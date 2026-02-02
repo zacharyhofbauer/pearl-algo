@@ -72,13 +72,14 @@ _maybe_load_dotenv_var "IBKR_USERNAME"
 _maybe_load_dotenv_var "IBKR_PASSWORD"
 _maybe_load_dotenv_var "IBKR_ACCOUNT_TYPE"
 _maybe_load_dotenv_var "IBKR_READ_ONLY_API"
+_maybe_load_dotenv_var "IBKR_PORT"
 
 IBKR_HOME_DEFAULT="$PROJECT_DIR/ibkr"
 IBKR_HOME="${PEARLALGO_IBKR_HOME:-$IBKR_HOME_DEFAULT}"
 IBC_DIR=""
 IBC_LOG_DIR=""
 JTS_DIR=""
-API_PORT=4002
+API_PORT="${IBKR_PORT:-4002}"
 
 
 _set_ibkr_paths() {

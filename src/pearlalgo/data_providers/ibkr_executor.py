@@ -278,13 +278,16 @@ class GetLatestBarTask(Task):
         
         ticker = None
         try:
-            # Set market data type - use DELAYED (3) for paper trading to avoid Error 354
+            # Set market data type based on environment config
             # 1 = Live (requires subscription), 2 = Frozen, 3 = Delayed (15-20 min), 4 = Delayed-Frozen
-            # Paper trading accounts typically don't have live data subscriptions
-            _log_trace("   Setting market data type to DELAYED (3) for paper trading compatibility...")
+            # Use IBKR_MARKET_DATA_TYPE env var, default to 3 (Delayed) for paper trading compatibility
+            import os
+            market_data_type = int(os.environ.get("IBKR_MARKET_DATA_TYPE", "3"))
+            market_data_labels = {1: "LIVE", 2: "FROZEN", 3: "DELAYED", 4: "DELAYED-FROZEN"}
+            _log_trace(f"   Setting market data type to {market_data_labels.get(market_data_type, 'UNKNOWN')} ({market_data_type})...")
             try:
-                ib.reqMarketDataType(3)  # 3 = Delayed - works with paper trading
-                _log_trace("   ✅ Market data type set to DELAYED (3)")
+                ib.reqMarketDataType(market_data_type)
+                _log_trace(f"   ✅ Market data type set to {market_data_labels.get(market_data_type, 'UNKNOWN')} ({market_data_type})")
             except Exception as md_type_e:
                 logger.warning(f"   ⚠️  Could not set market data type (may already be set): {md_type_e}")
             
