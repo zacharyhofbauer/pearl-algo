@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { Position, RecentExit } from '@/stores'
 import { useAdminStore } from '@/stores'
 import { apiFetch } from '@/lib/api'
+import { calculateUnrealizedPnL } from '@/lib/position'
 
 interface OpenPositionsStripProps {
   positions: Position[]
@@ -21,16 +22,6 @@ export default function OpenPositionsStrip({
   const [closing, setClosing] = useState<string | null>(null)
   const [closingAll, setClosingAll] = useState(false)
   const { requireAuth } = useAdminStore()
-
-  // Calculate unrealized P/L for a position
-  const calcUnrealizedPnL = (pos: Position) => {
-    if (!currentPrice) return null
-    const diff = pos.direction === 'long'
-      ? currentPrice - pos.entry_price
-      : pos.entry_price - currentPrice
-    // MNQ: $2 per point
-    return diff * 2
-  }
 
   // Close single position (internal, after auth)
   const doClosePosition = async (signalId: string) => {
@@ -77,7 +68,7 @@ export default function OpenPositionsStrip({
 
   // Calculate total unrealized P/L
   const totalUnrealized = positions.reduce((sum, pos) => {
-    const pnl = calcUnrealizedPnL(pos)
+    const pnl = calculateUnrealizedPnL(pos, currentPrice)
     return sum + (pnl || 0)
   }, 0)
 
@@ -125,7 +116,7 @@ export default function OpenPositionsStrip({
       {/* Compact positions list */}
       <div className="positions-compact-list">
         {positions.map((pos) => {
-          const pnl = calcUnrealizedPnL(pos)
+          const pnl = calculateUnrealizedPnL(pos, currentPrice)
           return (
             <span
               key={pos.signal_id}

@@ -2,33 +2,18 @@
 
 import { memo, useMemo } from 'react'
 import type { Position } from '@/stores'
+import { calculateUnrealizedPnL, MNQ_POINT_VALUE } from '@/lib/position'
 
 interface PositionsStripProps {
   positions: Position[]
   latestPrice: number | null
-  tickValue?: number // Default $2 for MNQ (1 tick = 0.25 points)
+  pointValue?: number // Dollar value per point (default: MNQ_POINT_VALUE = $2)
 }
 
 interface PositionCardProps {
   position: Position
   latestPrice: number | null
-  tickValue: number
-}
-
-// Calculate unrealized P&L for a position
-function calculateUnrealizedPnL(
-  position: Position,
-  latestPrice: number | null,
-  tickValue: number
-): number | null {
-  if (latestPrice === null) return null
-
-  const priceDiff = latestPrice - position.entry_price
-  const directionMultiplier = position.direction === 'long' ? 1 : -1
-  // MNQ: 1 point = 4 ticks, tickValue is per tick
-  // So P&L = price_diff * 4 * tickValue
-  const pointsValue = tickValue * 4
-  return priceDiff * directionMultiplier * pointsValue
+  pointValue: number
 }
 
 // Calculate distance in points
@@ -86,11 +71,11 @@ function calculateRiskReward(
 const PositionCard = memo(function PositionCard({
   position,
   latestPrice,
-  tickValue,
+  pointValue,
 }: PositionCardProps) {
   const unrealizedPnL = useMemo(
-    () => calculateUnrealizedPnL(position, latestPrice, tickValue),
-    [position, latestPrice, tickValue]
+    () => calculateUnrealizedPnL(position, latestPrice, pointValue),
+    [position, latestPrice, pointValue]
   )
 
   const slDistance = useMemo(
@@ -248,7 +233,7 @@ const RiskRewardBar = memo(function RiskRewardBar({
 function PositionsStrip({
   positions,
   latestPrice,
-  tickValue = 2.0,
+  pointValue = MNQ_POINT_VALUE,
 }: PositionsStripProps) {
   if (positions.length === 0) {
     return null // Don't render if no positions
@@ -266,7 +251,7 @@ function PositionsStrip({
             key={position.signal_id}
             position={position}
             latestPrice={latestPrice}
-            tickValue={tickValue}
+            pointValue={pointValue}
           />
         ))}
       </div>

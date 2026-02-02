@@ -13,7 +13,7 @@ const MIN_BARS = 500 // Minimum bars to request for a full chart
 const MARKER_HOURS = 72 // Fetch 72 hours (3 days) of markers - API limit
 
 interface UseDashboardDataOptions {
-  onPositionsUpdate?: (positions: Position[], latestPrice: number | null, tickValue: number) => void
+  onPositionsUpdate?: (positions: Position[], latestPrice: number | null, pointValue: number) => void
 }
 
 export function useDashboardData(options: UseDashboardDataOptions = {}) {

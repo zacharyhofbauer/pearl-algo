@@ -484,7 +484,7 @@ describe('useDashboardData', () => {
         await Promise.resolve()
       })
 
-      expect(onPositionsUpdate).toHaveBeenCalledWith(positions)
+      expect(onPositionsUpdate).toHaveBeenCalledWith(positions, null, 2.0)
     })
 
     it('should call onPositionsUpdate with empty array on error', async () => {
@@ -508,7 +508,7 @@ describe('useDashboardData', () => {
         await Promise.resolve()
       })
 
-      expect(onPositionsUpdate).toHaveBeenCalledWith([])
+      expect(onPositionsUpdate).toHaveBeenCalledWith([], null, 2.0)
     })
   })
 

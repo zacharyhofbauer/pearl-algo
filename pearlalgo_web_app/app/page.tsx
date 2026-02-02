@@ -63,7 +63,7 @@ export default function PearlAlgoWebApp() {
   // Local state for active positions (for chart price lines)
   const [positions, setPositions] = useState<Position[]>([])
   const [latestPrice, setLatestPrice] = useState<number | null>(null)
-  const [tickValue, setTickValue] = useState<number>(2.0)
+  const [pointValue, setPointValue] = useState<number>(2.0)
 
   // Viewport detection for ultrawide layout
   const viewport = useViewportType()
@@ -103,10 +103,10 @@ export default function PearlAlgoWebApp() {
 
   // Data fetching hook
   const { forceRefresh } = useDashboardData({
-    onPositionsUpdate: (pos, price, tv) => {
+    onPositionsUpdate: (pos, price, pv) => {
       setPositions(pos)
       setLatestPrice(price)
-      setTickValue(tv)
+      setPointValue(pv)
     },
   })
 
@@ -324,7 +324,7 @@ export default function PearlAlgoWebApp() {
         <PositionsStrip
           positions={positions}
           latestPrice={latestPrice}
-          tickValue={tickValue}
+          pointValue={pointValue}
         />
       )}
 
