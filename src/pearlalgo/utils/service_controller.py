@@ -173,8 +173,9 @@ class ServiceController:
     def _is_gateway_running(self) -> bool:
         """Check if Gateway process is running."""
         try:
+            # Pattern matches IBC-launched gateway (java.*IBC.jar) or direct gateway (IbcGateway)
             result = subprocess.run(
-                ["pgrep", "-f", "java.*IBC.jar"],
+                ["pgrep", "-f", "java.*IBC.jar|IbcGateway"],
                 capture_output=True,
                 timeout=5,
             )
