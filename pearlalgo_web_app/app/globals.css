@@ -645,7 +645,7 @@ body {
 
   /* Show all badges but smaller */
   .header-badges .market-badge .countdown {
-    display: none;
+    font-size: 8px;
   }
 
   /* Compact health with short labels */
@@ -712,14 +712,15 @@ body {
     font-size: 7px;
   }
 
-  /* Hide some badges on very small */
+  /* Show all badges on very small - just smaller */
   .header-badges .ai-badge,
   .header-badges .regime-badge {
-    display: none;
+    font-size: 6px;
+    padding: 1px 3px;
   }
 
   .header-health .health-label {
-    display: none;
+    font-size: 6px;
   }
 }
 
@@ -1642,13 +1643,14 @@ body {
    RESPONSIVE - Dynamic sizing via clamp()
    =================================== */
 
-/* Very small phones - hide less critical elements */
+/* Very small phones - show all but tiny */
 @media (max-width: 350px) {
   .stat-label {
-    display: none;
+    font-size: 5px;
   }
   .marker-legend {
-    display: none;
+    font-size: 6px;
+    gap: 2px;
   }
 }
 
@@ -1873,12 +1875,12 @@ body {
   }
 
   .chart-info-bar .countdown-tf {
-    display: none;
+    font-size: 7px;
   }
 
   .chart-info-bar .countdown-time {
-    font-size: 8px;
-    min-width: 20px;
+    font-size: 7px;
+    min-width: 18px;
   }
 
   .chart-info-bar .leg {
@@ -8087,7 +8089,7 @@ body {
   }
 
   .calendar-cell-pnl {
-    display: none; /* Hide P&L text on smaller screens, rely on color */
+    font-size: 6px; /* Show tiny P&L text on smaller screens */
   }
 
   .calendar-summary {
@@ -8275,7 +8277,7 @@ body {
   }
 
   .calendar-cell-pnl {
-    display: none;
+    font-size: 5px; /* Tiny but visible */
   }
 
   .calendar-legend {
@@ -8455,7 +8457,8 @@ body {
   }
 
   .hour-stats {
-    display: none;
+    font-size: 7px;
+    gap: 2px;
   }
 
   /* Active positions panel */
