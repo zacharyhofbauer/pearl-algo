@@ -67,10 +67,12 @@ export default function PearlAlgoWebApp() {
   // Minimum bars to request
   const MIN_BARS = 500
 
-  // Responsive bar spacing - smaller on mobile
+  // Responsive bar spacing - smaller on mobile to show more candles
   const getBarSpacing = useCallback(() => {
     if (typeof window === 'undefined') return 10
-    return window.innerWidth < 768 ? 6 : 10
+    if (window.innerWidth < 400) return 3  // Very small phones - most candles
+    if (window.innerWidth < 768) return 4  // Mobile - more candles
+    return 10  // Desktop
   }, [])
 
   // Calculate bar count based on viewport width
@@ -101,109 +103,43 @@ export default function PearlAlgoWebApp() {
   })
 
   // Convert positions to price lines for chart visualization
-  // Groups lines at same/similar prices to avoid label clutter
+  // Limits to recent positions and groups nearby prices to reduce clutter
   const positionLines = useMemo<PositionLine[]>(() => {
-    // First collect all lines with their metadata
-    const rawLines: Array<{
-      price: number
-      color: string
-      title: string
-      type: 'entry' | 'sl' | 'tp'
-      direction: 'long' | 'short'
-    }> = []
+    // Limit to most recent positions to avoid chart flooding
+    const MAX_POSITIONS = 5
+    const recentPositions = positions.slice(-MAX_POSITIONS)
 
-    positions.forEach((pos) => {
-      // Entry price line
-      rawLines.push({
+    const lines: PositionLine[] = []
+
+    recentPositions.forEach((pos) => {
+      // Entry price line - show axis label
+      lines.push({
         price: pos.entry_price,
-        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
+        color: pos.direction === 'long' ? 'rgba(0, 212, 255, 0.6)' : 'rgba(255, 110, 199, 0.6)',
         title: pos.direction === 'long' ? '↑' : '↓',
-        type: 'entry',
-        direction: pos.direction as 'long' | 'short',
+        lineStyle: 2,
+        axisLabelVisible: true,
       })
 
-      // Stop loss line
+      // Stop loss line - no axis label to reduce clutter
       if (pos.stop_loss) {
-        rawLines.push({
+        lines.push({
           price: pos.stop_loss,
-          color: 'rgba(244, 67, 54, 0.55)',
-          title: '×',
-          type: 'sl',
-          direction: pos.direction as 'long' | 'short',
+          color: 'rgba(255, 82, 82, 0.4)',
+          title: '',
+          lineStyle: 2,
+          axisLabelVisible: false,
         })
       }
 
-      // Take profit line
+      // Take profit line - no axis label to reduce clutter
       if (pos.take_profit) {
-        rawLines.push({
+        lines.push({
           price: pos.take_profit,
-          color: 'rgba(76, 175, 80, 0.55)',
-          title: '✓',
-          type: 'tp',
-          direction: pos.direction as 'long' | 'short',
-        })
-      }
-    })
-
-    // Group lines by price (within 0.25 point threshold for MNQ)
-    const PRICE_THRESHOLD = 0.25
-    const grouped: Array<{ price: number; items: typeof rawLines }> = []
-
-    rawLines.forEach((line) => {
-      // Find existing group within threshold
-      const existingGroup = grouped.find(g => Math.abs(line.price - g.price) <= PRICE_THRESHOLD)
-      if (existingGroup) {
-        existingGroup.items.push(line)
-      } else {
-        grouped.push({ price: line.price, items: [line] })
-      }
-    })
-
-    // Convert groups to position lines
-    const lines: PositionLine[] = []
-    grouped.forEach(({ price, items: group }) => {
-      if (group.length === 1) {
-        // Single line - use as-is
-        const item = group[0]
-        lines.push({
-          price: item.price,
-          color: item.color,
-          title: item.title,
+          color: 'rgba(0, 230, 118, 0.4)',
+          title: '',
           lineStyle: 2,
-          axisLabelVisible: true,
-        })
-      } else {
-        // Multiple lines at same price - combine labels
-        // Priority: Entry color if present, else use first item's color
-        const hasEntry = group.some(g => g.type === 'entry')
-        const hasSL = group.some(g => g.type === 'sl')
-        const hasTP = group.some(g => g.type === 'tp')
-
-        // Build combined title
-        const titles: string[] = []
-        if (hasEntry) {
-          const entryItem = group.find(g => g.type === 'entry')
-          titles.push(entryItem?.title || '●')
-        }
-        if (hasSL) titles.push('×')
-        if (hasTP) titles.push('✓')
-
-        // Choose color based on what's present (entry takes priority)
-        let color = group[0].color
-        if (hasEntry) {
-          const entryItem = group.find(g => g.type === 'entry')
-          color = entryItem?.color || color
-        }
-
-        // Average price for the group
-        const avgPrice = group.reduce((sum, g) => sum + g.price, 0) / group.length
-
-        lines.push({
-          price: avgPrice,
-          color,
-          title: titles.join(''),
-          lineStyle: 2,
-          axisLabelVisible: true,
+          axisLabelVisible: false,
         })
       }
     })

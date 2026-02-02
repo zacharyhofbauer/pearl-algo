@@ -11,16 +11,6 @@ interface OpenPositionsStripProps {
   onPositionClosed?: () => void
 }
 
-// Format time for display
-const formatTime = (timestamp: string) => {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
 export default function OpenPositionsStrip({
   positions,
   currentPrice,
@@ -49,8 +39,6 @@ export default function OpenPositionsStrip({
       })
       if (res.ok) {
         onPositionClosed?.()
-      } else {
-        console.error('Failed to close position:', res.status)
       }
     } catch (err) {
       console.error('Error closing position:', err)
@@ -68,8 +56,6 @@ export default function OpenPositionsStrip({
       })
       if (res.ok) {
         onPositionClosed?.()
-      } else {
-        console.error('Failed to close all positions:', res.status)
       }
     } catch (err) {
       console.error('Error closing all positions:', err)
@@ -84,115 +70,79 @@ export default function OpenPositionsStrip({
     return sum + (pnl || 0)
   }, 0)
 
-  // Get recent trades to show (limit to 5)
-  const recentTrades = recentExits.slice(0, 5)
+  // Get recent trades (limit to 3 for compact view)
+  const recentTrades = recentExits.slice(0, 3)
+
+  // No positions - show minimal strip
+  if (positions.length === 0) {
+    return (
+      <div className="positions-strip compact">
+        <span className="positions-strip-label">Positions: 0</span>
+        {recentTrades.length > 0 && (
+          <div className="recent-inline">
+            {recentTrades.map((t, i) => (
+              <span key={t.signal_id || i} className={`recent-chip ${t.pnl >= 0 ? 'win' : 'loss'}`}>
+                {t.direction === 'long' ? '↑' : '↓'}
+                {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(0)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
-    <div className="positions-strip">
-      {/* Open Positions Section */}
+    <div className="positions-strip compact">
+      {/* Header with count, total P/L, close all */}
       <div className="positions-strip-header">
-        <span className="positions-strip-label">
-          {positions.length > 0 ? `Open (${positions.length})` : 'Positions'}
+        <span className="positions-strip-label">Open ({positions.length})</span>
+        <span className={`positions-strip-total ${totalUnrealized >= 0 ? 'profit' : 'loss'}`}>
+          {totalUnrealized >= 0 ? '+' : ''}${totalUnrealized.toFixed(0)}
         </span>
         {positions.length > 0 && (
-          <span className={`positions-strip-total ${totalUnrealized >= 0 ? 'profit' : 'loss'}`}>
-            {totalUnrealized >= 0 ? '+' : ''}${totalUnrealized.toFixed(2)}
-          </span>
-        )}
-        {positions.length > 1 && (
           <button
             className="positions-close-all-btn"
-            onClick={closeAllPositions}
-            disabled={closingAll}
-            title="Close all positions"
+            onClick={positions.length === 1 ? () => closePosition(positions[0].signal_id) : closeAllPositions}
+            disabled={closingAll || closing !== null}
           >
-            {closingAll ? '...' : 'Close All'}
-          </button>
-        )}
-        {positions.length === 1 && (
-          <button
-            className="positions-close-all-btn"
-            onClick={() => closePosition(positions[0].signal_id)}
-            disabled={closing === positions[0].signal_id}
-            title="Close position"
-          >
-            {closing === positions[0].signal_id ? '...' : 'Close'}
+            {closingAll || closing ? '...' : positions.length === 1 ? '×' : 'Close All'}
           </button>
         )}
       </div>
 
-      {/* Open Positions List */}
-      {positions.length > 0 ? (
-        <div className="positions-strip-list">
-          {positions.map((pos) => {
-            const unrealized = calcUnrealizedPnL(pos)
-            const isClosing = closing === pos.signal_id
-
-            return (
-              <div
-                key={pos.signal_id}
-                className={`position-item ${pos.direction}`}
-              >
-                <span className={`position-direction ${pos.direction}`}>
-                  {pos.direction === 'long' ? '↑L' : '↓S'}
+      {/* Compact positions list */}
+      <div className="positions-compact-list">
+        {positions.map((pos) => {
+          const pnl = calcUnrealizedPnL(pos)
+          return (
+            <span
+              key={pos.signal_id}
+              className={`position-chip ${pos.direction}`}
+              title={`Entry: ${pos.entry_price.toFixed(2)}${pos.stop_loss ? ` SL: ${pos.stop_loss.toFixed(0)}` : ''}${pos.take_profit ? ` TP: ${pos.take_profit.toFixed(0)}` : ''}`}
+            >
+              <span className="chip-dir">{pos.direction === 'long' ? '↑' : '↓'}</span>
+              <span className="chip-entry">{pos.entry_price.toFixed(0)}</span>
+              {pnl !== null && (
+                <span className={`chip-pnl ${pnl >= 0 ? 'profit' : 'loss'}`}>
+                  {pnl >= 0 ? '+' : ''}{pnl.toFixed(0)}
                 </span>
-                <span className="position-entry">
-                  {pos.entry_price.toFixed(2)}
-                </span>
-                {pos.stop_loss && (
-                  <span className="position-sl" title="Stop Loss">
-                    SL:{pos.stop_loss.toFixed(0)}
-                  </span>
-                )}
-                {pos.take_profit && (
-                  <span className="position-tp" title="Take Profit">
-                    TP:{pos.take_profit.toFixed(0)}
-                  </span>
-                )}
-                {unrealized !== null && (
-                  <span className={`position-pnl ${unrealized >= 0 ? 'profit' : 'loss'}`}>
-                    {unrealized >= 0 ? '+' : ''}${unrealized.toFixed(2)}
-                  </span>
-                )}
-                <button
-                  className="position-close-btn"
-                  onClick={() => closePosition(pos.signal_id)}
-                  disabled={isClosing}
-                  title="Close position"
-                >
-                  {isClosing ? '...' : '×'}
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <div className="positions-strip-empty-msg">No open positions</div>
-      )}
+              )}
+            </span>
+          )
+        })}
+      </div>
 
-      {/* Recent Trades Section */}
+      {/* Recent trades inline */}
       {recentTrades.length > 0 && (
-        <div className="recent-trades-section">
-          <div className="recent-trades-label">Recent</div>
-          <div className="recent-trades-list">
-            {recentTrades.map((trade, idx) => (
-              <div
-                key={trade.signal_id || idx}
-                className={`recent-trade-item ${trade.pnl >= 0 ? 'win' : 'loss'}`}
-              >
-                <span className={`trade-direction ${trade.direction}`}>
-                  {trade.direction === 'long' ? '↑' : '↓'}
-                </span>
-                <span className="trade-time">{formatTime(trade.exit_time)}</span>
-                <span className={`trade-pnl ${trade.pnl >= 0 ? 'profit' : 'loss'}`}>
-                  {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
-                </span>
-                {trade.exit_reason && (
-                  <span className="trade-reason">{trade.exit_reason.replace(/_/g, ' ')}</span>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="recent-inline">
+          <span className="recent-label">Recent:</span>
+          {recentTrades.map((t, i) => (
+            <span key={t.signal_id || i} className={`recent-chip ${t.pnl >= 0 ? 'win' : 'loss'}`}>
+              {t.direction === 'long' ? '↑' : '↓'}
+              {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(0)}
+            </span>
+          ))}
         </div>
       )}
     </div>

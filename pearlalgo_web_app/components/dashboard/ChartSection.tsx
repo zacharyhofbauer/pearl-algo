@@ -122,7 +122,7 @@ export function ChartSection({
             data={indicators.rsi}
             barSpacing={barSpacing}
             mainChart={mainChartApi}
-            height={100}
+            height={140}
           />
         </div>
       )}
@@ -134,7 +134,7 @@ export function ChartSection({
             data={indicators.macd}
             barSpacing={barSpacing}
             mainChart={mainChartApi}
-            height={120}
+            height={150}
           />
         </div>
       )}

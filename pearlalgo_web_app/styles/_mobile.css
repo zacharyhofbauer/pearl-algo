@@ -41,7 +41,7 @@
   }
 
   .data-panel-title {
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.5px;
   }
 
@@ -55,8 +55,8 @@
   }
 
   .data-panel-badge {
-    font-size: 8px;
-    padding: 2px 5px;
+    font-size: 10px;
+    padding: 3px 6px;
   }
 
   .data-panel-content {
@@ -91,18 +91,18 @@
   }
 
   .ai-pill {
-    padding: 4px 8px;
+    padding: 5px 10px;
     border-radius: 12px;
-    font-size: 9px;
+    font-size: 11px;
   }
 
   .ai-pill-label {
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .ai-pill-mode {
-    font-size: 8px;
-    padding: 1px 4px;
+    font-size: 10px;
+    padding: 2px 5px;
   }
 
   /* AI Lift & Gating - compact inline */
@@ -149,9 +149,10 @@
   }
 
   .pearl-btn {
-    padding: 6px 12px;
-    font-size: 11px;
-    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: 13px;
+    border-radius: 8px;
+    min-height: 44px;
   }
 
   /* No Insight State */
@@ -194,8 +195,9 @@
 
   .history-toggle-btn,
   .details-toggle {
-    font-size: 10px;
-    padding: 4px 8px;
+    font-size: 12px;
+    padding: 8px 12px;
+    min-height: 36px;
   }
 
   /* Pearl AI Tabs - Mobile */
@@ -265,7 +267,7 @@
   }
 
   .msg-text {
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .msg-time {
@@ -283,9 +285,10 @@
   }
 
   .pearl-chat-input button {
-    padding: 8px 12px;
-    font-size: 13px;
-    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: 14px;
+    border-radius: 8px;
+    min-height: 44px;
   }
 
   /* ===================
@@ -449,11 +452,11 @@
      =================== */
   .signal-rejection {
     padding: 8px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .rejection-reason {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   /* ===================
@@ -495,16 +498,16 @@
      P&L CALENDAR
      =================== */
   .pnl-calendar {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .calendar-day {
-    padding: 4px 2px;
-    min-width: 32px;
+    padding: 4px 3px;
+    min-width: 36px;
   }
 
   .calendar-day .day-pnl {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   /* ===================
