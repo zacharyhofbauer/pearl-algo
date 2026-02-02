@@ -167,6 +167,11 @@
   --scrollbar-width-thin: 6px;
 
   /* ===================================
+     LAYOUT
+     =================================== */
+  --pearl-header-height: 32px;
+
+  /* ===================================
      TRADING SESSION COLORS (U1.2)
      =================================== */
   /* Overnight/Pre-Market (4:00-6:30) - deep purple */

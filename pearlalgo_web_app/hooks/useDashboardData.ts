@@ -161,10 +161,11 @@ export function useDashboardData(options: UseDashboardDataOptions = {}) {
       setIsLive(true)
       setChartError(null)
 
-      // Always clear loading when we have data
+      // Always clear loading and fetching states when we have data
       if (candlesData.length > 0) {
         setChartLoading(false)
       }
+      setIsFetching(false)
     } catch (err) {
       console.error('Failed to fetch data:', err)
       setChartError(err instanceof Error ? err.message : 'Failed to fetch')
