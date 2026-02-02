@@ -15,11 +15,50 @@ export interface IndicatorData {
   value: number
 }
 
+export interface MACDData {
+  time: number
+  macd: number
+  signal: number
+  histogram: number
+}
+
+export interface BollingerBandsData {
+  time: number
+  upper: number
+  middle: number
+  lower: number
+}
+
+export interface ATRBandsData {
+  time: number
+  upper: number
+  lower: number
+  atr: number
+}
+
+export interface VolumeProfileData {
+  price: number
+  volume: number
+  buyVolume: number
+  sellVolume: number
+}
+
+export interface VolumeProfile {
+  levels: VolumeProfileData[]
+  poc: number  // Point of Control - price with highest volume
+  vah: number  // Value Area High
+  val: number  // Value Area Low
+}
+
 export interface Indicators {
   ema9?: IndicatorData[]
   ema21?: IndicatorData[]
   vwap?: IndicatorData[]
   rsi?: IndicatorData[]
+  macd?: MACDData[]
+  bollingerBands?: BollingerBandsData[]
+  atrBands?: ATRBandsData[]
+  volumeProfile?: VolumeProfile
 }
 
 export interface MarkerData {
@@ -39,6 +78,25 @@ export interface MarkerData {
   exit_reason?: string
 }
 
+// Active position for chart price lines
+export interface Position {
+  signal_id: string
+  direction: 'long' | 'short'
+  entry_price: number
+  entry_time?: string
+  stop_loss?: number
+  take_profit?: number
+}
+
+// Position line for chart visualization
+export interface PositionLine {
+  price: number
+  color: string
+  title: string
+  lineStyle?: number  // 0=solid, 1=dotted, 2=dashed
+  axisLabelVisible?: boolean  // Show/hide price on axis
+}
+
 export interface MarketStatus {
   is_open: boolean
   close_reason: string | null
@@ -46,7 +104,7 @@ export interface MarketStatus {
   current_time_et: string
 }
 
-export type Timeframe = '1m' | '5m' | '15m' | '1h'
+export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1D'
 
 interface ChartStore {
   // State

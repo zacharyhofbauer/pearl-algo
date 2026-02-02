@@ -11,6 +11,8 @@ interface DataFreshnessIndicatorProps {
   staleThresholdSeconds?: number
   onRefresh?: () => void
   variant?: 'full' | 'compact' | 'floating'
+  onFitAll?: () => void  // Chart action: fit all content
+  onGoLive?: () => void  // Chart action: scroll to real time
 }
 
 export default function DataFreshnessIndicator({
@@ -21,6 +23,8 @@ export default function DataFreshnessIndicator({
   staleThresholdSeconds = 60,
   onRefresh,
   variant = 'compact',
+  onFitAll,
+  onGoLive,
 }: DataFreshnessIndicatorProps) {
   const [secondsAgo, setSecondsAgo] = useState<number>(0)
   const [pulseKey, setPulseKey] = useState<number>(0)
@@ -166,6 +170,28 @@ export default function DataFreshnessIndicator({
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+          )}
+          {onFitAll && (
+            <button
+              className="freshness-action-btn"
+              onClick={(e) => { e.stopPropagation(); onFitAll(); }}
+              title="Fit All"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+              </svg>
+            </button>
+          )}
+          {onGoLive && (
+            <button
+              className="freshness-action-btn"
+              onClick={(e) => { e.stopPropagation(); onGoLive(); }}
+              title="Go Live"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             </button>
           )}

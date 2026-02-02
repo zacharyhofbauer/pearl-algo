@@ -2,8 +2,17 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
-import type { CandleData, IndicatorData, MarkerData, Indicators } from '@/stores'
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine } from 'lightweight-charts'
+import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsData, ATRBandsData } from '@/stores'
+import { useChartSettingsStore } from '@/stores'
+
+interface PositionLine {
+  price: number
+  color: string
+  title: string
+  lineStyle?: number
+  axisLabelVisible?: boolean
+}
 
 interface ChartProps {
   data: CandleData[]
@@ -12,6 +21,7 @@ interface ChartProps {
   barSpacing?: number
   timeframe?: string
   onChartReady?: (chart: IChartApi | null) => void
+  positionLines?: PositionLine[]  // Entry, SL, TP lines for active positions
 }
 
 interface TooltipState {
@@ -33,7 +43,7 @@ const getSessionColor = (hour: number): string => {
   return 'transparent'
 }
 
-export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady }: ChartProps) {
+export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -43,6 +53,21 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const resizeHandlerRef = useRef<(() => void) | null>(null)
+
+  // Bollinger Bands series refs
+  const bbUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bbMiddleRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const bbLowerRef = useRef<ISeriesApi<'Line'> | null>(null)
+
+  // ATR Bands series refs
+  const atrUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const atrLowerRef = useRef<ISeriesApi<'Line'> | null>(null)
+
+  // Position price lines refs (for cleanup)
+  const positionPriceLinesRef = useRef<IPriceLine[]>([])
+
+  // Chart settings for indicator visibility
+  const indicatorSettings = useChartSettingsStore((s) => s.indicators)
 
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
@@ -181,7 +206,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         borderColor: '#2a2a3a',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,
+        rightOffset: 15,  // More space between candles and price labels
         barSpacing: barSpacing,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
@@ -235,6 +260,55 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
+    // Bollinger Bands (blue, semi-transparent)
+    const bbUpper = chart.addLineSeries({
+      color: 'rgba(41, 98, 255, 0.5)',
+      lineWidth: 1,
+      lineStyle: 0,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    const bbMiddle = chart.addLineSeries({
+      color: 'rgba(41, 98, 255, 0.8)',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    const bbLower = chart.addLineSeries({
+      color: 'rgba(41, 98, 255, 0.5)',
+      lineWidth: 1,
+      lineStyle: 0,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    bbUpperRef.current = bbUpper
+    bbMiddleRef.current = bbMiddle
+    bbLowerRef.current = bbLower
+
+    // ATR Bands (orange, semi-transparent)
+    const atrUpper = chart.addLineSeries({
+      color: 'rgba(255, 152, 0, 0.5)',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    const atrLower = chart.addLineSeries({
+      color: 'rgba(255, 152, 0, 0.5)',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    atrUpperRef.current = atrUpper
+    atrLowerRef.current = atrLower
+
     // Candlestick series - bright green/red
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
@@ -246,8 +320,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: '#ff5252',
-      priceLineStyle: 2,
+      priceLineColor: 'rgba(255, 215, 0, 0.35)',  // Gold/yellow - subtle, less visible than position lines
+      priceLineStyle: 2,  // Dashed
     })
 
     // Volume series
@@ -420,7 +494,44 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       const vwapData = indicators.vwap.map((d) => ({ time: d.time as Time, value: d.value }))
       vwapSeriesRef.current.setData(vwapData)
     }
-  }, [indicators])
+
+    // Update Bollinger Bands
+    if (indicatorSettings.bollingerBands && indicators.bollingerBands?.length) {
+      if (bbUpperRef.current) {
+        const upperData = indicators.bollingerBands.map((d) => ({ time: d.time as Time, value: d.upper }))
+        bbUpperRef.current.setData(upperData)
+      }
+      if (bbMiddleRef.current) {
+        const middleData = indicators.bollingerBands.map((d) => ({ time: d.time as Time, value: d.middle }))
+        bbMiddleRef.current.setData(middleData)
+      }
+      if (bbLowerRef.current) {
+        const lowerData = indicators.bollingerBands.map((d) => ({ time: d.time as Time, value: d.lower }))
+        bbLowerRef.current.setData(lowerData)
+      }
+    } else {
+      // Clear Bollinger Bands if disabled
+      bbUpperRef.current?.setData([])
+      bbMiddleRef.current?.setData([])
+      bbLowerRef.current?.setData([])
+    }
+
+    // Update ATR Bands
+    if (indicatorSettings.atrBands && indicators.atrBands?.length) {
+      if (atrUpperRef.current) {
+        const upperData = indicators.atrBands.map((d) => ({ time: d.time as Time, value: d.upper }))
+        atrUpperRef.current.setData(upperData)
+      }
+      if (atrLowerRef.current) {
+        const lowerData = indicators.atrBands.map((d) => ({ time: d.time as Time, value: d.lower }))
+        atrLowerRef.current.setData(lowerData)
+      }
+    } else {
+      // Clear ATR Bands if disabled
+      atrUpperRef.current?.setData([])
+      atrLowerRef.current?.setData([])
+    }
+  }, [indicators, indicatorSettings.bollingerBands, indicatorSettings.atrBands])
 
   // Update markers - use aggregated markers to prevent stacking
   useEffect(() => {
@@ -537,6 +648,55 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       connectionLineRef.current.setData([])
     }
   }, [activeSignalId, markers])
+
+  // Update position lines (Entry, SL, TP)
+  useEffect(() => {
+    if (!candleSeriesRef.current) return
+
+    // Remove all existing position price lines first
+    positionPriceLinesRef.current.forEach((priceLine) => {
+      try {
+        if (candleSeriesRef.current) {
+          candleSeriesRef.current.removePriceLine(priceLine)
+        }
+      } catch {
+        // Line may already be removed
+      }
+    })
+    positionPriceLinesRef.current = []
+
+    // If no position lines, we're done
+    if (!positionLines?.length) return
+
+    // Create price lines for each position
+    positionLines.forEach((line) => {
+      if (candleSeriesRef.current) {
+        const priceLine = candleSeriesRef.current.createPriceLine({
+          price: line.price,
+          color: line.color,
+          lineWidth: 1,
+          lineStyle: line.lineStyle ?? 2, // dashed by default
+          axisLabelVisible: line.axisLabelVisible ?? true,
+          title: line.title || '',
+        })
+        positionPriceLinesRef.current.push(priceLine)
+      }
+    })
+
+    // Cleanup function on unmount
+    return () => {
+      positionPriceLinesRef.current.forEach((priceLine) => {
+        try {
+          if (candleSeriesRef.current) {
+            candleSeriesRef.current.removePriceLine(priceLine)
+          }
+        } catch {
+          // Line may already be removed
+        }
+      })
+      positionPriceLinesRef.current = []
+    }
+  }, [positionLines])
 
   // Format price
   const formatPrice = (price?: number) => {

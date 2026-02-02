@@ -589,8 +589,8 @@ body {
     scrollbar-width: none;
     justify-content: flex-start;
     position: relative;
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .header-timeframe::-webkit-scrollbar {
@@ -604,8 +604,8 @@ body {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-wrap: nowrap;
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .header-badges::-webkit-scrollbar {
@@ -8493,8 +8493,8 @@ body {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-wrap: nowrap;
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .analytics-tabs::-webkit-scrollbar {
@@ -8517,8 +8517,8 @@ body {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-wrap: nowrap;
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .perf-tabs::-webkit-scrollbar {
@@ -8591,8 +8591,8 @@ body {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     flex-wrap: nowrap;
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .session-stats-row::-webkit-scrollbar {
@@ -9667,15 +9667,13 @@ body {
     gap: var(--space-2);
   }
 
-  /* Indicator values - scrollable with fade */
+  /* Indicator values - scrollable, no fade (was cutting off text) */
   .indicator-values {
     flex-wrap: nowrap;
     gap: var(--space-2);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    mask-image: linear-gradient(90deg, black 0%, black 80%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 80%, transparent 100%);
   }
 
   .indicator-values::-webkit-scrollbar {
@@ -9708,8 +9706,8 @@ body {
     scrollbar-width: none;
     justify-content: flex-start;
     padding-left: var(--space-4);
-    mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .vp-legend::-webkit-scrollbar {
@@ -10380,6 +10378,27 @@ body {
 
 .freshness-refresh-btn.spinning svg {
   animation: refresh-spin 1s linear infinite;
+}
+
+/* Chart action buttons in freshness indicator */
+.freshness-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.freshness-action-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--accent-cyan);
 }
 
 /* Expanded details */
