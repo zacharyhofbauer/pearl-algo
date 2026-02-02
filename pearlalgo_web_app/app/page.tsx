@@ -397,7 +397,7 @@ export default function PearlAlgoWebApp() {
         <div className="header-row-main">
           {/* Brand */}
           <div className="header-brand">
-            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
+            <Image src="/pearl-emoji.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
             <div className="header-titles">
               <span className="header-symbol">MNQ</span>
               <span className="header-app-name">Pearl Algo Web App</span>
@@ -604,7 +604,7 @@ export default function PearlAlgoWebApp() {
     return (
       <div className="ultrawide-header">
         <div className="uw-brand">
-          <Image src="/logo.png" alt="PEARL" width={20} height={20} priority />
+          <Image src="/pearl-emoji.png" alt="PEARL" width={20} height={20} priority />
           <span className="uw-symbol">MNQ</span>
         </div>
         <div className="uw-stats">
@@ -616,7 +616,7 @@ export default function PearlAlgoWebApp() {
           </span>
         </div>
         <div className="uw-timeframe">
-          {['1m', '5m', '15m', '1h'].map((tf) => (
+          {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
             <button
               key={tf}
               className={`uw-tf-btn ${timeframe === tf ? 'active' : ''}`}
