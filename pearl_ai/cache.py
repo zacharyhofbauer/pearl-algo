@@ -96,6 +96,8 @@ class ResponseCache:
         - P&L bucket (rounded to avoid cache thrashing)
         - Win rate bucket
         - Active position state
+
+        Uses SHA256 for cryptographically stronger hashing (P1.3).
         """
         relevant = {
             "regime": state.get("market_regime", {}).get("regime"),
@@ -105,7 +107,7 @@ class ResponseCache:
         }
 
         hash_input = json.dumps(relevant, sort_keys=True)
-        return hashlib.md5(hash_input.encode()).hexdigest()[:8]
+        return hashlib.sha256(hash_input.encode()).hexdigest()[:8]
 
     def _bucket_value(self, value: float, bucket_size: float) -> int:
         """Round value to nearest bucket."""
@@ -121,10 +123,10 @@ class ResponseCache:
         return int(round(rate * 10) * 10)  # 0, 10, 20, ..., 100
 
     def _make_key(self, query: str, context_hash: str) -> str:
-        """Create cache key from query and context."""
+        """Create cache key from query and context. Uses SHA256 (P1.3)."""
         normalized = self._normalize_query(query)
         key_input = f"{normalized}:{context_hash}"
-        return hashlib.md5(key_input.encode()).hexdigest()
+        return hashlib.sha256(key_input.encode()).hexdigest()
 
     def _should_skip_cache(self, query: str) -> bool:
         """Check if query should skip cache."""

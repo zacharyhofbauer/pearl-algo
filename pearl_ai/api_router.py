@@ -40,6 +40,7 @@ class ChatResponse(BaseModel):
     response: str
     timestamp: str
     complexity: str  # "quick" or "deep"
+    source: Optional[str] = None  # "cache", "local", "claude", "template" (P5.1)
 
 
 class StreamChatRequest(BaseModel):
@@ -199,10 +200,14 @@ def create_pearl_router(
             # Determine which LLM was used
             complexity = brain._classify_query(request.message).value
 
+            # Get response source (P5.1)
+            source = brain.get_last_response_source()
+
             return ChatResponse(
                 response=response,
                 timestamp=datetime.now().isoformat(),
                 complexity=complexity,
+                source=source,
             )
 
         except Exception as e:

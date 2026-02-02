@@ -117,6 +117,7 @@ export {
   selectIsFetching,
   selectLastFetchDuration,
   selectFetchCount,
+  selectChartsLocked,
 } from './uiStore'
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'

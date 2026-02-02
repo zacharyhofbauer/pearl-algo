@@ -5,12 +5,150 @@ Defines tools for Claude function calling, enabling structured
 queries with validated arguments and reliable outputs.
 """
 
-from typing import Dict, List, Any, Optional, Callable, Awaitable
+from typing import Dict, List, Any, Optional, Callable, Awaitable, Union
 from dataclasses import dataclass
 import logging
 import json
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
+
+
+# ================================================================
+# OUTPUT VALIDATION MODELS (P1.2)
+# ================================================================
+
+class RegimePerformanceData(BaseModel):
+    """Validated output for regime performance tool."""
+    regime: str
+    days: int = 30
+    total_trades: int = 0
+    wins: int = 0
+    win_rate: float = 0.0
+    avg_pnl: float = 0.0
+    total_pnl: float = 0.0
+    message: Optional[str] = None
+
+    @field_validator("win_rate", mode="before")
+    @classmethod
+    def clamp_win_rate(cls, v):
+        """Ensure win rate is between 0 and 1."""
+        if v is None:
+            return 0.0
+        return max(0.0, min(1.0, float(v)))
+
+
+class TradeRecord(BaseModel):
+    """Validated trade record."""
+    direction: str = "unknown"
+    pnl: float = 0.0
+    is_win: bool = False
+    exit_reason: str = "unknown"
+    timestamp: Optional[str] = None
+
+
+class SimilarTradesData(BaseModel):
+    """Validated output for similar trades tool."""
+    trades: List[TradeRecord] = Field(default_factory=list)
+    count: int = 0
+    message: Optional[str] = None
+
+
+class DirectionPerformanceData(BaseModel):
+    """Validated output for direction performance tool."""
+    long: Optional[Dict[str, Any]] = None
+    short: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+
+
+class HourlyStats(BaseModel):
+    """Statistics for a single hour."""
+    trades: int = 0
+    wins: int = 0
+    avg_pnl: float = 0.0
+    total_pnl: float = 0.0
+
+
+class HourlyPerformanceData(BaseModel):
+    """Validated output for hourly performance tool."""
+    hourly_data: Dict[str, HourlyStats] = Field(default_factory=dict)
+    best_hour: Optional[Dict[str, Any]] = None
+    worst_hour: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+
+
+class PerformanceSummaryData(BaseModel):
+    """Validated output for performance summary tool."""
+    days: int = 7
+    total_trades: int = 0
+    wins: int = 0
+    win_rate: float = 0.0
+    total_pnl: float = 0.0
+    best_trade: float = 0.0
+    worst_trade: float = 0.0
+    message: Optional[str] = None
+
+
+class RejectionExplanationData(BaseModel):
+    """Validated output for rejection explanation tool."""
+    explanation: Optional[str] = None
+    rejections_24h: Dict[str, int] = Field(default_factory=dict)
+    ml_skipped: int = 0
+    ml_passed: int = 0
+
+
+class StreakStatsData(BaseModel):
+    """Validated output for streak stats tool."""
+    max_win_streak: int = 0
+    max_loss_streak: int = 0
+    current_streak: int = 0
+    streak_type: str = "none"
+    message: Optional[str] = None
+
+
+# Union of all valid tool output types
+ValidatedToolOutput = Union[
+    RegimePerformanceData,
+    SimilarTradesData,
+    DirectionPerformanceData,
+    HourlyPerformanceData,
+    PerformanceSummaryData,
+    RejectionExplanationData,
+    StreakStatsData,
+    Dict[str, Any],  # Fallback for other tools
+]
+
+
+def validate_tool_output(tool_name: str, data: Any) -> ValidatedToolOutput:
+    """
+    Validate tool output against the appropriate schema (P1.2).
+
+    Args:
+        tool_name: Name of the tool
+        data: Raw output data
+
+    Returns:
+        Validated data model or original data if no validator exists
+    """
+    validators = {
+        "get_regime_performance": RegimePerformanceData,
+        "get_similar_trades": SimilarTradesData,
+        "get_direction_performance": DirectionPerformanceData,
+        "get_hourly_performance": HourlyPerformanceData,
+        "get_performance_summary": PerformanceSummaryData,
+        "explain_rejection": RejectionExplanationData,
+        "get_streak_stats": StreakStatsData,
+    }
+
+    validator_class = validators.get(tool_name)
+    if validator_class and isinstance(data, dict):
+        try:
+            return validator_class(**data)
+        except Exception as e:
+            logger.warning(f"Tool output validation failed for {tool_name}: {e}")
+            return data
+
+    return data
 
 
 @dataclass
@@ -207,14 +345,14 @@ class ToolExecutor:
 
     def execute(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """
-        Execute a tool by name.
+        Execute a tool by name with output validation (P1.2).
 
         Args:
             tool_name: Name of the tool to execute
             arguments: Tool arguments
 
         Returns:
-            ToolResult with success/data/error
+            ToolResult with success/data/error (data is validated)
         """
         executor = self._executors.get(tool_name)
 
@@ -226,7 +364,18 @@ class ToolExecutor:
             )
 
         try:
-            return executor(arguments)
+            result = executor(arguments)
+
+            # Validate output (P1.2)
+            if result.success and result.data:
+                validated_data = validate_tool_output(tool_name, result.data)
+                # Convert Pydantic model to dict if needed
+                if hasattr(validated_data, "model_dump"):
+                    result.data = validated_data.model_dump()
+                elif hasattr(validated_data, "dict"):
+                    result.data = validated_data.dict()
+
+            return result
         except Exception as e:
             logger.error(f"Tool execution error ({tool_name}): {e}")
             return ToolResult(

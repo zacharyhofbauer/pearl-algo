@@ -5,7 +5,7 @@ import CandlestickChart from '@/components/CandlestickChart'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { RSIPanel, MACDPanel, VolumeProfilePanel } from '@/components/indicators'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { useChartStore, useChartSettingsStore, useUIStore, type PositionLine, type Timeframe } from '@/stores'
+import { useChartStore, useChartSettingsStore, useUIStore, selectChartsLocked, type PositionLine, type Timeframe } from '@/stores'
 import type { IChartApi } from 'lightweight-charts'
 
 // Stale threshold in seconds
@@ -38,6 +38,8 @@ export function ChartSection({
   const lastUpdate = useUIStore((s) => s.lastUpdate)
   const dataSource = useUIStore((s) => s.dataSource)
   const isFetching = useUIStore((s) => s.isFetching)
+  const chartsLocked = useUIStore(selectChartsLocked)
+  const toggleChartsLocked = useUIStore((s) => s.toggleChartsLocked)
 
   // Chart settings store for indicator visibility
   const showRSIPanel = useChartSettingsStore((s) => s.showRSIPanel)
@@ -47,7 +49,7 @@ export function ChartSection({
   return (
     <>
       {/* Main Chart */}
-      <div className="chart-wrapper">
+      <div className={`chart-wrapper ${chartsLocked ? 'charts-locked' : ''}`}>
         <div className="chart-actions">
           <DataFreshnessIndicator
             lastUpdate={lastUpdate}
@@ -57,11 +59,12 @@ export function ChartSection({
             staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
             onRefresh={onForceRefresh}
             onFitAll={() => mainChartApi?.timeScale().fitContent()}
-            onGoLive={() => mainChartApi?.timeScale().scrollToRealTime()}
+            chartsLocked={chartsLocked}
+            onToggleLock={toggleChartsLocked}
             variant="floating"
           />
         </div>
-        <div className="chart-container">
+        <div className={`chart-container ${chartsLocked ? 'locked' : ''}`}>
           {chartLoading && (
             <div className="loading-screen">
               <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
@@ -109,31 +112,37 @@ export function ChartSection({
 
       {/* RSI Panel */}
       {showRSIPanel && indicators.rsi && indicators.rsi.length > 0 && (
-        <RSIPanel
-          data={indicators.rsi}
-          barSpacing={barSpacing}
-          mainChart={mainChartApi}
-          height={100}
-        />
+        <div className={chartsLocked ? 'indicator-panel-locked' : ''}>
+          <RSIPanel
+            data={indicators.rsi}
+            barSpacing={barSpacing}
+            mainChart={mainChartApi}
+            height={100}
+          />
+        </div>
       )}
 
       {/* MACD Panel */}
       {showMACDPanel && indicators.macd && indicators.macd.length > 0 && (
-        <MACDPanel
-          data={indicators.macd}
-          barSpacing={barSpacing}
-          mainChart={mainChartApi}
-          height={120}
-        />
+        <div className={chartsLocked ? 'indicator-panel-locked' : ''}>
+          <MACDPanel
+            data={indicators.macd}
+            barSpacing={barSpacing}
+            mainChart={mainChartApi}
+            height={120}
+          />
+        </div>
       )}
 
       {/* Volume Profile Panel */}
       {showVolumeProfilePanel && indicators.volumeProfile && (
-        <VolumeProfilePanel
-          data={indicators.volumeProfile}
-          currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-          height={300}
-        />
+        <div className={chartsLocked ? 'indicator-panel-locked' : ''}>
+          <VolumeProfilePanel
+            data={indicators.volumeProfile}
+            currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+            height={300}
+          />
+        </div>
       )}
     </>
   )

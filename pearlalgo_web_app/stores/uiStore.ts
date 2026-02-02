@@ -20,6 +20,7 @@ interface UIStore {
   // UI preferences (persisted)
   theme: 'dark' | 'light'
   showHelp: boolean
+  chartsLocked: boolean  // Lock charts to prevent accidental touch interaction
 
   // Notifications
   notifications: Notification[]
@@ -33,6 +34,7 @@ interface UIStore {
   recordFetch: (durationMs: number, source: DataSource) => void
   setTheme: (theme: 'dark' | 'light') => void
   toggleHelp: () => void
+  toggleChartsLocked: () => void
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void
   removeNotification: (id: string) => void
   clearNotifications: () => void
@@ -60,6 +62,7 @@ export const useUIStore = create<UIStore>()(
       fetchCount: 0,
       theme: 'dark',
       showHelp: false,
+      chartsLocked: true,
       notifications: [],
 
       // Actions
@@ -86,6 +89,8 @@ export const useUIStore = create<UIStore>()(
 
       toggleHelp: () => set((state) => ({ showHelp: !state.showHelp })),
 
+      toggleChartsLocked: () => set((state) => ({ chartsLocked: !state.chartsLocked })),
+
       addNotification: (notification) =>
         set((state) => ({
           notifications: [
@@ -110,6 +115,7 @@ export const useUIStore = create<UIStore>()(
       partialize: (state) => ({
         theme: state.theme,
         showHelp: state.showHelp,
+        chartsLocked: state.chartsLocked,
       }),
     }
   )
@@ -124,3 +130,4 @@ export const selectDataSource = (state: UIStore) => state.dataSource
 export const selectIsFetching = (state: UIStore) => state.isFetching
 export const selectLastFetchDuration = (state: UIStore) => state.lastFetchDuration
 export const selectFetchCount = (state: UIStore) => state.fetchCount
+export const selectChartsLocked = (state: UIStore) => state.chartsLocked

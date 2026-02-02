@@ -24,6 +24,8 @@ from .metrics import MetricsCollector, LLMRequest
 from .data_access import TradeDataAccess
 from .cache import ResponseCache
 from .tools import ToolExecutor, format_tool_result_for_llm, PEARL_TOOLS
+from .config import get_config, PearlConfig
+from .types import SanitizationResult, TradingContextSummary, ChatResponseDict
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,14 @@ class QueryComplexity(Enum):
     QUICK = "quick"      # Local LLM - simple narration, state summary
     DEEP = "deep"        # Claude - analysis, coaching, complex why
     AUTO = "auto"        # Let brain decide
+
+
+class ResponseSource(Enum):
+    """Indicates where a response came from"""
+    CACHE = "cache"
+    LOCAL = "local"
+    CLAUDE = "claude"
+    TEMPLATE = "template"
 
 
 @dataclass
@@ -139,14 +149,70 @@ class PearlBrain:
         self._last_quiet_engagement_time: Optional[datetime] = None
         self._last_signal_time: Optional[datetime] = None
 
+        # Response source tracking (P5.1)
+        self._last_response_source: Optional["ResponseSource"] = None
+
         # Cooldowns for proactive messages
         self.insight_cooldown = timedelta(minutes=30)
         self.ml_warning_cooldown = timedelta(hours=2)
         self.coaching_cooldown = timedelta(minutes=15)
         self.quiet_engagement_threshold = timedelta(minutes=15)
 
+        # Load configuration
+        self._config = get_config()
+
         logger.info(f"Pearl Brain 3.0 initialized - Local: {enable_local}, Claude: {enable_claude}, "
                    f"Tools: {enable_tools}, Caching: {enable_caching}")
+
+    def _sanitize_input(self, user_message: str) -> SanitizationResult:
+        """
+        Sanitize user input to prevent prompt injection attacks.
+
+        Args:
+            user_message: Raw user message
+
+        Returns:
+            SanitizationResult with sanitized message and warnings
+        """
+        config = self._config.sanitization
+        warnings: List[str] = []
+        was_modified = False
+        sanitized = user_message
+
+        # Enforce length limit
+        if len(sanitized) > config.MAX_MESSAGE_LENGTH:
+            sanitized = sanitized[:config.MAX_MESSAGE_LENGTH]
+            warnings.append(f"Message truncated to {config.MAX_MESSAGE_LENGTH} characters")
+            was_modified = True
+
+        # Strip injection markers
+        for pattern in config.INJECTION_PATTERNS:
+            if pattern.lower() in sanitized.lower():
+                # Case-insensitive replacement
+                import re
+                sanitized = re.sub(re.escape(pattern), "", sanitized, flags=re.IGNORECASE)
+                was_modified = True
+                logger.warning(f"Stripped injection pattern: {pattern}")
+
+        # Check for suspicious patterns (log but don't remove)
+        message_lower = sanitized.lower()
+        for pattern in config.SUSPICIOUS_PATTERNS:
+            if pattern in message_lower:
+                warnings.append(f"Suspicious pattern detected: {pattern}")
+                logger.warning(f"Suspicious input pattern: {pattern}")
+
+        # Clean up excessive whitespace
+        import re
+        cleaned = re.sub(r'\s+', ' ', sanitized).strip()
+        if cleaned != sanitized:
+            sanitized = cleaned
+            was_modified = True
+
+        return SanitizationResult(
+            sanitized=sanitized,
+            was_modified=was_modified,
+            warnings=warnings,
+        )
 
     def add_message_handler(self, handler: Callable[[PearlMessage], None]):
         """Register a callback for when Pearl has something to say"""
@@ -297,12 +363,22 @@ class PearlBrain:
         """
         start_time = time.time()
 
-        # Add to memory
-        self.memory.add_user_message(user_message)
+        # Sanitize input (P1.1: Input sanitization layer)
+        sanitization_result = self._sanitize_input(user_message)
+        sanitized_message = sanitization_result["sanitized"]
+
+        if sanitization_result["warnings"]:
+            logger.info(f"Input sanitization warnings: {sanitization_result['warnings']}")
+
+        # Add to memory (use sanitized message)
+        self.memory.add_user_message(sanitized_message)
+
+        # Track response source for transparency (P5.1)
+        response_source = ResponseSource.TEMPLATE
 
         # Check cache first (3.0)
         if self.cache:
-            cached = self.cache.get(user_message, self._current_state)
+            cached = self.cache.get(sanitized_message, self._current_state)
             if cached:
                 self.metrics.record(LLMRequest(
                     timestamp=datetime.now(),
@@ -315,17 +391,18 @@ class PearlBrain:
                     success=True,
                 ))
                 self.memory.add_assistant_message(cached)
+                self._last_response_source = ResponseSource.CACHE
                 return cached
 
         # Determine complexity if auto
         if complexity == QueryComplexity.AUTO:
-            complexity = self._classify_query(user_message)
+            complexity = self._classify_query(sanitized_message)
 
         # Build context with RAG (3.0)
-        context = self._build_chat_context(user_message)
+        context = self._build_chat_context(sanitized_message)
 
         # Get relevant trade history for RAG
-        rag_context = self._get_rag_context(user_message)
+        rag_context = self._get_rag_context(sanitized_message)
         if rag_context:
             context["trade_history"] = rag_context
 
@@ -337,23 +414,30 @@ class PearlBrain:
         fallback_used = False
 
         if complexity == QueryComplexity.QUICK and self.local_llm:
-            response = await self._quick_response(user_message, context)
+            response = await self._quick_response(sanitized_message, context)
             model_used = self.local_llm.model
+            response_source = ResponseSource.LOCAL
         elif self.claude_llm:
             # Try with tools if enabled (3.0)
             if self.enable_tools:
-                response, input_tokens, output_tokens = await self._deep_response_with_tools(user_message, context)
+                response, input_tokens, output_tokens = await self._deep_response_with_tools(sanitized_message, context)
             else:
-                response, input_tokens, output_tokens = await self._deep_response_with_metadata(user_message, context)
+                response, input_tokens, output_tokens = await self._deep_response_with_metadata(sanitized_message, context)
             model_used = self.claude_llm.model
+            response_source = ResponseSource.CLAUDE
         elif self.local_llm:
-            response = await self._quick_response(user_message, context)
+            response = await self._quick_response(sanitized_message, context)
             model_used = self.local_llm.model
+            response_source = ResponseSource.LOCAL
             fallback_used = True
         else:
             response = "I'm having trouble connecting to my AI backend. Please check the configuration."
+            response_source = ResponseSource.TEMPLATE
 
         latency_ms = (time.time() - start_time) * 1000
+
+        # Store last response source for API (P5.1)
+        self._last_response_source = response_source
 
         # Record metrics (3.0)
         self.metrics.record(LLMRequest(
@@ -1178,3 +1262,14 @@ Be conversational, not robotic. Under 2 sentences."""
             "month_usd": round(self.metrics.get_cost_this_month(), 4),
             "limit_usd": self.metrics.daily_cost_limit,
         }
+
+    def get_last_response_source(self) -> Optional[str]:
+        """
+        Get the source of the last response (P5.1).
+
+        Returns:
+            Source string: "cache", "local", "claude", or "template"
+        """
+        if self._last_response_source:
+            return self._last_response_source.value
+        return None

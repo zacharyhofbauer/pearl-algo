@@ -1486,6 +1486,41 @@ body {
 }
 
 /* ===================================
+   CHART LOCK TOGGLE
+   =================================== */
+/* Lock button active state in freshness indicator */
+.freshness-action-btn.chart-locked-active {
+  background: rgba(255, 193, 7, 0.2);
+  color: var(--accent-yellow);
+}
+
+/* Charts locked state - disable pointer events */
+.chart-container.locked {
+  pointer-events: none;
+}
+
+.chart-container.locked::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+}
+
+.indicator-panel-locked {
+  pointer-events: none;
+  position: relative;
+}
+
+/* Visual indicator when locked */
+.charts-locked .chart-container,
+.indicator-panel-locked {
+  opacity: 0.95;
+}
+
+/* ===================================
    STATUS PANEL - Compact & Dynamic
    =================================== */
 .status-panel {
@@ -5418,7 +5453,7 @@ body {
 
   .pearl-chat-input input {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: 16px; /* Must be 16px+ to prevent iOS auto-zoom */
     border-radius: 6px;
   }
 

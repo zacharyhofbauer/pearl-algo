@@ -12,7 +12,9 @@ interface DataFreshnessIndicatorProps {
   onRefresh?: () => void
   variant?: 'full' | 'compact' | 'floating'
   onFitAll?: () => void  // Chart action: fit all content
-  onGoLive?: () => void  // Chart action: scroll to real time
+  onGoLive?: () => void  // Chart action: scroll to real time (deprecated, use lock instead)
+  chartsLocked?: boolean  // Chart lock state
+  onToggleLock?: () => void  // Toggle chart lock
 }
 
 export default function DataFreshnessIndicator({
@@ -25,6 +27,8 @@ export default function DataFreshnessIndicator({
   variant = 'compact',
   onFitAll,
   onGoLive,
+  chartsLocked = false,
+  onToggleLock,
 }: DataFreshnessIndicatorProps) {
   const [secondsAgo, setSecondsAgo] = useState<number>(0)
   const [pulseKey, setPulseKey] = useState<number>(0)
@@ -193,7 +197,27 @@ export default function DataFreshnessIndicator({
               </svg>
             </button>
           )}
-          {onGoLive && (
+          {onToggleLock && (
+            <button
+              className={`freshness-action-btn ${chartsLocked ? 'chart-locked-active' : ''}`}
+              onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
+              title={chartsLocked ? 'Unlock charts' : 'Lock charts (scroll mode)'}
+              aria-pressed={chartsLocked}
+            >
+              {chartsLocked ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+                </svg>
+              )}
+            </button>
+          )}
+          {!onToggleLock && onGoLive && (
             <button
               className="freshness-action-btn"
               onClick={(e) => { e.stopPropagation(); onGoLive(); }}

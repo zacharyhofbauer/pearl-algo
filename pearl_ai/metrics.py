@@ -32,6 +32,25 @@ MODEL_PRICING = {
 
 
 @dataclass
+class ToolCall:
+    """Metrics for a single tool call (P2.3)."""
+    name: str
+    arguments: Dict[str, Any]
+    success: bool
+    latency_ms: float
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "arguments": self.arguments,
+            "success": self.success,
+            "latency_ms": self.latency_ms,
+            "error": self.error,
+        }
+
+
+@dataclass
 class LLMRequest:
     """Metrics for a single LLM request."""
     timestamp: datetime
@@ -44,6 +63,7 @@ class LLMRequest:
     success: bool = True
     error: Optional[str] = None
     fallback_used: bool = False
+    tool_calls: Optional[List[ToolCall]] = None  # P2.3: Tool execution tracing
 
     @property
     def total_tokens(self) -> int:
@@ -62,7 +82,7 @@ class LLMRequest:
         return input_cost + output_cost
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "timestamp": self.timestamp.isoformat(),
             "endpoint": self.endpoint,
             "model": self.model,
@@ -76,6 +96,10 @@ class LLMRequest:
             "error": self.error,
             "fallback_used": self.fallback_used,
         }
+        # Add tool calls if present (P2.3)
+        if self.tool_calls:
+            result["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        return result
 
 
 class MetricsCollector:
