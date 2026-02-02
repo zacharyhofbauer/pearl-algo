@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-PearlAlgo Health Check & Monitoring Script
+PearlAlgo Health Check & Monitoring Script (Python) - Automated with Telegram Alerts
+
+This is the AUTOMATED version for cron/systemd scheduling.
+For a QUICK MANUAL status check, use:
+  ./scripts/ops/quick_status.sh
 
 Checks system health and sends Telegram alerts when issues are detected.
 Run periodically via cron: */5 * * * * /path/to/health_check.py

@@ -415,9 +415,9 @@ Pearl AI assistant is available via CLI/terminal only. Telegram is for notificat
 ./pearl.sh status     # Full dashboard with P&L and trades
 ```
 
-**Or use the health check script:**
+**Or use the quick status script:**
 ```bash
-./scripts/health_check.sh
+./scripts/ops/quick_status.sh
 ```
 
 **What it verifies:**

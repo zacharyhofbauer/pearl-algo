@@ -36,7 +36,7 @@ Backtesting scripts for strategy validation on historical data.
 
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
-- Backtesting scripts removed - using pearl_bot_auto only
+  - **Usage**: `python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/NQ/signals.jsonl`
 - `train_ml_filter.py`
   - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
 
@@ -123,10 +123,14 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
 
 **Note**: The Pearl Algo Web App provides an interactive web view and can be used for Telegram screenshot captures via Playwright. See `docs/PEARL_WEB_APP.md` for details.
 
-## Ops Shortcuts (`scripts/`)
+## Ops (`scripts/ops/`)
 
-- `health_check.sh`
+Quick operational utilities for manual/interactive use.
+
+- `quick_status.sh`
   - **Role**: Fast local health snapshot (processes, gateway, state.json, recent signals/log errors). Requires `jq`.
+  - **Usage**: `./scripts/ops/quick_status.sh --market NQ`
+  - **Note**: For automated monitoring with Telegram alerts, use `scripts/monitoring/health_check.py` instead.
 
 ## General Guidelines
 

@@ -11,10 +11,16 @@ Runtime signal generation is provided by the core strategy in `trading_bots/pear
 
 ## Backtesting (canonical usage)
 
-Trading bots are run via the backtesting scripts:
+Backtesting scripts are located in `scripts/backtesting/`:
+
+- **`strategy_selection.py`** - Generate drawdown-aware strategy selection reports from historical trade outcomes
+- **`train_ml_filter.py`** - Train/update the ML signal filter artifact (offline only)
+
+Example usage:
 
 ```bash
-# Backtesting scripts removed - using pearl_bot_auto only
+python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/NQ/signals.jsonl
+python3 scripts/backtesting/train_ml_filter.py
 ```
 
 ## Backtesting

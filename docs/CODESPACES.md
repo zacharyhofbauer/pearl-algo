@@ -64,7 +64,7 @@ EOF
 ### Quick health check (all services)
 
 ```bash
-./scripts/health_check.sh --market NQ
+./scripts/ops/quick_status.sh --market NQ
 ```
 
 ### Run CI checks locally

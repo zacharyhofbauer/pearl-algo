@@ -1,11 +1,18 @@
 #!/bin/bash
-# Quick health check for the market agent
+# Quick Status Check (bash) - Fast local health snapshot for manual use
+#
+# This is the MANUAL/INTERACTIVE version for operator use.
+# For AUTOMATED health monitoring with Telegram alerts, use:
+#   python3 scripts/monitoring/health_check.py
+#
 # Usage:
-#   ./scripts/health_check.sh
-#   ./scripts/health_check.sh --market NQ
+#   ./scripts/ops/quick_status.sh
+#   ./scripts/ops/quick_status.sh --market NQ
+#
+# Requires: jq
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 MARKET="${PEARLALGO_MARKET:-NQ}"
 if [ "${1:-}" = "--market" ] && [ -n "${2:-}" ]; then

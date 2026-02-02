@@ -112,7 +112,8 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `scripts/testing/smoke_test_ibkr.py` | KEEP | IBKR smoke |
 | `scripts/testing/generate_coverage_badge.py` | KEEP | Coverage badge |
 | `scripts/testing/report_orphan_modules.py` | KEEP | Orphan module report |
-| `scripts/health_check.sh` | KEEP | Fast health snapshot |
+| `scripts/ops/quick_status.sh` | KEEP | Fast health snapshot (manual) |
+| `scripts/monitoring/health_check.py` | KEEP | Automated health check with alerts |
 
 ---
 
@@ -123,6 +124,9 @@ All source modules are retained.
 | Path | Decision | Role |
 |------|----------|------|
 | `src/pearlalgo/__init__.py` | KEEP | Package root |
+| `src/pearlalgo/analytics/__init__.py` | KEEP | Analytics package |
+| `src/pearlalgo/analytics/strategy_report.py` | KEEP | Strategy report business logic |
+| `src/pearlalgo/analytics/doctor_report.py` | KEEP | Doctor rollup business logic |
 | `src/pearlalgo/config/__init__.py` | KEEP | Config package |
 | `src/pearlalgo/config/config_file.py` | KEEP | Config loader |
 | `src/pearlalgo/config/config_loader.py` | KEEP | Config defaults |

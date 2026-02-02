@@ -60,7 +60,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
-  - Backtesting scripts removed - using pearl_bot_auto only
   - `train_ml_filter.py` – offline training for ML signal filter artifacts
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
@@ -134,7 +133,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `scripts/monitoring/serve_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
   - `scripts/monitoring/incident_report.py` – incident report generation
-  - `scripts/health_check.sh` – fast local health snapshot (requires `jq`)
+  - `scripts/monitoring/health_check.py` – automated health check with Telegram alerts (for cron/systemd)
+- **Ops scripts** (`scripts/ops/`):
+  - `quick_status.sh` – fast local health snapshot for manual use (requires `jq`)
 - **Docs**:
   - `docs/MARKET_AGENT_GUIDE.md` (monitoring section)
   - `docs/PROJECT_SUMMARY.md` (status server section)
