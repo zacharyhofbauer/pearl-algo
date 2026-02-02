@@ -8,6 +8,7 @@ wrapping the shell scripts with proper error handling and logging.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -157,7 +158,9 @@ class ServiceController:
             Dictionary with gateway status information
         """
         is_running = self._is_gateway_running()
-        port_listening = self._is_port_listening(4002)
+        # Use IB_PORT from environment, default to 4001 (matches jts.ini RemotePortOrderRouting)
+        gateway_port = int(os.getenv("IB_PORT", "4001"))
+        port_listening = self._is_port_listening(gateway_port)
 
         status = "RUNNING" if is_running else "STOPPED"
         api_status = "READY" if port_listening else "NOT_READY"
@@ -165,6 +168,7 @@ class ServiceController:
         return {
             "process_running": is_running,
             "port_listening": port_listening,
+            "port": gateway_port,
             "status": status,
             "api_status": api_status,
             "message": self._format_gateway_status(is_running, port_listening),
