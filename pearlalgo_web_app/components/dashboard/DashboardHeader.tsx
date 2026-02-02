@@ -124,22 +124,26 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats - with ARIA live region for real-time updates */}
         {agentState && (
-          <div className="header-stats-row">
+          <div className="header-stats-row" aria-live="polite" aria-atomic="true">
             <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
               <span className="stat-label">P&L</span>
-              <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
+              <span className="stat-value" aria-label={`Daily P&L: ${formatPnL(agentState.daily_pnl)}`}>
+                {formatPnL(agentState.daily_pnl)}
+              </span>
             </div>
             <div className="stat-item trades">
               <span className="stat-label">W/L</span>
-              <span className="stat-value">
+              <span className="stat-value" aria-label={`Wins: ${agentState.daily_wins}, Losses: ${agentState.daily_losses}`}>
                 <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
               </span>
             </div>
             {agentState.active_trades_count > 0 && (
               <div className="stat-item positions">
-                <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
+                <span className="stat-value highlight" aria-label={`${agentState.active_trades_count} active positions`}>
+                  {agentState.active_trades_count} pos
+                </span>
               </div>
             )}
           </div>
@@ -161,11 +165,14 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
 
       {/* Secondary Row - Badges, Health, Legends */}
       <div className="header-row-secondary">
-        {/* Badges */}
-        <div className="header-badges">
+        {/* Badges - with ARIA live region for status changes */}
+        <div className="header-badges" role="status" aria-live="polite">
           {agentState && (
-            <span className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}>
-              <span className="badge-dot"></span>
+            <span
+              className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+              aria-label={`Agent status: ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+            >
+              <span className="badge-dot" aria-hidden="true"></span>
               {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
             </span>
           )}

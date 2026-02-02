@@ -3,6 +3,9 @@ Pearl Memory - Context and Pattern Storage
 
 Maintains conversation history, learns user patterns,
 and provides context for AI responses.
+
+Pearl AI 3.0: Added conversation persistence, message rotation,
+and session resume capability.
 """
 
 import json
@@ -12,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from collections import defaultdict
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -68,15 +72,24 @@ class PearlMemory:
     Long-term and short-term memory for Pearl AI.
 
     Stores:
-    - Conversation history
-    - Pearl's messages (narrations, insights)
+    - Conversation history (with persistence)
+    - Pearl's messages (narrations, insights) (with rotation)
     - User patterns and preferences
     - Trading session summaries
     """
 
+    # Persistence settings
+    CHECKPOINT_INTERVAL = 10  # Save checkpoint every N messages
+    MAX_PEARL_MESSAGES_PER_FILE = 1000
+    RETENTION_DAYS = 30
+
     def __init__(self, storage_path: Optional[Path] = None):
         self.storage_path = storage_path or Path.home() / ".pearl" / "memory"
         self.storage_path.mkdir(parents=True, exist_ok=True)
+
+        # Session tracking
+        self.session_id = str(uuid.uuid4())[:8]
+        self._messages_since_checkpoint = 0
 
         # Short-term: current session
         self.conversation_history: List[ConversationMessage] = []
@@ -90,6 +103,10 @@ class PearlMemory:
         # Analytics
         self.question_counts: Dict[str, int] = defaultdict(int)
         self.topic_frequency: Dict[str, int] = defaultdict(int)
+
+        # Create subdirectories
+        (self.storage_path / "conversations").mkdir(exist_ok=True)
+        (self.storage_path / "pearl_messages").mkdir(exist_ok=True)
 
         # Load persisted data
         self._load_memory()
@@ -113,10 +130,49 @@ class PearlMemory:
             if summaries_file.exists():
                 self.session_summaries = json.loads(summaries_file.read_text())
 
+            # Load most recent conversation if resuming
+            self._try_resume_conversation()
+
             logger.info(f"Loaded memory: {len(self.user_patterns)} patterns, {len(self.session_summaries)} summaries")
 
         except Exception as e:
             logger.error(f"Error loading memory: {e}")
+
+    def _try_resume_conversation(self):
+        """Try to resume the most recent conversation."""
+        try:
+            conv_dir = self.storage_path / "conversations"
+            if not conv_dir.exists():
+                return
+
+            # Find most recent conversation file
+            conv_files = sorted(conv_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+
+            if not conv_files:
+                return
+
+            # Check if recent enough to resume (within 4 hours)
+            most_recent = conv_files[0]
+            age = datetime.now().timestamp() - most_recent.stat().st_mtime
+
+            if age > 4 * 3600:  # 4 hours
+                logger.debug("Most recent conversation too old to resume")
+                return
+
+            # Load and resume
+            data = json.loads(most_recent.read_text())
+            self.session_id = data.get("session_id", self.session_id)
+
+            for msg_data in data.get("messages", []):
+                try:
+                    self.conversation_history.append(ConversationMessage.from_dict(msg_data))
+                except Exception:
+                    pass
+
+            logger.info(f"Resumed conversation {self.session_id} with {len(self.conversation_history)} messages")
+
+        except Exception as e:
+            logger.warning(f"Could not resume conversation: {e}")
 
     def _save_memory(self):
         """Persist memory to disk."""
@@ -127,7 +183,7 @@ class PearlMemory:
             (self.storage_path / "preferences.json").write_text(json.dumps(self.preferences, indent=2))
 
             # Keep only last 30 days of summaries
-            cutoff = datetime.now() - timedelta(days=30)
+            cutoff = datetime.now() - timedelta(days=self.RETENTION_DAYS)
             recent_summaries = [
                 s for s in self.session_summaries
                 if datetime.fromisoformat(s.get("date", "2020-01-01")) > cutoff
@@ -136,6 +192,72 @@ class PearlMemory:
 
         except Exception as e:
             logger.error(f"Error saving memory: {e}")
+
+    def _save_conversation_checkpoint(self):
+        """Save conversation checkpoint to disk."""
+        try:
+            conv_file = self.storage_path / "conversations" / f"{self.session_id}.json"
+
+            data = {
+                "session_id": self.session_id,
+                "started_at": self.conversation_history[0].timestamp.isoformat() if self.conversation_history else datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat(),
+                "messages": [msg.to_dict() for msg in self.conversation_history[-100:]],  # Keep last 100
+            }
+
+            conv_file.write_text(json.dumps(data, indent=2))
+            logger.debug(f"Saved conversation checkpoint: {len(self.conversation_history)} messages")
+
+        except Exception as e:
+            logger.error(f"Error saving conversation checkpoint: {e}")
+
+    def _save_pearl_message(self, message: Any):
+        """Save Pearl message to rotating daily file."""
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            msg_file = self.storage_path / "pearl_messages" / f"{today}.jsonl"
+
+            # Append to JSONL file
+            with open(msg_file, "a") as f:
+                f.write(json.dumps(message.to_dict()) + "\n")
+
+            # Cleanup old files (keep last 30 days)
+            self._cleanup_old_pearl_messages()
+
+        except Exception as e:
+            logger.error(f"Error saving Pearl message: {e}")
+
+    def _cleanup_old_pearl_messages(self):
+        """Remove Pearl message files older than retention period."""
+        try:
+            msg_dir = self.storage_path / "pearl_messages"
+            cutoff_date = datetime.now() - timedelta(days=self.RETENTION_DAYS)
+
+            for f in msg_dir.glob("*.jsonl"):
+                try:
+                    file_date = datetime.strptime(f.stem, "%Y-%m-%d")
+                    if file_date < cutoff_date:
+                        f.unlink()
+                        logger.debug(f"Cleaned up old Pearl messages: {f.name}")
+                except ValueError:
+                    pass  # Skip files that don't match date pattern
+
+        except Exception as e:
+            logger.warning(f"Error cleaning up Pearl messages: {e}")
+
+    def _cleanup_old_conversations(self):
+        """Remove old conversation files."""
+        try:
+            conv_dir = self.storage_path / "conversations"
+            cutoff = datetime.now().timestamp() - (self.RETENTION_DAYS * 24 * 3600)
+
+            for f in conv_dir.glob("*.json"):
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    logger.debug(f"Cleaned up old conversation: {f.name}")
+
+        except Exception as e:
+            logger.warning(f"Error cleaning up conversations: {e}")
 
     def add_user_message(self, content: str, metadata: Optional[Dict] = None):
         """Add a user message to conversation history."""
@@ -153,6 +275,12 @@ class PearlMemory:
         if len(self.conversation_history) > 100:
             self.conversation_history = self.conversation_history[-50:]
 
+        # Checkpoint periodically
+        self._messages_since_checkpoint += 1
+        if self._messages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
+            self._save_conversation_checkpoint()
+            self._messages_since_checkpoint = 0
+
     def add_assistant_message(self, content: str, metadata: Optional[Dict] = None):
         """Add Pearl's response to conversation history."""
         message = ConversationMessage(
@@ -162,9 +290,18 @@ class PearlMemory:
         )
         self.conversation_history.append(message)
 
+        # Checkpoint periodically
+        self._messages_since_checkpoint += 1
+        if self._messages_since_checkpoint >= self.CHECKPOINT_INTERVAL:
+            self._save_conversation_checkpoint()
+            self._messages_since_checkpoint = 0
+
     def add_message(self, pearl_message: Any):
         """Add a PearlMessage to the message history."""
         self.pearl_messages.append(pearl_message)
+
+        # Persist to disk
+        self._save_pearl_message(pearl_message)
 
         # Keep manageable
         if len(self.pearl_messages) > 500:
@@ -309,10 +446,50 @@ class PearlMemory:
 
         return " ".join(context_parts) if context_parts else ""
 
+    def get_recent_pearl_messages(self, days: int = 1, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get recent Pearl messages from disk.
+
+        Args:
+            days: Number of days to look back
+            limit: Maximum messages to return
+
+        Returns:
+            List of message dictionaries
+        """
+        messages = []
+
+        try:
+            msg_dir = self.storage_path / "pearl_messages"
+
+            for i in range(days):
+                date_str = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                msg_file = msg_dir / f"{date_str}.jsonl"
+
+                if msg_file.exists():
+                    with open(msg_file, "r") as f:
+                        for line in f:
+                            try:
+                                messages.append(json.loads(line.strip()))
+                            except json.JSONDecodeError:
+                                pass
+
+                if len(messages) >= limit:
+                    break
+
+        except Exception as e:
+            logger.warning(f"Error loading recent Pearl messages: {e}")
+
+        return messages[:limit]
+
     def clear_session(self):
         """Clear short-term memory (conversation) but keep patterns."""
         self.conversation_history = []
         self.pearl_messages = []
+
+        # Start new session
+        self.session_id = str(uuid.uuid4())[:8]
+        self._messages_since_checkpoint = 0
 
     def export_memory(self) -> Dict[str, Any]:
         """Export all memory for backup or analysis."""
@@ -322,4 +499,17 @@ class PearlMemory:
             "session_summaries": self.session_summaries,
             "topic_frequency": dict(self.topic_frequency),
             "question_counts": dict(self.question_counts),
+            "session_id": self.session_id,
         }
+
+    def get_conversation_history_for_llm(self, limit: int = 10) -> List[Dict[str, str]]:
+        """
+        Get conversation history formatted for LLM context.
+
+        Returns messages in the format expected by chat APIs:
+        [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+        """
+        return [
+            {"role": msg.role, "content": msg.content}
+            for msg in self.conversation_history[-limit:]
+        ]

@@ -8,13 +8,16 @@ Add to your FastAPI app:
 Authentication:
     All endpoints require API key authentication when PEARL_API_AUTH_ENABLED=true.
     Pass the API key via X-API-Key header.
+
+Pearl AI 3.0: Added /metrics and /chat/stream endpoints.
 """
 
 import asyncio
 import logging
 import os
+import json
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, AsyncIterator
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, Security, Query
 from fastapi.security import APIKeyHeader
@@ -39,6 +42,12 @@ class ChatResponse(BaseModel):
     complexity: str  # "quick" or "deep"
 
 
+class StreamChatRequest(BaseModel):
+    """Request body for streaming chat endpoint."""
+    message: str
+    context: Optional[Dict[str, Any]] = None
+
+
 class FeedMessage(BaseModel):
     """A message in the Pearl feed."""
     id: str
@@ -48,6 +57,31 @@ class FeedMessage(BaseModel):
     timestamp: str
     trade_id: Optional[str] = None
     metadata: Dict[str, Any] = {}
+
+
+class MetricsSummary(BaseModel):
+    """Metrics summary response."""
+    period_hours: int
+    total_requests: int
+    total_tokens: int
+    total_cost_usd: float
+    avg_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+    cache_hit_rate: float
+    error_rate: float
+    fallback_rate: float
+    by_endpoint: Dict[str, Any]
+    by_model: Dict[str, Any]
+    cache: Optional[Dict[str, Any]] = None
+
+
+class CostSummary(BaseModel):
+    """Cost summary response."""
+    today_usd: float
+    month_usd: float
+    limit_usd: Optional[float] = None
 
 
 def create_pearl_router(
@@ -174,6 +208,78 @@ def create_pearl_router(
         except Exception as e:
             logger.error(f"Chat error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/chat/stream")
+    async def chat_stream(request: StreamChatRequest, _: Optional[str] = Depends(auth_dep)):
+        """
+        Send a message to Pearl AI and get a streaming response.
+
+        Returns Server-Sent Events (SSE) with progressive text chunks.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        async def generate_stream() -> AsyncIterator[str]:
+            """Generate SSE stream of response chunks."""
+            try:
+                # Send initial event
+                yield f"data: {json.dumps({'type': 'start', 'timestamp': datetime.now().isoformat()})}\n\n"
+
+                # Check if Claude LLM supports streaming
+                if brain.claude_llm:
+                    try:
+                        # Build context
+                        context = brain._build_chat_context(request.message)
+                        rag_context = brain._get_rag_context(request.message)
+                        if rag_context:
+                            context["trade_history"] = rag_context
+
+                        # Build prompts
+                        system_prompt = brain._build_deep_system_prompt(context)
+                        user_prompt = brain._build_deep_user_prompt(request.message, context)
+
+                        # Stream response
+                        full_response = ""
+                        async for chunk in brain.claude_llm.generate_stream(
+                            prompt=user_prompt,
+                            system=system_prompt,
+                            max_tokens=1000,
+                        ):
+                            full_response += chunk
+                            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
+                        # Store in memory
+                        brain.memory.add_user_message(request.message)
+                        brain.memory.add_assistant_message(full_response)
+
+                        # Final event
+                        yield f"data: {json.dumps({'type': 'done', 'timestamp': datetime.now().isoformat()})}\n\n"
+
+                    except Exception as e:
+                        logger.error(f"Streaming error: {e}")
+                        # Fallback to non-streaming
+                        response = await brain.chat(request.message)
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': response})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'timestamp': datetime.now().isoformat()})}\n\n"
+
+                else:
+                    # No Claude LLM, use non-streaming response
+                    response = await brain.chat(request.message)
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': response})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'timestamp': datetime.now().isoformat()})}\n\n"
+
+            except Exception as e:
+                logger.error(f"Stream generation error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            }
+        )
 
     @router.get("/feed", response_model=List[FeedMessage])
     async def get_feed(limit: int = 50, _: Optional[str] = Depends(auth_dep)):
@@ -325,6 +431,7 @@ def create_pearl_router(
             claude_available = True  # Assume available if configured
 
         return {
+            "version": "3.0.0",
             "local_llm": {
                 "enabled": brain.local_llm is not None,
                 "available": local_available,
@@ -334,10 +441,16 @@ def create_pearl_router(
                 "enabled": brain.claude_llm is not None,
                 "model": brain.claude_llm.model if brain.claude_llm else None,
             },
+            "features": {
+                "tools_enabled": brain.enable_tools,
+                "caching_enabled": brain.cache is not None,
+                "rag_enabled": brain.data_access.is_available(),
+            },
             "memory": {
                 "conversation_messages": len(brain.memory.conversation_history),
                 "pearl_messages": len(brain.memory.pearl_messages),
                 "patterns_learned": len(brain.memory.user_patterns),
+                "session_id": brain.memory.session_id,
             },
         }
 
@@ -386,6 +499,87 @@ def create_pearl_router(
         """
         explanation = brain.explain_rejections(brain._current_state)
         return {"explanation": explanation}
+
+    # ================================================================
+    # Pearl AI 3.0 Metrics Endpoints
+    # ================================================================
+
+    @router.get("/metrics", response_model=MetricsSummary)
+    async def get_metrics(hours: int = 24, _: Optional[str] = Depends(auth_dep)):
+        """
+        Get Pearl AI usage metrics.
+
+        Returns token counts, costs, latency percentiles, cache hit rates,
+        and breakdown by endpoint and model.
+
+        Args:
+            hours: Number of hours to look back (default 24)
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.get_metrics_summary(hours)
+
+    @router.get("/metrics/cost", response_model=CostSummary)
+    async def get_cost(_: Optional[str] = Depends(auth_dep)):
+        """
+        Get Pearl AI cost summary.
+
+        Returns today's cost, month's cost, and daily limit if set.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.get_cost_summary()
+
+    @router.get("/metrics/recent")
+    async def get_recent_requests(limit: int = 20, _: Optional[str] = Depends(auth_dep)):
+        """
+        Get recent LLM requests for debugging.
+
+        Returns the most recent requests with full details.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.metrics.get_recent_requests(limit)
+
+    @router.get("/metrics/errors")
+    async def get_error_summary(hours: int = 24, _: Optional[str] = Depends(auth_dep)):
+        """
+        Get error summary by error type.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.metrics.get_error_summary(hours)
+
+    @router.post("/cache/clear")
+    async def clear_cache(_: Optional[str] = Depends(auth_dep)):
+        """
+        Clear the response cache.
+
+        Useful if responses seem stale or after configuration changes.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        if brain.cache:
+            count = brain.cache.invalidate()
+            return {"cleared": True, "entries_removed": count}
+        return {"cleared": False, "reason": "Caching not enabled"}
+
+    @router.get("/cache/stats")
+    async def get_cache_stats(_: Optional[str] = Depends(auth_dep)):
+        """
+        Get cache statistics.
+
+        Returns cache size, hit rate, and entry details.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        if brain.cache:
+            return {
+                "enabled": True,
+                "stats": brain.cache.get_stats(),
+                "entries": brain.cache.get_entries(),
+            }
+        return {"enabled": False}
 
     return router
 

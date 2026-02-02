@@ -12,6 +12,7 @@ interface Message {
   timestamp: Date
   type?: 'narration' | 'insight' | 'alert' | 'coaching' | 'response'
   priority?: 'low' | 'normal' | 'high' | 'critical'
+  isStreaming?: boolean  // Pearl AI 3.0: For streaming messages
 }
 
 interface TradingContext {
@@ -233,7 +234,7 @@ export default function PearlInsightsPanel({
     }
   }, [])
 
-  // Send chat message
+  // Send chat message with streaming support (Pearl AI 3.0)
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return
 
@@ -249,10 +250,78 @@ export default function PearlInsightsPanel({
     setInput('')
     setIsLoading(true)
 
+    // Create a placeholder for streaming response
+    const streamingMessageId = `pearl-${Date.now()}`
+
     try {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Try streaming first
+      const streamResponse = await fetch('/api/pearl/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: messageText }),
+      })
+
+      if (streamResponse.ok && streamResponse.body) {
+        // Create streaming message placeholder
+        const streamingMessage: Message = {
+          id: streamingMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          type: 'response',
+          isStreaming: true,
+        }
+        setMessages((prev) => [...prev, streamingMessage])
+
+        // Read the stream
+        const reader = streamResponse.body.getReader()
+        const decoder = new TextDecoder()
+        let fullContent = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          const chunk = decoder.decode(value)
+          const lines = chunk.split('\n')
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                if (data.type === 'chunk' && data.content) {
+                  fullContent += data.content
+                  // Update the streaming message
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === streamingMessageId
+                        ? { ...msg, content: fullContent }
+                        : msg
+                    )
+                  )
+                } else if (data.type === 'done') {
+                  // Mark as no longer streaming
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === streamingMessageId
+                        ? { ...msg, isStreaming: false }
+                        : msg
+                    )
+                  )
+                } else if (data.type === 'error') {
+                  console.error('Stream error:', data.message)
+                }
+              } catch {
+                // Ignore parsing errors for incomplete chunks
+              }
+            }
+          }
+        }
+      } else if (wsRef.current?.readyState === WebSocket.OPEN) {
+        // Fallback to WebSocket
         wsRef.current.send(`chat:${messageText}`)
       } else {
+        // Fallback to regular HTTP
         const response = await fetch('/api/pearl/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -262,7 +331,7 @@ export default function PearlInsightsPanel({
         if (response.ok) {
           const data = await response.json()
           const assistantMessage: Message = {
-            id: `pearl-${Date.now()}`,
+            id: streamingMessageId,
             role: 'assistant',
             content: data.response,
             timestamp: new Date(data.timestamp),
@@ -297,6 +366,7 @@ export default function PearlInsightsPanel({
     const classes = ['pearl-msg', `pearl-msg-${msg.role}`]
     if (msg.type) classes.push(`pearl-msg-type-${msg.type}`)
     if (msg.priority === 'high' || msg.priority === 'critical') classes.push('pearl-msg-priority')
+    if (msg.isStreaming) classes.push('pearl-msg-streaming')
     return classes.join(' ')
   }
 

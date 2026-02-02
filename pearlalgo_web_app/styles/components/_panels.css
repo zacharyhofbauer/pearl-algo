@@ -1,0 +1,182 @@
+/**
+ * Panel Components
+ *
+ * DataPanel and related panel styling.
+ * Note: This file extracts common panel patterns. The full panel styles
+ * remain in globals.css during the migration period.
+ */
+
+/* ===================================
+   DATA PANEL BASE
+   =================================== */
+
+.data-panel {
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  transition: border-color var(--duration-fast) var(--ease-default);
+}
+
+.data-panel:hover {
+  border-color: var(--border-subtle);
+}
+
+/* Panel Header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel-icon {
+  font-size: var(--font-size-md);
+}
+
+.panel-badge {
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  border-radius: var(--radius-md);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+}
+
+/* Panel Content */
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ===================================
+   PANEL VARIANTS
+   =================================== */
+
+/* Feature Panel */
+.data-panel.panel-feature {
+  border-color: rgba(var(--accent-cyan-rgb), 0.15);
+}
+
+.data-panel.panel-feature:hover {
+  border-color: rgba(var(--accent-cyan-rgb), 0.25);
+}
+
+/* Status Panel */
+.data-panel.panel-status {
+  border-color: rgba(var(--accent-green-rgb), 0.15);
+}
+
+/* Warning Panel */
+.data-panel.panel-warning {
+  border-color: rgba(var(--accent-yellow-rgb), 0.2);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-yellow-rgb), 0.05) 0%,
+    var(--bg-card) 100%
+  );
+}
+
+/* Error Panel */
+.data-panel.panel-error {
+  border-color: rgba(var(--accent-red-rgb), 0.2);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-red-rgb), 0.05) 0%,
+    var(--bg-card) 100%
+  );
+}
+
+/* ===================================
+   PANEL SIZES
+   =================================== */
+
+.data-panel.panel-sm {
+  padding: var(--space-4);
+  gap: var(--space-3);
+}
+
+.data-panel.panel-lg {
+  padding: var(--space-6);
+  gap: var(--space-5);
+}
+
+/* ===================================
+   PANEL LOADING STATE
+   =================================== */
+
+.panel-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.panel-loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--bg-primary), 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+}
+
+.panel-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ===================================
+   PANEL ERROR STATE
+   =================================== */
+
+.panel-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.panel-error-icon {
+  font-size: 24px;
+  opacity: 0.5;
+}
+
+.panel-error-message {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+.panel-retry-btn {
+  font-size: var(--font-size-sm);
+  color: var(--accent-cyan);
+  background: rgba(var(--accent-cyan-rgb), 0.1);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast);
+}
+
+.panel-retry-btn:hover {
+  background: rgba(var(--accent-cyan-rgb), 0.2);
+}

@@ -1,0 +1,207 @@
+/**
+ * Badge Components
+ *
+ * Status badges, chips, and indicator styling.
+ */
+
+/* ===================================
+   STATUS BADGE BASE
+   =================================== */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Dot variant - just dot + optional label */
+.status-badge-dot {
+  font-size: var(--font-size-sm);
+}
+
+/* Pill variant - with background */
+.status-badge-pill {
+  padding: 3px 8px;
+  border-radius: var(--radius-xl);
+}
+
+/* Minimal variant - dot only */
+.status-badge-minimal {
+  padding: 0;
+}
+
+/* Chip variant - inline chip style */
+.status-badge-chip {
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+/* ===================================
+   STATUS CHIPS (Legacy support)
+   =================================== */
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.status-chip.armed {
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--accent-green);
+}
+
+.status-chip.disarmed {
+  background: rgba(var(--accent-yellow-rgb), 0.12);
+  color: var(--accent-yellow);
+}
+
+.status-chip.active {
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--accent-green);
+}
+
+.status-chip.inactive {
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+}
+
+.status-chip.cooldown {
+  background: rgba(var(--accent-yellow-rgb), 0.12);
+  color: var(--accent-yellow);
+}
+
+.status-chip.positive {
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--accent-green);
+}
+
+.status-chip.negative {
+  background: rgba(var(--accent-red-rgb), 0.12);
+  color: var(--accent-red);
+}
+
+.status-chip.neutral {
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+}
+
+.chip-sub {
+  font-size: var(--font-size-xs);
+  opacity: 0.8;
+  margin-left: var(--space-2);
+}
+
+/* ===================================
+   READINESS BADGE
+   =================================== */
+
+.readiness-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-xl);
+  background: rgba(var(--accent-green-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-green-rgb), 0.2);
+}
+
+.readiness-badge.readiness-offline {
+  background: rgba(var(--accent-red-rgb), 0.1);
+  border-color: rgba(var(--accent-red-rgb), 0.2);
+}
+
+.readiness-badge.readiness-paused,
+.readiness-badge.readiness-cooldown,
+.readiness-badge.readiness-disarmed {
+  background: rgba(var(--accent-yellow-rgb), 0.1);
+  border-color: rgba(var(--accent-yellow-rgb), 0.2);
+}
+
+.readiness-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--badge-color, var(--accent-green));
+  animation: pulse-dot 2s infinite;
+}
+
+.readiness-badge.readiness-offline .readiness-dot,
+.readiness-badge.readiness-paused .readiness-dot {
+  animation: none;
+}
+
+.readiness-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--badge-color, var(--accent-green));
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ===================================
+   MODE BADGE
+   =================================== */
+
+.mode-badge {
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  border-radius: var(--radius-md);
+  background: rgba(171, 71, 188, 0.15);
+  color: var(--accent-purple);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ===================================
+   HEADER BADGES
+   =================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.agent-badge.running {
+  background: rgba(var(--accent-green-rgb), 0.1);
+  color: var(--accent-green);
+}
+
+.agent-badge.running .badge-dot {
+  animation: pulse-dot 2s infinite;
+}
+
+.agent-badge.paused {
+  background: rgba(var(--accent-yellow-rgb), 0.1);
+  color: var(--accent-yellow);
+}
+
+.agent-badge.stopped {
+  background: rgba(var(--accent-red-rgb), 0.1);
+  color: var(--accent-red);
+}

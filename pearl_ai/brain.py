@@ -3,19 +3,27 @@ Pearl Brain - The AI Orchestrator
 
 Routes queries between local LLM (fast) and Claude (deep),
 manages context, and triggers proactive messages.
+
+Pearl AI 3.0: Integrated metrics, RAG, caching, and tool support.
 """
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Callable, Literal
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 from .memory import PearlMemory
 from .narrator import PearlNarrator
 from .llm_local import LocalLLM
-from .llm_claude import ClaudeLLM
+from .llm_claude import ClaudeLLM, LLMResponse
+from .metrics import MetricsCollector, LLMRequest
+from .data_access import TradeDataAccess
+from .cache import ResponseCache
+from .tools import ToolExecutor, format_tool_result_for_llm, PEARL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +65,10 @@ class PearlBrain:
     - Maintain conversation context
     - Trigger proactive messages based on events
     - Learn user preferences over time
+    - Track metrics and costs (3.0)
+    - Ground responses with trade history (3.0)
+    - Cache responses to reduce API calls (3.0)
+    - Use tools for structured queries (3.0)
     """
 
     def __init__(
@@ -66,6 +78,10 @@ class PearlBrain:
         ollama_host: str = "http://localhost:11434",
         enable_local: bool = True,
         enable_claude: bool = True,
+        trade_db_path: Optional[str] = None,
+        enable_tools: bool = True,
+        enable_caching: bool = True,
+        daily_cost_limit: Optional[float] = None,
     ):
         self.memory = PearlMemory()
         self.narrator = PearlNarrator()
@@ -79,6 +95,25 @@ class PearlBrain:
 
         if enable_claude and claude_api_key:
             self.claude_llm = ClaudeLLM(api_key=claude_api_key)
+
+        # Pearl AI 3.0: Metrics, RAG, Caching, Tools
+        metrics_path = Path.home() / ".pearl" / "metrics"
+        self.metrics = MetricsCollector(
+            max_history=1000,
+            storage_path=metrics_path,
+            daily_cost_limit=daily_cost_limit,
+        )
+
+        self.data_access = TradeDataAccess(db_path=trade_db_path)
+        self.cache = ResponseCache(max_size=100) if enable_caching else None
+
+        # Tool executor
+        self.enable_tools = enable_tools
+        self.tool_executor = ToolExecutor(
+            data_access=self.data_access,
+            current_state_getter=lambda: self._current_state,
+            rejection_explainer=self.explain_rejections,
+        )
 
         # Message handlers (callbacks for sending messages to UI)
         self._message_handlers: List[Callable[[PearlMessage], None]] = []
@@ -110,7 +145,8 @@ class PearlBrain:
         self.coaching_cooldown = timedelta(minutes=15)
         self.quiet_engagement_threshold = timedelta(minutes=15)
 
-        logger.info(f"Pearl Brain initialized - Local: {enable_local}, Claude: {enable_claude}")
+        logger.info(f"Pearl Brain 3.0 initialized - Local: {enable_local}, Claude: {enable_claude}, "
+                   f"Tools: {enable_tools}, Caching: {enable_caching}")
 
     def add_message_handler(self, handler: Callable[[PearlMessage], None]):
         """Register a callback for when Pearl has something to say"""
@@ -202,7 +238,9 @@ class PearlBrain:
                     return
 
         # Generate narration
+        start_time = time.time()
         narration = await self._generate_narration(event_type, context)
+        latency_ms = (time.time() - start_time) * 1000
 
         if narration:
             message = PearlMessage(
@@ -214,6 +252,17 @@ class PearlBrain:
             )
             await self._emit_message(message)
             self._last_narration_time = datetime.now()
+
+            # Record metrics for narration
+            self.metrics.record(LLMRequest(
+                timestamp=datetime.now(),
+                endpoint="narration",
+                model=self.local_llm.model if self.local_llm else "template",
+                input_tokens=len(str(context)) // 4,  # Estimate
+                output_tokens=len(narration) // 4,
+                latency_ms=latency_ms,
+                success=True,
+            ))
 
     async def _generate_narration(self, event_type: str, context: Dict[str, Any]) -> str:
         """Generate narration using local LLM"""
@@ -246,26 +295,82 @@ class PearlBrain:
         Handle a chat message from the user.
         Routes to appropriate LLM based on complexity.
         """
+        start_time = time.time()
 
         # Add to memory
         self.memory.add_user_message(user_message)
+
+        # Check cache first (3.0)
+        if self.cache:
+            cached = self.cache.get(user_message, self._current_state)
+            if cached:
+                self.metrics.record(LLMRequest(
+                    timestamp=datetime.now(),
+                    endpoint="chat",
+                    model="cache",
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=(time.time() - start_time) * 1000,
+                    cache_hit=True,
+                    success=True,
+                ))
+                self.memory.add_assistant_message(cached)
+                return cached
 
         # Determine complexity if auto
         if complexity == QueryComplexity.AUTO:
             complexity = self._classify_query(user_message)
 
-        # Build context
+        # Build context with RAG (3.0)
         context = self._build_chat_context(user_message)
 
+        # Get relevant trade history for RAG
+        rag_context = self._get_rag_context(user_message)
+        if rag_context:
+            context["trade_history"] = rag_context
+
         # Route to appropriate LLM
+        response = ""
+        input_tokens = 0
+        output_tokens = 0
+        model_used = "template"
+        fallback_used = False
+
         if complexity == QueryComplexity.QUICK and self.local_llm:
             response = await self._quick_response(user_message, context)
+            model_used = self.local_llm.model
         elif self.claude_llm:
-            response = await self._deep_response(user_message, context)
+            # Try with tools if enabled (3.0)
+            if self.enable_tools:
+                response, input_tokens, output_tokens = await self._deep_response_with_tools(user_message, context)
+            else:
+                response, input_tokens, output_tokens = await self._deep_response_with_metadata(user_message, context)
+            model_used = self.claude_llm.model
         elif self.local_llm:
             response = await self._quick_response(user_message, context)
+            model_used = self.local_llm.model
+            fallback_used = True
         else:
             response = "I'm having trouble connecting to my AI backend. Please check the configuration."
+
+        latency_ms = (time.time() - start_time) * 1000
+
+        # Record metrics (3.0)
+        self.metrics.record(LLMRequest(
+            timestamp=datetime.now(),
+            endpoint="chat",
+            model=model_used,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            cache_hit=False,
+            success=bool(response),
+            fallback_used=fallback_used,
+        ))
+
+        # Cache response (3.0)
+        if self.cache and response:
+            self.cache.set(user_message, self._current_state, response)
 
         # Store response
         self.memory.add_assistant_message(response)
@@ -279,6 +384,13 @@ class PearlBrain:
 
         return response
 
+    def _get_rag_context(self, query: str) -> str:
+        """Get relevant trade data for RAG based on query."""
+        if not self.data_access.is_available():
+            return ""
+
+        return self.data_access.format_for_context(query, self._current_state)
+
     def _classify_query(self, query: str) -> QueryComplexity:
         """Determine if query needs local (quick) or Claude (deep) response"""
 
@@ -287,6 +399,7 @@ class PearlBrain:
             "why", "explain", "analyze", "should i", "what if",
             "strategy", "improve", "pattern", "trend", "review",
             "coaching", "advice", "recommend", "optimize", "backtest",
+            "compare", "similar", "history", "regime", "performance",
         ]
 
         query_lower = query.lower()
@@ -348,10 +461,90 @@ Respond naturally and concisely:"""
 
         return self._fallback_response(query, context)
 
-    async def _deep_response(self, query: str, context: Dict[str, Any]) -> str:
-        """Generate deep analytical response using Claude"""
+    async def _deep_response_with_tools(
+        self,
+        query: str,
+        context: Dict[str, Any],
+    ) -> tuple[str, int, int]:
+        """Generate deep response with tool support (3.0)"""
 
-        system_prompt = """You are Pearl, an advanced AI trading coach and analyst.
+        system_prompt = self._build_deep_system_prompt(context)
+        user_prompt = self._build_deep_user_prompt(query, context)
+
+        if not self.claude_llm:
+            response = await self._quick_response(query, context)
+            return response, 0, 0
+
+        try:
+            # Get tool definitions
+            tools = self.tool_executor.get_tool_definitions()
+
+            # Define tool executor wrapper
+            def execute_tool(name: str, args: Dict) -> str:
+                result = self.tool_executor.execute(name, args)
+                return format_tool_result_for_llm(name, result)
+
+            # Generate with tools
+            llm_response = await self.claude_llm.generate_with_tools(
+                prompt=user_prompt,
+                tools=tools,
+                system=system_prompt,
+                max_tokens=1000,
+                tool_executor=execute_tool,
+            )
+
+            return llm_response.content, llm_response.input_tokens, llm_response.output_tokens
+
+        except Exception as e:
+            logger.error(f"Claude error with tools: {e}")
+
+            # Fallback to without tools
+            try:
+                response, input_tokens, output_tokens = await self._deep_response_with_metadata(query, context)
+                return response, input_tokens, output_tokens
+            except Exception as e2:
+                logger.error(f"Claude fallback error: {e2}")
+
+        # Final fallback to local
+        if self.local_llm and await self.local_llm.is_available():
+            return await self._quick_response(query, context), 0, 0
+
+        return self._fallback_response(query, context), 0, 0
+
+    async def _deep_response_with_metadata(
+        self,
+        query: str,
+        context: Dict[str, Any],
+    ) -> tuple[str, int, int]:
+        """Generate deep response with metadata tracking"""
+
+        system_prompt = self._build_deep_system_prompt(context)
+        user_prompt = self._build_deep_user_prompt(query, context)
+
+        if not self.claude_llm:
+            response = await self._quick_response(query, context)
+            return response, 0, 0
+
+        try:
+            llm_response = await self.claude_llm.generate_with_metadata(
+                prompt=user_prompt,
+                system=system_prompt,
+                max_tokens=1000,
+            )
+            return llm_response.content, llm_response.input_tokens, llm_response.output_tokens
+
+        except Exception as e:
+            logger.error(f"Claude error: {e}")
+
+        # Fallback to local if Claude unavailable
+        if self.local_llm and await self.local_llm.is_available():
+            return await self._quick_response(query, context), 0, 0
+
+        return self._fallback_response(query, context), 0, 0
+
+    def _build_deep_system_prompt(self, context: Dict[str, Any]) -> str:
+        """Build system prompt for deep responses"""
+        base_prompt = """You are Pearl, an advanced AI trading coach and analyst.
 You help traders understand their performance, identify patterns, and improve their strategy.
 
 Your capabilities:
@@ -364,11 +557,19 @@ Your capabilities:
 Be insightful, specific, and actionable. Use data to support your observations.
 Speak naturally, like a knowledgeable trading mentor."""
 
-        # Build comprehensive context for Claude
+        # Add personality context if available
+        personality = self.memory.get_personality_context()
+        if personality:
+            base_prompt += f"\n\nUser Context: {personality}"
+
+        return base_prompt
+
+    def _build_deep_user_prompt(self, query: str, context: Dict[str, Any]) -> str:
+        """Build user prompt for deep responses"""
         state = context['current_state']
         recent_trades = state.get('recent_exits', [])[:10]
 
-        user_prompt = f"""# Current Session
+        prompt = f"""# Current Session
 - Daily P&L: ${state.get('daily_pnl', 0):.2f}
 - Trades: {state.get('daily_trades', 0)} ({state.get('daily_wins', 0)}W / {state.get('daily_losses', 0)}L)
 - Active Positions: {state.get('active_trades_count', 0)}
@@ -391,29 +592,21 @@ Speak naturally, like a knowledgeable trading mentor."""
 - Direction Gating Blocks: {state.get('ai_status', {}).get('direction_gating', {}).get('blocks', 0)}
 
 # Signal Rejections (24h)
-{self._format_rejections(state.get('signal_rejections_24h', {}))}
+{self._format_rejections(state.get('signal_rejections_24h', {}))}"""
 
----
+        # Add RAG context if available
+        trade_history = context.get('trade_history', '')
+        if trade_history:
+            prompt += f"\n\n# Historical Trade Data\n{trade_history}"
 
-User Question: {query}
+        prompt += f"\n\n---\n\nUser Question: {query}\n\nProvide a thoughtful, data-driven response:"
 
-Provide a thoughtful, data-driven response:"""
+        return prompt
 
-        if self.claude_llm:
-            try:
-                return await self.claude_llm.generate(
-                    user_prompt,
-                    system=system_prompt,
-                    max_tokens=1000,
-                )
-            except Exception as e:
-                logger.error(f"Claude error: {e}")
-
-        # Fallback to local if Claude unavailable
-        if self.local_llm and await self.local_llm.is_available():
-            return await self._quick_response(query, context)
-
-        return self._fallback_response(query, context)
+    async def _deep_response(self, query: str, context: Dict[str, Any]) -> str:
+        """Generate deep analytical response using Claude (legacy interface)"""
+        response, _, _ = await self._deep_response_with_metadata(query, context)
+        return response
 
     def _format_recent_trades(self, trades: List[Dict]) -> str:
         """Format recent trades for context"""
@@ -479,6 +672,8 @@ Provide a thoughtful, data-driven response:"""
             if datetime.now() - last_insight_time < timedelta(minutes=30):
                 return None
 
+        start_time = time.time()
+
         # Generate insight using Claude
         state = self._current_state
 
@@ -493,11 +688,24 @@ Rejections: {sum(state.get('signal_rejections_24h', {}).values()) if isinstance(
 Give a brief (1-2 sentence) observation or suggestion. Be specific and actionable."""
 
         try:
-            insight = await self.claude_llm.generate(
+            llm_response = await self.claude_llm.generate_with_metadata(
                 prompt,
                 system="You are Pearl, a trading coach. Give brief, actionable insights.",
                 max_tokens=100,
             )
+            insight = llm_response.content
+            latency_ms = (time.time() - start_time) * 1000
+
+            # Record metrics
+            self.metrics.record(LLMRequest(
+                timestamp=datetime.now(),
+                endpoint="insight",
+                model=self.claude_llm.model,
+                input_tokens=llm_response.input_tokens,
+                output_tokens=llm_response.output_tokens,
+                latency_ms=latency_ms,
+                success=True,
+            ))
 
             if insight:
                 message = PearlMessage(
@@ -519,6 +727,7 @@ Give a brief (1-2 sentence) observation or suggestion. Be specific and actionabl
         if not self.claude_llm:
             return None
 
+        start_time = time.time()
         state = self._current_state
 
         prompt = f"""Generate a brief end-of-day trading review:
@@ -544,11 +753,24 @@ Provide:
 Keep it concise (4-5 sentences total)."""
 
         try:
-            review = await self.claude_llm.generate(
+            llm_response = await self.claude_llm.generate_with_metadata(
                 prompt,
                 system="You are Pearl, a trading coach. Provide constructive, balanced daily reviews.",
                 max_tokens=300,
             )
+            review = llm_response.content
+            latency_ms = (time.time() - start_time) * 1000
+
+            # Record metrics
+            self.metrics.record(LLMRequest(
+                timestamp=datetime.now(),
+                endpoint="daily_review",
+                model=self.claude_llm.model,
+                input_tokens=llm_response.input_tokens,
+                output_tokens=llm_response.output_tokens,
+                latency_ms=latency_ms,
+                success=True,
+            ))
 
             if review:
                 message = PearlMessage(
@@ -933,4 +1155,26 @@ Be conversational, not robotic. Under 2 sentences."""
             "last_signal_time": last_signal,
             "consecutive_wins": state.get("consecutive_wins", 0),
             "consecutive_losses": state.get("consecutive_losses", 0),
+        }
+
+    # ================================================================
+    # METRICS API (Pearl AI 3.0)
+    # ================================================================
+
+    def get_metrics_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """Get metrics summary for API endpoint."""
+        summary = self.metrics.get_summary(hours)
+
+        # Add cache stats if available
+        if self.cache:
+            summary["cache"] = self.cache.get_stats()
+
+        return summary
+
+    def get_cost_summary(self) -> Dict[str, Any]:
+        """Get cost summary for API endpoint."""
+        return {
+            "today_usd": round(self.metrics.get_cost_today(), 4),
+            "month_usd": round(self.metrics.get_cost_this_month(), 4),
+            "limit_usd": self.metrics.daily_cost_limit,
         }

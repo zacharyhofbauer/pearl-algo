@@ -96,14 +96,15 @@ export default function SystemStatusPanel({
 
   return (
     <DataPanel title="System Status" icon="🎯" variant="status">
-      <div className="system-status-panel">
-        {/* Main Readiness Indicator */}
-        <div className="status-readiness">
+      <div className="system-status-panel" role="region" aria-label="System Status">
+        {/* Main Readiness Indicator - with ARIA live region */}
+        <div className="status-readiness" role="status" aria-live="polite" aria-atomic="true">
           <div
             className={`readiness-badge readiness-${readiness.status}`}
             style={{ '--badge-color': readiness.color } as React.CSSProperties}
+            aria-label={`System readiness: ${readiness.label}`}
           >
-            <span className="readiness-dot"></span>
+            <span className="readiness-dot" aria-hidden="true"></span>
             <span className="readiness-label">{readiness.label}</span>
           </div>
           {executionState?.mode && executionState.mode !== 'live' && (
@@ -111,8 +112,8 @@ export default function SystemStatusPanel({
           )}
         </div>
 
-        {/* Status Grid */}
-        <div className="status-grid">
+        {/* Status Grid - items update independently */}
+        <div className="status-grid" aria-live="polite">
           {/* Execution State */}
           <div className="status-item">
             <span className="status-item-label">Execution</span>

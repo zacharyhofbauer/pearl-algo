@@ -2,14 +2,32 @@
 Claude LLM Interface - Anthropic API Integration
 
 Provides deep analysis, coaching, and complex reasoning capabilities.
+Pearl AI 3.0: Added token extraction, streaming, and tool support.
 """
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, List
+import json
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, AsyncIterator, Callable
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LLMResponse:
+    """Response from Claude with metadata."""
+    content: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    stop_reason: Optional[str] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    model: str = ""
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 class ClaudeLLM:
@@ -21,6 +39,7 @@ class ClaudeLLM:
     - Performance analysis and coaching
     - Pattern recognition
     - Strategy suggestions
+    - Tool use for structured queries (3.0)
     """
 
     # Model options
@@ -76,9 +95,41 @@ class ClaudeLLM:
         Returns:
             Generated text response
         """
+        response = await self.generate_with_metadata(
+            prompt=prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop_sequences=stop_sequences,
+        )
+        return response.content
+
+    async def generate_with_metadata(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        stop_sequences: Optional[List[str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> LLMResponse:
+        """
+        Generate a response with full metadata including token counts.
+
+        Args:
+            prompt: The user prompt
+            system: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0-1)
+            stop_sequences: Optional stop sequences
+            tools: Optional list of tool definitions
+
+        Returns:
+            LLMResponse with content and metadata
+        """
         messages = [{"role": "user", "content": prompt}]
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens,
             "messages": messages,
@@ -91,6 +142,9 @@ class ClaudeLLM:
         if stop_sequences:
             payload["stop_sequences"] = stop_sequences
 
+        if tools:
+            payload["tools"] = tools
+
         for attempt in range(self.max_retries + 1):
             try:
                 session = await self._get_session()
@@ -100,12 +154,7 @@ class ClaudeLLM:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        content = data.get("content", [])
-                        if content and content[0].get("type") == "text":
-                            response = content[0].get("text", "").strip()
-                            logger.debug(f"Claude generated {len(response)} chars")
-                            return response
-                        return ""
+                        return self._parse_response(data)
 
                     elif resp.status == 429:
                         # Rate limited - wait and retry
@@ -139,6 +188,262 @@ class ClaudeLLM:
                 raise
 
         raise RuntimeError("Max retries exceeded")
+
+    def _parse_response(self, data: Dict[str, Any]) -> LLMResponse:
+        """Parse API response into LLMResponse."""
+        content = ""
+        tool_calls = []
+
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                content = block.get("text", "").strip()
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id"),
+                    "name": block.get("name"),
+                    "input": block.get("input", {}),
+                })
+
+        # Extract usage
+        usage = data.get("usage", {})
+
+        return LLMResponse(
+            content=content,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            stop_reason=data.get("stop_reason"),
+            tool_calls=tool_calls if tool_calls else None,
+            model=data.get("model", self.model),
+        )
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        on_chunk: Optional[Callable[[str], None]] = None,
+    ) -> AsyncIterator[str]:
+        """
+        Stream a response from Claude.
+
+        Args:
+            prompt: The user prompt
+            system: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0-1)
+            on_chunk: Optional callback for each chunk
+
+        Yields:
+            Text chunks as they arrive
+        """
+        messages = [{"role": "user", "content": prompt}]
+
+        payload = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        if system:
+            payload["system"] = system
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/messages",
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise RuntimeError(f"Claude stream error: {error}")
+
+                # Process SSE stream
+                async for line in resp.content:
+                    line_str = line.decode("utf-8").strip()
+
+                    if not line_str or not line_str.startswith("data: "):
+                        continue
+
+                    json_str = line_str[6:]  # Remove "data: " prefix
+
+                    if json_str == "[DONE]":
+                        break
+
+                    try:
+                        event = json.loads(json_str)
+                        event_type = event.get("type")
+
+                        if event_type == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                if text:
+                                    if on_chunk:
+                                        on_chunk(text)
+                                    yield text
+
+                    except json.JSONDecodeError:
+                        continue
+
+        except Exception as e:
+            logger.error(f"Claude stream error: {e}")
+            raise
+
+    async def generate_with_tools(
+        self,
+        prompt: str,
+        tools: List[Dict[str, Any]],
+        system: Optional[str] = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        tool_executor: Optional[Callable[[str, Dict], Any]] = None,
+    ) -> LLMResponse:
+        """
+        Generate a response with tool use support.
+
+        Args:
+            prompt: The user prompt
+            tools: List of tool definitions
+            system: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            tool_executor: Optional function to execute tools
+
+        Returns:
+            LLMResponse, potentially after tool execution
+        """
+        response = await self.generate_with_metadata(
+            prompt=prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+        )
+
+        # If no tool calls, return directly
+        if not response.tool_calls:
+            return response
+
+        # If tool executor provided, execute tools and continue conversation
+        if tool_executor:
+            return await self._execute_tool_loop(
+                prompt=prompt,
+                system=system,
+                initial_response=response,
+                tools=tools,
+                tool_executor=tool_executor,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        return response
+
+    async def _execute_tool_loop(
+        self,
+        prompt: str,
+        system: Optional[str],
+        initial_response: LLMResponse,
+        tools: List[Dict[str, Any]],
+        tool_executor: Callable[[str, Dict], Any],
+        max_tokens: int,
+        temperature: float,
+        max_iterations: int = 3,
+    ) -> LLMResponse:
+        """
+        Execute tool calls and continue conversation.
+
+        Implements the tool use loop:
+        1. Model requests tool use
+        2. Execute tool, get result
+        3. Send result back to model
+        4. Model generates final response (or more tool calls)
+        """
+        messages = [{"role": "user", "content": prompt}]
+        current_response = initial_response
+        total_input_tokens = initial_response.input_tokens
+        total_output_tokens = initial_response.output_tokens
+
+        for iteration in range(max_iterations):
+            if not current_response.tool_calls:
+                break
+
+            # Build assistant message with tool use
+            assistant_content = []
+            if current_response.content:
+                assistant_content.append({
+                    "type": "text",
+                    "text": current_response.content,
+                })
+
+            for tool_call in current_response.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tool_call["id"],
+                    "name": tool_call["name"],
+                    "input": tool_call["input"],
+                })
+
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            # Execute tools and build tool_result message
+            tool_results = []
+            for tool_call in current_response.tool_calls:
+                try:
+                    result = tool_executor(tool_call["name"], tool_call["input"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call["id"],
+                        "content": str(result) if not isinstance(result, str) else result,
+                    })
+                except Exception as e:
+                    logger.error(f"Tool execution error: {e}")
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call["id"],
+                        "content": f"Error: {e}",
+                        "is_error": True,
+                    })
+
+            messages.append({"role": "user", "content": tool_results})
+
+            # Continue conversation
+            payload = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": messages,
+                "temperature": temperature,
+                "tools": tools,
+            }
+
+            if system:
+                payload["system"] = system
+
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/messages",
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise RuntimeError(f"Claude API error: {error}")
+
+                data = await resp.json()
+                current_response = self._parse_response(data)
+                total_input_tokens += current_response.input_tokens
+                total_output_tokens += current_response.output_tokens
+
+        # Return final response with accumulated tokens
+        return LLMResponse(
+            content=current_response.content,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            stop_reason=current_response.stop_reason,
+            tool_calls=current_response.tool_calls,
+            model=current_response.model,
+        )
 
     async def chat(
         self,
@@ -192,6 +497,59 @@ class ClaudeLLM:
                 if content and content[0].get("type") == "text":
                     return content[0].get("text", "").strip()
                 return ""
+
+        except Exception as e:
+            logger.error(f"Claude chat error: {e}")
+            raise
+
+    async def chat_with_metadata(
+        self,
+        messages: List[Dict[str, str]],
+        system: Optional[str] = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        """
+        Chat with full metadata including token counts.
+
+        Args:
+            messages: List of {"role": "user"|"assistant", "content": "..."}
+            system: Optional system prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+
+        Returns:
+            LLMResponse with content and metadata
+        """
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+            })
+
+        payload = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "messages": formatted_messages,
+            "temperature": temperature,
+        }
+
+        if system:
+            payload["system"] = system
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/messages",
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise RuntimeError(f"Claude chat error: {error}")
+
+                data = await resp.json()
+                return self._parse_response(data)
 
         except Exception as e:
             logger.error(f"Claude chat error: {e}")

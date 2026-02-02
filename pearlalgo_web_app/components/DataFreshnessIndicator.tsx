@@ -108,8 +108,12 @@ export default function DataFreshnessIndicator({
         className={`freshness-compact ${statusClass}`}
         onClick={() => setIsExpanded(!isExpanded)}
         title="Click for details"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)}`}
       >
-        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey} aria-hidden="true"></span>
         <span className="freshness-time-compact">{formatTimeAgo(secondsAgo)}</span>
         {isLoading && <span className="freshness-loading-dot"></span>}
 
@@ -152,12 +156,17 @@ export default function DataFreshnessIndicator({
   // Floating version - under price with expand
   if (variant === 'floating') {
     return (
-      <div className={`freshness-floating ${statusClass} ${isExpanded ? 'expanded' : ''}`}>
+      <div
+        className={`freshness-floating ${statusClass} ${isExpanded ? 'expanded' : ''}`}
+        role="status"
+        aria-live="polite"
+        aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}`}
+      >
         <div
           className="freshness-floating-header"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey} aria-hidden="true"></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
           <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.icon}</span>
@@ -223,9 +232,15 @@ export default function DataFreshnessIndicator({
 
   // Full version (original)
   return (
-    <div className={`data-freshness-indicator ${statusClass}`}>
+    <div
+      className={`data-freshness-indicator ${statusClass}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)}`}
+    >
       <div className="freshness-heartbeat" key={pulseKey}>
-        <span className={`heartbeat-dot ${isLoading ? 'loading' : ''}`}></span>
+        <span className={`heartbeat-dot ${isLoading ? 'loading' : ''}`} aria-hidden="true"></span>
       </div>
       <div className="freshness-time">
         <span className="time-label">Updated</span>
