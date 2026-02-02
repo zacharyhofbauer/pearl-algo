@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import Image from 'next/image'
-import { usePearlStore, useAgentStore, useAdminStore, type PearlMessage } from '@/stores'
+import { usePearlStore, useAgentStore, useChartStore, useAdminStore, type PearlMessage } from '@/stores'
 import PearlDropdownPanel from './PearlDropdownPanel'
 import { apiFetch } from '@/lib/api'
 
@@ -20,6 +20,9 @@ export default function PearlHeaderBar() {
 
   // Get agent state for panel props - access the nested agentState property
   const agentState = useAgentStore((state) => state.agentState)
+
+  // Get market status from chart store
+  const marketStatus = useChartStore((state) => state.marketStatus)
 
   const headerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -251,6 +254,7 @@ export default function PearlHeaderBar() {
           aiStatus={agentState?.ai_status}
           shadowCounters={agentState?.shadow_counters}
           mlFilterPerformance={agentState?.ml_filter_performance}
+          marketStatus={marketStatus}
           onAccept={handleAcceptSuggestion}
           onDismiss={handleDismissSuggestion}
         />

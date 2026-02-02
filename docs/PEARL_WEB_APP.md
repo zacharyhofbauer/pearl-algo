@@ -110,6 +110,35 @@ Stop:
 
 ---
 
+## UI iteration with Cursor Browser Visual Editor ("Visuals")
+
+Cursor includes a **visual editor inside the built-in Browser** that lets you manipulate rendered UI (layout + styles) and then have Cursor apply the corresponding changes back into your codebase.
+
+Official references:
+- Blog: `https://cursor.com/blog/browser-visual-editor`
+- Changelog (2.2): `https://cursor.com/changelog/2-2`
+- Docs: `https://cursor.com/docs/agent/browser`
+
+### Quick workflow (recommended for `pearlalgo_web_app/`)
+
+1. Start the app (`./pearl.sh webapp start`) and open `http://localhost:3001`.
+2. In Cursor, open the Browser on that URL and open the **design sidebar / Visual Editor**.
+3. Select an element (and multi-select when helpful) to:
+   - rearrange with drag-and-drop
+   - adjust styles with visual controls (spacing, flex/grid, typography, colors, shadows/opacity, etc.)
+   - inspect components/props (React) to test variants
+4. When it looks right, click **Apply** so Cursor updates the underlying files. Review the diff before keeping it.
+
+### Practical tips
+
+- **Point-and-prompt**: select elements and describe changes; Cursor can use multi-selection as broader context (useful for “make these consistent” edits).
+- **Responsive sanity-check**: resize the Browser pane to approximate different widths, but still validate on real viewport sizes and add explicit responsive rules in code (CSS media queries / Tailwind breakpoints).
+- **Undo/redo/delete**: depending on Cursor version, common shortcuts (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z) and Backspace may work inside the visual editor.
+- **QoL improvements to look for** (varies by Cursor version): reduced selection animations (snappier selection) and finer-grained blur controls (e.g., 0.1 steps).
+- **Text/content changes**: if direct text editing isn’t available in your build, edit the JSX/HTML source for copy changes.
+
+---
+
 ## State Management
 
 The app uses Zustand stores for centralized state:

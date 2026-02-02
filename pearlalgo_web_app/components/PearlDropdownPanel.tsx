@@ -10,7 +10,7 @@ import {
   type DismissFeedbackReason,
   type SuggestionFeedback,
 } from '@/stores'
-import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
+import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance, MarketStatus } from '@/stores'
 
 interface PearlDropdownPanelProps {
   insights: PearlInsights | null
@@ -18,6 +18,7 @@ interface PearlDropdownPanelProps {
   aiStatus?: AIStatus | null
   shadowCounters?: ShadowCounters | null
   mlFilterPerformance?: MLFilterPerformance | null
+  marketStatus?: MarketStatus | null
   onAccept?: () => void
   onDismiss?: () => void
   // Optional overrides for embedded use
@@ -161,12 +162,35 @@ function FeedbackModal({ suggestionId, onSubmit, onCancel }: FeedbackModalProps)
   )
 }
 
+// Format countdown for market open
+function formatMarketCountdown(nextOpen: string | null | undefined): string | null {
+  if (!nextOpen) return null
+  try {
+    const nextOpenDate = new Date(nextOpen)
+    const now = new Date()
+    const diffMs = nextOpenDate.getTime() - now.getTime()
+    if (diffMs <= 0) return null
+
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+    if (hours > 24) {
+      const days = Math.floor(hours / 24)
+      return `${days}d ${hours % 24}h`
+    }
+    return `${hours}h ${minutes}m`
+  } catch {
+    return null
+  }
+}
+
 export default function PearlDropdownPanel({
   insights,
   suggestion,
   aiStatus,
   shadowCounters,
   mlFilterPerformance,
+  marketStatus,
   onAccept,
   onDismiss,
   showTabs = true,
@@ -453,6 +477,24 @@ export default function PearlDropdownPanel({
       {/* Status Tab Content */}
       {activeTab === 'status' && (
         <div className="pearl-status-content">
+          {/* Market Status Banner */}
+          {marketStatus && (
+            <div className={`pearl-market-status ${marketStatus.is_open ? 'open' : 'closed'}`}>
+              <span className="market-status-dot"></span>
+              <span className="market-status-label">
+                {marketStatus.is_open ? 'Market Open' : 'Market Closed'}
+              </span>
+              {!marketStatus.is_open && marketStatus.close_reason && (
+                <span className="market-status-reason">{marketStatus.close_reason}</span>
+              )}
+              {!marketStatus.is_open && marketStatus.next_open && (
+                <span className="market-status-countdown">
+                  Opens in {formatMarketCountdown(marketStatus.next_open)}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* AI Component Status Pills */}
           {aiStatus ? (
             <div className="pearl-ai-status">

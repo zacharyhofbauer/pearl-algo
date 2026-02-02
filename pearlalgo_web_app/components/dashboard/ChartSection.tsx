@@ -72,19 +72,6 @@ export function ChartSection({
           />
         </div>
         <div className={`chart-container ${chartsLocked ? 'locked' : ''}`}>
-          {/* Market Closed State - show when market is closed and no data */}
-          {marketStatus && !marketStatus.is_open && candles.length === 0 && (
-            <div className="market-closed-container">
-              <Image src="/pearl-emoji.png" alt="PEARL" className="market-closed-logo" width={64} height={64} />
-              <div className="market-closed-title">Market Closed</div>
-              <div className="market-closed-reason">{marketStatus.close_reason}</div>
-              {marketStatus.next_open && (
-                <div className="market-closed-next">
-                  Chart will resume when market opens
-                </div>
-              )}
-            </div>
-          )}
           {/* Loading State - only when market is open or status unknown */}
           {chartLoading && (!marketStatus || marketStatus.is_open) && (
             <div className="loading-screen">

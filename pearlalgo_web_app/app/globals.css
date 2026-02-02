@@ -905,45 +905,6 @@
   opacity: 0.7;
 }
 
-/* Market Closed state */
-.market-closed-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 16px;
-  padding: 40px;
-  text-align: center;
-  background: var(--bg-primary);
-}
-
-.market-closed-logo {
-  width: 64px;
-  height: 64px;
-  opacity: 0.6;
-  filter: grayscale(30%) sepia(20%) hue-rotate(180deg);
-}
-
-.market-closed-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.market-closed-reason {
-  font-size: var(--font-size-lg);
-  color: var(--accent-yellow);
-  max-width: 400px;
-}
-
-.market-closed-next {
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
-  opacity: 0.7;
-  margin-top: 8px;
-}
-
 /* Responsive - Tablet */
 @media (max-width: 1024px) {
   .chart-wrapper {

@@ -948,6 +948,62 @@
 }
 
 /* ===================================
+   PEARL MARKET STATUS
+   =================================== */
+.pearl-market-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.pearl-market-status.open {
+  background: rgba(var(--accent-green-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-green-rgb), 0.3);
+}
+
+.pearl-market-status.closed {
+  background: rgba(var(--accent-red-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-red-rgb), 0.3);
+}
+
+.pearl-market-status .market-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pearl-market-status.open .market-status-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+}
+
+.pearl-market-status.closed .market-status-dot {
+  background: var(--accent-red);
+}
+
+.pearl-market-status .market-status-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.pearl-market-status .market-status-reason {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.pearl-market-status .market-status-countdown {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* ===================================
    PEARL STATUS CONTENT
    =================================== */
 .pearl-status-content {
