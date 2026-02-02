@@ -60,6 +60,13 @@ export {
   selectMLFilterPerformance,
   selectSessionContext,
   selectSignalActivity,
+  // AI mode selectors (consolidated from page.tsx)
+  selectAIMode,
+  selectAgentModeBadge,
+  selectRegimeBadge,
+  type AIMode,
+  type AgentModeBadge,
+  type RegimeBadge,
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'

@@ -52,6 +52,16 @@ import secrets
 
 import pandas as pd
 
+# Pearl AI imports (optional - graceful degradation if not available)
+_pearl_brain = None
+try:
+    from pearl_ai import PearlBrain
+    from pearl_ai.api_router import create_pearl_router
+    _pearl_ai_available = True
+except ImportError:
+    _pearl_ai_available = False
+    print("[Pearl AI] Module not available - chat features disabled")
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -817,6 +827,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Pearl AI Router (Optional - graceful degradation if not available)
+# ---------------------------------------------------------------------------
+
+def _init_pearl_ai():
+    """Initialize Pearl AI brain and mount router."""
+    global _pearl_brain
+
+    if not _pearl_ai_available:
+        return
+
+    # Get Claude API key from environment
+    claude_api_key = os.getenv("ANTHROPIC_API_KEY")
+    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    ollama_model = os.getenv("PEARL_OLLAMA_MODEL", "llama3.1:8b")
+
+    try:
+        # Initialize Pearl Brain with available LLMs
+        _pearl_brain = PearlBrain(
+            claude_api_key=claude_api_key,
+            ollama_model=ollama_model,
+            ollama_host=ollama_host,
+            enable_local=True,  # Try Ollama
+            enable_claude=bool(claude_api_key),
+        )
+
+        # Create and mount the Pearl AI router
+        pearl_router = create_pearl_router(_pearl_brain)
+        app.include_router(pearl_router, prefix="/api/pearl")
+
+        print(f"[Pearl AI] Initialized successfully")
+        print(f"  - Local LLM (Ollama): {'enabled' if True else 'disabled'} ({ollama_model})")
+        print(f"  - Claude API: {'enabled' if claude_api_key else 'disabled (no API key)'}")
+
+    except Exception as e:
+        print(f"[Pearl AI] Failed to initialize: {e}")
+        _pearl_brain = None
+
+# Initialize Pearl AI at module load time (before startup)
+_init_pearl_ai()
 
 # Global state
 _market: str = DEFAULT_MARKET

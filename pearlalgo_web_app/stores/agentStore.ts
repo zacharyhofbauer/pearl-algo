@@ -510,3 +510,65 @@ export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.cir
 export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
 export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
 export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
+
+// Derived AI mode selector - consolidates logic from page.tsx
+export type AIMode = 'live' | 'shadow' | 'off'
+
+export const selectAIMode = (state: AgentStore): AIMode | null => {
+  const aiStatus = state.agentState?.ai_status
+  if (!aiStatus) return null
+
+  const hasLive = aiStatus.bandit_mode === 'live' ||
+                  aiStatus.contextual_mode === 'live' ||
+                  (aiStatus.ml_filter?.enabled && aiStatus.ml_filter?.mode === 'live')
+
+  const hasShadow = aiStatus.bandit_mode === 'shadow' ||
+                    aiStatus.contextual_mode === 'shadow' ||
+                    (aiStatus.ml_filter?.enabled && aiStatus.ml_filter?.mode === 'shadow')
+
+  if (hasLive) return 'live'
+  if (hasShadow) return 'shadow'
+  return 'off'
+}
+
+// Agent mode badge selector - returns badge info for header display
+export interface AgentModeBadge {
+  mode: 'live' | 'shadow' | 'off'
+  label: string
+}
+
+export const selectAgentModeBadge = (state: AgentStore): AgentModeBadge | null => {
+  const aiMode = selectAIMode(state)
+  if (!aiMode) return null
+
+  switch (aiMode) {
+    case 'live': return { mode: 'live', label: 'AI LIVE' }
+    case 'shadow': return { mode: 'shadow', label: 'AI SHADOW' }
+    case 'off': return { mode: 'off', label: 'AI OFF' }
+  }
+}
+
+// Regime badge selector
+export interface RegimeBadge {
+  icon: string
+  label: string
+  confidence: number
+}
+
+export const selectRegimeBadge = (state: AgentStore): RegimeBadge | null => {
+  const regime = state.agentState?.market_regime
+  if (!regime || regime.confidence === 0 || regime.regime === 'unknown') return null
+
+  const icons: Record<string, string> = {
+    'trending_up': '📈',
+    'trending_down': '📉',
+    'ranging': '↔️',
+    'volatile': '⚡',
+  }
+
+  return {
+    icon: icons[regime.regime] || '❓',
+    label: regime.regime.replace('_', ' ').toUpperCase(),
+    confidence: Math.round(regime.confidence * 100)
+  }
+}

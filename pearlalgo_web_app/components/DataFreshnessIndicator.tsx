@@ -73,7 +73,7 @@ export default function DataFreshnessIndicator({
   const getWsDisplay = () => {
     switch (wsStatus) {
       case 'connected':
-        return { icon: '⚡', label: 'WS', className: 'ws-connected' }
+        return { icon: '●', label: 'WS', className: 'ws-connected' }
       case 'connecting':
         return { icon: '🔄', label: 'WS', className: 'ws-connecting' }
       case 'disconnected':
