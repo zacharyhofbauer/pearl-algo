@@ -2,26 +2,34 @@
  * Pearl Algo Web App - Modular Styles
  *
  * This file serves as the import orchestrator for the modular CSS architecture.
- * Import this file instead of globals.css for new projects or during migration.
+ * Imported alongside globals.css in app/layout.tsx.
  *
  * Directory Structure:
  * styles/
- *   _tokens.css      - Design tokens (colors, typography, spacing, etc.)
- *   _reset.css       - CSS reset and base element styles
- *   _typography.css  - Typography utility classes
- *   _utilities.css   - Layout and general utilities
- *   _animations.css  - Keyframes and animation utilities
- *   _scrollbar.css   - Custom scrollbar styling
+ *   _tokens.css         - Design tokens (colors, typography, spacing, etc.)
+ *   _reset.css          - CSS reset and base element styles
+ *   _typography.css     - Typography utility classes
+ *   _utilities.css      - Layout and general utilities
+ *   _animations.css     - Keyframes and animation utilities
+ *   _scrollbar.css      - Custom scrollbar styling
+ *   _responsive.css     - Comprehensive responsive breakpoints
+ *   _mobile.css         - Mobile-specific responsive styles
  *   components/
- *     _panels.css    - DataPanel variants
- *     _tabs.css      - Tab components
- *     _badges.css    - Status badges and chips
- *   index.css        - This file (import orchestrator)
- *
- * Migration Strategy:
- * 1. New components should use classes from this modular system
- * 2. globals.css remains the primary source during transition
- * 3. Once all components migrate, globals.css can be deprecated
+ *     _panels.css       - DataPanel base variants
+ *     _tabs.css         - Tab components
+ *     _badges.css       - Status badges and chips
+ *     _forms.css        - Form elements
+ *     _pearl.css        - Pearl AI components
+ *     _charts.css       - Chart-related styles
+ *     _stat-display.css - Statistics display components
+ *     _layout.css       - Layout components (header, navigation)
+ *     _freshness.css    - Data freshness indicators
+ *     _status-panels.css - System status panels
+ *     _indicators.css   - Technical indicator panels
+ *     _calendar.css     - P&L calendar and annotations
+ *     _analytics.css    - Analytics panel components
+ *     _dashboard-panels.css - Dashboard-specific panels
+ *   index.css           - This file (import orchestrator)
  */
 
 /* Foundation */
@@ -40,3 +48,16 @@
 @import './components/_badges.css';
 @import './components/_forms.css';
 @import './components/_pearl.css';
+@import './components/_charts.css';
+@import './components/_stat-display.css';
+@import './components/_layout.css';
+@import './components/_freshness.css';
+@import './components/_status-panels.css';
+@import './components/_indicators.css';
+@import './components/_calendar.css';
+@import './components/_analytics.css';
+@import './components/_dashboard-panels.css';
+
+/* Responsive (must come after components to override at breakpoints) */
+@import './_responsive.css';
+@import './_mobile.css';

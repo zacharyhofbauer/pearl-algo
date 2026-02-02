@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import '../styles/index.css'
 import PearlHeaderBarWrapper from '@/components/PearlHeaderBarWrapper'
 
 export const metadata: Metadata = {

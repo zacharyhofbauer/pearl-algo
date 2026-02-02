@@ -1,0 +1,439 @@
+/**
+ * Indicator Panels
+ *
+ * Technical indicator panel styles including RSI, volume profile,
+ * and other chart-based indicator displays.
+ * Migrated from globals.css as part of CSS modularization (U1.1).
+ *
+ * Includes:
+ * - Indicator Panel base styles
+ * - RSI Indicator Panel
+ * - Volume Profile Panel
+ * - Responsive indicator styles
+ */
+
+/* ===================================
+   INDICATOR PANELS
+   =================================== */
+
+/* Common indicator panel styles */
+.indicator-panel {
+  width: 100%;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.indicator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.indicator-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.indicator-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.indicator-params {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.indicator-values {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.indicator-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-mono);
+}
+
+.indicator-levels {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.indicator-levels .level.overbought {
+  color: var(--accent-red);
+}
+
+.indicator-levels .level.oversold {
+  color: var(--accent-green);
+}
+
+.indicator-levels .level-sep {
+  color: var(--text-muted);
+}
+
+.indicator-chart {
+  width: 100%;
+  overflow: hidden;
+}
+
+/* RSI Panel specific */
+.rsi-panel .indicator-header {
+  background: linear-gradient(90deg, rgba(171, 71, 188, 0.1) 0%, transparent 100%);
+}
+
+/* MACD Panel specific */
+.macd-panel .indicator-header {
+  background: linear-gradient(90deg, rgba(33, 150, 243, 0.1) 0%, transparent 100%);
+}
+
+.macd-panel .indicator-values {
+  gap: var(--space-3);
+}
+
+.macd-panel .indicator-value.macd::before {
+  content: 'M:';
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+.macd-panel .indicator-value.signal::before {
+  content: 'S:';
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+.macd-panel .indicator-value.histogram::before {
+  content: 'H:';
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+/* ===================================
+   VOLUME PROFILE PANEL
+   =================================== */
+
+.volume-profile-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.volume-profile-panel .indicator-header {
+  background: linear-gradient(90deg, rgba(76, 175, 80, 0.1) 0%, transparent 100%);
+}
+
+.volume-profile-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.volume-profile-chart {
+  flex: 1;
+  display: flex;
+  position: relative;
+  padding: var(--space-4);
+  gap: var(--space-3);
+  overflow: hidden;
+}
+
+.vp-price-axis {
+  width: 60px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.vp-price-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.vp-bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+}
+
+.vp-bar-row {
+  display: flex;
+  align-items: center;
+  height: 6px;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.vp-bar-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vp-bar-row.poc {
+  height: 8px;
+}
+
+.vp-bar-row.value-area {
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.vp-bar-row.current-price {
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.vp-bar {
+  display: flex;
+  height: 100%;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.vp-bar-buy {
+  background: linear-gradient(90deg, rgba(0, 230, 118, 0.7), rgba(0, 230, 118, 0.4));
+}
+
+.vp-bar-sell {
+  background: linear-gradient(90deg, rgba(255, 82, 82, 0.4), rgba(255, 82, 82, 0.7));
+}
+
+.vp-poc-marker {
+  position: absolute;
+  right: 4px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  color: var(--accent-yellow);
+  background: rgba(255, 193, 7, 0.2);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.vp-value-area-lines {
+  position: absolute;
+  top: 0;
+  left: 60px;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.vp-vah-line,
+.vp-val-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(76, 175, 80, 0.5) 0px,
+    rgba(76, 175, 80, 0.5) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.vp-line-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-100%);
+  font-size: 9px;
+  color: rgba(76, 175, 80, 0.8);
+  background: var(--bg-card);
+  padding: 0 2px;
+}
+
+.vp-current-price-line {
+  position: absolute;
+  left: 60px;
+  right: 0;
+  height: 2px;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 4px rgba(0, 212, 255, 0.5);
+}
+
+.vp-current-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-100%);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--accent-cyan);
+  background: var(--bg-card);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.vp-legend {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+}
+
+.vp-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.vp-legend-color {
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.vp-legend-color.buy {
+  background: linear-gradient(90deg, rgba(0, 230, 118, 0.7), rgba(0, 230, 118, 0.4));
+}
+
+.vp-legend-color.sell {
+  background: linear-gradient(90deg, rgba(255, 82, 82, 0.4), rgba(255, 82, 82, 0.7));
+}
+
+.vp-legend-color.value-area {
+  background: rgba(76, 175, 80, 0.3);
+  border: 1px dashed rgba(76, 175, 80, 0.5);
+}
+
+.vp-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.vp-stat .vp-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.vp-stat .vp-value {
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.vp-stat.poc .vp-label {
+  color: var(--accent-yellow);
+}
+
+.vp-stat.vah .vp-label,
+.vp-stat.val .vp-label {
+  color: rgba(76, 175, 80, 0.8);
+}
+
+/* ===================================
+   RESPONSIVE INDICATOR PANELS
+   =================================== */
+
+@media (max-width: 768px) {
+  .indicator-header {
+    padding: var(--space-2) var(--space-3);
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+  }
+
+  /* Indicator values - scrollable, no fade (was cutting off text) */
+  .indicator-values {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .indicator-values::-webkit-scrollbar {
+    display: none;
+  }
+
+  .indicator-name {
+    font-size: var(--font-size-xs);
+  }
+
+  .indicator-value {
+    font-size: var(--font-size-xs);
+    flex-shrink: 0;
+  }
+
+  .volume-profile-chart {
+    padding: var(--space-2);
+  }
+
+  .vp-price-axis {
+    width: 50px;
+  }
+
+  /* VP Legend - scrollable */
+  .vp-legend {
+    flex-wrap: nowrap;
+    gap: var(--space-3);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    justify-content: flex-start;
+    padding-left: var(--space-4);
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+  }
+
+  .vp-legend::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vp-legend-item {
+    font-size: 9px;
+    flex-shrink: 0;
+  }
+
+  .chart-settings-panel {
+    top: auto;
+    bottom: 60px;
+    right: 10px;
+    left: 10px;
+    max-width: none;
+  }
+}
+
+/* Ultrawide indicator panels */
+@media (min-width: 2200px) {
+  .indicator-panel {
+    border-radius: 4px;
+    margin-bottom: var(--space-2);
+  }
+
+  .indicator-header {
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .indicator-name {
+    font-size: var(--font-size-md);
+  }
+
+  .indicator-value {
+    font-size: var(--font-size-md);
+  }
+}
+

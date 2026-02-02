@@ -24,6 +24,7 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+  overflow-anchor: none; /* Prevent auto-scroll on content changes */
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);

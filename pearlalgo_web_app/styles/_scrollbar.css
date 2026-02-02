@@ -4,6 +4,11 @@
  * Custom scrollbar styles for the Pearl Algo Web App.
  */
 
+/* Color scheme for dark mode */
+:root {
+  color-scheme: dark;
+}
+
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
@@ -33,4 +38,24 @@
 
 *::-webkit-scrollbar-corner {
   background: var(--scrollbar-track);
+}
+
+/* Thin scrollbar variant for smaller containers */
+.scrollbar-thin::-webkit-scrollbar {
+  width: var(--scrollbar-width-thin);
+  height: var(--scrollbar-width-thin);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
 }

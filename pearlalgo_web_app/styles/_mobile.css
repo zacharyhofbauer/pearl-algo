@@ -1,0 +1,590 @@
+/**
+ * Mobile Responsive Styles
+ *
+ * Mobile-specific responsive styles for data panels and dashboard components.
+ * Migrated from globals.css as part of CSS modularization (U1.1).
+ *
+ * Includes:
+ * - Data panels mobile layouts
+ * - Component-specific mobile adjustments
+ */
+
+/* ============================================
+   DATA PANELS - Mobile Responsive Styles
+   ============================================ */
+
+/* Tablet - single column */
+@media (max-width: 900px) {
+  .data-panels-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Mobile - optimized compact layout */
+@media (max-width: 600px) {
+  .data-panels {
+    padding: 4px;
+  }
+
+  .data-panels-grid {
+    gap: 8px;
+  }
+
+  /* Panel base styles */
+  .data-panel {
+    border-radius: 10px;
+  }
+
+  .data-panel-header {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .data-panel-title {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
+  .data-panel-icon {
+    font-size: 14px;
+  }
+
+  .data-panel-icon-img {
+    width: 16px;
+    height: 16px;
+  }
+
+  .data-panel-badge {
+    font-size: 8px;
+    padding: 2px 5px;
+  }
+
+  .data-panel-content {
+    padding: 10px;
+  }
+
+  /* ===================
+     PEARL AI PANEL - Priority styling
+     =================== */
+  .pearl-insights-panel {
+    border: 1px solid rgba(171, 71, 188, 0.4);
+    box-shadow: 0 2px 12px rgba(171, 71, 188, 0.15);
+  }
+
+  .pearl-insights-panel .data-panel-header {
+    background: linear-gradient(90deg, rgba(171, 71, 188, 0.2), rgba(0, 212, 255, 0.15));
+  }
+
+  .pearl-insights {
+    gap: 12px;
+  }
+
+  /* AI Pills - horizontal scroll or wrap */
+  .pearl-ai-status {
+    gap: 8px;
+  }
+
+  .pearl-ai-status .ai-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .ai-pill {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 9px;
+  }
+
+  .ai-pill-label {
+    font-size: 8px;
+  }
+
+  .ai-pill-mode {
+    font-size: 8px;
+    padding: 1px 4px;
+  }
+
+  /* AI Lift & Gating - compact inline */
+  .ai-lift-compact,
+  .ai-gating-compact {
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  /* Current Insight Card */
+  .pearl-current-insight {
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .insight-header {
+    margin-bottom: 6px;
+    gap: 6px;
+  }
+
+  .insight-icon {
+    font-size: 14px;
+  }
+
+  .insight-label {
+    font-size: 10px;
+  }
+
+  .insight-message {
+    font-size: 12px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+  }
+
+  .insight-action {
+    font-size: 11px;
+    margin-bottom: 8px;
+  }
+
+  .insight-buttons {
+    gap: 8px;
+  }
+
+  .pearl-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+    border-radius: 6px;
+  }
+
+  /* No Insight State */
+  .pearl-no-insight {
+    padding: 12px;
+    font-size: 12px;
+  }
+
+  /* Shadow Impact Row - 2x2 grid */
+  .shadow-impact-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .shadow-impact-row .impact-item {
+    padding: 6px 4px;
+    text-align: center;
+  }
+
+  .shadow-impact-row .impact-value {
+    font-size: 12px;
+  }
+
+  .shadow-impact-row .impact-label {
+    font-size: 8px;
+  }
+
+  /* Shadow Details */
+  .shadow-details {
+    font-size: 11px;
+  }
+
+  .shadow-stats-compact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .history-toggle-btn,
+  .details-toggle {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  /* Pearl AI Tabs - Mobile */
+  .pearl-tabs {
+    padding: 3px;
+    margin-bottom: 10px;
+  }
+
+  .pearl-tab {
+    padding: 6px 10px;
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  .pearl-tab-badge {
+    min-width: 16px;
+    height: 16px;
+    font-size: 9px;
+  }
+
+  .pearl-ws-dot {
+    width: 5px;
+    height: 5px;
+  }
+
+  /* Pearl Chat - Mobile */
+  .pearl-chat-content {
+    height: 260px;
+    min-height: 220px;
+  }
+
+  .pearl-chat-messages {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .pearl-chat-empty {
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .pearl-chat-empty .empty-icon {
+    font-size: 24px;
+  }
+
+  .pearl-chat-empty .empty-text {
+    font-size: 11px;
+    max-width: 200px;
+  }
+
+  .pearl-chat-empty .empty-suggestions {
+    gap: 4px;
+  }
+
+  .pearl-chat-empty .empty-suggestions button {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
+  .pearl-msg {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .msg-type-icon {
+    font-size: 12px;
+  }
+
+  .msg-text {
+    font-size: 11px;
+  }
+
+  .msg-time {
+    font-size: 9px;
+  }
+
+  .pearl-chat-input {
+    gap: 6px;
+  }
+
+  .pearl-chat-input input {
+    padding: 8px 10px;
+    font-size: 16px; /* Must be 16px+ to prevent iOS auto-zoom */
+    border-radius: 6px;
+  }
+
+  .pearl-chat-input button {
+    padding: 8px 12px;
+    font-size: 13px;
+    border-radius: 6px;
+  }
+
+  /* ===================
+     PERFORMANCE PANEL
+     =================== */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 8px;
+    text-align: center;
+  }
+
+  .stat-card .stat-label {
+    font-size: 8px;
+  }
+
+  .stat-card .stat-value {
+    font-size: 13px;
+  }
+
+  /* ===================
+     CHALLENGE PANEL
+     =================== */
+  .challenge-progress {
+    height: 8px;
+    border-radius: 4px;
+  }
+
+  .challenge-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .challenge-stat {
+    text-align: center;
+    padding: 6px;
+  }
+
+  .challenge-stat .label {
+    font-size: 8px;
+  }
+
+  .challenge-stat .value {
+    font-size: 12px;
+  }
+
+  /* ===================
+     RISK METRICS PANEL
+     =================== */
+  .risk-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .risk-item {
+    padding: 8px;
+  }
+
+  .risk-item .risk-label {
+    font-size: 9px;
+  }
+
+  .risk-item .risk-value {
+    font-size: 13px;
+  }
+
+  /* ===================
+     MARKET REGIME PANEL
+     =================== */
+  .regime-display {
+    padding: 10px;
+  }
+
+  .regime-name {
+    font-size: 14px;
+  }
+
+  .regime-confidence {
+    font-size: 11px;
+  }
+
+  .regime-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  /* ===================
+     ACTIVE POSITIONS PANEL
+     =================== */
+  .positions-list {
+    gap: 8px;
+  }
+
+  .position-card {
+    padding: 10px;
+  }
+
+  .position-header {
+    font-size: 12px;
+  }
+
+  .position-pnl {
+    font-size: 14px;
+  }
+
+  /* ===================
+     RECENT TRADES PANEL
+     =================== */
+  .recent-trades-list {
+    gap: 6px;
+  }
+
+  .recent-trade {
+    padding: 8px;
+    border-radius: 6px;
+  }
+
+  .trade-direction {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .trade-pnl {
+    font-size: 13px;
+  }
+
+  .trade-time {
+    font-size: 9px;
+  }
+
+  /* ===================
+     EQUITY CURVE PANEL
+     =================== */
+  .equity-curve-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .equity-stat {
+    text-align: center;
+  }
+
+  .equity-stat-label {
+    font-size: 8px;
+  }
+
+  .equity-stat-value {
+    font-size: 12px;
+  }
+
+  /* ===================
+     SIGNAL DECISIONS PANEL
+     =================== */
+  .signal-rejection {
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .rejection-reason {
+    font-size: 10px;
+  }
+
+  /* ===================
+     CONFIG PANEL
+     =================== */
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .config-item {
+    padding: 6px;
+    font-size: 10px;
+  }
+
+  /* ===================
+     SYSTEM HEALTH PANEL
+     =================== */
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .health-item {
+    padding: 8px;
+  }
+
+  .health-label {
+    font-size: 9px;
+  }
+
+  .health-value {
+    font-size: 12px;
+  }
+
+  /* ===================
+     P&L CALENDAR
+     =================== */
+  .pnl-calendar {
+    font-size: 10px;
+  }
+
+  .calendar-day {
+    padding: 4px 2px;
+    min-width: 32px;
+  }
+
+  .calendar-day .day-pnl {
+    font-size: 9px;
+  }
+
+  /* ===================
+     ANALYTICS PANEL
+     =================== */
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .analytics-stat {
+    padding: 8px;
+    text-align: center;
+  }
+
+  .analytics-label {
+    font-size: 8px;
+  }
+
+  .analytics-value {
+    font-size: 13px;
+  }
+
+  /* ===================
+     MARKET PRESSURE PANEL
+     =================== */
+  .pressure-bar {
+    height: 10px;
+    border-radius: 5px;
+  }
+
+  .pressure-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 400px) {
+  .data-panels {
+    padding: 2px;
+  }
+
+  .data-panels-grid {
+    gap: 6px;
+  }
+
+  .data-panel-header {
+    padding: 6px 8px;
+  }
+
+  .data-panel-title {
+    font-size: 10px;
+  }
+
+  .data-panel-content {
+    padding: 8px;
+  }
+
+  /* Shadow impact - 2x2 grid on tiny screens */
+  .shadow-impact-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Stats grids - 2 columns */
+  .stats-grid,
+  .challenge-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Equity stats - 2 columns */
+  .equity-curve-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .equity-stat:last-child {
+    grid-column: span 2;
+    justify-self: center;
+  }
+}
+
