@@ -328,10 +328,11 @@ async def _fetch_candles(
     # Try to fetch live data with timeout
     if provider is not None:
         try:
-            # Calculate time range based on bars and timeframe
+            # Calculate time range based on bars and timeframe (case-insensitive)
+            tf_lower = timeframe.lower()
             tf_minutes = {
                 "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
-            }.get(timeframe, 5)
+            }.get(tf_lower, 5)
 
             end = datetime.now(timezone.utc)
             start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
@@ -381,6 +382,91 @@ async def _fetch_candles(
         cached = _load_candle_cache(cache_key)
         if cached:
             return cached
+
+    # No live data and no cache
+    raise DataUnavailableError(
+        f"Market closed - no live data available. Cache not found for {symbol} {timeframe}."
+    )
+
+
+async def _fetch_candles_with_source(
+    symbol: str,
+    timeframe: str = "5m",
+    bars: int = 72,
+    use_cache_fallback: bool = True,
+) -> tuple:
+    """
+    Fetch OHLCV candles and return with data source indicator.
+
+    Returns:
+        Tuple of (candles, data_source) where data_source is 'live' or 'cache'
+    """
+    cache_key = f"{symbol}_{timeframe}_{bars}"
+
+    # Try cache first if provider not available (faster response when market closed)
+    provider = _get_data_provider()
+    if provider is None and use_cache_fallback:
+        cached = _load_candle_cache(cache_key)
+        if cached:
+            return (cached, "cache")
+
+    # Try to fetch live data with timeout
+    if provider is not None:
+        try:
+            # Calculate time range based on bars and timeframe (case-insensitive)
+            tf_lower = timeframe.lower()
+            tf_minutes = {
+                "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
+            }.get(tf_lower, 5)
+
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
+
+            # Run blocking fetch_historical in thread pool with timeout
+            loop = asyncio.get_event_loop()
+            df = await asyncio.wait_for(
+                loop.run_in_executor(
+                    _executor,
+                    partial(
+                        provider.fetch_historical,
+                        symbol=symbol,
+                        start=start,
+                        end=end,
+                        timeframe=timeframe,
+                    )
+                ),
+                timeout=5.0  # 5 second timeout - fail fast if IBKR not responding
+            )
+
+            if df is not None and not df.empty:
+                # Convert to TradingView format
+                candles = []
+                for idx, row in df.tail(bars).iterrows():
+                    ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
+                    # Get volume - try different column name variations
+                    vol = row.get("Volume", row.get("volume", row.get("vol", 0)))
+                    candles.append({
+                        "time": ts,
+                        "open": float(row.get("Open", row.get("open", 0))),
+                        "high": float(row.get("High", row.get("high", 0))),
+                        "low": float(row.get("Low", row.get("low", 0))),
+                        "close": float(row.get("Close", row.get("close", 0))),
+                        "volume": int(vol) if vol else 0,
+                    })
+
+                # Cache successful fetch
+                _save_candle_cache(cache_key, candles)
+                return (candles, "live")
+        except asyncio.TimeoutError:
+            pass  # Fall through to cache
+        except Exception:
+            pass  # Fall through to cache
+
+    # Try cache fallback
+    if use_cache_fallback:
+        cached = _load_candle_cache(cache_key)
+        if cached:
+            return (cached, "cache")
 
     # No live data and no cache
     raise DataUnavailableError(
@@ -1024,13 +1110,20 @@ async def get_candles(
     Get OHLCV candle data for TradingView Lightweight Charts.
 
     Returns cached data if live data is unavailable (market closed).
+    Includes X-Data-Source header: 'live' or 'cache'
 
     Returns data in format:
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     try:
-        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars, use_cache_fallback=True)
-        return JSONResponse(content=candles)
+        # Track whether we get cached or live data
+        candles, data_source = await _fetch_candles_with_source(
+            symbol=symbol, timeframe=timeframe, bars=bars, use_cache_fallback=True
+        )
+        return JSONResponse(
+            content=candles,
+            headers={"X-Data-Source": data_source}
+        )
     except DataUnavailableError as e:
         raise HTTPException(
             status_code=503,
@@ -1940,6 +2033,51 @@ async def get_trades(
     ]
     
     return trades[-limit:]
+
+
+@app.get("/api/positions")
+async def get_positions(
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Get currently open positions with entry price, stop loss, and take profit.
+
+    Returns positions for display on chart as price lines.
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    signals_file = _state_dir / "signals.jsonl"
+    signals = _load_jsonl_file(signals_file, max_lines=500)
+
+    # Filter to open positions only (not exited)
+    positions = []
+    for s in signals:
+        # Skip exited trades
+        if s.get("status") == "exited":
+            continue
+
+        # Must have entry to be an open position
+        entry_price = s.get("entry_price")
+        if not entry_price:
+            continue
+
+        signal_data = s.get("signal", {})
+        direction = signal_data.get("direction", "long") if isinstance(signal_data, dict) else s.get("direction", "long")
+
+        # Get stop loss and take profit from signal data
+        stop_loss = signal_data.get("stop_loss") if isinstance(signal_data, dict) else None
+        take_profit = signal_data.get("take_profit") if isinstance(signal_data, dict) else None
+
+        positions.append({
+            "signal_id": s.get("signal_id"),
+            "direction": direction,
+            "entry_price": entry_price,
+            "entry_time": s.get("entry_time"),
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+        })
+
+    return positions
 
 
 @app.get("/api/indicators")

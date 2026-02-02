@@ -57,6 +57,13 @@ export type {
   Indicators,
   MarkerData,
   MarketStatus,
+  MACDData,
+  BollingerBandsData,
+  ATRBandsData,
+  VolumeProfileData,
+  VolumeProfile,
+  Position,
+  PositionLine,
 } from './chartStore'
 export {
   selectCurrentPrice,
@@ -65,12 +72,26 @@ export {
   selectRSI,
 } from './chartStore'
 
-export { useUIStore } from './uiStore'
+export { useUIStore, type DataSource } from './uiStore'
 export {
   selectWsStatus,
   selectIsConnected,
   selectTheme,
   selectNotifications,
+  selectDataSource,
+  selectIsFetching,
+  selectLastFetchDuration,
+  selectFetchCount,
 } from './uiStore'
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'
+
+export {
+  useChartSettingsStore,
+  type ChartTheme,
+  type IndicatorVisibility,
+  type ChartThemeColors,
+  selectThemeColors,
+  selectIndicatorVisibility,
+  getThemePreset,
+} from './chartSettingsStore'

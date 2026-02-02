@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
 import DataPanelsContainer from '@/components/DataPanelsContainer'
@@ -20,19 +20,27 @@ import AnalyticsPanel from '@/components/AnalyticsPanel'
 import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
+import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
+// Indicator panels
+import { RSIPanel, MACDPanel, VolumeProfilePanel } from '@/components/indicators'
+
 // Import stores and types
 import {
   useAgentStore,
   useChartStore,
+  useChartSettingsStore,
   useUIStore,
   type Timeframe,
   type IndicatorData,
+  type Position,
+  type PositionLine,
+  type DataSource,
 } from '@/stores'
 
 // API configuration imported from @/lib/api
@@ -77,12 +85,62 @@ export default function PearlAlgoWebApp() {
   const wsStatus = useUIStore((s) => s.wsStatus)
   const isLive = useUIStore((s) => s.isLive)
   const lastUpdate = useUIStore((s) => s.lastUpdate)
+  const dataSource = useUIStore((s) => s.dataSource)
+  const isFetching = useUIStore((s) => s.isFetching)
   const setWsStatus = useUIStore((s) => s.setWsStatus)
   const setIsLive = useUIStore((s) => s.setIsLive)
   const setLastUpdate = useUIStore((s) => s.setLastUpdate)
+  const setIsFetching = useUIStore((s) => s.setIsFetching)
+  const recordFetch = useUIStore((s) => s.recordFetch)
+
+  // Track fetch start time for duration calculation
+  const fetchStartRef = useRef<number>(0)
 
   // Local state for chart API reference (not suitable for global store)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
+
+  // Local state for active positions (for chart price lines)
+  const [positions, setPositions] = useState<Position[]>([])
+
+  // Convert positions to price lines for chart visualization
+  const positionLines = useMemo<PositionLine[]>(() => {
+    const lines: PositionLine[] = []
+
+    positions.forEach((pos) => {
+      // Entry price line - subtle cyan/pink, no label
+      lines.push({
+        price: pos.entry_price,
+        color: pos.direction === 'long' ? 'rgba(0, 212, 255, 0.6)' : 'rgba(255, 110, 199, 0.6)',
+        title: '',  // No title to reduce clutter
+        lineStyle: 2, // dashed
+        axisLabelVisible: false,  // Hide price label on axis
+      })
+
+      // Stop loss line - subtle red
+      if (pos.stop_loss) {
+        lines.push({
+          price: pos.stop_loss,
+          color: 'rgba(255, 68, 68, 0.5)',
+          title: '',
+          lineStyle: 1, // dotted
+          axisLabelVisible: false,
+        })
+      }
+
+      // Take profit line - subtle green
+      if (pos.take_profit) {
+        lines.push({
+          price: pos.take_profit,
+          color: 'rgba(0, 255, 136, 0.5)',
+          title: '',
+          lineStyle: 1, // dotted
+          axisLabelVisible: false,
+        })
+      }
+    })
+
+    return lines
+  }, [positions])
 
   // Viewport detection for ultrawide layout
   const viewport = useViewportType()
@@ -137,18 +195,23 @@ export default function PearlAlgoWebApp() {
   }, [getBarSpacing, calculateBarCount, setBarSpacing, setBarCount])
 
   const fetchData = useCallback(async (tf: Timeframe, bars: number) => {
+    // Track fetch timing and state
+    fetchStartRef.current = performance.now()
+    setIsFetching(true)
+
     try {
       // Ensure we always request at least MIN_BARS
       const requestBars = Math.max(MIN_BARS, bars)
 
       // Fetch all data in parallel (apiFetch includes auth headers when configured)
-      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes] = await Promise.all([
+      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes] = await Promise.all([
         apiFetch(`/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         apiFetch(`/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         apiFetch(`/api/markers?hours=${MARKER_HOURS}`),
         apiFetch(`/api/state`),
         apiFetch(`/api/market-status`),
         apiFetch(`/api/analytics`).catch(() => null),  // Analytics is optional
+        apiFetch(`/api/positions`).catch(() => null),  // Positions for chart lines
       ])
 
       // Update market status
@@ -204,7 +267,26 @@ export default function PearlAlgoWebApp() {
         }
       }
 
-      setLastUpdate(new Date())
+      // Update positions for chart price lines
+      if (positionsRes && positionsRes.ok) {
+        try {
+          const positionsData = await positionsRes.json()
+          setPositions(positionsData)
+        } catch {
+          setPositions([])
+        }
+      } else {
+        setPositions([])
+      }
+
+      // Calculate fetch duration and determine data source
+      const fetchDuration = performance.now() - fetchStartRef.current
+      // Detect cached data: if candles response has x-data-source header or is very fast (<50ms)
+      const dataSourceHeader = candlesRes.headers.get('x-data-source')
+      const detectedSource: DataSource = dataSourceHeader === 'cache' ? 'cached' : 'live'
+
+      // Record successful fetch with timing and source
+      recordFetch(fetchDuration, detectedSource)
       setIsLive(true)
       setChartError(null)
 
@@ -218,6 +300,7 @@ export default function PearlAlgoWebApp() {
       setChartError(err instanceof Error ? err.message : 'Failed to fetch')
       setIsLive(false)
       setChartLoading(false)
+      setIsFetching(false)
     }
   }, [
     lastDataHash,
@@ -229,8 +312,9 @@ export default function PearlAlgoWebApp() {
     setLastDataHash,
     setChartError,
     setChartLoading,
-    setLastUpdate,
     setIsLive,
+    setIsFetching,
+    recordFetch,
   ])
 
   useEffect(() => {
@@ -330,11 +414,19 @@ export default function PearlAlgoWebApp() {
     }
   }
 
+  // Stale threshold reduced to 60 seconds for better responsiveness
+  const STALE_THRESHOLD_SECONDS = 60
+
   const isDataStale = () => {
     if (!lastUpdate) return true
     const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000)
-    return seconds > 120 // Stale if > 2 minutes
+    return seconds > STALE_THRESHOLD_SECONDS
   }
+
+  // Force refresh function for manual refresh button
+  const handleForceRefresh = useCallback(() => {
+    fetchData(timeframe, barCount)
+  }, [fetchData, timeframe, barCount])
 
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
@@ -386,13 +478,6 @@ export default function PearlAlgoWebApp() {
 
     return (
       <header className="header-combined">
-        {/* Stale Data Warning */}
-        {stale && isLive && (
-          <div className="stale-warning">
-            ⚠️ Data may be stale - last update {formatRelativeTime(lastUpdate)}
-          </div>
-        )}
-
         {/* Main Header Row */}
         <div className="header-row-main">
           {/* Brand */}
@@ -427,7 +512,7 @@ export default function PearlAlgoWebApp() {
 
           {/* Timeframe */}
           <div className="header-timeframe">
-            {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+            {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
               <button
                 key={tf}
                 className={`tf-btn ${timeframe === tf ? 'active' : ''}`}
@@ -438,13 +523,15 @@ export default function PearlAlgoWebApp() {
             ))}
           </div>
 
-          {/* Status Indicators */}
-          <div className="header-status">
-            <div className={`status-indicator ${stale ? 'stale' : 'live'}`}>
-              <span className="status-dot"></span>
-              <span className="status-text">{stale ? 'STALE' : 'LIVE'}</span>
-            </div>
-          </div>
+          {/* Data Freshness Indicator */}
+          <DataFreshnessIndicator
+            lastUpdate={lastUpdate}
+            wsStatus={wsStatus}
+            dataSource={dataSource}
+            isLoading={isFetching}
+            staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
+            onRefresh={handleForceRefresh}
+          />
         </div>
 
         {/* Secondary Row - Badges, Health, Legends */}
@@ -582,6 +669,7 @@ export default function PearlAlgoWebApp() {
               barSpacing={barSpacing}
               timeframe={timeframe}
               onChartReady={setMainChartApi}
+              positionLines={positionLines}
             />
           </ErrorBoundary>
         )}
@@ -589,12 +677,43 @@ export default function PearlAlgoWebApp() {
     </div>
   )
 
+  // Chart settings store for indicator visibility
+  const showRSIPanel = useChartSettingsStore((s) => s.showRSIPanel)
+  const showMACDPanel = useChartSettingsStore((s) => s.showMACDPanel)
+  const showVolumeProfilePanel = useChartSettingsStore((s) => s.showVolumeProfilePanel)
+
   // RSI section component
   const renderRSI = () => (
-    indicators.rsi && indicators.rsi.length > 0 && (
-      <div className="rsi-panel">
-        <RSIChart data={indicators.rsi} barSpacing={barSpacing} />
-      </div>
+    showRSIPanel && indicators.rsi && indicators.rsi.length > 0 && (
+      <RSIPanel
+        data={indicators.rsi}
+        barSpacing={barSpacing}
+        mainChart={mainChartApi}
+        height={100}
+      />
+    )
+  )
+
+  // MACD section component
+  const renderMACD = () => (
+    showMACDPanel && indicators.macd && indicators.macd.length > 0 && (
+      <MACDPanel
+        data={indicators.macd}
+        barSpacing={barSpacing}
+        mainChart={mainChartApi}
+        height={120}
+      />
+    )
+  )
+
+  // Volume Profile section component
+  const renderVolumeProfile = () => (
+    showVolumeProfilePanel && indicators.volumeProfile && (
+      <VolumeProfilePanel
+        data={indicators.volumeProfile}
+        currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+        height={300}
+      />
     )
   )
 
@@ -616,7 +735,7 @@ export default function PearlAlgoWebApp() {
           </span>
         </div>
         <div className="uw-timeframe">
-          {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+          {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
             <button
               key={tf}
               className={`uw-tf-btn ${timeframe === tf ? 'active' : ''}`}
@@ -765,6 +884,7 @@ export default function PearlAlgoWebApp() {
       {renderStatusPanel()}
       {renderChart()}
       {renderRSI()}
+      {renderMACD()}
 
       {/* Data Panels */}
       {agentState && (
@@ -880,98 +1000,6 @@ export default function PearlAlgoWebApp() {
 
       {/* Help Panel - Quick Reference */}
       <HelpPanel />
-    </div>
-  )
-}
-
-// Simple RSI Chart Component
-function RSIChart({ data, barSpacing = 10 }: { data: IndicatorData[], barSpacing?: number }) {
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return
-
-    const chartHeight = Math.max(80, Math.min(120, window.innerHeight * 0.12))
-    const { createChart, ColorType } = require('lightweight-charts')
-    const chart = createChart(node, {
-      width: node.clientWidth,
-      height: chartHeight,
-      layout: {
-        background: { type: ColorType.Solid, color: '#0a0a0f' },
-        textColor: '#8a94a6',
-      },
-      grid: {
-        vertLines: { color: '#1e222d' },
-        horzLines: { color: '#1e222d' },
-      },
-      rightPriceScale: {
-        borderColor: '#2a2a3a',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        visible: true,
-        borderColor: '#2a2a3a',
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 8,
-        barSpacing: barSpacing,
-        tickMarkFormatter: (time: number) => {
-          const date = new Date(time * 1000)
-          const hours = date.getHours().toString().padStart(2, '0')
-          const minutes = date.getMinutes().toString().padStart(2, '0')
-          return `${hours}:${minutes}`
-        },
-      },
-    })
-
-    const series = chart.addLineSeries({
-      color: '#ab47bc',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    })
-
-    // Add overbought/oversold lines
-    const ob = chart.addLineSeries({
-      color: 'rgba(255, 82, 82, 0.8)',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-    const os = chart.addLineSeries({
-      color: 'rgba(0, 230, 118, 0.8)',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-
-    // Set data
-    series.setData(data)
-    const obData = data.map(d => ({ time: d.time, value: 70 }))
-    const osData = data.map(d => ({ time: d.time, value: 30 }))
-    ob.setData(obData)
-    os.setData(osData)
-
-    const handleResize = () => {
-      chart.applyOptions({
-        width: node.clientWidth,
-        height: Math.max(80, Math.min(120, window.innerHeight * 0.12)),
-      })
-    }
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      chart.remove()
-    }
-  }, [data, barSpacing])
-
-  return (
-    <div className="rsi-container">
-      <span className="rsi-label">RSI(14)</span>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     </div>
   )
 }

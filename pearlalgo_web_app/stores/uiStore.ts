@@ -2,11 +2,20 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { WebSocketStatus } from '@/hooks/useWebSocket'
 
+// Data source types for transparency
+export type DataSource = 'live' | 'cached' | 'unknown'
+
 interface UIStore {
   // Connection state
   wsStatus: WebSocketStatus
   isLive: boolean
   lastUpdate: Date | null
+
+  // Data freshness tracking
+  dataSource: DataSource
+  isFetching: boolean
+  lastFetchDuration: number | null  // ms
+  fetchCount: number  // total fetches this session
 
   // UI preferences (persisted)
   theme: 'dark' | 'light'
@@ -19,6 +28,9 @@ interface UIStore {
   setWsStatus: (status: WebSocketStatus) => void
   setIsLive: (isLive: boolean) => void
   setLastUpdate: (date: Date) => void
+  setDataSource: (source: DataSource) => void
+  setIsFetching: (fetching: boolean) => void
+  recordFetch: (durationMs: number, source: DataSource) => void
   setTheme: (theme: 'dark' | 'light') => void
   toggleHelp: () => void
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void
@@ -42,6 +54,10 @@ export const useUIStore = create<UIStore>()(
       wsStatus: 'disconnected',
       isLive: false,
       lastUpdate: null,
+      dataSource: 'unknown',
+      isFetching: false,
+      lastFetchDuration: null,
+      fetchCount: 0,
       theme: 'dark',
       showHelp: false,
       notifications: [],
@@ -52,6 +68,19 @@ export const useUIStore = create<UIStore>()(
       setIsLive: (isLive) => set({ isLive }),
 
       setLastUpdate: (lastUpdate) => set({ lastUpdate }),
+
+      setDataSource: (dataSource) => set({ dataSource }),
+
+      setIsFetching: (isFetching) => set({ isFetching }),
+
+      recordFetch: (durationMs, source) =>
+        set((state) => ({
+          lastUpdate: new Date(),
+          lastFetchDuration: durationMs,
+          dataSource: source,
+          fetchCount: state.fetchCount + 1,
+          isFetching: false,
+        })),
 
       setTheme: (theme) => set({ theme }),
 
@@ -91,3 +120,7 @@ export const selectWsStatus = (state: UIStore) => state.wsStatus
 export const selectIsConnected = (state: UIStore) => state.wsStatus === 'connected'
 export const selectTheme = (state: UIStore) => state.theme
 export const selectNotifications = (state: UIStore) => state.notifications
+export const selectDataSource = (state: UIStore) => state.dataSource
+export const selectIsFetching = (state: UIStore) => state.isFetching
+export const selectLastFetchDuration = (state: UIStore) => state.lastFetchDuration
+export const selectFetchCount = (state: UIStore) => state.fetchCount
