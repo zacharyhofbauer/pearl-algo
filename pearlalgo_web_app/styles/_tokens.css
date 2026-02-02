@@ -46,6 +46,20 @@
   --accent-cyan-rgb: 0, 212, 255;
   --accent-yellow-rgb: 255, 193, 7;
 
+  /* Background RGB variants for transparent overlays */
+  --bg-primary-rgb: 10, 10, 15;
+  --bg-secondary-rgb: 18, 18, 26;
+  --bg-card-rgb: 26, 26, 36;
+  --bg-elevated-rgb: 34, 34, 46;
+  --bg-tertiary-rgb: 22, 22, 30;
+  --border-color-rgb: 42, 42, 58;
+
+  /* Direction color RGB variants */
+  --color-long-rgb: 0, 212, 255;
+  --color-short-rgb: 255, 110, 199;
+  --color-profit-rgb: 0, 230, 118;
+  --color-loss-rgb: 255, 82, 82;
+
   /* ===================================
      SEMANTIC COLORS - FINANCIAL
      =================================== */

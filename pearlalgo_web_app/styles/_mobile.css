@@ -402,28 +402,120 @@
   }
 
   /* ===================
-     RECENT TRADES PANEL
+     RECENT TRADES PANEL - Mobile Optimized
      =================== */
   .recent-trades-list {
-    gap: 6px;
+    gap: 4px;
+  }
+
+  .recent-trade-wrapper {
+    margin-bottom: 4px;
   }
 
   .recent-trade {
-    padding: 8px;
+    padding: 6px 8px;
     border-radius: 6px;
   }
 
-  .trade-direction {
-    font-size: 10px;
-    padding: 2px 6px;
+  .trade-direction-badge {
+    font-size: 9px;
+    padding: 2px 5px;
   }
 
-  .trade-pnl {
-    font-size: 13px;
+  .trade-left {
+    gap: 6px;
+  }
+
+  .trade-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .trade-time {
     font-size: 9px;
+  }
+
+  .trade-prices {
+    font-size: 9px;
+  }
+
+  .trade-pnl {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .trade-reason-badge {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+
+  .trade-expand-icon {
+    font-size: 8px;
+    margin-left: 4px;
+  }
+
+  /* Trade Details - Mobile */
+  .trade-details {
+    padding: 8px;
+  }
+
+  .trade-detail-row {
+    padding: 3px 0;
+  }
+
+  .trade-detail-label {
+    font-size: 9px;
+  }
+
+  .trade-detail-value {
+    font-size: 11px;
+  }
+
+  .trade-signal {
+    font-size: 9px;
+    max-width: 120px;
+  }
+
+  .trade-regime {
+    font-size: 9px;
+  }
+
+  /* Trade Stats Summary - Mobile */
+  .trade-stats-summary-wrapper {
+    margin-bottom: 8px;
+  }
+
+  .trade-stats-summary-toggle {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  .trade-stats-summary {
+    padding: 6px;
+    font-size: 10px;
+  }
+
+  .trade-stats-row {
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 4px;
+  }
+
+  .trade-stats-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 9px;
+  }
+
+  .exit-reason-grid {
+    gap: 4px;
+  }
+
+  .exit-reason-stat {
+    font-size: 9px;
+    padding: 3px 6px;
   }
 
   /* ===================

@@ -25,6 +25,19 @@
   border-color: var(--border-subtle);
 }
 
+/* Transparent panel variant */
+.data-panel.panel-transparent {
+  background: rgba(var(--bg-card-rgb), 0.4);
+  border-color: rgba(var(--border-color-rgb), 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.data-panel.panel-transparent:hover {
+  background: rgba(var(--bg-card-rgb), 0.5);
+  border-color: rgba(var(--border-color-rgb), 0.4);
+}
+
 /* Panel Header */
 .panel-header {
   display: flex;

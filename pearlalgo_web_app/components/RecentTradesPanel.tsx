@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { formatPnL, formatTime as formatTimeUtil, formatDuration as formatDurationUtil, formatPrice } from '@/lib/formatters'
 import type { RecentExit, DirectionBreakdown, StatusBreakdown } from '@/stores'
@@ -12,7 +12,34 @@ interface RecentTradesPanelProps {
   statusBreakdown?: StatusBreakdown | null
 }
 
-export default function RecentTradesPanel({
+// Helper to format exit reasons
+const formatExitReason = (reason: string): { text: string; type: string } => {
+  if (!reason) return { text: '', type: '' }
+  const lowerReason = reason.toLowerCase()
+
+  if (lowerReason.includes('close_all') || lowerReason.includes('close all')) {
+    return { text: 'Manual Close', type: 'manual' }
+  }
+  if (lowerReason.includes('stop') || lowerReason.includes('sl_')) {
+    return { text: 'Stop Loss', type: 'stop' }
+  }
+  if (lowerReason.includes('target') || lowerReason.includes('tp_') || lowerReason.includes('profit')) {
+    return { text: 'Target Hit', type: 'target' }
+  }
+  if (lowerReason.includes('trail')) {
+    return { text: 'Trailing Stop', type: 'trail' }
+  }
+  if (lowerReason.includes('time') || lowerReason.includes('eod') || lowerReason.includes('session')) {
+    return { text: 'Time Exit', type: 'time' }
+  }
+
+  return {
+    text: reason.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    type: 'other'
+  }
+}
+
+function RecentTradesPanel({
   recentExits,
   maxItems,
   directionBreakdown,
@@ -21,6 +48,35 @@ export default function RecentTradesPanel({
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(true)
 
+  // All hooks must be called before any early returns
+  // Apply maxItems limit if specified (for compact ultrawide display)
+  const displayExits = useMemo(
+    () => (maxItems && recentExits ? recentExits.slice(0, maxItems) : recentExits || []),
+    [recentExits, maxItems]
+  )
+
+  // Calculate win rate by exit reason - memoized to avoid recalculation
+  const sortedExitReasons = useMemo(() => {
+    if (!recentExits || recentExits.length === 0) return []
+
+    const exitReasonStats = recentExits.reduce((acc, exit) => {
+      if (!exit.exit_reason) return acc
+      const { text } = formatExitReason(exit.exit_reason)
+      if (!acc[text]) {
+        acc[text] = { wins: 0, total: 0, pnl: 0 }
+      }
+      acc[text].total++
+      if (exit.pnl > 0) acc[text].wins++
+      acc[text].pnl += exit.pnl
+      return acc
+    }, {} as Record<string, { wins: number; total: number; pnl: number }>)
+
+    return Object.entries(exitReasonStats)
+      .filter(([_, stats]) => stats.total >= 2)
+      .sort((a, b) => b[1].total - a[1].total)
+  }, [recentExits])
+
+  // Early return after all hooks
   if (!recentExits || recentExits.length === 0) {
     return (
       <DataPanel title="Recent Trades" icon="📋">
@@ -30,65 +86,15 @@ export default function RecentTradesPanel({
   }
 
   // Use centralized formatters with appropriate options
-  const formatTime = (timeStr: string) => formatTimeUtil(timeStr, false) // no seconds
+  const formatTime = (timeStr: string) => formatTimeUtil(timeStr, false)
   const formatDuration = (seconds?: number) => formatDurationUtil(seconds)
-
-  const formatExitReason = (reason: string): { text: string; type: string } => {
-    if (!reason) return { text: '', type: '' }
-    const lowerReason = reason.toLowerCase()
-
-    // Categorize exit reasons for styling
-    if (lowerReason.includes('close_all') || lowerReason.includes('close all')) {
-      return { text: 'Manual Close', type: 'manual' }
-    }
-    if (lowerReason.includes('stop') || lowerReason.includes('sl_')) {
-      return { text: 'Stop Loss', type: 'stop' }
-    }
-    if (lowerReason.includes('target') || lowerReason.includes('tp_') || lowerReason.includes('profit')) {
-      return { text: 'Target Hit', type: 'target' }
-    }
-    if (lowerReason.includes('trail')) {
-      return { text: 'Trailing Stop', type: 'trail' }
-    }
-    if (lowerReason.includes('time') || lowerReason.includes('eod') || lowerReason.includes('session')) {
-      return { text: 'Time Exit', type: 'time' }
-    }
-
-    return {
-      text: reason.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-      type: 'other'
-    }
-  }
+  const formatSummaryPnL = (pnl: number) => formatPnL(pnl, 0)
 
   const toggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id)
   }
 
-  // Apply maxItems limit if specified (for compact ultrawide display)
-  const displayExits = maxItems ? recentExits.slice(0, maxItems) : recentExits
-
-  // Use centralized formatPnL with 0 decimals for summary
-  const formatSummaryPnL = (pnl: number) => formatPnL(pnl, 0)
-
   const hasSummaryData = directionBreakdown || statusBreakdown
-
-  // Calculate win rate by exit reason
-  const exitReasonStats = recentExits.reduce((acc, exit) => {
-    if (!exit.exit_reason) return acc
-    const { text } = formatExitReason(exit.exit_reason)
-    if (!acc[text]) {
-      acc[text] = { wins: 0, total: 0, pnl: 0 }
-    }
-    acc[text].total++
-    if (exit.pnl > 0) acc[text].wins++
-    acc[text].pnl += exit.pnl
-    return acc
-  }, {} as Record<string, { wins: number; total: number; pnl: number }>)
-
-  // Sort by total trades descending
-  const sortedExitReasons = Object.entries(exitReasonStats)
-    .filter(([_, stats]) => stats.total >= 2) // Only show reasons with 2+ trades
-    .sort((a, b) => b[1].total - a[1].total)
 
   return (
     <DataPanel title="Recent Trades" icon="📋">
@@ -257,3 +263,5 @@ export default function RecentTradesPanel({
     </DataPanel>
   )
 }
+
+export default memo(RecentTradesPanel)
