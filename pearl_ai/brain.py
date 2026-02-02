@@ -97,6 +97,19 @@ class PearlBrain:
             "direction_blocked",
         }
 
+        # Proactive engagement tracking
+        self._last_insight_time: Optional[datetime] = None
+        self._last_ml_warning_time: Optional[datetime] = None
+        self._last_coaching_time: Optional[datetime] = None
+        self._last_quiet_engagement_time: Optional[datetime] = None
+        self._last_signal_time: Optional[datetime] = None
+
+        # Cooldowns for proactive messages
+        self.insight_cooldown = timedelta(minutes=30)
+        self.ml_warning_cooldown = timedelta(hours=2)
+        self.coaching_cooldown = timedelta(minutes=15)
+        self.quiet_engagement_threshold = timedelta(minutes=15)
+
         logger.info(f"Pearl Brain initialized - Local: {enable_local}, Claude: {enable_claude}")
 
     def add_message_handler(self, handler: Callable[[PearlMessage], None]):
@@ -122,8 +135,15 @@ class PearlBrain:
         old_state = self._current_state
         self._current_state = state
 
+        # Track signal time for quiet period detection
+        if state.get("last_signal_time"):
+            self._last_signal_time = datetime.now()
+
         # Detect significant changes and narrate
         asyncio.create_task(self._check_state_changes(old_state, state))
+
+        # Run proactive checks
+        asyncio.create_task(self._run_proactive_checks(old_state, state))
 
     async def _check_state_changes(self, old: Dict, new: Dict):
         """Detect and narrate significant state changes"""
@@ -543,3 +563,374 @@ Keep it concise (4-5 sentences total)."""
             logger.error(f"Error generating daily review: {e}")
 
         return None
+
+    # ================================================================
+    # PROACTIVE ENGAGEMENT METHODS (Pearl AI 2.0)
+    # ================================================================
+
+    async def _run_proactive_checks(self, old_state: Dict, new_state: Dict):
+        """Run all proactive engagement checks."""
+        try:
+            # Check ML filter performance warning
+            ml_message = await self.check_ml_performance(new_state)
+            if ml_message:
+                await self._emit_message(ml_message)
+
+            # Check for losing streak coaching
+            coaching_message = await self.check_streak_coaching(new_state)
+            if coaching_message:
+                await self._emit_message(coaching_message)
+
+            # Check for quiet period engagement
+            quiet_message = await self.check_quiet_period(new_state)
+            if quiet_message:
+                await self._emit_message(quiet_message)
+
+        except Exception as e:
+            logger.error(f"Error in proactive checks: {e}")
+
+    async def check_ml_performance(self, state: Dict[str, Any]) -> Optional[PearlMessage]:
+        """
+        Check if ML filter is helping or hurting performance.
+        Proactively warns user when ML has negative lift.
+        """
+        # Check cooldown
+        if self._last_ml_warning_time:
+            elapsed = datetime.now() - self._last_ml_warning_time
+            if elapsed < self.ml_warning_cooldown:
+                return None
+
+        ai_status = state.get("ai_status", {})
+        ml_filter = ai_status.get("ml_filter", {})
+
+        if not ml_filter.get("enabled"):
+            return None
+
+        lift = ml_filter.get("lift", {})
+        if not lift:
+            return None
+
+        lift_ok = lift.get("lift_ok", True)
+        win_rate_pass = lift.get("win_rate_pass", 0)
+        win_rate_fail = lift.get("win_rate_fail", 0)
+        lift_pct = lift.get("lift_pct", 0)
+
+        # ML is blocking winners - this is bad!
+        if not lift_ok and win_rate_fail > win_rate_pass and win_rate_fail > 0.4:
+            self._last_ml_warning_time = datetime.now()
+
+            passed = ml_filter.get("passed", 0)
+            skipped = ml_filter.get("skipped", 0)
+
+            content = (
+                f"Heads up: ML filter is currently filtering OUT winners. "
+                f"Blocked signals had {win_rate_fail*100:.0f}% win rate vs "
+                f"{win_rate_pass*100:.0f}% for passed signals. "
+                f"(ML passed {passed}, blocked {skipped}). "
+                f"Consider toggling it off temporarily."
+            )
+
+            return PearlMessage(
+                content=content,
+                message_type="alert",
+                priority="high",
+                metadata={
+                    "alert_type": "ml_negative_lift",
+                    "win_rate_pass": win_rate_pass,
+                    "win_rate_fail": win_rate_fail,
+                    "lift_pct": lift_pct,
+                }
+            )
+
+        # ML has poor lift (not adding value)
+        elif not lift_ok and abs(lift_pct) < 5 and (passed := ml_filter.get("passed", 0)) > 10:
+            # Only warn occasionally when ML is neutral
+            if self._last_ml_warning_time:
+                # Extra long cooldown for neutral warnings
+                elapsed = datetime.now() - self._last_ml_warning_time
+                if elapsed < timedelta(hours=4):
+                    return None
+
+            self._last_ml_warning_time = datetime.now()
+
+            content = (
+                f"ML filter is active but not showing significant lift yet. "
+                f"Pass rate: {win_rate_pass*100:.0f}%, Block rate: {win_rate_fail*100:.0f}%. "
+                f"It may need more data to calibrate."
+            )
+
+            return PearlMessage(
+                content=content,
+                message_type="insight",
+                priority="normal",
+                metadata={"alert_type": "ml_neutral_lift"}
+            )
+
+        return None
+
+    async def check_streak_coaching(self, state: Dict[str, Any]) -> Optional[PearlMessage]:
+        """
+        Check for losing streaks and offer supportive coaching.
+        Triggers at 2+ consecutive losses.
+        """
+        # Check cooldown
+        if self._last_coaching_time:
+            elapsed = datetime.now() - self._last_coaching_time
+            if elapsed < self.coaching_cooldown:
+                return None
+
+        consecutive_losses = state.get("consecutive_losses", 0)
+
+        if consecutive_losses < 2:
+            return None
+
+        self._last_coaching_time = datetime.now()
+
+        # Get recent losing trades for analysis
+        recent_exits = state.get("recent_exits", [])[:consecutive_losses]
+        directions = [t.get("direction", "?").upper() for t in recent_exits]
+        total_loss = sum(t.get("pnl", 0) for t in recent_exits)
+
+        # Check for patterns
+        regime = state.get("market_regime", {}).get("regime", "unknown")
+        pressure = state.get("buy_sell_pressure", {}).get("bias", "neutral")
+
+        # Analyze if there's a pattern
+        pattern_note = ""
+        if len(set(directions)) == 1:  # All same direction
+            dir_str = directions[0]
+            # Check if direction is opposite to pressure
+            if (dir_str == "LONG" and pressure == "seller") or (dir_str == "SHORT" and pressure == "buyer"):
+                pattern_note = f"All {consecutive_losses} were {dir_str} entries against {pressure} pressure."
+            else:
+                pattern_note = f"All {consecutive_losses} were {dir_str} entries."
+
+        # Use Claude for coaching if available, otherwise template
+        if self.claude_llm:
+            try:
+                prompt = f"""A trader has {consecutive_losses} consecutive losses (${total_loss:.2f} total).
+Market: {regime} regime with {pressure} pressure
+Directions: {', '.join(directions)}
+{f'Pattern: {pattern_note}' if pattern_note else ''}
+
+Generate a supportive, brief coaching message (2-3 sentences):
+- Acknowledge the streak without being negative or dramatic
+- If there's a pattern, point it out gently
+- Suggest an optional 5-minute pause
+- Be supportive, not critical
+
+Example: "Two losses in a row, both LONG in seller pressure. The market might be rotating against us. Want to step back for 5 minutes to let things settle?"
+"""
+                response = await self.claude_llm.generate(
+                    prompt,
+                    system="You are Pearl, a supportive trading coach. Be brief, constructive, and never blame the trader.",
+                    max_tokens=150,
+                )
+                if response:
+                    return PearlMessage(
+                        content=response,
+                        message_type="coaching",
+                        priority="high",
+                        metadata={
+                            "coaching_type": "losing_streak",
+                            "consecutive_losses": consecutive_losses,
+                            "total_loss": total_loss,
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Error generating streak coaching: {e}")
+
+        # Fallback template
+        content = f"{consecutive_losses} losses in a row (${total_loss:.2f}). "
+        if pattern_note:
+            content += f"{pattern_note} "
+        content += "Consider taking a 5-minute breather."
+
+        return PearlMessage(
+            content=content,
+            message_type="coaching",
+            priority="high",
+            metadata={
+                "coaching_type": "losing_streak",
+                "consecutive_losses": consecutive_losses,
+            }
+        )
+
+    async def check_quiet_period(self, state: Dict[str, Any]) -> Optional[PearlMessage]:
+        """
+        Engage during quiet market periods (15+ minutes with no signals).
+        Provides observations, historical patterns, or coaching.
+        """
+        # Check cooldown
+        if self._last_quiet_engagement_time:
+            elapsed = datetime.now() - self._last_quiet_engagement_time
+            if elapsed < self.quiet_engagement_threshold:
+                return None
+
+        # Check how long since last signal
+        if self._last_signal_time:
+            quiet_duration = datetime.now() - self._last_signal_time
+        else:
+            # Use state's quiet period if available
+            quiet_minutes = state.get("quiet_period_minutes", 0)
+            if quiet_minutes < 15:
+                return None
+            quiet_duration = timedelta(minutes=quiet_minutes)
+
+        if quiet_duration < self.quiet_engagement_threshold:
+            return None
+
+        self._last_quiet_engagement_time = datetime.now()
+        quiet_mins = int(quiet_duration.total_seconds() / 60)
+
+        # Get context for insight
+        regime = state.get("market_regime", {}).get("regime", "unknown")
+        daily_pnl = state.get("daily_pnl", 0)
+        daily_wins = state.get("daily_wins", 0)
+        daily_losses = state.get("daily_losses", 0)
+        daily_trades = state.get("daily_trades", 0)
+
+        # Use local LLM for quick engagement
+        if self.local_llm and await self.local_llm.is_available():
+            try:
+                prompt = f"""Market has been quiet for {quiet_mins} minutes.
+Current state: {regime} market, ${daily_pnl:.2f} P&L, {daily_wins}W/{daily_losses}L
+
+Generate ONE brief, helpful observation or tip (1-2 sentences).
+Options:
+- Market observation ("Ranging market = fewer signals, but setups may be cleaner when they come")
+- Quick performance note ("3 wins today with tight stops - good discipline")
+- Friendly check-in ("Quiet market - good time for a stretch!")
+- Pattern observation if interesting
+
+Be conversational, not robotic. Under 2 sentences."""
+
+                response = await self.local_llm.generate(
+                    prompt,
+                    system="You are Pearl, a friendly trading assistant. Keep it brief and natural.",
+                    max_tokens=100,
+                )
+                if response:
+                    return PearlMessage(
+                        content=response,
+                        message_type="insight",
+                        priority="low",
+                        metadata={
+                            "insight_type": "quiet_period",
+                            "quiet_minutes": quiet_mins,
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Error generating quiet period insight: {e}")
+
+        # Fallback template-based engagement
+        if daily_trades > 0:
+            win_rate = daily_wins / daily_trades * 100
+            content = f"Quiet {quiet_mins} minutes. Today so far: ${daily_pnl:.2f} P&L, {win_rate:.0f}% win rate ({daily_wins}/{daily_trades})."
+        else:
+            content = f"No signals in {quiet_mins} minutes. {regime.replace('_', ' ').title()} market - waiting for the right setup."
+
+        return PearlMessage(
+            content=content,
+            message_type="insight",
+            priority="low",
+            metadata={"insight_type": "quiet_period", "quiet_minutes": quiet_mins}
+        )
+
+    def explain_rejections(self, state: Dict[str, Any]) -> str:
+        """
+        Explain why signals were rejected today.
+        Returns a human-readable breakdown of rejection reasons.
+        """
+        ai_status = state.get("ai_status", {})
+        ml_filter = ai_status.get("ml_filter", {})
+        direction_gating = ai_status.get("direction_gating", {})
+        circuit_breaker = state.get("circuit_breaker", {})
+        rejections_24h = state.get("signal_rejections_24h", {})
+
+        reasons = []
+
+        # ML filter rejections
+        ml_skips = ml_filter.get("skipped", 0)
+        if ml_skips > 0:
+            ml_threshold = ml_filter.get("threshold", 0.5)
+            reasons.append(f"{ml_skips} below ML threshold ({ml_threshold*100:.0f}%)")
+
+        # Direction gating blocks
+        gating_blocks = direction_gating.get("blocks", 0)
+        if gating_blocks > 0:
+            blocked_dir = direction_gating.get("blocked_direction", "opposite")
+            reasons.append(f"{gating_blocks} direction gated ({blocked_dir} blocked)")
+
+        # Circuit breaker blocks
+        cb_blocks = circuit_breaker.get("blocks", 0)
+        if cb_blocks > 0:
+            reasons.append(f"{cb_blocks} circuit breaker blocks")
+
+        # Any additional rejection categories from 24h stats
+        if isinstance(rejections_24h, dict):
+            for reason, count in rejections_24h.items():
+                # Skip if already counted above
+                if count > 0 and reason not in ["ml_filter", "direction_gating", "circuit_breaker"]:
+                    reason_str = reason.replace("_", " ").title()
+                    if reason_str not in str(reasons):
+                        reasons.append(f"{count} {reason_str}")
+
+        if not reasons:
+            return "No signals rejected today - all opportunities taken!"
+
+        total = sum(int(r.split()[0]) for r in reasons)
+        summary = f"Signals rejected today ({total} total): " + ", ".join(reasons) + "."
+
+        return summary
+
+    def get_trading_context_summary(self, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Get a summary of current trading context for display.
+        Used by frontend for context panel.
+        """
+        state = state or self._current_state
+
+        daily_pnl = state.get("daily_pnl", 0)
+        daily_wins = state.get("daily_wins", 0)
+        daily_losses = state.get("daily_losses", 0)
+        daily_trades = state.get("daily_trades", 0)
+        active_positions = state.get("active_trades_count", 0)
+
+        regime_info = state.get("market_regime", {})
+        regime = regime_info.get("regime", "unknown").replace("_", " ").title()
+
+        # Last signal time
+        last_signal = None
+        if self._last_signal_time:
+            elapsed = datetime.now() - self._last_signal_time
+            mins = int(elapsed.total_seconds() / 60)
+            if mins < 1:
+                last_signal = "Just now"
+            elif mins < 60:
+                last_signal = f"{mins}m ago"
+            else:
+                hours = mins // 60
+                last_signal = f"{hours}h ago"
+
+        # Active position details
+        position_info = None
+        if active_positions > 0:
+            last_dir = state.get("last_trade_direction", "").upper()
+            last_entry = state.get("last_entry_price", 0)
+            if last_dir and last_entry:
+                position_info = f"{last_dir} @ {last_entry}"
+
+        return {
+            "daily_pnl": daily_pnl,
+            "win_count": daily_wins,
+            "loss_count": daily_losses,
+            "trade_count": daily_trades,
+            "win_rate": (daily_wins / daily_trades * 100) if daily_trades > 0 else 0,
+            "active_positions": active_positions,
+            "position_info": position_info,
+            "market_regime": regime,
+            "last_signal_time": last_signal,
+            "consecutive_wins": state.get("consecutive_wins", 0),
+            "consecutive_losses": state.get("consecutive_losses", 0),
+        }

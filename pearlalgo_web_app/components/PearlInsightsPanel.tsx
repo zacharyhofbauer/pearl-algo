@@ -14,6 +14,20 @@ interface Message {
   priority?: 'low' | 'normal' | 'high' | 'critical'
 }
 
+interface TradingContext {
+  daily_pnl: number
+  win_count: number
+  loss_count: number
+  trade_count: number
+  win_rate: number
+  active_positions: number
+  position_info: string | null
+  market_regime: string
+  last_signal_time: string | null
+  consecutive_wins: number
+  consecutive_losses: number
+}
+
 interface PearlInsightsPanelProps {
   insights: PearlInsights | null
   suggestion: PearlSuggestion | null
@@ -77,6 +91,8 @@ export default function PearlInsightsPanel({
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
+  const [showContext, setShowContext] = useState(false)
+  const [tradingContext, setTradingContext] = useState<TradingContext | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -124,6 +140,29 @@ export default function PearlInsightsPanel({
       scrollToBottom()
     }
   }, [messages, activeTab, scrollToBottom])
+
+  // Fetch trading context periodically when chat tab is active
+  useEffect(() => {
+    if (activeTab !== 'chat') return
+
+    const fetchContext = async () => {
+      try {
+        const response = await fetch('/api/pearl/context')
+        if (response.ok) {
+          const data = await response.json()
+          setTradingContext(data)
+        }
+      } catch (error) {
+        console.debug('Could not fetch trading context:', error)
+      }
+    }
+
+    // Fetch immediately and then every 10 seconds
+    fetchContext()
+    const interval = setInterval(fetchContext, 10000)
+
+    return () => clearInterval(interval)
+  }, [activeTab])
 
   // WebSocket connection for real-time feed
   useEffect(() => {
@@ -547,6 +586,62 @@ export default function PearlInsightsPanel({
         {/* Chat Tab Content */}
         {activeTab === 'chat' && (
           <div className="pearl-chat-content">
+            {/* State Context Panel - Collapsible */}
+            {tradingContext && (
+              <div className="pearl-chat-context">
+                <button
+                  className="context-toggle"
+                  onClick={() => setShowContext(!showContext)}
+                >
+                  <span className="context-summary">
+                    <span className={`context-pnl ${(tradingContext.daily_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                      ${(tradingContext.daily_pnl || 0).toFixed(0)}
+                    </span>
+                    <span className="context-divider">|</span>
+                    <span className="context-wl">
+                      {tradingContext.win_count}W/{tradingContext.loss_count}L
+                    </span>
+                    {tradingContext.active_positions > 0 && (
+                      <>
+                        <span className="context-divider">|</span>
+                        <span className="context-active">{tradingContext.position_info || 'Active'}</span>
+                      </>
+                    )}
+                  </span>
+                  <span className="toggle-icon">{showContext ? '▲' : '▼'}</span>
+                </button>
+
+                {showContext && (
+                  <div className="context-details">
+                    <div className="context-row">
+                      <span className="context-label">Regime</span>
+                      <span className="context-value">{tradingContext.market_regime || 'Unknown'}</span>
+                    </div>
+                    <div className="context-row">
+                      <span className="context-label">Last Signal</span>
+                      <span className="context-value">{tradingContext.last_signal_time || 'None'}</span>
+                    </div>
+                    <div className="context-row">
+                      <span className="context-label">Win Rate</span>
+                      <span className="context-value">{tradingContext.win_rate.toFixed(0)}%</span>
+                    </div>
+                    {tradingContext.consecutive_losses >= 2 && (
+                      <div className="context-row context-warning">
+                        <span className="context-label">Streak</span>
+                        <span className="context-value">{tradingContext.consecutive_losses} losses</span>
+                      </div>
+                    )}
+                    {tradingContext.consecutive_wins >= 3 && (
+                      <div className="context-row context-positive">
+                        <span className="context-label">Streak</span>
+                        <span className="context-value">{tradingContext.consecutive_wins} wins</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="pearl-chat-messages">
               {messages.length === 0 ? (
                 <div className="pearl-chat-empty">

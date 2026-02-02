@@ -4365,6 +4365,105 @@ body {
   animation: pulse 1s ease-in-out infinite;
 }
 
+/* Chat State Context Panel */
+.pearl-chat-context {
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.pearl-chat-context .context-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.pearl-chat-context .context-toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pearl-chat-context .context-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.pearl-chat-context .context-pnl {
+  font-weight: 600;
+}
+
+.pearl-chat-context .context-pnl.positive {
+  color: var(--accent-green);
+}
+
+.pearl-chat-context .context-pnl.negative {
+  color: var(--accent-red);
+}
+
+.pearl-chat-context .context-divider {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.pearl-chat-context .context-wl {
+  color: var(--text-secondary);
+}
+
+.pearl-chat-context .context-active {
+  color: var(--accent-cyan);
+  font-weight: 500;
+}
+
+.pearl-chat-context .toggle-icon {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.pearl-chat-context .context-details {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.pearl-chat-context .context-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.pearl-chat-context .context-label {
+  color: var(--text-tertiary);
+}
+
+.pearl-chat-context .context-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.pearl-chat-context .context-row.context-warning .context-value {
+  color: var(--accent-yellow);
+}
+
+.pearl-chat-context .context-row.context-positive .context-value {
+  color: var(--accent-green);
+}
+
 /* ML Performance Section (within Pearl AI) */
 .ml-performance-section {
   background: var(--bg-elevated);

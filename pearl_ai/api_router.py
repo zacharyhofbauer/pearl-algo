@@ -4,14 +4,20 @@ Pearl AI API Router - FastAPI endpoints for Pearl AI chat and feed.
 Add to your FastAPI app:
     from pearl_ai.api_router import create_pearl_router
     app.include_router(create_pearl_router(brain), prefix="/api/pearl")
+
+Authentication:
+    All endpoints require API key authentication when PEARL_API_AUTH_ENABLED=true.
+    Pass the API key via X-API-Key header.
 """
 
 import asyncio
 import logging
+import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, Security, Query
+from fastapi.security import APIKeyHeader
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -44,12 +50,17 @@ class FeedMessage(BaseModel):
     metadata: Dict[str, Any] = {}
 
 
-def create_pearl_router(brain: PearlBrain) -> APIRouter:
+def create_pearl_router(
+    brain: PearlBrain,
+    auth_dependency: Optional[Callable] = None,
+) -> APIRouter:
     """
     Create the Pearl AI API router.
 
     Args:
         brain: The PearlBrain instance to use for AI operations
+        auth_dependency: Optional authentication dependency to inject.
+                        If None, uses built-in API key authentication.
 
     Returns:
         FastAPI router with Pearl AI endpoints
@@ -58,6 +69,57 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
 
     # Store for WebSocket connections
     websocket_connections: List[WebSocket] = []
+
+    # ---------------------------------------------------------------------------
+    # Authentication Setup
+    # ---------------------------------------------------------------------------
+    _auth_enabled = os.getenv("PEARL_API_AUTH_ENABLED", "true").lower() == "true"
+    _api_keys: set = set()
+
+    def _load_api_keys() -> set:
+        """Load API keys from environment."""
+        keys = set()
+        env_key = os.getenv("PEARL_API_KEY")
+        if env_key:
+            keys.add(env_key.strip())
+
+        # Load from file if specified
+        key_file_path = os.getenv("PEARL_API_KEY_FILE")
+        if key_file_path:
+            from pathlib import Path
+            key_file = Path(key_file_path)
+            if key_file.exists():
+                try:
+                    for line in key_file.read_text().strip().split("\n"):
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            keys.add(line)
+                except Exception as e:
+                    logger.warning(f"Failed to read API key file: {e}")
+        return keys
+
+    if _auth_enabled:
+        _api_keys = _load_api_keys()
+        if not _api_keys:
+            logger.warning("[Pearl AI] Auth enabled but no API keys configured. "
+                          "Set PEARL_API_KEY or PEARL_API_KEY_FILE.")
+
+    api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+    async def verify_api_key(
+        api_key: Optional[str] = Security(api_key_header),
+    ) -> Optional[str]:
+        """Verify API key from header."""
+        if not _auth_enabled:
+            return None
+        if not api_key:
+            raise HTTPException(status_code=401, detail="Missing API key. Provide X-API-Key header.")
+        if api_key not in _api_keys:
+            raise HTTPException(status_code=403, detail="Invalid API key.")
+        return api_key
+
+    # Use provided auth dependency or built-in
+    auth_dep = auth_dependency if auth_dependency else verify_api_key
 
     # Register message handler to broadcast to WebSockets
     async def broadcast_message(message: PearlMessage):
@@ -88,12 +150,14 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
     brain.add_message_handler(broadcast_message)
 
     @router.post("/chat", response_model=ChatResponse)
-    async def chat(request: ChatRequest):
+    async def chat(request: ChatRequest, _: Optional[str] = Depends(auth_dep)):
         """
         Send a message to Pearl AI and get a response.
 
         The AI will automatically determine whether to use local LLM (fast)
         or Claude (deep analysis) based on the complexity of the question.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         try:
             response = await brain.chat(request.message)
@@ -112,11 +176,13 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.get("/feed", response_model=List[FeedMessage])
-    async def get_feed(limit: int = 50):
+    async def get_feed(limit: int = 50, _: Optional[str] = Depends(auth_dep)):
         """
         Get recent Pearl AI messages (narrations, insights, alerts).
 
         Returns the most recent messages from Pearl's feed.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         messages = brain.memory.pearl_messages[-limit:]
 
@@ -134,12 +200,23 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
         ]
 
     @router.websocket("/feed/ws")
-    async def feed_websocket(websocket: WebSocket):
+    async def feed_websocket(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
         """
         WebSocket endpoint for real-time Pearl AI messages.
 
         Connect to receive live narrations, insights, and alerts as they happen.
+
+        Pass api_key as query parameter for authentication when enabled.
         """
+        # Verify API key for WebSocket connections
+        if _auth_enabled:
+            if not api_key:
+                await websocket.close(code=1008, reason="Missing API key")
+                return
+            if api_key not in _api_keys:
+                await websocket.close(code=1008, reason="Invalid API key")
+                return
+
         await websocket.accept()
         websocket_connections.append(websocket)
         logger.info(f"Pearl feed WebSocket connected. Total: {len(websocket_connections)}")
@@ -190,11 +267,13 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
                 websocket_connections.remove(websocket)
 
     @router.post("/insight")
-    async def generate_insight():
+    async def generate_insight(_: Optional[str] = Depends(auth_dep)):
         """
         Trigger Pearl to generate a proactive insight.
 
         Useful for testing or forcing an insight generation.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         insight = await brain.generate_insight()
 
@@ -208,11 +287,13 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
         return {"generated": False, "reason": "No insight generated (cooldown or no data)"}
 
     @router.post("/daily-review")
-    async def generate_daily_review():
+    async def generate_daily_review(_: Optional[str] = Depends(auth_dep)):
         """
         Generate an end-of-day trading review.
 
         Provides a summary of the day's performance with coaching insights.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         review = await brain.daily_review()
 
@@ -226,11 +307,13 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
         return {"generated": False, "reason": "Could not generate review (Claude unavailable?)"}
 
     @router.get("/status")
-    async def get_status():
+    async def get_status(_: Optional[str] = Depends(auth_dep)):
         """
         Get Pearl AI system status.
 
         Shows which LLM backends are available and configuration.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         local_available = False
         claude_available = False
@@ -259,23 +342,50 @@ def create_pearl_router(brain: PearlBrain) -> APIRouter:
         }
 
     @router.get("/conversation")
-    async def get_conversation(limit: int = 20):
+    async def get_conversation(limit: int = 20, _: Optional[str] = Depends(auth_dep)):
         """
         Get recent conversation history.
 
         Returns the most recent user and assistant messages.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         return brain.memory.get_recent_messages(limit)
 
     @router.delete("/conversation")
-    async def clear_conversation():
+    async def clear_conversation(_: Optional[str] = Depends(auth_dep)):
         """
         Clear the current conversation history.
 
         Keeps learned patterns but clears the conversation context.
+
+        Requires X-API-Key header when authentication is enabled.
         """
         brain.memory.clear_session()
         return {"cleared": True}
+
+    @router.get("/context")
+    async def get_trading_context(_: Optional[str] = Depends(auth_dep)):
+        """
+        Get current trading context summary for UI display.
+
+        Returns P&L, win/loss, regime, position info for chat state panel.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.get_trading_context_summary()
+
+    @router.get("/rejections")
+    async def explain_rejections(_: Optional[str] = Depends(auth_dep)):
+        """
+        Get explanation of signal rejections today.
+
+        Returns breakdown of why signals were rejected.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        explanation = brain.explain_rejections(brain._current_state)
+        return {"explanation": explanation}
 
     return router
 

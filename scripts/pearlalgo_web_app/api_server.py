@@ -75,17 +75,32 @@ DEFAULT_MARKET = "NQ"
 # ---------------------------------------------------------------------------
 
 # Environment variables for auth:
-# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: false for local)
+# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: true for security)
 # PEARL_API_KEY=<key>          - Set a specific API key (optional, auto-generates if not set)
 # PEARL_API_KEY_FILE=<path>    - Path to file containing API keys (one per line)
+#
+# To disable auth for local development only:
+#   PEARL_API_AUTH_ENABLED=false
 
-_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "false").lower() == "true"
+_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "true").lower() == "true"
 _api_keys: set = set()
 _api_key_file: Optional[Path] = None
 
-# Security schemes
+# Security schemes - header only (query param removed for security)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+# ---------------------------------------------------------------------------
+# Rate Limiting Configuration
+# ---------------------------------------------------------------------------
+
+# Simple in-memory rate limiter (per-IP, sliding window)
+# For production, consider using Redis-backed rate limiting
+from collections import defaultdict
+import time as time_module
+
+_rate_limit_requests = int(os.getenv("PEARL_RATE_LIMIT_REQUESTS", "100"))  # requests per window
+_rate_limit_window = int(os.getenv("PEARL_RATE_LIMIT_WINDOW", "60"))  # window in seconds
+_rate_limit_store: Dict[str, List[float]] = defaultdict(list)
 
 
 def _load_api_keys() -> set:
@@ -133,33 +148,32 @@ def _init_auth():
 
 async def verify_api_key(
     api_key_header: Optional[str] = Security(api_key_header),
-    api_key_query: Optional[str] = Security(api_key_query),
 ) -> Optional[str]:
     """
-    Verify API key from header or query parameter.
+    Verify API key from header.
 
     Returns the API key if valid, None if auth disabled.
     Raises HTTPException if auth enabled but key invalid/missing.
+
+    Note: Query parameter auth has been removed for security reasons.
+    Always use the X-API-Key header.
     """
     if not _auth_enabled:
         return None
 
-    # Check header first, then query param
-    api_key = api_key_header or api_key_query
-
-    if not api_key:
+    if not api_key_header:
         raise HTTPException(
             status_code=401,
-            detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
+            detail="Missing API key. Provide X-API-Key header.",
         )
 
-    if api_key not in _api_keys:
+    if api_key_header not in _api_keys:
         raise HTTPException(
             status_code=403,
             detail="Invalid API key.",
         )
 
-    return api_key
+    return api_key_header
 
 
 # Dependency for protected routes
@@ -827,6 +841,68 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Rate Limiting Middleware
+# ---------------------------------------------------------------------------
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple in-memory rate limiting middleware (per-IP, sliding window)."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting for health check
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        # Get client IP (handle proxy headers)
+        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = request.client.host if request.client else "unknown"
+
+        # Clean up old requests and check rate limit
+        now = time_module.time()
+        window_start = now - _rate_limit_window
+
+        # Remove old entries
+        _rate_limit_store[client_ip] = [
+            t for t in _rate_limit_store[client_ip] if t > window_start
+        ]
+
+        # Check if over limit
+        if len(_rate_limit_store[client_ip]) >= _rate_limit_requests:
+            return Response(
+                content='{"detail": "Rate limit exceeded. Try again later."}',
+                status_code=429,
+                headers={
+                    "Content-Type": "application/json",
+                    "Retry-After": str(_rate_limit_window),
+                    "X-RateLimit-Limit": str(_rate_limit_requests),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(int(window_start + _rate_limit_window)),
+                },
+            )
+
+        # Record this request
+        _rate_limit_store[client_ip].append(now)
+
+        # Add rate limit headers to response
+        response = await call_next(request)
+        remaining = _rate_limit_requests - len(_rate_limit_store[client_ip])
+        response.headers["X-RateLimit-Limit"] = str(_rate_limit_requests)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
+        response.headers["X-RateLimit-Reset"] = str(int(now + _rate_limit_window))
+
+        return response
+
+
+# Add rate limiting middleware
+app.add_middleware(RateLimitMiddleware)
 
 # ---------------------------------------------------------------------------
 # Pearl AI Router (Optional - graceful degradation if not available)
@@ -2523,6 +2599,170 @@ async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
 
 
 # ---------------------------------------------------------------------------
+# Prometheus Metrics Endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/metrics")
+async def get_metrics(api_key: Optional[str] = Depends(verify_api_key)):
+    """
+    Prometheus-compatible metrics endpoint.
+
+    Returns metrics in Prometheus text format:
+    - pearl_active_positions: Number of currently open positions
+    - pearl_daily_pnl_dollars: Today's P&L in dollars
+    - pearl_daily_trades_total: Total trades today
+    - pearl_daily_wins_total: Winning trades today
+    - pearl_daily_losses_total: Losing trades today
+    - pearl_signal_rate_per_hour: Signal generation rate (last hour)
+    - pearl_websocket_connections: Active WebSocket connections
+    - pearl_api_requests_total: Total API requests (by endpoint)
+    - pearl_agent_running: Whether the agent is running (1/0)
+    - pearl_data_fresh: Whether data is fresh (1/0)
+    - pearl_gateway_status: IBKR gateway status (1=online, 0=offline)
+    - pearl_rate_limit_remaining: Remaining rate limit for client
+    """
+    if _state_dir is None:
+        return Response(
+            content="# No state directory configured\n",
+            media_type="text/plain; version=0.0.4",
+        )
+
+    # Load state
+    state_file = _state_dir / "state.json"
+    state = _load_json_file(state_file)
+
+    # Load daily stats
+    daily_stats = _compute_daily_stats(_state_dir)
+
+    # Count active positions from signals
+    signals_file = _state_dir / "signals.jsonl"
+    active_positions = 0
+    signals_last_hour = 0
+
+    if signals_file.exists():
+        signals = _load_jsonl_file(signals_file, max_lines=500)
+        now_ts = datetime.now(timezone.utc)
+        hour_ago = (now_ts - timedelta(hours=1)).isoformat()
+
+        for s in signals:
+            # Count active (non-exited) positions
+            if s.get("status") != "exited" and s.get("entry_price"):
+                active_positions += 1
+
+            # Count signals in last hour
+            ts = s.get("timestamp", "")
+            if ts and ts >= hour_ago:
+                signals_last_hour += 1
+
+    # Gateway status
+    gateway = _get_gateway_status()
+    gateway_online = 1 if gateway.get("status") == "online" else 0
+
+    # Build Prometheus text output
+    lines = [
+        "# HELP pearl_active_positions Number of currently open positions",
+        "# TYPE pearl_active_positions gauge",
+        f"pearl_active_positions {active_positions}",
+        "",
+        "# HELP pearl_daily_pnl_dollars Today's P&L in dollars",
+        "# TYPE pearl_daily_pnl_dollars gauge",
+        f"pearl_daily_pnl_dollars {daily_stats['daily_pnl']}",
+        "",
+        "# HELP pearl_daily_trades_total Total trades completed today",
+        "# TYPE pearl_daily_trades_total counter",
+        f"pearl_daily_trades_total {daily_stats['daily_trades']}",
+        "",
+        "# HELP pearl_daily_wins_total Winning trades today",
+        "# TYPE pearl_daily_wins_total counter",
+        f"pearl_daily_wins_total {daily_stats['daily_wins']}",
+        "",
+        "# HELP pearl_daily_losses_total Losing trades today",
+        "# TYPE pearl_daily_losses_total counter",
+        f"pearl_daily_losses_total {daily_stats['daily_losses']}",
+        "",
+        "# HELP pearl_signal_rate_per_hour Signals generated in the last hour",
+        "# TYPE pearl_signal_rate_per_hour gauge",
+        f"pearl_signal_rate_per_hour {signals_last_hour}",
+        "",
+        "# HELP pearl_websocket_connections Active WebSocket connections",
+        "# TYPE pearl_websocket_connections gauge",
+        f"pearl_websocket_connections {len(ws_manager.active_connections)}",
+        "",
+        "# HELP pearl_agent_running Whether the trading agent is running (1=yes, 0=no)",
+        "# TYPE pearl_agent_running gauge",
+        f"pearl_agent_running {1 if state.get('running', False) else 0}",
+        "",
+        "# HELP pearl_agent_paused Whether the trading agent is paused (1=yes, 0=no)",
+        "# TYPE pearl_agent_paused gauge",
+        f"pearl_agent_paused {1 if state.get('paused', False) else 0}",
+        "",
+        "# HELP pearl_data_fresh Whether market data is fresh (1=yes, 0=no)",
+        "# TYPE pearl_data_fresh gauge",
+        f"pearl_data_fresh {1 if state.get('data_fresh', False) else 0}",
+        "",
+        "# HELP pearl_gateway_status IBKR gateway connection status (1=online, 0=offline)",
+        "# TYPE pearl_gateway_status gauge",
+        f"pearl_gateway_status {gateway_online}",
+        "",
+        "# HELP pearl_gateway_port_listening IBKR gateway port responding (1=yes, 0=no)",
+        "# TYPE pearl_gateway_port_listening gauge",
+        f"pearl_gateway_port_listening {1 if gateway.get('port_listening', False) else 0}",
+        "",
+    ]
+
+    # Add circuit breaker metrics if available
+    circuit_breaker = state.get("trading_circuit_breaker", {})
+    if circuit_breaker:
+        blocks = circuit_breaker.get("blocks_by_reason", {})
+        lines.extend([
+            "# HELP pearl_circuit_breaker_blocks Signals blocked by circuit breaker (by reason)",
+            "# TYPE pearl_circuit_breaker_blocks counter",
+        ])
+        for reason, count in blocks.items():
+            lines.append(f'pearl_circuit_breaker_blocks{{reason="{reason}"}} {count}')
+        lines.append("")
+
+    # Add performance metrics
+    perf = _compute_performance_stats(_state_dir)
+    if perf:
+        lines.extend([
+            "# HELP pearl_win_rate_24h Win rate in the last 24 hours (percentage)",
+            "# TYPE pearl_win_rate_24h gauge",
+            f"pearl_win_rate_24h {perf.get('24h', {}).get('win_rate', 0)}",
+            "",
+            "# HELP pearl_pnl_24h P&L in the last 24 hours",
+            "# TYPE pearl_pnl_24h gauge",
+            f"pearl_pnl_24h {perf.get('24h', {}).get('pnl', 0)}",
+            "",
+        ])
+
+    # Add risk metrics
+    risk = _get_risk_metrics(_state_dir)
+    if risk:
+        lines.extend([
+            "# HELP pearl_max_drawdown Maximum drawdown in dollars",
+            "# TYPE pearl_max_drawdown gauge",
+            f"pearl_max_drawdown {risk.get('max_drawdown', 0)}",
+            "",
+            "# HELP pearl_profit_factor Profit factor (gross profit / gross loss)",
+            "# TYPE pearl_profit_factor gauge",
+            f"pearl_profit_factor {risk.get('profit_factor', 0) or 0}",
+            "",
+            "# HELP pearl_expectancy Expected value per trade",
+            "# TYPE pearl_expectancy gauge",
+            f"pearl_expectancy {risk.get('expectancy', 0)}",
+            "",
+        ])
+
+    # Return as Prometheus text format
+    from starlette.responses import Response as StarletteResponse
+    return StarletteResponse(
+        content="\n".join(lines) + "\n",
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2552,6 +2792,7 @@ def main():
     print(f"  GET /api/sessions?hours=6")
     print(f"  GET /api/state")
     print(f"  GET /api/trades")
+    print(f"  GET /api/metrics (Prometheus format)")
     print(f"  GET /health")
     print(f"")
     print(f"Tips:")

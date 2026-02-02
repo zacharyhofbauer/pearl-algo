@@ -22,10 +22,17 @@ for infrastructure and deployment wiring (IBKR connectivity).
 - For strategy-specific parameters (symbol, timeframe, risk parameters)
 - For strategy behavior configuration (ATR multipliers, R:R ratios)
 
+**Secret Management:**
+    Secrets are loaded from ~/.config/pearlalgo/secrets.env with chmod 600 permissions.
+    Non-sensitive configuration remains in .env in the project root.
+
+    Secrets include: IBKR_USERNAME, IBKR_PASSWORD, API keys (GROQ, OPENAI, ANTHROPIC),
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PEARL_API_KEY
+
 **Example usage:**
     ```python
     from pearlalgo.config.settings import get_settings
-    
+
     settings = get_settings()
     ibkr_host = settings.ib_host
     ibkr_port = settings.ib_port
@@ -34,13 +41,23 @@ for infrastructure and deployment wiring (IBKR connectivity).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load `.env` manually so non-prefixed vars (e.g. `IBKR_HOST`) are available in `os.environ`.
+# Default secrets file location
+SECRETS_FILE_PATH = Path.home() / ".config" / "pearlalgo" / "secrets.env"
+
+# Load secrets from secure location first, then project .env
+# This allows secrets to be stored separately with restricted permissions
 try:
     from dotenv import load_dotenv
+    # Load secrets first (higher priority for sensitive values)
+    secrets_path = os.getenv("PEARLALGO_SECRETS_FILE", str(SECRETS_FILE_PATH))
+    if Path(secrets_path).exists():
+        load_dotenv(secrets_path)
+    # Then load project .env (non-sensitive config, won't override secrets)
     load_dotenv()
 except ImportError:
     pass  # dotenv not required, but helpful
