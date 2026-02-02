@@ -10,6 +10,7 @@ interface DataFreshnessIndicatorProps {
   isLoading: boolean
   staleThresholdSeconds?: number
   onRefresh?: () => void
+  variant?: 'full' | 'compact' | 'floating'
 }
 
 export default function DataFreshnessIndicator({
@@ -19,9 +20,11 @@ export default function DataFreshnessIndicator({
   isLoading,
   staleThresholdSeconds = 60,
   onRefresh,
+  variant = 'compact',
 }: DataFreshnessIndicatorProps) {
   const [secondsAgo, setSecondsAgo] = useState<number>(0)
   const [pulseKey, setPulseKey] = useState<number>(0)
+  const [isExpanded, setIsExpanded] = useState(false)
 
   // Update seconds ago every second
   useEffect(() => {
@@ -48,10 +51,10 @@ export default function DataFreshnessIndicator({
 
   // Format time ago
   const formatTimeAgo = (seconds: number): string => {
-    if (seconds < 5) return 'just now'
-    if (seconds < 60) return `${seconds}s ago`
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s ago`
-    return `${Math.floor(seconds / 3600)}h ago`
+    if (seconds < 5) return 'now'
+    if (seconds < 60) return `${seconds}s`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+    return `${Math.floor(seconds / 3600)}h`
   }
 
   // Get status color class
@@ -84,7 +87,7 @@ export default function DataFreshnessIndicator({
       case 'live':
         return { label: 'LIVE', className: 'source-live' }
       case 'cached':
-        return { label: 'CACHED', className: 'source-cached' }
+        return { label: 'CACHE', className: 'source-cached' }
       default:
         return { label: '?', className: 'source-unknown' }
     }
@@ -94,33 +97,123 @@ export default function DataFreshnessIndicator({
   const sourceDisplay = getSourceDisplay()
   const statusClass = getStatusClass()
 
+  // Compact inline version - just dot + time
+  if (variant === 'compact') {
+    return (
+      <div
+        className={`freshness-compact ${statusClass}`}
+        onClick={() => setIsExpanded(!isExpanded)}
+        title="Click for details"
+      >
+        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+        <span className="freshness-time-compact">{formatTimeAgo(secondsAgo)}</span>
+        {isLoading && <span className="freshness-loading-dot"></span>}
+
+        {/* Expandable panel */}
+        {isExpanded && (
+          <div className="freshness-expanded-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="freshness-panel-row">
+              <span className="panel-label">Status</span>
+              <span className={`panel-value ${statusClass}`}>
+                {isStale ? 'STALE' : isWarning ? 'WARNING' : 'FRESH'}
+              </span>
+            </div>
+            <div className="freshness-panel-row">
+              <span className="panel-label">Updated</span>
+              <span className="panel-value">{formatTimeAgo(secondsAgo)} ago</span>
+            </div>
+            <div className="freshness-panel-row">
+              <span className="panel-label">Source</span>
+              <span className={`panel-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
+            </div>
+            <div className="freshness-panel-row">
+              <span className="panel-label">Connection</span>
+              <span className={`panel-badge ${wsDisplay.className}`}>{wsDisplay.icon} {wsDisplay.label}</span>
+            </div>
+            {onRefresh && (
+              <button
+                className={`freshness-panel-refresh ${isLoading ? 'spinning' : ''}`}
+                onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Refreshing...' : '↻ Refresh Now'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Floating version - under price with expand
+  if (variant === 'floating') {
+    return (
+      <div className={`freshness-floating ${statusClass} ${isExpanded ? 'expanded' : ''}`}>
+        <div
+          className="freshness-floating-header"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+          <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
+          <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
+          <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.icon}</span>
+          {onRefresh && (
+            <button
+              className={`freshness-refresh-btn ${isLoading ? 'spinning' : ''}`}
+              onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+              disabled={isLoading}
+              title="Refresh"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {isExpanded && (
+          <div className="freshness-floating-details">
+            <div className="detail-row">
+              <span>Last Update</span>
+              <span>{lastUpdate ? lastUpdate.toLocaleTimeString() : 'Never'}</span>
+            </div>
+            <div className="detail-row">
+              <span>Data Age</span>
+              <span className={statusClass}>{secondsAgo}s</span>
+            </div>
+            <div className="detail-row">
+              <span>Stale After</span>
+              <span>{staleThresholdSeconds}s</span>
+            </div>
+            <div className="detail-row">
+              <span>WebSocket</span>
+              <span className={wsDisplay.className}>{wsStatus}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Full version (original)
   return (
     <div className={`data-freshness-indicator ${statusClass}`}>
-      {/* Heartbeat Pulse */}
       <div className="freshness-heartbeat" key={pulseKey}>
         <span className={`heartbeat-dot ${isLoading ? 'loading' : ''}`}></span>
       </div>
-
-      {/* Time Since Update */}
       <div className="freshness-time">
         <span className="time-label">Updated</span>
         <span className={`time-value ${statusClass}`}>
           {lastUpdate ? formatTimeAgo(secondsAgo) : 'never'}
         </span>
       </div>
-
-      {/* Data Source Badge */}
       <div className={`freshness-source ${sourceDisplay.className}`}>
         {sourceDisplay.label}
       </div>
-
-      {/* WebSocket Status */}
       <div className={`freshness-ws ${wsDisplay.className}`} title={`WebSocket: ${wsStatus}`}>
         <span className="ws-icon">{wsDisplay.icon}</span>
         <span className="ws-label">{wsDisplay.label}</span>
       </div>
-
-      {/* Refresh Button */}
       {onRefresh && (
         <button
           className={`freshness-refresh ${isLoading ? 'spinning' : ''}`}
@@ -133,8 +226,6 @@ export default function DataFreshnessIndicator({
           </svg>
         </button>
       )}
-
-      {/* Loading Spinner Overlay */}
       {isLoading && (
         <div className="freshness-loading-overlay">
           <div className="loading-spinner"></div>

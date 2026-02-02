@@ -107,32 +107,32 @@ export default function PearlAlgoWebApp() {
     const lines: PositionLine[] = []
 
     positions.forEach((pos) => {
-      // Entry price line - subtle cyan/pink, no label
+      // Entry price line - cyan/pink, tiny symbol on line only (no axis label)
       lines.push({
         price: pos.entry_price,
-        color: pos.direction === 'long' ? 'rgba(0, 212, 255, 0.6)' : 'rgba(255, 110, 199, 0.6)',
-        title: '',  // No title to reduce clutter
+        color: pos.direction === 'long' ? 'rgba(0, 212, 255, 0.7)' : 'rgba(255, 110, 199, 0.7)',
+        title: pos.direction === 'long' ? '↑' : '↓',
         lineStyle: 2, // dashed
-        axisLabelVisible: false,  // Hide price label on axis
+        axisLabelVisible: false,  // Hide price on axis - smaller than live price
       })
 
-      // Stop loss line - subtle red
+      // Stop loss line - red, tiny symbol only
       if (pos.stop_loss) {
         lines.push({
           price: pos.stop_loss,
-          color: 'rgba(255, 68, 68, 0.5)',
-          title: '',
+          color: 'rgba(255, 68, 68, 0.6)',
+          title: '×',
           lineStyle: 1, // dotted
           axisLabelVisible: false,
         })
       }
 
-      // Take profit line - subtle green
+      // Take profit line - green, tiny symbol only
       if (pos.take_profit) {
         lines.push({
           price: pos.take_profit,
-          color: 'rgba(0, 255, 136, 0.5)',
-          title: '',
+          color: 'rgba(0, 255, 136, 0.6)',
+          title: '✓',
           lineStyle: 1, // dotted
           axisLabelVisible: false,
         })
@@ -489,26 +489,38 @@ export default function PearlAlgoWebApp() {
             </div>
           </div>
 
-          {/* Stats */}
-          {agentState && (
-            <div className="header-stats-row">
-              <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                <span className="stat-label">P&L</span>
-                <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
-              </div>
-              <div className="stat-item trades">
-                <span className="stat-label">W/L</span>
-                <span className="stat-value">
-                  <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
-                </span>
-              </div>
-              {agentState.active_trades_count > 0 && (
-                <div className="stat-item positions">
-                  <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
+          {/* Stats with Freshness Indicator */}
+          <div className="header-stats-row">
+            {agentState && (
+              <>
+                <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                  <span className="stat-label">P&L</span>
+                  <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
                 </div>
-              )}
-            </div>
-          )}
+                <div className="stat-item trades">
+                  <span className="stat-label">W/L</span>
+                  <span className="stat-value">
+                    <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
+                  </span>
+                </div>
+                {agentState.active_trades_count > 0 && (
+                  <div className="stat-item positions">
+                    <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
+                  </div>
+                )}
+              </>
+            )}
+            {/* Floating Freshness Indicator */}
+            <DataFreshnessIndicator
+              lastUpdate={lastUpdate}
+              wsStatus={wsStatus}
+              dataSource={dataSource}
+              isLoading={isFetching}
+              staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
+              onRefresh={handleForceRefresh}
+              variant="floating"
+            />
+          </div>
 
           {/* Timeframe */}
           <div className="header-timeframe">
@@ -522,16 +534,6 @@ export default function PearlAlgoWebApp() {
               </button>
             ))}
           </div>
-
-          {/* Data Freshness Indicator */}
-          <DataFreshnessIndicator
-            lastUpdate={lastUpdate}
-            wsStatus={wsStatus}
-            dataSource={dataSource}
-            isLoading={isFetching}
-            staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
-            onRefresh={handleForceRefresh}
-          />
         </div>
 
         {/* Secondary Row - Badges, Health, Legends */}
