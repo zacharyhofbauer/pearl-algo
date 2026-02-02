@@ -183,6 +183,7 @@ export default function PearlAlgoWebApp() {
               recentExits={agentState.recent_exits}
               onChartReady={setMainChartApi}
               onForceRefresh={forceRefresh}
+              marketStatus={marketStatus}
             />
           }
           rsiSection={null}
@@ -315,6 +316,7 @@ export default function PearlAlgoWebApp() {
         recentExits={agentState?.recent_exits}
         onChartReady={setMainChartApi}
         onForceRefresh={forceRefresh}
+        marketStatus={marketStatus}
       />
 
       {/* Positions Strip - detailed view of open positions */}

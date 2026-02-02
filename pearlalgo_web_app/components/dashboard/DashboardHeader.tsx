@@ -7,11 +7,6 @@ import {
   useUIStore,
   selectAIMode,
   selectRegimeBadge,
-  selectDailyStats,
-  selectActiveTradesCount,
-  selectIsRunning,
-  selectGatewayStatus,
-  selectAIStatus,
   type Timeframe,
 } from '@/stores'
 import { formatPnL } from '@/lib/formatters'
@@ -51,15 +46,8 @@ interface DashboardHeaderProps {
 }
 
 export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) {
-  // Agent store - use fine-grained selectors to minimize re-renders
-  const dailyStats = useAgentStore(selectDailyStats)
-  const activeTradesCount = useAgentStore(selectActiveTradesCount)
-  const isRunning = useAgentStore(selectIsRunning)
-  const isPaused = useAgentStore((s) => s.agentState?.paused ?? false)
-  const dataFresh = useAgentStore((s) => s.agentState?.data_fresh ?? false)
-  const futuresMarketOpen = useAgentStore((s) => s.agentState?.futures_market_open ?? false)
-  const gatewayStatus = useAgentStore(selectGatewayStatus)
-  const aiStatus = useAgentStore(selectAIStatus)
+  // Agent store
+  const agentState = useAgentStore((s) => s.agentState)
   const aiMode = useAgentStore(selectAIMode)
   const regimeBadge = useAgentStore(selectRegimeBadge)
 
@@ -72,7 +60,7 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
   const lastUpdate = useUIStore((s) => s.lastUpdate)
 
   const countdown = formatMarketCountdown(marketStatus)
-  const dirGate = aiStatus?.direction_gating
+  const dirGate = agentState?.ai_status?.direction_gating
 
   const isDataStale = () => {
     if (!lastUpdate) return true
@@ -91,11 +79,11 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
           <span className="uw-symbol">MNQ</span>
         </div>
         <div className="uw-stats">
-          <span className={`uw-pnl ${dailyStats.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-            {dailyStats.daily_pnl >= 0 ? '+' : ''}${dailyStats.daily_pnl.toFixed(0)}
+          <span className={`uw-pnl ${(agentState?.daily_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+            {(agentState?.daily_pnl || 0) >= 0 ? '+' : ''}${(agentState?.daily_pnl || 0).toFixed(0)}
           </span>
           <span className="uw-trades">
-            {dailyStats.daily_wins}W/{dailyStats.daily_losses}L
+            {agentState?.daily_wins || 0}W/{agentState?.daily_losses || 0}L
           </span>
         </div>
         <div className="uw-timeframe">
@@ -132,27 +120,29 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
         </div>
 
         {/* Stats - with ARIA live region for real-time updates */}
-        <div className="header-stats-row" aria-live="polite" aria-atomic="true">
-          <div className={`stat-item pnl ${dailyStats.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-            <span className="stat-label">P&L</span>
-            <span className="stat-value" aria-label={`Daily P&L: ${formatPnL(dailyStats.daily_pnl)}`}>
-              {formatPnL(dailyStats.daily_pnl)}
-            </span>
-          </div>
-          <div className="stat-item trades">
-            <span className="stat-label">W/L</span>
-            <span className="stat-value" aria-label={`Wins: ${dailyStats.daily_wins}, Losses: ${dailyStats.daily_losses}`}>
-              <span className="win">{dailyStats.daily_wins}</span>/<span className="loss">{dailyStats.daily_losses}</span>
-            </span>
-          </div>
-          {activeTradesCount > 0 && (
-            <div className="stat-item positions">
-              <span className="stat-value highlight" aria-label={`${activeTradesCount} active positions`}>
-                {activeTradesCount} pos
+        {agentState && (
+          <div className="header-stats-row" aria-live="polite" aria-atomic="true">
+            <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+              <span className="stat-label">P&L</span>
+              <span className="stat-value" aria-label={`Daily P&L: ${formatPnL(agentState.daily_pnl)}`}>
+                {formatPnL(agentState.daily_pnl)}
               </span>
             </div>
-          )}
-        </div>
+            <div className="stat-item trades">
+              <span className="stat-label">W/L</span>
+              <span className="stat-value" aria-label={`Wins: ${agentState.daily_wins}, Losses: ${agentState.daily_losses}`}>
+                <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
+              </span>
+            </div>
+            {agentState.active_trades_count > 0 && (
+              <div className="stat-item positions">
+                <span className="stat-value highlight" aria-label={`${agentState.active_trades_count} active positions`}>
+                  {agentState.active_trades_count} pos
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Timeframe */}
         <div className="header-timeframe">
@@ -172,13 +162,15 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
       <div className="header-row-secondary">
         {/* Badges - with ARIA live region for status changes */}
         <div className="header-badges" role="status" aria-live="polite">
-          <span
-            className={`badge agent-badge ${isRunning ? (isPaused ? 'paused' : 'running') : 'stopped'}`}
-            aria-label={`Agent status: ${isRunning ? (isPaused ? 'paused' : 'running') : 'stopped'}`}
-          >
-            <span className="badge-dot" aria-hidden="true"></span>
-            {isRunning ? (isPaused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
-          </span>
+          {agentState && (
+            <span
+              className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+              aria-label={`Agent status: ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+            >
+              <span className="badge-dot" aria-hidden="true"></span>
+              {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
+            </span>
+          )}
           {aiMode && (
             <span className={`badge ai-badge ${aiMode}`}>
               🧠 {aiMode.toUpperCase()}
@@ -198,20 +190,22 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
         </div>
 
         {/* Health Indicators */}
-        <div className="header-health">
-          <span className={`health-dot ${gatewayStatus?.status === 'online' ? 'ok' : 'error'}`}></span>
-          <span className="health-label">GW</span>
-          <span className={`health-dot ${dataFresh ? 'ok' : 'error'}`}></span>
-          <span className="health-label">Data</span>
-          <span className={`health-dot ${futuresMarketOpen ? 'ok' : 'warning'}`}></span>
-          <span className="health-label">Mkt</span>
-          {dirGate?.enabled && (
-            <>
-              <span className={`health-dot ${dirGate.blocks > 0 ? 'warning' : 'ok'}`}></span>
-              <span className="health-label">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
-            </>
-          )}
-        </div>
+        {agentState && (
+          <div className="header-health">
+            <span className={`health-dot ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}></span>
+            <span className="health-label">GW</span>
+            <span className={`health-dot ${agentState.data_fresh ? 'ok' : 'error'}`}></span>
+            <span className="health-label">Data</span>
+            <span className={`health-dot ${agentState.futures_market_open ? 'ok' : 'warning'}`}></span>
+            <span className="health-label">Mkt</span>
+            {dirGate?.enabled && (
+              <>
+                <span className={`health-dot ${dirGate.blocks > 0 ? 'warning' : 'ok'}`}></span>
+                <span className="health-label">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Chart Legend */}
         <div className="header-legend">

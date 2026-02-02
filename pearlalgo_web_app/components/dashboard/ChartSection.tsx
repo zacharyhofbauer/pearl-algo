@@ -6,7 +6,7 @@ import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import OpenPositionsStrip from '@/components/OpenPositionsStrip'
 import { RSIPanel, MACDPanel, VolumeProfilePanel } from '@/components/indicators'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { useChartStore, useChartSettingsStore, useUIStore, selectChartsLocked, type PositionLine, type Position, type RecentExit } from '@/stores'
+import { useChartStore, useChartSettingsStore, useUIStore, selectChartsLocked, type PositionLine, type Position, type RecentExit, type MarketStatus } from '@/stores'
 import type { IChartApi } from 'lightweight-charts'
 
 // Stale threshold in seconds
@@ -19,6 +19,7 @@ interface ChartSectionProps {
   recentExits?: RecentExit[]
   onChartReady: (api: IChartApi | null) => void
   onForceRefresh: () => void
+  marketStatus?: MarketStatus | null
 }
 
 export function ChartSection({
@@ -28,6 +29,7 @@ export function ChartSection({
   recentExits = [],
   onChartReady,
   onForceRefresh,
+  marketStatus,
 }: ChartSectionProps) {
   // Chart store
   const candles = useChartStore((s) => s.candles)
@@ -70,14 +72,29 @@ export function ChartSection({
           />
         </div>
         <div className={`chart-container ${chartsLocked ? 'locked' : ''}`}>
-          {chartLoading && (
+          {/* Market Closed State - show when market is closed and no data */}
+          {marketStatus && !marketStatus.is_open && candles.length === 0 && (
+            <div className="market-closed-container">
+              <Image src="/pearl-emoji.png" alt="PEARL" className="market-closed-logo" width={64} height={64} />
+              <div className="market-closed-title">Market Closed</div>
+              <div className="market-closed-reason">{marketStatus.close_reason}</div>
+              {marketStatus.next_open && (
+                <div className="market-closed-next">
+                  Chart will resume when market opens
+                </div>
+              )}
+            </div>
+          )}
+          {/* Loading State - only when market is open or status unknown */}
+          {chartLoading && (!marketStatus || marketStatus.is_open) && (
             <div className="loading-screen">
               <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
               <div className="loading-text">Loading Live Data...</div>
               <div className="loading-spinner"></div>
             </div>
           )}
-          {chartError && !chartLoading && (
+          {/* Error State - only when market is open */}
+          {chartError && !chartLoading && (!marketStatus || marketStatus.is_open) && (
             <div className="no-data-container">
               <Image src="/pearl-emoji.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
               <div className="no-data-title">No Live Data</div>
@@ -87,7 +104,8 @@ export function ChartSection({
               </div>
             </div>
           )}
-          {!chartLoading && !chartError && candles.length > 0 && (
+          {/* Chart - show when we have data (even if market closed) */}
+          {candles.length > 0 && (
             <ErrorBoundary
               panelName="Chart"
               fallback={
