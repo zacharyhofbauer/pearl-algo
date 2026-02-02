@@ -188,6 +188,9 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # Repo knowledge index + RAG integration
     "knowledge",
     "challenge",
+    # AI integrations
+    "ai_chat",
+    "ai_briefings",
 })
 
 # Config keys expected to be specific types after env substitution
