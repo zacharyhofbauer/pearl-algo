@@ -209,8 +209,9 @@ export default function PearlAlgoWebApp() {
       setIsLive(true)
       setChartError(null)
 
-      // Only clear loading if we have sufficient data
-      if (candlesData.length >= MIN_BARS * 0.8) {
+      // Always clear loading when we have data (even if less than ideal)
+      // This fixes timeframe buttons getting stuck in loading state
+      if (candlesData.length > 0) {
         setChartLoading(false)
       }
     } catch (err) {

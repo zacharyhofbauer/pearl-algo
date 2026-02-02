@@ -107,9 +107,9 @@ export const useChartStore = create<ChartStore>((set) => ({
     set({
       timeframe,
       isLoading: true,
-      candles: [],
-      indicators: {},
-      lastDataHash: '',
+      // Keep existing data visible while loading new timeframe
+      // This prevents the flash/loading screen during timeframe changes
+      lastDataHash: '', // Force data refresh
     }),
 
   setBarCount: (barCount) => set({ barCount }),
