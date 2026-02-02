@@ -2,6 +2,18 @@
  * Badge Components
  *
  * Status badges, chips, and indicator styling.
+ *
+ * MIGRATION GUIDE (U1.3):
+ * The canonical StatusBadge component is at components/ui/StatusBadge.tsx
+ *
+ * CANONICAL CLASSES:
+ * - .status-badge (base)
+ * - .status-badge-dot (dot variant)
+ * - .status-badge-pill (pill variant)
+ * - .status-badge-chip (chip variant)
+ * - .status-chip (legacy, but standardized)
+ *
+ * Use the StatusBadge component for consistency.
  */
 
 /* ===================================

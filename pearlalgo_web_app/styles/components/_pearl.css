@@ -1,0 +1,331 @@
+/**
+ * Pearl AI Components
+ *
+ * Styles for Pearl AI chat, settings, and feedback components.
+ * Migrated from globals.css as part of CSS modularization (U1.1).
+ */
+
+/* ===================================
+   PEARL SETTINGS TAB (I3.2)
+   =================================== */
+.pearl-settings-content {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  cursor: pointer;
+}
+
+.settings-toggle .toggle-label {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+.settings-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.settings-toggle .toggle-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  transition: background var(--duration-fast), border-color var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.settings-toggle .toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-tertiary);
+  border-radius: 50%;
+  transition: transform var(--duration-fast), background var(--duration-fast);
+}
+
+.settings-toggle input:checked + .toggle-slider {
+  background: rgba(var(--accent-cyan-rgb), 0.2);
+  border-color: var(--accent-cyan);
+}
+
+.settings-toggle input:checked + .toggle-slider::after {
+  transform: translateX(16px);
+  background: var(--accent-cyan);
+}
+
+.settings-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+
+.settings-select .select-label {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+
+.settings-select select {
+  appearance: none;
+  padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-7);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%237a8290' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.settings-select select:focus {
+  outline: none;
+  border-color: var(--accent-cyan);
+}
+
+.settings-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) 0;
+}
+
+.settings-info .info-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+.settings-info .info-value {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.settings-info .info-mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+/* Settings tab button */
+.pearl-tab-settings {
+  min-width: 32px;
+  padding: var(--space-2) var(--space-4) !important;
+  font-size: var(--font-size-lg) !important;
+}
+
+/* ===================================
+   FEEDBACK MODAL (I3.1)
+   =================================== */
+.pearl-feedback-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  animation: fadeIn var(--duration-fast) ease-out;
+}
+
+.pearl-feedback-modal {
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: slideUp var(--duration-normal) ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.feedback-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.feedback-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.feedback-close {
+  background: none;
+  border: none;
+  padding: var(--space-2);
+  font-size: var(--font-size-lg);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast);
+}
+
+.feedback-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.feedback-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.feedback-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.feedback-option:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--text-tertiary);
+}
+
+.feedback-option.selected {
+  background: rgba(var(--accent-cyan-rgb), 0.1);
+  border-color: var(--accent-cyan);
+}
+
+.feedback-option .option-icon {
+  font-size: var(--font-size-xl);
+}
+
+.feedback-option .option-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.feedback-option.selected .option-label {
+  color: var(--accent-cyan);
+}
+
+.feedback-comment {
+  width: calc(100% - var(--space-5) * 2);
+  margin: 0 var(--space-5) var(--space-4);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  resize: none;
+}
+
+.feedback-comment:focus {
+  outline: none;
+  border-color: var(--accent-cyan);
+}
+
+.feedback-comment::placeholder {
+  color: var(--text-tertiary);
+}
+
+.feedback-actions {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.feedback-skip {
+  flex: 1;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.feedback-skip:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-tertiary);
+}
+
+.feedback-submit {
+  flex: 1;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--bg-primary);
+  background: var(--accent-cyan);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.feedback-submit:hover:not(:disabled) {
+  background: #00b8e0;
+}
+
+.feedback-submit:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}

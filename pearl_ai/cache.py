@@ -3,17 +3,36 @@ Pearl AI Response Cache - Semantic Caching with TTL
 
 Caches LLM responses to reduce redundant API calls.
 Uses semantic hashing based on query and state context.
+Includes request deduplication to prevent duplicate LLM calls.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable, Awaitable
+from enum import Enum
 import hashlib
 import json
 import logging
+import asyncio
 from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
+
+
+class CacheMissReason(Enum):
+    """Categorizes why a cache miss occurred."""
+    EXPIRED = "expired"
+    NEVER_SEEN = "never_seen"
+    SKIPPED_PATTERN = "skipped_pattern"
+    STATE_CHANGED = "state_changed"
+
+
+@dataclass
+class CacheMissInfo:
+    """Information about a cache miss."""
+    reason: CacheMissReason
+    key: Optional[str] = None
+    context_hash: Optional[str] = None
 
 
 @dataclass
@@ -23,6 +42,7 @@ class CacheEntry:
     created_at: datetime
     ttl_seconds: int
     hit_count: int = 0
+    context_hash: str = ""  # Store context hash for state change detection
 
     @property
     def is_expired(self) -> bool:
@@ -33,6 +53,89 @@ class CacheEntry:
     def age_seconds(self) -> float:
         """Get age of entry in seconds."""
         return (datetime.now() - self.created_at).total_seconds()
+
+
+class RequestDeduplicator:
+    """
+    Deduplicates concurrent requests within a time window.
+
+    Prevents the same query from hitting the LLM multiple times
+    when rapid-fire requests come in (e.g., user double-clicks).
+    """
+
+    def __init__(self, window_ms: int = 2000):
+        """
+        Initialize the deduplicator.
+
+        Args:
+            window_ms: Time window in milliseconds to consider requests as duplicates
+        """
+        self.window_ms = window_ms
+        self._pending: Dict[str, asyncio.Future] = {}
+        self._cleanup_task: Optional[asyncio.Task] = None
+
+    async def dedupe(
+        self,
+        key: str,
+        generator: Callable[[], Awaitable[str]],
+    ) -> str:
+        """
+        Deduplicate a request.
+
+        If a request with the same key is already pending, wait for its result.
+        Otherwise, execute the generator and share the result with any
+        concurrent requests that come in during execution.
+
+        Args:
+            key: Unique key for this request (usually cache key)
+            generator: Async function that generates the response
+
+        Returns:
+            The response string (either freshly generated or shared from pending)
+        """
+        # Check if there's already a pending request for this key
+        if key in self._pending:
+            logger.debug(f"Dedup hit: waiting for pending request {key[:16]}...")
+            try:
+                return await self._pending[key]
+            except Exception:
+                # If the pending request failed, we'll try again
+                pass
+
+        # Create a future for this request
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[key] = future
+
+        try:
+            # Execute the generator
+            result = await generator()
+            future.set_result(result)
+            return result
+        except Exception as e:
+            future.set_exception(e)
+            raise
+        finally:
+            # Schedule cleanup after the window expires
+            asyncio.get_event_loop().call_later(
+                self.window_ms / 1000,
+                self._cleanup_key,
+                key
+            )
+
+    def _cleanup_key(self, key: str) -> None:
+        """Remove a key from pending requests."""
+        self._pending.pop(key, None)
+
+    def is_pending(self, key: str) -> bool:
+        """Check if a request is currently pending."""
+        return key in self._pending
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get deduplication statistics."""
+        return {
+            "pending_requests": len(self._pending),
+            "window_ms": self.window_ms,
+        }
 
 
 class ResponseCache:
@@ -77,6 +180,17 @@ class ResponseCache:
         self._hits = 0
         self._misses = 0
         self._evictions = 0
+
+        # Cache miss categorization (A2.4)
+        self._misses_by_reason: Dict[str, int] = {
+            CacheMissReason.EXPIRED.value: 0,
+            CacheMissReason.NEVER_SEEN.value: 0,
+            CacheMissReason.SKIPPED_PATTERN.value: 0,
+            CacheMissReason.STATE_CHANGED.value: 0,
+        }
+
+        # Track last context hash for state change detection
+        self._last_context_hash: Optional[str] = None
 
     def _normalize_query(self, query: str) -> str:
         """Normalize query for consistent hashing."""
@@ -162,6 +276,7 @@ class ResponseCache:
         # Skip cache for certain query types
         if self._should_skip_cache(query):
             self._misses += 1
+            self._misses_by_reason[CacheMissReason.SKIPPED_PATTERN.value] += 1
             return None
 
         context_hash = self._context_hash(state)
@@ -171,12 +286,27 @@ class ResponseCache:
 
         if entry is None:
             self._misses += 1
+            # Determine if it's a state change or never seen
+            # Check if we have any entry for this normalized query with different context
+            normalized = self._normalize_query(query)
+            query_seen_before = any(
+                self._normalize_query_from_key_partial(k, normalized)
+                for k in self.cache.keys()
+            )
+            if query_seen_before:
+                self._misses_by_reason[CacheMissReason.STATE_CHANGED.value] += 1
+                logger.debug(f"Cache miss: state changed for query")
+            else:
+                self._misses_by_reason[CacheMissReason.NEVER_SEEN.value] += 1
+                logger.debug(f"Cache miss: never seen query")
             return None
 
         if entry.is_expired:
             # Remove expired entry
             del self.cache[key]
             self._misses += 1
+            self._misses_by_reason[CacheMissReason.EXPIRED.value] += 1
+            logger.debug(f"Cache miss: expired entry (age: {entry.age_seconds:.0f}s)")
             return None
 
         # Cache hit - move to end (LRU) and increment hit count
@@ -186,6 +316,13 @@ class ResponseCache:
 
         logger.debug(f"Cache hit for query (age: {entry.age_seconds:.0f}s)")
         return entry.response
+
+    def _normalize_query_from_key_partial(self, key: str, normalized_query: str) -> bool:
+        """Check if a cache key might match a normalized query (heuristic)."""
+        # Since keys are hashes, we can't reverse them, but we track this
+        # by storing normalized queries. For now, return False as we'd need
+        # a reverse index for accurate detection.
+        return False
 
     def set(
         self,
@@ -222,6 +359,7 @@ class ResponseCache:
             response=response,
             created_at=datetime.now(),
             ttl_seconds=ttl,
+            context_hash=context_hash,
         )
 
         # Add to cache (will be at end = most recently used)
@@ -292,6 +430,13 @@ class ResponseCache:
         ages = [entry.age_seconds for entry in self.cache.values()]
         avg_age = sum(ages) / len(ages) if ages else 0
 
+        # Calculate miss reason percentages
+        total_misses = self._misses if self._misses > 0 else 1
+        misses_by_reason_pct = {
+            reason: round(count / total_misses * 100, 1)
+            for reason, count in self._misses_by_reason.items()
+        }
+
         return {
             "size": len(self.cache),
             "max_size": self.max_size,
@@ -300,6 +445,8 @@ class ResponseCache:
             "hit_rate": round(hit_rate, 3),
             "evictions": self._evictions,
             "avg_entry_age_seconds": round(avg_age, 1),
+            "misses_by_reason": self._misses_by_reason.copy(),
+            "misses_by_reason_pct": misses_by_reason_pct,
         }
 
     def get_entries(self) -> List[Dict[str, Any]]:

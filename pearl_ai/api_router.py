@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
     message: str
     context: Optional[Dict[str, Any]] = None
+    session_id: Optional[str] = None  # I3.3: Session ID for chat persistence
 
 
 class ChatResponse(BaseModel):
@@ -462,13 +463,17 @@ def create_pearl_router(
     @router.get("/conversation")
     async def get_conversation(limit: int = 20, _: Optional[str] = Depends(auth_dep)):
         """
-        Get recent conversation history.
+        Get recent conversation history (I3.3).
 
         Returns the most recent user and assistant messages.
+        Use this endpoint on page load to restore chat history.
 
         Requires X-API-Key header when authentication is enabled.
         """
-        return brain.memory.get_recent_messages(limit)
+        return {
+            "session_id": brain.memory.session_id,
+            "messages": brain.memory.get_recent_messages(limit),
+        }
 
     @router.delete("/conversation")
     async def clear_conversation(_: Optional[str] = Depends(auth_dep)):
@@ -585,6 +590,44 @@ def create_pearl_router(
                 "entries": brain.cache.get_entries(),
             }
         return {"enabled": False}
+
+    # ================================================================
+    # Pearl AI Improvement Plan Endpoints (A2.2, A2.3)
+    # ================================================================
+
+    @router.get("/metrics/sources")
+    async def get_response_sources(
+        hours: Optional[int] = Query(default=None, description="Time window in hours (omit for all-time)"),
+        _: Optional[str] = Depends(auth_dep)
+    ):
+        """
+        Get response source distribution (A2.2).
+
+        Returns breakdown of responses by source: cache, local, claude, template.
+        Shows both counts and percentages.
+
+        Args:
+            hours: Optional time window. Omit for all-time statistics.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.get_response_source_distribution(hours)
+
+    @router.get("/ml-status")
+    async def get_ml_status(_: Optional[str] = Depends(auth_dep)):
+        """
+        Get ML filter lift metrics (A2.3).
+
+        Returns whether the ML filter is adding value:
+        - pass_win_rate: Win rate of signals that passed
+        - fail_win_rate: Win rate of signals that were blocked
+        - lift_pct: Percentage improvement from ML
+        - confidence: Statistical confidence level
+        - sample_size: Number of samples
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.get_ml_lift_metrics()
 
     return router
 

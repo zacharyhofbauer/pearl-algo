@@ -1273,3 +1273,84 @@ Be conversational, not robotic. Under 2 sentences."""
         if self._last_response_source:
             return self._last_response_source.value
         return None
+
+    def get_ml_lift_metrics(self, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Get ML filter lift metrics for API exposure (A2.3).
+
+        Returns metrics about whether the ML filter is helping performance:
+        - pass_win_rate: Win rate of signals that passed ML filter
+        - fail_win_rate: Win rate of signals that failed ML filter
+        - lift_pct: Percentage lift from ML filter
+        - confidence: Statistical confidence level
+        - sample_size: Number of samples used
+
+        Args:
+            state: Optional state dict. If None, uses current state.
+
+        Returns:
+            Dictionary with ML lift metrics
+        """
+        state = state or self._current_state
+        ai_status = state.get("ai_status", {})
+        ml_filter = ai_status.get("ml_filter", {})
+
+        # Check if ML filter is enabled
+        if not ml_filter.get("enabled"):
+            return {
+                "enabled": False,
+                "pass_win_rate": None,
+                "fail_win_rate": None,
+                "lift_pct": None,
+                "lift_ok": None,
+                "confidence": None,
+                "sample_size": 0,
+                "mode": "off",
+            }
+
+        lift = ml_filter.get("lift", {})
+        passed = ml_filter.get("passed", 0)
+        skipped = ml_filter.get("skipped", 0)
+
+        # Extract lift metrics
+        win_rate_pass = lift.get("win_rate_pass", lift.get("lift_win_rate"))
+        win_rate_fail = lift.get("win_rate_fail")
+        lift_ok = lift.get("lift_ok", False)
+        lift_pct = lift.get("lift_pct", 0)
+
+        # Calculate confidence based on sample size
+        total_samples = passed + skipped
+        if total_samples < 10:
+            confidence = "very_low"
+        elif total_samples < 30:
+            confidence = "low"
+        elif total_samples < 100:
+            confidence = "medium"
+        else:
+            confidence = "high"
+
+        return {
+            "enabled": True,
+            "mode": ml_filter.get("mode", "shadow"),
+            "pass_win_rate": win_rate_pass,
+            "fail_win_rate": win_rate_fail,
+            "lift_pct": lift_pct,
+            "lift_ok": lift_ok,
+            "confidence": confidence,
+            "sample_size": total_samples,
+            "signals_passed": passed,
+            "signals_skipped": skipped,
+            "threshold": ml_filter.get("threshold", 0.5),
+        }
+
+    def get_response_source_distribution(self, hours: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get response source distribution metrics (A2.2).
+
+        Args:
+            hours: Optional time window in hours. None for all-time.
+
+        Returns:
+            Dictionary with source distribution data
+        """
+        return self.metrics.get_response_source_distribution(hours)

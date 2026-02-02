@@ -111,6 +111,7 @@ class MetricsCollector:
     - Time-windowed summaries
     - Percentile calculations
     - Cost tracking
+    - Response source distribution (A2.2)
     - Persistence to disk
     """
 
@@ -141,16 +142,25 @@ class MetricsCollector:
         self._errors = 0
         self._fallbacks = 0
 
+        # Response source distribution tracking (A2.2)
+        self._response_sources: Dict[str, int] = {
+            "cache": 0,
+            "local": 0,
+            "claude": 0,
+            "template": 0,
+        }
+
         # Load persisted metrics if available
         if storage_path:
             self._load_metrics()
 
-    def record(self, request: LLMRequest) -> None:
+    def record(self, request: LLMRequest, source: Optional[str] = None) -> None:
         """
         Record an LLM request.
 
         Args:
             request: The LLMRequest to record
+            source: Optional response source ("cache", "local", "claude", "template")
         """
         self.requests.append(request)
 
@@ -164,6 +174,18 @@ class MetricsCollector:
             self._errors += 1
         if request.fallback_used:
             self._fallbacks += 1
+
+        # Track response source (A2.2)
+        if source and source in self._response_sources:
+            self._response_sources[source] += 1
+        elif request.cache_hit:
+            self._response_sources["cache"] += 1
+        elif request.model in ["llama3.1:8b", "llama3.2:3b"]:
+            self._response_sources["local"] += 1
+        elif "claude" in request.model:
+            self._response_sources["claude"] += 1
+        elif request.model == "template":
+            self._response_sources["template"] += 1
 
         # Trim history if needed
         if len(self.requests) > self.max_history:
@@ -285,6 +307,71 @@ class MetricsCollector:
             error_counts[error_type] = error_counts.get(error_type, 0) + 1
 
         return error_counts
+
+    def get_response_source_distribution(self, hours: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get response source distribution (A2.2).
+
+        Args:
+            hours: Optional time window. If None, returns all-time stats.
+
+        Returns:
+            Dictionary with counts and percentages for each source
+        """
+        if hours is None:
+            # All-time distribution
+            total = sum(self._response_sources.values())
+            if total == 0:
+                return {
+                    "counts": self._response_sources.copy(),
+                    "percentages": {k: 0.0 for k in self._response_sources},
+                    "total": 0,
+                    "period": "all_time",
+                }
+
+            return {
+                "counts": self._response_sources.copy(),
+                "percentages": {
+                    k: round(v / total * 100, 1)
+                    for k, v in self._response_sources.items()
+                },
+                "total": total,
+                "period": "all_time",
+            }
+
+        # Time-windowed distribution
+        cutoff = datetime.now() - timedelta(hours=hours)
+        recent = [r for r in self.requests if r.timestamp > cutoff]
+
+        source_counts = {"cache": 0, "local": 0, "claude": 0, "template": 0}
+        for r in recent:
+            if r.cache_hit:
+                source_counts["cache"] += 1
+            elif r.model in ["llama3.1:8b", "llama3.2:3b"]:
+                source_counts["local"] += 1
+            elif "claude" in r.model:
+                source_counts["claude"] += 1
+            else:
+                source_counts["template"] += 1
+
+        total = sum(source_counts.values())
+        if total == 0:
+            return {
+                "counts": source_counts,
+                "percentages": {k: 0.0 for k in source_counts},
+                "total": 0,
+                "period_hours": hours,
+            }
+
+        return {
+            "counts": source_counts,
+            "percentages": {
+                k: round(v / total * 100, 1)
+                for k, v in source_counts.items()
+            },
+            "total": total,
+            "period_hours": hours,
+        }
 
     def _save_metrics(self) -> None:
         """Save metrics to disk."""

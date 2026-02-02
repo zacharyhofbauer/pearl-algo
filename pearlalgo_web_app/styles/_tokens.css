@@ -165,6 +165,52 @@
   --scrollbar-thumb-hover: #3a3a4a;
   --scrollbar-width: 8px;
   --scrollbar-width-thin: 6px;
+
+  /* ===================================
+     TRADING SESSION COLORS (U1.2)
+     =================================== */
+  /* Overnight/Pre-Market (4:00-6:30) - deep purple */
+  --session-overnight-rgb: 147, 112, 219;
+  --session-overnight: rgb(var(--session-overnight-rgb));
+
+  /* Early Morning/Asian (6:30-8:00) - blue-purple */
+  --session-early-rgb: 100, 149, 237;
+  --session-early: rgb(var(--session-early-rgb));
+
+  /* London Open (8:00-9:30) - cyan */
+  --session-london-rgb: 0, 212, 255;
+  --session-london: rgb(var(--session-london-rgb));
+
+  /* US Open/Morning (9:30-12:00) - bright green */
+  --session-us-open-rgb: 0, 230, 118;
+  --session-us-open: rgb(var(--session-us-open-rgb));
+
+  /* Midday/Lunch (12:00-14:00) - gold */
+  --session-midday-rgb: 255, 193, 7;
+  --session-midday: rgb(var(--session-midday-rgb));
+
+  /* Afternoon (14:00-16:00) - orange */
+  --session-afternoon-rgb: 255, 152, 0;
+  --session-afternoon: rgb(var(--session-afternoon-rgb));
+
+  /* Close/After Hours (16:00-18:00) - pink */
+  --session-close-rgb: 255, 110, 199;
+  --session-close: rgb(var(--session-close-rgb));
+
+  /* Extended/Overnight (18:00-4:00) - dim purple */
+  --session-extended-rgb: 106, 90, 205;
+  --session-extended: rgb(var(--session-extended-rgb));
+
+  /* ===================================
+     CHART COLORS (U1.2)
+     =================================== */
+  --chart-candle-up: var(--accent-green);
+  --chart-candle-down: var(--accent-red);
+  --chart-volume-up: rgba(var(--accent-green-rgb), 0.3);
+  --chart-volume-down: rgba(var(--accent-red-rgb), 0.3);
+  --chart-grid: var(--grid-color);
+  --chart-crosshair: rgba(255, 255, 255, 0.3);
+  --chart-tooltip-bg: var(--bg-elevated);
 }
 
 /* Color scheme for dark mode */

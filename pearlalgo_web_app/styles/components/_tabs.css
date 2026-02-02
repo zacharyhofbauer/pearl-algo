@@ -2,10 +2,22 @@
  * Tab Components
  *
  * Unified tab styling for the Pearl Algo Web App.
- * This consolidates the various tab implementations:
- * - .perf-tabs (PerformancePanel)
- * - .pearl-tabs (PearlInsightsPanel)
+ * This consolidates the various tab implementations.
+ *
+ * MIGRATION GUIDE (U1.3):
+ * The canonical Tabs component is at components/ui/Tabs.tsx
+ * Use these CSS classes with that component:
+ *
+ * DEPRECATED - Use components/ui/Tabs.tsx instead:
+ * - .perf-tabs / .perf-tab (PerformancePanel)
+ * - .pearl-tabs / .pearl-tab (PearlInsightsPanel)
  * - .analytics-tabs (AnalyticsPanel)
+ *
+ * CANONICAL CLASSES (use these with components/ui/Tabs.tsx):
+ * - .tabs-container (container)
+ * - .tab (individual tab)
+ * - .tab-badge (badge inside tab)
+ * - Variants: .tabs-compact, .tabs-pill
  */
 
 /* ===================================

@@ -2,7 +2,14 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react'
 import { InfoTooltip } from './ui'
-import { usePearlStore, type PearlMessage, type PearlTab, type TradingContext } from '@/stores'
+import {
+  usePearlStore,
+  type PearlMessage,
+  type PearlTab,
+  type TradingContext,
+  type DismissFeedbackReason,
+  type SuggestionFeedback,
+} from '@/stores'
 import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
 
 interface PearlDropdownPanelProps {
@@ -79,6 +86,81 @@ function getChatTypeIcon(type?: string) {
   }
 }
 
+// Feedback modal for dismissed suggestions (I3.1)
+interface FeedbackModalProps {
+  suggestionId: string | null
+  onSubmit: (reason: DismissFeedbackReason, comment?: string) => void
+  onCancel: () => void
+}
+
+function FeedbackModal({ suggestionId, onSubmit, onCancel }: FeedbackModalProps) {
+  const [selectedReason, setSelectedReason] = useState<DismissFeedbackReason | null>(null)
+  const [comment, setComment] = useState('')
+
+  if (!suggestionId) return null
+
+  const reasons: { value: DismissFeedbackReason; label: string; icon: string }[] = [
+    { value: 'not_relevant', label: 'Not relevant', icon: '\uD83D\uDEAB' },
+    { value: 'wrong_timing', label: 'Wrong timing', icon: '\u23F0' },
+    { value: 'too_risky', label: 'Too risky', icon: '\u26A0\uFE0F' },
+    { value: 'other', label: 'Other', icon: '\uD83D\uDCDD' },
+  ]
+
+  const handleSubmit = () => {
+    if (selectedReason) {
+      onSubmit(selectedReason, comment.trim() || undefined)
+    } else {
+      // Allow dismiss without reason (quick dismiss)
+      onCancel()
+    }
+  }
+
+  return (
+    <div className="pearl-feedback-modal-overlay" onClick={onCancel}>
+      <div className="pearl-feedback-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="feedback-header">
+          <span className="feedback-title">Why are you dismissing?</span>
+          <button className="feedback-close" onClick={onCancel}>\u2715</button>
+        </div>
+        <div className="feedback-options">
+          {reasons.map((reason) => (
+            <button
+              key={reason.value}
+              className={`feedback-option ${selectedReason === reason.value ? 'selected' : ''}`}
+              onClick={() => setSelectedReason(reason.value)}
+            >
+              <span className="option-icon">{reason.icon}</span>
+              <span className="option-label">{reason.label}</span>
+            </button>
+          ))}
+        </div>
+        {selectedReason === 'other' && (
+          <input
+            type="text"
+            className="feedback-comment"
+            placeholder="Tell us more (optional)..."
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            maxLength={100}
+          />
+        )}
+        <div className="feedback-actions">
+          <button className="feedback-skip" onClick={onCancel}>
+            Skip
+          </button>
+          <button
+            className="feedback-submit"
+            onClick={handleSubmit}
+            disabled={!selectedReason}
+          >
+            Submit
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function PearlDropdownPanel({
   insights,
   suggestion,
@@ -100,12 +182,19 @@ export default function PearlDropdownPanel({
     inputValue,
     isLoading,
     showContext,
+    settings,
+    showFeedbackModal,
+    pendingDismissSuggestionId,
     setActiveTab,
     setInputValue,
     setIsLoading,
     setShowContext,
     addMessage,
     updateMessage,
+    recordFeedback,
+    showDismissFeedback,
+    hideDismissFeedback,
+    updateSettings,
   } = usePearlStore()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -117,6 +206,39 @@ export default function PearlDropdownPanel({
   // Local UI state for history/details
   const [showHistory, setShowHistory] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+
+  // Load chat history on mount (I3.3)
+  useEffect(() => {
+    if (historyLoaded || messages.length > 0) return
+
+    const loadChatHistory = async () => {
+      try {
+        const response = await fetch('/api/pearl/conversation?limit=20')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.messages && data.messages.length > 0) {
+            // Convert server messages to PearlMessage format
+            data.messages.forEach((msg: { role: string; content: string; timestamp: string }) => {
+              const pearlMsg: PearlMessage = {
+                id: `history-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content,
+                timestamp: new Date(msg.timestamp),
+                type: msg.role === 'assistant' ? 'response' : undefined,
+              }
+              addMessage(pearlMsg)
+            })
+          }
+        }
+      } catch (error) {
+        console.debug('Could not load chat history:', error)
+      }
+      setHistoryLoaded(true)
+    }
+
+    loadChatHistory()
+  }, [historyLoaded, messages.length, addMessage])
 
   const metrics = insights?.shadow_metrics
   const activeSuggestion = suggestion || metrics?.active_suggestion
@@ -319,6 +441,13 @@ export default function PearlDropdownPanel({
             )}
             <span className={`pearl-ws-dot ${isConnected ? 'connected' : ''}`} />
           </button>
+          <button
+            className={`pearl-tab pearl-tab-settings ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+            title="Settings"
+          >
+            \u2699
+          </button>
         </div>
       )}
 
@@ -445,10 +574,27 @@ export default function PearlDropdownPanel({
                 </div>
               )}
               <div className="insight-buttons">
-                <button className="pearl-btn pearl-btn-accept" onClick={onAccept}>
+                <button
+                  className="pearl-btn pearl-btn-accept"
+                  onClick={() => {
+                    // Record accept feedback
+                    recordFeedback({
+                      suggestion_id: activeSuggestion.id || `suggestion-${Date.now()}`,
+                      action: 'accept',
+                      timestamp: new Date(),
+                    })
+                    onAccept?.()
+                  }}
+                >
                   Accept
                 </button>
-                <button className="pearl-btn pearl-btn-dismiss" onClick={onDismiss}>
+                <button
+                  className="pearl-btn pearl-btn-dismiss"
+                  onClick={() => {
+                    // Show feedback modal for dismiss reason (I3.1)
+                    showDismissFeedback(activeSuggestion.id || `suggestion-${Date.now()}`)
+                  }}
+                >
                   Dismiss
                 </button>
               </div>
@@ -570,6 +716,65 @@ export default function PearlDropdownPanel({
         </div>
       )}
 
+      {/* Settings Tab Content (I3.2) */}
+      {activeTab === 'settings' && (
+        <div className="pearl-settings-content">
+          <div className="settings-section">
+            <div className="settings-title">Pearl AI Preferences</div>
+
+            <label className="settings-toggle">
+              <span className="toggle-label">Enable coaching messages</span>
+              <input
+                type="checkbox"
+                checked={settings.enableCoachingMessages}
+                onChange={(e) => updateSettings({ enableCoachingMessages: e.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </label>
+
+            <label className="settings-toggle">
+              <span className="toggle-label">Show shadow impact</span>
+              <input
+                type="checkbox"
+                checked={settings.showShadowImpact}
+                onChange={(e) => updateSettings({ showShadowImpact: e.target.checked })}
+              />
+              <span className="toggle-slider" />
+            </label>
+
+            <div className="settings-select">
+              <span className="select-label">Suggestion frequency</span>
+              <select
+                value={settings.suggestionFrequency}
+                onChange={(e) =>
+                  updateSettings({
+                    suggestionFrequency: e.target.value as 'low' | 'normal' | 'high',
+                  })
+                }
+              >
+                <option value="low">Low (fewer suggestions)</option>
+                <option value="normal">Normal</option>
+                <option value="high">High (more suggestions)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-title">About</div>
+            <div className="settings-info">
+              <span className="info-label">Pearl AI</span>
+              <span className="info-value">v3.0</span>
+            </div>
+            <div className="settings-info">
+              <span className="info-label">Session ID</span>
+              <span className="info-value info-mono">
+                {usePearlStore.getState().sessionId.slice(-8)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chat Tab Content */}
       {activeTab === 'chat' && (
         <div className="pearl-chat-content">
@@ -685,6 +890,27 @@ export default function PearlDropdownPanel({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Feedback Modal (I3.1) */}
+      {showFeedbackModal && (
+        <FeedbackModal
+          suggestionId={pendingDismissSuggestionId}
+          onSubmit={(reason, comment) => {
+            recordFeedback({
+              suggestion_id: pendingDismissSuggestionId || '',
+              action: 'dismiss',
+              dismiss_reason: reason,
+              dismiss_comment: comment,
+              timestamp: new Date(),
+            })
+            onDismiss?.()
+          }}
+          onCancel={() => {
+            hideDismissFeedback()
+            onDismiss?.()
+          }}
+        />
       )}
     </div>
   )

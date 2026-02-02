@@ -76,6 +76,9 @@ export {
   type PearlMessage,
   type TradingContext,
   type PearlTab,
+  type DismissFeedbackReason,
+  type SuggestionFeedback,
+  type PearlSettings,
   selectMessages,
   selectIsConnected as selectPearlIsConnected,
   selectIsHeaderExpanded,
@@ -85,6 +88,11 @@ export {
   selectIsLoading as selectPearlIsLoading,
   selectShowContext,
   selectUnreadCount,
+  selectSessionId,
+  selectFeedbackHistory,
+  selectSettings,
+  selectShowFeedbackModal,
+  selectPendingDismissSuggestionId,
 } from './pearlStore'
 export type {
   CandleData,
