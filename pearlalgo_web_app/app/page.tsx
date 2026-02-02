@@ -42,8 +42,8 @@ const WS_REFRESH_INTERVAL = 30000 // 30 seconds (slower when WebSocket connected
 // Minimum bars to request for a full chart (500 = ~4 days on 5m, ~2 weeks on 1h)
 const MIN_BARS = 500
 
-// Fetch 168 hours (7 days) of markers for complete trade history
-const MARKER_HOURS = 168
+// Fetch 72 hours (3 days) of markers - API limit
+const MARKER_HOURS = 72
 
 export default function PearlAlgoWebApp() {
   // Agent store
@@ -362,103 +362,6 @@ export default function PearlAlgoWebApp() {
     }
   }
 
-  // Common header component
-  const renderHeader = () => {
-    const agentMode = getAgentModeBadge()
-    const regime = getRegimeBadge()
-    const countdown = formatMarketCountdown()
-    const stale = isDataStale()
-
-    return (
-      <header className="header">
-        {/* Stale Data Warning Banner */}
-        {stale && isLive && (
-          <div className="stale-data-banner">
-            <span className="stale-icon">⚠️</span>
-            <span>Data may be stale - last update {formatRelativeTime(lastUpdate)}</span>
-          </div>
-        )}
-
-        <div className="header-main">
-          {/* Title and Logo */}
-          <div className="header-title-group">
-            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
-            <h1>
-              <span className="symbol">MNQ</span>
-              <span className="page-name">Pearl Algo Web App</span>
-            </h1>
-          </div>
-
-          {/* Status Badges */}
-          <div className="header-badges">
-            {/* Agent Mode Badge */}
-            {agentMode && (
-              <div className={`agent-mode-badge mode-${agentMode.mode}`}>
-                <span className="pulse-dot"></span>
-                {agentMode.label}
-              </div>
-            )}
-
-            {/* Market Regime Badge */}
-            {regime && (
-              <div className={`regime-header-badge ${agentState?.market_regime?.regime?.includes('trending') ? 'trending' : agentState?.market_regime?.regime === 'ranging' ? 'ranging' : agentState?.market_regime?.regime === 'volatile' ? 'volatile' : ''}`} title={`${regime.confidence}% confidence`}>
-                <span className="regime-header-icon">{regime.icon}</span>
-                <span className="regime-header-label">{regime.label}</span>
-              </div>
-            )}
-
-            {/* Market Status Badge */}
-            {marketStatus && (
-              <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
-                <span className="market-status-dot"></span>
-                <span className="market-status-text">{marketStatus.is_open ? 'Open' : 'Closed'}</span>
-                {countdown && <span className="market-countdown-text">{countdown}</span>}
-              </div>
-            )}
-          </div>
-
-          {/* Timeframe Selector */}
-          <div className="timeframe-selector">
-            {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
-              <button
-                key={tf}
-                className={timeframe === tf ? 'active' : ''}
-                onClick={() => setTimeframe(tf)}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
-
-          <div className="status">
-            {/* Data Freshness Indicator */}
-            <div className={`data-freshness-indicator ${stale ? 'stale' : 'fresh'}`} title={stale ? 'Data is stale' : 'Data is fresh'}>
-              <span className="freshness-dot"></span>
-              <span className="freshness-label">{stale ? 'STALE' : 'LIVE'}</span>
-            </div>
-
-            <span className="status-separator">•</span>
-
-            {/* WebSocket Status Indicator */}
-            <div className={`ws-status-indicator ${wsStatus}`} title={`WebSocket: ${wsStatus}`}>
-              <span className="ws-status-dot"></span>
-              <span className="ws-status-label">
-                {wsStatus === 'connected' ? 'WS' : wsStatus === 'connecting' ? '...' : 'Poll'}
-              </span>
-            </div>
-
-            <span className="status-separator">•</span>
-
-            {/* Last Update Time */}
-            <span className="last-update-time" title={formatTime(lastUpdate)}>
-              {formatRelativeTime(lastUpdate)}
-            </span>
-          </div>
-        </div>
-      </header>
-    )
-  }
-
   // Get AI mode from status
   const getAIMode = () => {
     if (!agentState?.ai_status) return null
@@ -472,86 +375,141 @@ export default function PearlAlgoWebApp() {
     return 'off'
   }
 
-  // Common status panel component - optimized for all screens
-  const renderStatusPanel = () => {
-    if (!agentState && candles.length === 0) return null
-
-    const currentCandle = candles[candles.length - 1]
-    const priceUp = currentCandle ? currentCandle.close >= currentCandle.open : true
+  // Combined header - all info in one modern compact section
+  const renderHeader = () => {
+    const agentMode = getAgentModeBadge()
+    const regime = getRegimeBadge()
+    const countdown = formatMarketCountdown()
+    const stale = isDataStale()
     const aiMode = getAIMode()
     const dirGate = agentState?.ai_status?.direction_gating
 
     return (
-      <div className="status-panel">
-        {/* Row 1: Price + Badges + Stats */}
-        <div className="status-row status-row-main">
-          {currentCandle && (
-            <span className={`price-value ${priceUp ? 'positive' : 'negative'}`}>
-              {currentCandle.close.toFixed(2)}
-            </span>
-          )}
+      <header className="header-combined">
+        {/* Stale Data Warning */}
+        {stale && isLive && (
+          <div className="stale-warning">
+            ⚠️ Data may be stale - last update {formatRelativeTime(lastUpdate)}
+          </div>
+        )}
 
+        {/* Main Header Row */}
+        <div className="header-row-main">
+          {/* Brand */}
+          <div className="header-brand">
+            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
+            <div className="header-titles">
+              <span className="header-symbol">MNQ</span>
+              <span className="header-app-name">Pearl Algo Web App</span>
+            </div>
+          </div>
+
+          {/* Stats */}
           {agentState && (
-            <>
-              <span className={`mini-badge ${agentState.running ? (agentState.paused ? 'paused' : 'live') : 'off'}`}>
-                <span className="mini-dot"></span>
-                {agentState.running ? (agentState.paused ? 'PAU' : 'LIVE') : 'OFF'}
-              </span>
-
-              {aiMode && (
-                <span className={`mini-badge ai-${aiMode}`}>🧠{aiMode.toUpperCase()}</span>
+            <div className="header-stats-row">
+              <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                <span className="stat-label">P&L</span>
+                <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
+              </div>
+              <div className="stat-item trades">
+                <span className="stat-label">W/L</span>
+                <span className="stat-value">
+                  <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
+                </span>
+              </div>
+              {agentState.active_trades_count > 0 && (
+                <div className="stat-item positions">
+                  <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
+                </div>
               )}
-
-              <span className={`stat-val ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                {formatPnL(agentState.daily_pnl)}
-              </span>
-
-              <span className="stat-val trades-value">
-                <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
-              </span>
-
-              <span className={`stat-val ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
-                {agentState.active_trades_count}pos
-              </span>
-            </>
+            </div>
           )}
+
+          {/* Timeframe */}
+          <div className="header-timeframe">
+            {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+              <button
+                key={tf}
+                className={`tf-btn ${timeframe === tf ? 'active' : ''}`}
+                onClick={() => setTimeframe(tf)}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          {/* Status Indicators */}
+          <div className="header-status">
+            <div className={`status-indicator ${stale ? 'stale' : 'live'}`}>
+              <span className="status-dot"></span>
+              <span className="status-text">{stale ? 'STALE' : 'LIVE'}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Row 2: Health + Gate + Legends */}
-        <div className="status-row status-row-secondary">
+        {/* Secondary Row - Badges, Health, Legends */}
+        <div className="header-row-secondary">
+          {/* Badges */}
+          <div className="header-badges">
+            {agentState && (
+              <span className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}>
+                <span className="badge-dot"></span>
+                {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
+              </span>
+            )}
+            {aiMode && (
+              <span className={`badge ai-badge ${aiMode}`}>
+                🧠 {aiMode.toUpperCase()}
+              </span>
+            )}
+            {regime && (
+              <span className={`badge regime-badge`}>
+                {regime.icon} {regime.label}
+              </span>
+            )}
+            {marketStatus && (
+              <span className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
+                {marketStatus.is_open ? '🟢 OPEN' : '🔴 CLOSED'}
+                {countdown && <span className="countdown">{countdown}</span>}
+              </span>
+            )}
+          </div>
+
+          {/* Health Indicators */}
           {agentState && (
-            <div className="health-row">
-              <span className={`h-dot ${agentState.gateway_status?.status === 'online' ? 'ok' : 'err'}`}></span>
-              <span className="h-lbl">GW</span>
-              <span className={`h-dot ${agentState.data_fresh ? 'ok' : 'err'}`}></span>
-              <span className="h-lbl">Data</span>
-              <span className={`h-dot ${agentState.futures_market_open ? 'ok' : 'warn'}`}></span>
-              <span className="h-lbl">Mkt</span>
+            <div className="header-health">
+              <span className={`health-dot ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}></span>
+              <span className="health-label">GW</span>
+              <span className={`health-dot ${agentState.data_fresh ? 'ok' : 'error'}`}></span>
+              <span className="health-label">Data</span>
+              <span className={`health-dot ${agentState.futures_market_open ? 'ok' : 'warning'}`}></span>
+              <span className="health-label">Mkt</span>
               {dirGate?.enabled && (
                 <>
-                  <span className={`h-dot ${dirGate.blocks > 0 ? 'warn' : 'ok'}`}></span>
-                  <span className="h-lbl">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
+                  <span className={`health-dot ${dirGate.blocks > 0 ? 'warning' : 'ok'}`}></span>
+                  <span className="health-label">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
                 </>
               )}
             </div>
           )}
 
-          <div className="chart-legend">
-            <span className="lg-item"><span className="lg-line ema9"></span>E9</span>
-            <span className="lg-item"><span className="lg-line ema21"></span>E21</span>
-            <span className="lg-item"><span className="lg-line vwap"></span>VW</span>
-          </div>
-
-          <div className="marker-legend">
-            <span className="lg-item"><span className="mk entry">▲</span>L</span>
-            <span className="lg-item"><span className="mk entry">▼</span>S</span>
-            <span className="lg-item"><span className="mk exit-win">●</span>W</span>
-            <span className="lg-item"><span className="mk exit-loss">●</span>X</span>
+          {/* Chart Legend */}
+          <div className="header-legend">
+            <span className="legend-item"><span className="legend-line ema9"></span>EMA9</span>
+            <span className="legend-item"><span className="legend-line ema21"></span>EMA21</span>
+            <span className="legend-item"><span className="legend-line vwap"></span>VWAP</span>
+            <span className="legend-item"><span className="legend-marker long">▲</span>Long</span>
+            <span className="legend-item"><span className="legend-marker short">▼</span>Short</span>
+            <span className="legend-item"><span className="legend-marker win">●</span>Win</span>
+            <span className="legend-item"><span className="legend-marker loss">●</span>Loss</span>
           </div>
         </div>
-      </div>
+      </header>
     )
   }
+
+  // Status panel no longer needed - integrated into header
+  const renderStatusPanel = () => null
 
   // Chart section component
   const renderChart = () => (
@@ -622,6 +580,7 @@ export default function PearlAlgoWebApp() {
               indicators={indicators}
               markers={markers}
               barSpacing={barSpacing}
+              timeframe={timeframe}
               onChartReady={setMainChartApi}
             />
           </ErrorBoundary>

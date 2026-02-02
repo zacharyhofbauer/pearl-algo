@@ -4,13 +4,13 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators } from '@/stores'
-import { useAnnotationStore, type ChartAnnotation } from '@/stores'
 
 interface ChartProps {
   data: CandleData[]
   indicators?: Indicators
   markers?: MarkerData[]
   barSpacing?: number
+  timeframe?: string
   onChartReady?: (chart: IChartApi | null) => void
 }
 
@@ -33,7 +33,7 @@ const getSessionColor = (hour: number): string => {
   return 'transparent'
 }
 
-export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, onChartReady }: ChartProps) {
+export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -43,7 +43,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const resizeHandlerRef = useRef<(() => void) | null>(null)
-  
+
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
     x: 0,
@@ -51,62 +51,46 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     marker: null,
     groupedMarkers: null,
   })
-  
+
   // Track the active signal for highlighting
   const [activeSignalId, setActiveSignalId] = useState<string | null>(null)
 
-  // Annotation state
-  const { annotations, addAnnotation, removeAnnotation } = useAnnotationStore()
-  const [annotationModal, setAnnotationModal] = useState<{
-    visible: boolean
-    time: number
-    price: number
-    x: number
-    y: number
-  } | null>(null)
-  const [annotationText, setAnnotationText] = useState('')
-  const [annotationColor, setAnnotationColor] = useState('#ffd700')
-  const annotationSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  // Candle countdown timer
+  const [candleCountdown, setCandleCountdown] = useState<string>('')
 
-  // Handle double-click for annotation
-  const handleChartDoubleClick = useCallback((param: any) => {
-    if (!chartRef.current || !containerRef.current || !param.time || !param.point) return
+  // Get timeframe in seconds
+  const getTimeframeSeconds = useCallback(() => {
+    switch (timeframe) {
+      case '1m': return 60
+      case '5m': return 300
+      case '15m': return 900
+      case '1h': return 3600
+      default: return 300
+    }
+  }, [timeframe])
 
-    const chart = chartRef.current
-    const series = candleSeriesRef.current
-    if (!series) return
+  // Update candle countdown every second
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = Math.floor(Date.now() / 1000)
+      const tfSeconds = getTimeframeSeconds()
+      const secondsIntoCandle = now % tfSeconds
+      const secondsRemaining = tfSeconds - secondsIntoCandle
 
-    // Get price at click position
-    const price = series.coordinateToPrice(param.point.y)
-    if (price === null) return
+      const mins = Math.floor(secondsRemaining / 60)
+      const secs = secondsRemaining % 60
 
-    const time = typeof param.time === 'object' ? param.time.valueOf() : param.time
+      if (mins > 0) {
+        setCandleCountdown(`${mins}:${secs.toString().padStart(2, '0')}`)
+      } else {
+        setCandleCountdown(`${secs}s`)
+      }
+    }
 
-    // Show annotation modal
-    setAnnotationModal({
-      visible: true,
-      time,
-      price,
-      x: Math.min(param.point.x, containerRef.current.clientWidth - 250),
-      y: Math.min(param.point.y, containerRef.current.clientHeight - 150),
-    })
-    setAnnotationText('')
-  }, [])
-
-  // Save annotation
-  const saveAnnotation = useCallback(() => {
-    if (!annotationModal || !annotationText.trim()) return
-
-    addAnnotation({
-      time: annotationModal.time,
-      price: annotationModal.price,
-      text: annotationText.trim(),
-      color: annotationColor,
-    })
-
-    setAnnotationModal(null)
-    setAnnotationText('')
-  }, [annotationModal, annotationText, annotationColor, addAnnotation])
+    updateCountdown()
+    const interval = setInterval(updateCountdown, 1000)
+    return () => clearInterval(interval)
+  }, [getTimeframeSeconds])
 
   // Build a lookup map for markers by time
   const markersByTime = useMemo(() => {
@@ -314,15 +298,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     resizeHandlerRef.current = handleResize
     window.addEventListener('resize', handleResize)
 
-    // Add double-click handler for annotations
-    chart.subscribeClick(handleChartDoubleClick)
-
     return () => {
       if (resizeHandlerRef.current) {
         window.removeEventListener('resize', resizeHandlerRef.current)
         resizeHandlerRef.current = null
       }
-      chart.unsubscribeClick(handleChartDoubleClick)
       onChartReady?.(null)
       chart.remove()
     }
@@ -586,12 +566,50 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     ? Math.max(300, window.innerHeight * 0.5)
     : 500
 
+  // Get current price and change
+  const currentCandle = data[data.length - 1]
+  const prevCandle = data[data.length - 2]
+  const priceChange = currentCandle && prevCandle
+    ? currentCandle.close - prevCandle.close
+    : 0
+  const priceChangePercent = prevCandle
+    ? ((priceChange / prevCandle.close) * 100)
+    : 0
+
   return (
     <div
       ref={containerRef}
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
       style={{ width: '100%', height: '100%', minHeight, position: 'relative' }}
     >
+      {/* Unified Chart Info Bar - Price, Countdown, Legend */}
+      <div className="chart-info-bar">
+        {/* Price Section */}
+        {currentCandle && (
+          <div className={`info-price ${priceChange >= 0 ? 'up' : 'down'}`}>
+            <span className="price-value">{currentCandle.close.toFixed(2)}</span>
+          </div>
+        )}
+
+        {/* Countdown Section */}
+        <div className="info-countdown">
+          <span className="countdown-dot"></span>
+          <span className="countdown-tf">{timeframe}</span>
+          <span className="countdown-time">{candleCountdown}</span>
+        </div>
+
+        {/* Legend Section */}
+        <div className="info-legend">
+          <span className="leg"><span className="line ema9"></span>9</span>
+          <span className="leg"><span className="line ema21"></span>21</span>
+          <span className="leg"><span className="line vwap"></span>V</span>
+          <span className="leg-sep"></span>
+          <span className="leg"><span className="mkr entry">▲●</span>In</span>
+          <span className="leg"><span className="mkr win">●</span>W</span>
+          <span className="leg"><span className="mkr loss">●</span>L</span>
+        </div>
+      </div>
+
       {/* Marker Tooltip - Single Trade */}
       {tooltip.visible && tooltip.marker && !tooltip.groupedMarkers && (
         <div
@@ -612,7 +630,18 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
               {tooltip.marker.kind === 'entry' ? 'ENTRY' : 'EXIT'}
             </span>
           </div>
-          
+
+          {/* Time */}
+          <div className="tooltip-time">
+            {new Date(tooltip.marker.time * 1000).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            })}
+          </div>
+
           {/* Trade details - always show both entry and exit */}
           <div className="tooltip-body">
             <div className="tooltip-row">
@@ -621,7 +650,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
                 {formatPrice(tooltip.marker.kind === 'entry' ? tooltip.marker.entry_price : pairedMarker?.entry_price)}
               </span>
             </div>
-            
+
             {(tooltip.marker.kind === 'exit' || pairedMarker) && (
               <div className="tooltip-row">
                 <span className="tooltip-label">Exit</span>
@@ -630,14 +659,14 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
                 </span>
               </div>
             )}
-            
+
             {/* P&L - prominent */}
             {(tooltip.marker.pnl !== undefined || pairedMarker?.pnl !== undefined) && (
               <div className={`tooltip-pnl ${((tooltip.marker.pnl || pairedMarker?.pnl || 0) >= 0) ? 'positive' : 'negative'}`}>
                 {formatPnL(tooltip.marker.pnl || pairedMarker?.pnl)}
               </div>
             )}
-            
+
             {/* Exit reason badge */}
             {(tooltip.marker.exit_reason || pairedMarker?.exit_reason) && (
               <div className="tooltip-reason-badge">
@@ -645,9 +674,59 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
               </div>
             )}
           </div>
-          
-          {/* PEARL Logo */}
-          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={24} height={24} />
+
+          {/* Entry signals */}
+          {(tooltip.marker.reason || pairedMarker?.reason) && (
+            <div className="tooltip-signals">
+              <div className="tooltip-signals-label">Signals</div>
+              <div className="tooltip-signals-list">
+                {(tooltip.marker.reason || pairedMarker?.reason)?.split(' | ').slice(0, 4).map((signal, i) => (
+                  <span
+                    key={i}
+                    className={`tooltip-signal-tag ${
+                      signal.includes('UP') || signal.includes('LONG') || signal.includes('BULL') ? 'bullish' :
+                      signal.includes('DOWN') || signal.includes('SHORT') || signal.includes('BEAR') ? 'bearish' : ''
+                    }`}
+                  >
+                    {signal.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hold duration - show if we have both entry and exit */}
+          {pairedMarker && tooltip.marker.kind === 'entry' && (
+            <div className="tooltip-hold-duration">
+              <span>Hold Time</span>
+              <span className="duration-value">
+                {(() => {
+                  const mins = Math.round((pairedMarker.time - tooltip.marker.time) / 60)
+                  if (mins < 60) return `${mins}m`
+                  const hrs = Math.floor(mins / 60)
+                  const remainMins = mins % 60
+                  return `${hrs}h ${remainMins}m`
+                })()}
+              </span>
+            </div>
+          )}
+          {pairedMarker && tooltip.marker.kind === 'exit' && (
+            <div className="tooltip-hold-duration">
+              <span>Hold Time</span>
+              <span className="duration-value">
+                {(() => {
+                  const mins = Math.round((tooltip.marker.time - pairedMarker.time) / 60)
+                  if (mins < 60) return `${mins}m`
+                  const hrs = Math.floor(mins / 60)
+                  const remainMins = mins % 60
+                  return `${hrs}h ${remainMins}m`
+                })()}
+              </span>
+            </div>
+          )}
+
+          {/* PEARL Logo - small */}
+          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={14} height={14} />
         </div>
       )}
 
@@ -722,114 +801,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
             )}
           </div>
           
-          {/* PEARL Logo */}
-          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={24} height={24} />
+          {/* PEARL Logo - small */}
+          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={14} height={14} />
         </div>
       )}
 
-      {/* Annotation Modal */}
-      {annotationModal?.visible && (
-        <div
-          className="annotation-modal"
-          style={{
-            position: 'absolute',
-            left: annotationModal.x,
-            top: annotationModal.y,
-            zIndex: 1000,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="annotation-modal-header">
-            <span>Add Note</span>
-            <button
-              className="annotation-close-btn"
-              onClick={() => setAnnotationModal(null)}
-            >
-              ×
-            </button>
-          </div>
-          <textarea
-            className="annotation-input"
-            placeholder="Enter your note..."
-            value={annotationText}
-            onChange={(e) => setAnnotationText(e.target.value)}
-            autoFocus
-            rows={3}
-          />
-          <div className="annotation-colors">
-            {['#ffd700', '#00e676', '#ff5252', '#2196f3', '#ab47bc'].map((color) => (
-              <button
-                key={color}
-                className={`annotation-color-btn ${annotationColor === color ? 'active' : ''}`}
-                style={{ backgroundColor: color }}
-                onClick={() => setAnnotationColor(color)}
-              />
-            ))}
-          </div>
-          <div className="annotation-actions">
-            <button
-              className="annotation-cancel-btn"
-              onClick={() => setAnnotationModal(null)}
-            >
-              Cancel
-            </button>
-            <button
-              className="annotation-save-btn"
-              onClick={saveAnnotation}
-              disabled={!annotationText.trim()}
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Annotation Markers */}
-      {annotations.map((ann) => {
-        if (!chartRef.current || !candleSeriesRef.current) return null
-        const series = candleSeriesRef.current
-        const chart = chartRef.current
-
-        // Get pixel coordinates for the annotation
-        const timeCoord = chart.timeScale().timeToCoordinate(ann.time as Time)
-        const priceCoord = series.priceToCoordinate(ann.price)
-
-        if (timeCoord === null || priceCoord === null) return null
-
-        return (
-          <div
-            key={ann.id}
-            className="chart-annotation"
-            style={{
-              position: 'absolute',
-              left: timeCoord,
-              top: priceCoord,
-              transform: 'translate(-50%, -100%)',
-              pointerEvents: 'auto',
-            }}
-            title={ann.text}
-          >
-            <div
-              className="annotation-marker"
-              style={{ backgroundColor: ann.color }}
-            >
-              <span className="annotation-icon">📝</span>
-            </div>
-            <div className="annotation-popup">
-              <div className="annotation-text">{ann.text}</div>
-              <div className="annotation-meta">
-                {new Date(ann.createdAt).toLocaleDateString()}
-              </div>
-              <button
-                className="annotation-delete-btn"
-                onClick={() => removeAnnotation(ann.id)}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
