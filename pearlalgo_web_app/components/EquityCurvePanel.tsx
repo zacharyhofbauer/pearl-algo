@@ -5,6 +5,7 @@ import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import { formatPnL } from '@/lib/formatters'
 import type { EquityCurvePoint } from '@/stores'
+import { getChartColors } from '@/utils/chartColors'
 
 interface EquityCurvePanelProps {
   equityCurve: EquityCurvePoint[]
@@ -30,16 +31,19 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
       chartRef.current = null
     }
 
+    // Get colors from tokens (U1.2)
+    const chartColors = getChartColors()
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: 100,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#8a94a6',
+        textColor: chartColors.textColor,
       },
       grid: {
         vertLines: { visible: false },
-        horzLines: { color: '#1e222d', style: 1 },
+        horzLines: { color: chartColors.gridColor, style: 1 },
       },
       rightPriceScale: {
         borderVisible: false,
@@ -63,9 +67,9 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
 
     // Area series with gradient
     const series = chart.addAreaSeries({
-      lineColor: isPositive ? '#00e676' : '#ff5252',
-      topColor: isPositive ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
-      bottomColor: isPositive ? 'rgba(0, 230, 118, 0.0)' : 'rgba(255, 82, 82, 0.0)',
+      lineColor: isPositive ? chartColors.equityLineUp : chartColors.equityLineDown,
+      topColor: isPositive ? chartColors.equityAreaUpTop : chartColors.equityAreaDownTop,
+      bottomColor: isPositive ? chartColors.equityAreaUpBottom : chartColors.equityAreaDownBottom,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,

@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { createChart, ColorType, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { IndicatorData } from '@/stores'
 import { useChartSettingsStore } from '@/stores'
+import { getChartColors } from '@/utils/chartColors'
 
 interface RSIPanelProps {
   data: IndicatorData[]
@@ -16,7 +17,7 @@ export default function RSIPanel({
   data,
   barSpacing = 10,
   mainChart,
-  height = 100
+  height
 }: RSIPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -31,9 +32,12 @@ export default function RSIPanel({
   useEffect(() => {
     if (!containerRef.current) return
 
+    // Use container height if available, otherwise fall back to prop or default
+    const chartHeight = height || containerRef.current.clientHeight || 120
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: height,
+      height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: colors.background },
         textColor: colors.text,
@@ -75,9 +79,12 @@ export default function RSIPanel({
       },
     })
 
+    // Get indicator colors from tokens (U1.2)
+    const chartColors = getChartColors()
+
     // RSI line
     const rsiSeries = chart.addLineSeries({
-      color: '#ab47bc',
+      color: chartColors.rsiLine,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
@@ -87,7 +94,7 @@ export default function RSIPanel({
 
     // Overbought line (70)
     const overbought = chart.addLineSeries({
-      color: 'rgba(255, 82, 82, 0.6)',
+      color: chartColors.rsiOverbought,
       lineWidth: 1,
       lineStyle: 2, // dashed
       priceLineVisible: false,
@@ -97,7 +104,7 @@ export default function RSIPanel({
 
     // Oversold line (30)
     const oversold = chart.addLineSeries({
-      color: 'rgba(0, 230, 118, 0.6)',
+      color: chartColors.rsiOversold,
       lineWidth: 1,
       lineStyle: 2,
       priceLineVisible: false,
@@ -107,7 +114,7 @@ export default function RSIPanel({
 
     // Midline (50)
     const midline = chart.addLineSeries({
-      color: 'rgba(255, 255, 255, 0.2)',
+      color: chartColors.rsiMidline,
       lineWidth: 1,
       lineStyle: 2,
       priceLineVisible: false,
@@ -130,9 +137,10 @@ export default function RSIPanel({
     // Handle resize
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
+        const newHeight = height || containerRef.current.clientHeight || 120
         chartRef.current.applyOptions({
           width: containerRef.current.clientWidth,
-          height: height,
+          height: newHeight,
         })
       }
     }
@@ -190,13 +198,14 @@ export default function RSIPanel({
     }
   }, [data])
 
-  // Get current RSI value for display
+  // Get current RSI value for display (U1.2 - use token colors)
+  const displayColors = getChartColors()
   const currentRSI = data.length > 0 ? data[data.length - 1].value : null
   const rsiColor = currentRSI
-    ? currentRSI >= 70 ? '#ff5252'
-      : currentRSI <= 30 ? '#00e676'
-      : '#ab47bc'
-    : '#ab47bc'
+    ? currentRSI >= 70 ? displayColors.rsiOverbought
+      : currentRSI <= 30 ? displayColors.rsiOversold
+      : displayColors.rsiLine
+    : displayColors.rsiLine
 
   return (
     <div className="indicator-panel rsi-panel">
@@ -218,7 +227,7 @@ export default function RSIPanel({
           </span>
         </div>
       </div>
-      <div ref={containerRef} className="indicator-chart" style={{ height: `${height}px` }} />
+      <div ref={containerRef} className="indicator-chart" style={{ height: height ? `${height}px` : '100%', minHeight: '100px' }} />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { DataPanel } from './DataPanelsContainer'
 import { Tabs } from './ui'
 import { formatPnL } from '@/lib/formatters'
 import type { AnalyticsData, RecentExit } from '@/stores'
+import { getPnLColor } from '@/utils/chartColors'
 
 interface AnalyticsPanelProps {
   analytics: AnalyticsData
@@ -88,17 +89,15 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     )
   }, [calendarData])
 
-  // Get heatmap color based on P&L
+  // Get heatmap color based on P&L (U1.2 - use token colors)
   const getHeatmapColor = (pnl: number, trades: number) => {
     if (trades === 0) return 'var(--bg-primary)'
 
     const intensity = Math.min(Math.abs(pnl) / maxCalendarPnL, 1)
     const alpha = 0.2 + intensity * 0.8
 
-    if (pnl > 0) {
-      return `rgba(0, 230, 118, ${alpha})`
-    } else if (pnl < 0) {
-      return `rgba(255, 82, 82, ${alpha})`
+    if (pnl !== 0) {
+      return getPnLColor(pnl, alpha)
     }
     return 'var(--bg-secondary)'
   }

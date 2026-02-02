@@ -40,10 +40,6 @@
   height: 100%;
 }
 
-.chart-container-inner.trade-focused canvas {
-  filter: saturate(1.1) brightness(1.02);
-}
-
 /* ===================================
    CHART INFO BAR
    Unified bar: Price | Countdown | Legend
@@ -57,8 +53,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  background: linear-gradient(180deg, rgba(10, 10, 15, 0.92) 0%, rgba(10, 10, 15, 0.85) 100%);
-  backdrop-filter: blur(8px);
+  background: linear-gradient(180deg, rgba(10, 10, 15, 0.95) 0%, rgba(10, 10, 15, 0.9) 100%);
+  backdrop-filter: blur(4px);
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: none;
@@ -230,8 +226,8 @@
 
 /* Freshness indicator in chart header */
 .chart-actions .freshness-floating {
-  background: rgba(10, 10, 15, 0.9);
-  backdrop-filter: blur(8px);
+  background: rgba(10, 10, 15, 0.95);
+  backdrop-filter: blur(4px);
 }
 
 /* ===================================
@@ -242,27 +238,9 @@
   color: var(--accent-yellow);
 }
 
-/* On touch devices, block all interaction when locked */
-@media (pointer: coarse) {
-  .chart-container.locked,
-  .indicator-panel-locked {
-    pointer-events: none;
-  }
-}
-
-/* On desktop (non-touch), allow hover but show locked state visually */
-@media (pointer: fine) {
-  .chart-container.locked,
-  .indicator-panel-locked {
-    /* Allow hover for trade markers on desktop */
-  }
-}
-
-.chart-container.locked::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 5;
+/* Simple lock - blocks all interaction when locked */
+.chart-container.locked,
+.indicator-panel-locked {
   pointer-events: none;
 }
 
@@ -454,8 +432,8 @@
   background: var(--bg-secondary);
   border-radius: var(--radius-xl);
   border: 1px solid var(--border-color);
-  overflow: hidden;
-  height: clamp(100px, 15vh, 160px);
+  overflow: visible;
+  min-height: 100px;
 }
 
 .rsi-container {

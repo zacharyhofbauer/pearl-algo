@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { createChart, ColorType, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { MACDData } from '@/stores'
 import { useChartSettingsStore } from '@/stores'
+import { getChartColors } from '@/utils/chartColors'
 
 interface MACDPanelProps {
   data: MACDData[]
@@ -16,7 +17,7 @@ export default function MACDPanel({
   data,
   barSpacing = 10,
   mainChart,
-  height = 120
+  height
 }: MACDPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -31,9 +32,12 @@ export default function MACDPanel({
   useEffect(() => {
     if (!containerRef.current) return
 
+    // Use container height if available, otherwise fall back to prop or default
+    const chartHeight = height || containerRef.current.clientHeight || 140
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: height,
+      height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: colors.background },
         textColor: colors.text,
@@ -74,16 +78,19 @@ export default function MACDPanel({
       },
     })
 
+    // Get indicator colors from tokens (U1.2)
+    const chartColors = getChartColors()
+
     // Histogram (add first so it's behind the lines)
     const histogram = chart.addHistogramSeries({
-      color: '#26a69a',
+      color: chartColors.macdHistogramUp,
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
       priceScaleId: 'right',
     })
 
     // Zero line
     const zeroLine = chart.addLineSeries({
-      color: 'rgba(255, 255, 255, 0.3)',
+      color: chartColors.macdZeroLine,
       lineWidth: 1,
       lineStyle: 2,
       priceLineVisible: false,
@@ -93,7 +100,7 @@ export default function MACDPanel({
 
     // MACD line (blue)
     const macdLine = chart.addLineSeries({
-      color: '#2196F3',
+      color: chartColors.macdLine,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
@@ -103,7 +110,7 @@ export default function MACDPanel({
 
     // Signal line (orange)
     const signalLine = chart.addLineSeries({
-      color: '#ff9800',
+      color: chartColors.macdSignal,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
@@ -120,9 +127,10 @@ export default function MACDPanel({
     // Handle resize
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
+        const newHeight = height || containerRef.current.clientHeight || 140
         chartRef.current.applyOptions({
           width: containerRef.current.clientWidth,
-          height: height,
+          height: newHeight,
         })
       }
     }
@@ -175,6 +183,9 @@ export default function MACDPanel({
     }))
     signalLineRef.current.setData(signalData)
 
+    // Get colors for histogram (U1.2)
+    const histColors = getChartColors()
+
     // Histogram data with colors based on value and direction
     const histogramData = data.map((d, i) => {
       const prevHistogram = i > 0 ? data[i - 1].histogram : 0
@@ -183,10 +194,10 @@ export default function MACDPanel({
       let color: string
       if (d.histogram >= 0) {
         // Positive: green shades
-        color = isRising ? '#26a69a' : '#1e8c7e'
+        color = isRising ? histColors.macdHistogramUp : histColors.macdHistogramUpFade
       } else {
         // Negative: red shades
-        color = isRising ? '#ef5350' : '#c62828'
+        color = isRising ? histColors.macdHistogramDown : histColors.macdHistogramDownFade
       }
 
       return {
@@ -210,14 +221,15 @@ export default function MACDPanel({
     }
   }, [data])
 
-  // Get current values for display
+  // Get current values for display (U1.2 - use token colors)
+  const displayColors = getChartColors()
   const currentData = data.length > 0 ? data[data.length - 1] : null
   const macdColor = currentData
-    ? currentData.macd >= currentData.signal ? '#26a69a' : '#ef5350'
-    : '#8a94a6'
+    ? currentData.macd >= currentData.signal ? displayColors.macdHistogramUp : displayColors.macdHistogramDown
+    : displayColors.textColor
   const histColor = currentData
-    ? currentData.histogram >= 0 ? '#26a69a' : '#ef5350'
-    : '#8a94a6'
+    ? currentData.histogram >= 0 ? displayColors.macdHistogramUp : displayColors.macdHistogramDown
+    : displayColors.textColor
 
   return (
     <div className="indicator-panel macd-panel">
@@ -229,10 +241,10 @@ export default function MACDPanel({
         <div className="indicator-values">
           {currentData && (
             <>
-              <span className="indicator-value macd" style={{ color: '#2196F3' }}>
+              <span className="indicator-value macd" style={{ color: displayColors.macdLine }}>
                 {currentData.macd.toFixed(2)}
               </span>
-              <span className="indicator-value signal" style={{ color: '#ff9800' }}>
+              <span className="indicator-value signal" style={{ color: displayColors.macdSignal }}>
                 {currentData.signal.toFixed(2)}
               </span>
               <span className="indicator-value histogram" style={{ color: histColor }}>
@@ -242,7 +254,7 @@ export default function MACDPanel({
           )}
         </div>
       </div>
-      <div ref={containerRef} className="indicator-chart" style={{ height: `${height}px` }} />
+      <div ref={containerRef} className="indicator-chart" style={{ height: height ? `${height}px` : '100%', minHeight: '120px' }} />
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import type { EquityCurvePoint, ChallengeStatus } from '@/stores'
+import { getChartColors } from '@/utils/chartColors'
 
 interface ChallengePanelProps {
   challenge: ChallengeStatus | null
@@ -38,9 +39,13 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
     const scaleX = (i: number) => padding + (i / (values.length - 1)) * (width - padding * 2)
     const scaleY = (v: number) => height - padding - ((v - minVal) / range) * (height - padding * 2)
 
+    // Get colors from tokens (U1.2)
+    const colors = getChartColors()
+    const lineColor = isPositive ? colors.equityLineUp : colors.equityLineDown
+
     // Draw line with gradient
     ctx.beginPath()
-    ctx.strokeStyle = isPositive ? '#00e676' : '#ff5252'
+    ctx.strokeStyle = lineColor
     ctx.lineWidth = 2
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
@@ -60,7 +65,7 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
     const lastX = scaleX(values.length - 1)
     const lastY = scaleY(values[values.length - 1])
     ctx.beginPath()
-    ctx.fillStyle = isPositive ? '#00e676' : '#ff5252'
+    ctx.fillStyle = lineColor
     ctx.arc(lastX, lastY, 3, 0, Math.PI * 2)
     ctx.fill()
   }, [data, isPositive])

@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsData, ATRBandsData } from '@/stores'
 import { useChartSettingsStore } from '@/stores'
+import { getChartColors, getSessionColor, getMarkerColor } from '@/utils/chartColors'
 
 interface PositionLine {
   price: number
@@ -32,16 +33,8 @@ interface TooltipState {
   groupedMarkers: MarkerData[] | null  // All markers at this time
 }
 
-// Session times in UTC hours (futures trade almost 24h)
-// Overnight/Asian: 23:00 - 08:00 UTC (6pm-3am ET)
-// London: 08:00 - 13:00 UTC (3am-8am ET)  
-// NY RTH: 14:30 - 21:00 UTC (9:30am-4pm ET)
-const getSessionColor = (hour: number): string => {
-  if (hour >= 23 || hour < 8) return 'rgba(30, 60, 114, 0.15)' // Overnight - blue tint
-  if (hour >= 8 && hour < 14) return 'rgba(60, 40, 20, 0.15)' // London - brown tint
-  if (hour >= 14 && hour < 21) return 'rgba(40, 70, 40, 0.15)' // NY RTH - green tint
-  return 'transparent'
-}
+// Session colors are now provided by utils/chartColors.ts
+// which reads from CSS custom properties for theme consistency
 
 export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -160,12 +153,10 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       
       return {
         time,
-        position: (isExitDominant 
+        position: (isExitDominant
           ? (dominantDirection === 'long' ? 'aboveBar' : 'belowBar')
           : (dominantDirection === 'long' ? 'belowBar' : 'aboveBar')) as 'aboveBar' | 'belowBar',
-        color: isExitDominant 
-          ? (totalPnl >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
-          : 'rgba(180, 180, 180, 0.9)',
+        color: getMarkerColor(isExitDominant ? 'exit' : 'entry', totalPnl, true),
         shape: 'circle' as const,
         text: `${group.length}`,
         kind: isExitDominant ? 'exit' : 'entry',
@@ -186,24 +177,27 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   useEffect(() => {
     if (!containerRef.current) return
 
+    // Get colors from CSS tokens (U1.2)
+    const colors = getChartColors()
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight || 600,
       layout: {
-        background: { type: ColorType.Solid, color: '#0a0a0f' },
-        textColor: '#8a94a6',
+        background: { type: ColorType.Solid, color: colors.background },
+        textColor: colors.textColor,
       },
       grid: {
-        vertLines: { color: '#1e222d' },
-        horzLines: { color: '#1e222d' },
+        vertLines: { color: colors.gridColor },
+        horzLines: { color: colors.gridColor },
       },
       rightPriceScale: {
-        borderColor: '#2a2a3a',
+        borderColor: colors.borderColor,
         scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
         visible: true,
-        borderColor: '#2a2a3a',
+        borderColor: colors.borderColor,
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 15,  // More space between candles and price labels
@@ -218,23 +212,23 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: '#758696',
+          color: colors.crosshairLine,
           width: 1,
           style: 3,
-          labelBackgroundColor: '#2a2a3a',
+          labelBackgroundColor: colors.crosshairLabel,
         },
         horzLine: {
-          color: '#758696',
+          color: colors.crosshairLine,
           width: 1,
           style: 3,
-          labelBackgroundColor: '#2a2a3a',
+          labelBackgroundColor: colors.crosshairLabel,
         },
       },
     })
 
     // EMA 9 line (cyan)
     const ema9Series = chart.addLineSeries({
-      color: '#00d4ff',
+      color: colors.ema9,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -243,7 +237,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // EMA 21 line (yellow)
     const ema21Series = chart.addLineSeries({
-      color: '#ffc107',
+      color: colors.ema21,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -252,7 +246,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // VWAP line (blue, solid)
     const vwapSeries = chart.addLineSeries({
-      color: '#2962ff',
+      color: colors.vwap,
       lineWidth: 2,
       lineStyle: 0,
       priceLineVisible: false,
@@ -262,7 +256,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // Bollinger Bands (blue, semi-transparent)
     const bbUpper = chart.addLineSeries({
-      color: 'rgba(41, 98, 255, 0.5)',
+      color: colors.bbUpper,
       lineWidth: 1,
       lineStyle: 0,
       priceLineVisible: false,
@@ -270,7 +264,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
     const bbMiddle = chart.addLineSeries({
-      color: 'rgba(41, 98, 255, 0.8)',
+      color: colors.bbMiddle,
       lineWidth: 1,
       lineStyle: 2, // dashed
       priceLineVisible: false,
@@ -278,7 +272,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
     const bbLower = chart.addLineSeries({
-      color: 'rgba(41, 98, 255, 0.5)',
+      color: colors.bbLower,
       lineWidth: 1,
       lineStyle: 0,
       priceLineVisible: false,
@@ -291,7 +285,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // ATR Bands (orange, semi-transparent)
     const atrUpper = chart.addLineSeries({
-      color: 'rgba(255, 152, 0, 0.5)',
+      color: colors.atrUpper,
       lineWidth: 1,
       lineStyle: 2, // dashed
       priceLineVisible: false,
@@ -299,7 +293,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
     const atrLower = chart.addLineSeries({
-      color: 'rgba(255, 152, 0, 0.5)',
+      color: colors.atrLower,
       lineWidth: 1,
       lineStyle: 2, // dashed
       priceLineVisible: false,
@@ -309,24 +303,24 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     atrUpperRef.current = atrUpper
     atrLowerRef.current = atrLower
 
-    // Candlestick series - bright green/red
+    // Candlestick series - uses token colors
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#00e676',
-      downColor: '#ff5252',
+      upColor: colors.candleUp,
+      downColor: colors.candleDown,
       borderVisible: false,
-      wickUpColor: '#00e676',
-      wickDownColor: '#ff5252',
+      wickUpColor: colors.wickUp,
+      wickDownColor: colors.wickDown,
       priceFormat: { type: 'price', precision: 2, minMove: 0.25 },
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: 'rgba(255, 215, 0, 0.35)',  // Gold/yellow - subtle, less visible than position lines
+      priceLineColor: colors.priceLineColor,
       priceLineStyle: 2,  // Dashed
     })
 
     // Volume series
     const volumeSeries = chart.addHistogramSeries({
-      color: '#26a69a',
+      color: colors.candleUp,
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     })
@@ -336,7 +330,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // Connection line - added LAST so it renders ON TOP of everything when hovering
     const connectionLine = chart.addLineSeries({
-      color: '#00e676',
+      color: colors.connectionWin,
       lineWidth: 4,
       lineStyle: 0, // solid
       priceLineVisible: false,
@@ -460,20 +454,23 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }))
     candleSeriesRef.current.setData(candleData)
 
+    // Get colors for volume bars (U1.2)
+    const chartColors = getChartColors()
     const volumeData = data.map((d) => ({
       time: d.time as Time,
       value: d.volume || 0,
-      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+      color: d.close >= d.open ? chartColors.volumeUp : chartColors.volumeDown,
     }))
     volumeSeriesRef.current.setData(volumeData)
 
     // Auto-fit when data length changes significantly (timeframe switch) or on initial load
+    // Only scroll to real time on initial load or major data changes, not every tick
     if (chartRef.current) {
       const lengthChanged = Math.abs(data.length - prevDataLength.current) > 5
       if (lengthChanged || prevDataLength.current === 0) {
         chartRef.current.timeScale().fitContent()
+        chartRef.current.timeScale().scrollToRealTime()
       }
-      chartRef.current.timeScale().scrollToRealTime()
       prevDataLength.current = data.length
     }
   }, [data])
@@ -551,10 +548,9 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
             if (m.kind === 'exit') {
               position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
             }
-            let color = m.kind === 'entry' 
-              ? 'rgba(180, 180, 180, 0.9)' 
-              : ((m.pnl || 0) >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
-            
+            // Use getMarkerColor utility (U1.2)
+            const color = getMarkerColor(m.kind as 'entry' | 'exit', m.pnl, false)
+
             return {
               time: m.time as any,
               position,
@@ -570,17 +566,12 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           if (m.kind === 'exit' && !m._isGrouped) {
             position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
           }
-          
-          let color = m.color
-          if (!m._isGrouped) {
-            if (m.kind === 'entry') {
-              color = 'rgba(180, 180, 180, 0.8)'
-            } else if (m.kind === 'exit') {
-              const isWin = (m.pnl || 0) >= 0
-              color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'
-            }
-          }
-          
+
+          // Use getMarkerColor utility for consistent colors (U1.2)
+          const color = m._isGrouped
+            ? m.color  // Already set by aggregation
+            : getMarkerColor(m.kind as 'entry' | 'exit', m.pnl, false)
+
           return {
             time: m.time as any,
             position,
@@ -612,10 +603,13 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         const entryPrice = entry.entry_price || 0
         const exitPrice = exit.exit_price || 0
         const isWin = (exit.pnl || 0) >= 0
-        
+
+        // Get colors from tokens (U1.2)
+        const chartColors = getChartColors()
+
         // Set line color based on win/loss - bright colors to stand out
         connectionLineRef.current.applyOptions({
-          color: isWin ? '#00ff88' : '#ff3333',
+          color: isWin ? chartColors.connectionWin : chartColors.connectionLoss,
           lineWidth: 2,
           lineStyle: 2, // dotted
         })
