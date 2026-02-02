@@ -6,9 +6,7 @@ import CandlestickChart from '@/components/CandlestickChart'
 import DataPanelsContainer from '@/components/DataPanelsContainer'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
-import AIStatusPanel from '@/components/AIStatusPanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
-import PearlSuggestionsPanel from '@/components/PearlSuggestionsPanel'
 import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
@@ -691,13 +689,13 @@ export default function PearlAlgoWebApp() {
               <MarketRegimePanel regime={agentState.market_regime} />
             )
           }
-          aiStatusSection={
-            agentState.ai_status && (
-              <AIStatusPanel
-                aiStatus={agentState.ai_status}
-                shadowCounters={agentState.shadow_counters}
-              />
-            )
+          pearlAISection={
+            <PearlInsightsPanel
+              insights={agentState.pearl_insights}
+              suggestion={agentState.pearl_suggestion}
+              aiStatus={agentState.ai_status}
+              shadowCounters={agentState.shadow_counters}
+            />
           }
           recentTradesSection={
             agentState.recent_exits && agentState.recent_exits.length > 0 && (
@@ -733,10 +731,12 @@ export default function PearlAlgoWebApp() {
       {/* Data Panels */}
       {agentState && (
         <DataPanelsContainer>
-          {/* Pearl AI Insights - Primary focus above performance */}
+          {/* Pearl AI - Combined insights and AI status */}
           <PearlInsightsPanel
             insights={agentState.pearl_insights}
             suggestion={agentState.pearl_suggestion}
+            aiStatus={agentState.ai_status}
+            shadowCounters={agentState.shadow_counters}
             onAccept={async () => {
               try {
                 const action = agentState.pearl_suggestion?.accept_action ||
@@ -818,12 +818,6 @@ export default function PearlAlgoWebApp() {
               connectionHealth={agentState.connection_health}
               errorSummary={agentState.error_summary}
               dataQuality={agentState.data_quality}
-            />
-          )}
-          {agentState.ai_status && (
-            <AIStatusPanel
-              aiStatus={agentState.ai_status}
-              shadowCounters={agentState.shadow_counters}
             />
           )}
           {agentState.recent_exits && agentState.recent_exits.length > 0 && (

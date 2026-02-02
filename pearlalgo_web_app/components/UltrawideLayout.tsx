@@ -12,7 +12,7 @@ interface UltrawideLayoutProps {
   challengeSection?: ReactNode
   // Column 3: Status & Trades (20%)
   regimeSection?: ReactNode
-  aiStatusSection?: ReactNode
+  pearlAISection?: ReactNode
   recentTradesSection?: ReactNode
 }
 
@@ -21,7 +21,7 @@ interface UltrawideLayoutProps {
  *
  * Layout (simplified for readability):
  * ┌────────────────────────────────────────────────────────────────────────────────┐
- * │                                 │  PERFORMANCE    │  REGIME + AI STATUS       │
+ * │                                 │  PERFORMANCE    │  REGIME + PEARL AI        │
  * │   TRADINGVIEW CHART             │  (P&L, Stats)   │  (Market state badges)    │
  * │   (Full candlestick + volume)   │                 │                           │
  * │                                 │  CHALLENGE      │  RECENT TRADES            │
@@ -38,7 +38,7 @@ export default function UltrawideLayout({
   activePositionsSection,
   challengeSection,
   regimeSection,
-  aiStatusSection,
+  pearlAISection,
   recentTradesSection,
 }: UltrawideLayoutProps) {
   return (
@@ -60,7 +60,7 @@ export default function UltrawideLayout({
       <div className="ultrawide-status-column">
         <div className="ultrawide-status-badges">
           {regimeSection}
-          {aiStatusSection}
+          {pearlAISection}
         </div>
         <div className="ultrawide-trades-section">
           {recentTradesSection}

@@ -1,6 +1,7 @@
 'use client'
 
 import { ReactNode } from 'react'
+import Image from 'next/image'
 import { ErrorBoundary } from './ErrorBoundary'
 
 interface DataPanelsContainerProps {
@@ -20,6 +21,8 @@ export default function DataPanelsContainer({ children }: DataPanelsContainerPro
 interface DataPanelProps {
   title: string
   icon?: string
+  /** Image path for icon (used instead of emoji icon) */
+  iconSrc?: string
   children: ReactNode
   className?: string
   /** Padding variant for panel content */
@@ -37,6 +40,7 @@ interface DataPanelProps {
 export function DataPanel({
   title,
   icon,
+  iconSrc,
   children,
   className = '',
   padding = 'default',
@@ -52,10 +56,21 @@ export function DataPanel({
     className
   ].filter(Boolean).join(' ')
 
+  // Render icon - either image or emoji
+  const renderIcon = () => {
+    if (iconSrc) {
+      return <Image src={iconSrc} alt="" width={18} height={18} className="data-panel-icon-img" />
+    }
+    if (icon) {
+      return <span className="data-panel-icon">{icon}</span>
+    }
+    return null
+  }
+
   const panelContent = (
     <div className={panelClasses}>
       <div className="data-panel-header">
-        {icon && <span className="data-panel-icon">{icon}</span>}
+        {renderIcon()}
         <span className="data-panel-title">{title}</span>
         {badge && (
           <span
@@ -83,7 +98,7 @@ export function DataPanel({
       fallback={
         <div className={`data-panel error-panel ${className}`}>
           <div className="data-panel-header">
-            {icon && <span className="data-panel-icon">{icon}</span>}
+            {renderIcon()}
             <span className="data-panel-title">{title}</span>
           </div>
           <div className="data-panel-content">

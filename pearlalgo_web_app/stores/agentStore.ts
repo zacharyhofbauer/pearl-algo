@@ -240,6 +240,9 @@ export interface AnalyticsData {
 export interface PearlSuggestion {
   message: string
   action: string
+  accept_action?: string
+  cooldown_key?: string
+  id?: string
 }
 
 export interface PearlShadowMetrics {

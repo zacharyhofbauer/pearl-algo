@@ -2,22 +2,62 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import type { PearlInsights, PearlSuggestion } from '@/stores'
+import { InfoTooltip } from './ui'
+import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters } from '@/stores'
 
 interface PearlInsightsPanelProps {
   insights: PearlInsights | null
   suggestion: PearlSuggestion | null
+  aiStatus?: AIStatus | null
+  shadowCounters?: ShadowCounters | null
   onAccept?: () => void
   onDismiss?: () => void
+}
+
+type Mode = 'off' | 'shadow' | 'live'
+
+function ModePill({ label, mode }: { label: string; mode: Mode }) {
+  const getModeClass = () => {
+    switch (mode) {
+      case 'live':
+        return 'ai-pill-live'
+      case 'shadow':
+        return 'ai-pill-shadow'
+      default:
+        return 'ai-pill-off'
+    }
+  }
+
+  const getModeLabel = () => {
+    switch (mode) {
+      case 'live':
+        return 'LIVE'
+      case 'shadow':
+        return 'SHADOW'
+      default:
+        return 'OFF'
+    }
+  }
+
+  return (
+    <div className={`ai-pill ${getModeClass()}`}>
+      <span className="ai-pill-label">{label}</span>
+      <span className="ai-pill-mode">{getModeLabel()}</span>
+      {mode === 'shadow' && <InfoTooltip text="Shadow mode observes but doesn't affect trades" />}
+    </div>
+  )
 }
 
 export default function PearlInsightsPanel({
   insights,
   suggestion,
+  aiStatus,
+  shadowCounters,
   onAccept,
   onDismiss,
 }: PearlInsightsPanelProps) {
   const [showHistory, setShowHistory] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   const metrics = insights?.shadow_metrics
   const activeSuggestion = suggestion || metrics?.active_suggestion
@@ -31,6 +71,18 @@ export default function PearlInsightsPanel({
   const suggestionsFollowed = metrics?.suggestions_followed || 0
   const suggestionsDismissed = metrics?.suggestions_dismissed || 0
 
+  // AI Status values
+  const mlMode = aiStatus?.ml_filter.enabled
+    ? (aiStatus.ml_filter.mode === 'live' ? 'live' : 'shadow')
+    : 'off'
+
+  // Check if any component is in shadow mode
+  const hasShadowMode = aiStatus && (
+    aiStatus.bandit_mode === 'shadow' ||
+    aiStatus.contextual_mode === 'shadow' ||
+    mlMode === 'shadow'
+  )
+
   // Format currency
   const formatCurrency = (val: number) => {
     if (val >= 1000) return `$${(val / 1000).toFixed(1)}k`
@@ -43,12 +95,50 @@ export default function PearlInsightsPanel({
   return (
     <DataPanel
       title="Pearl AI"
-      icon="🦪"
+      iconSrc="/logo.png"
       className="pearl-insights-panel"
-      badge={metrics?.mode === 'shadow' ? 'SHADOW' : undefined}
+      badge={hasShadowMode || metrics?.mode === 'shadow' ? 'SHADOW' : undefined}
       badgeColor="var(--color-warning)"
     >
       <div className="pearl-insights">
+        {/* AI Component Status Pills */}
+        {aiStatus && (
+          <div className="pearl-ai-status">
+            <div className="ai-pills">
+              <ModePill label="Bandit" mode={aiStatus.bandit_mode as Mode} />
+              <ModePill label="Contextual" mode={aiStatus.contextual_mode as Mode} />
+              <ModePill label="ML" mode={mlMode as Mode} />
+            </div>
+
+            {/* ML Lift Status (compact) */}
+            {aiStatus.ml_filter.enabled && aiStatus.ml_filter.lift && (
+              <div className="ai-lift-compact">
+                <span className={`lift-indicator ${aiStatus.ml_filter.lift.lift_ok ? 'lift-ok' : 'lift-fail'}`}>
+                  {aiStatus.ml_filter.lift.lift_ok ? '✓' : '—'}
+                </span>
+                {aiStatus.ml_filter.lift.lift_win_rate !== undefined && (
+                  <span className="lift-stat">
+                    WR {(aiStatus.ml_filter.lift.lift_win_rate * 100).toFixed(0)}%
+                  </span>
+                )}
+                {aiStatus.ml_filter.lift.lift_avg_pnl !== undefined && (
+                  <span className={`lift-stat ${aiStatus.ml_filter.lift.lift_avg_pnl >= 0 ? 'positive' : 'negative'}`}>
+                    {aiStatus.ml_filter.lift.lift_avg_pnl >= 0 ? '+' : ''}${aiStatus.ml_filter.lift.lift_avg_pnl.toFixed(0)}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Direction Gating (compact) */}
+            {aiStatus.direction_gating.enabled && aiStatus.direction_gating.blocks > 0 && (
+              <div className="ai-gating-compact">
+                <span className="gating-label">Gating:</span>
+                <span className="gating-count">{aiStatus.direction_gating.blocks} blocks</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Current Insight / Suggestion */}
         {activeSuggestion && (
           <div className="pearl-current-insight">
@@ -88,142 +178,118 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* Shadow Tracking Metrics */}
+        {/* Shadow Tracking Impact Summary (compact 2x2 grid) */}
         {metrics && totalSuggestions > 0 && (
           <div className="pearl-shadow-metrics">
             <div className="shadow-header">
-              <span className="shadow-title">Shadow Tracking</span>
-              <span className="shadow-badge">
-                {totalSuggestions} insights
-              </span>
+              <span className="shadow-title">Shadow Impact</span>
+              <button
+                className="details-toggle"
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                {showDetails ? '−' : '+'}
+              </button>
             </div>
 
-            {/* Impact Summary */}
-            <div className="shadow-impact-grid">
-              {/* Would Have Saved */}
-              <div className="impact-card impact-saved">
-                <div className="impact-label">Would Have Saved</div>
-                <div className="impact-value positive">
-                  {formatCurrency(totalWouldHaveSaved)}
-                </div>
-                <div className="impact-subtext">
-                  avoided losses
-                </div>
+            {/* Compact Impact Row */}
+            <div className="shadow-impact-row">
+              <div className="impact-item positive">
+                <span className="impact-value">{formatCurrency(totalWouldHaveSaved)}</span>
+                <span className="impact-label">saved</span>
               </div>
-
-              {/* Would Have Made */}
-              <div className="impact-card impact-made">
-                <div className="impact-label">Would Have Made</div>
-                <div className="impact-value positive">
-                  {formatCurrency(totalWouldHaveMade)}
-                </div>
-                <div className="impact-subtext">
-                  extra gains
-                </div>
+              <div className="impact-item positive">
+                <span className="impact-value">{formatCurrency(totalWouldHaveMade)}</span>
+                <span className="impact-label">made</span>
               </div>
-
-              {/* Net Impact */}
-              <div className="impact-card impact-net">
-                <div className="impact-label">Net Impact</div>
-                <div className={`impact-value ${netImpact >= 0 ? 'positive' : 'negative'}`}>
-                  {netImpact >= 0 ? '+' : ''}{formatCurrency(netImpact)}
-                </div>
-                <div className="impact-subtext">
-                  if followed
-                </div>
+              <div className={`impact-item ${netImpact >= 0 ? 'positive' : 'negative'}`}>
+                <span className="impact-value">{netImpact >= 0 ? '+' : ''}{formatCurrency(netImpact)}</span>
+                <span className="impact-label">net</span>
               </div>
-
-              {/* Accuracy */}
-              <div className="impact-card impact-accuracy">
-                <div className="impact-label">Accuracy</div>
-                <div className={`impact-value ${accuracyRate >= 60 ? 'positive' : accuracyRate >= 40 ? 'neutral' : 'negative'}`}>
-                  {formatPct(accuracyRate)}
-                </div>
-                <div className="impact-subtext">
-                  {metrics.correct_suggestions}/{metrics.correct_suggestions + metrics.incorrect_suggestions} correct
-                </div>
+              <div className={`impact-item ${accuracyRate >= 60 ? 'positive' : 'neutral'}`}>
+                <span className="impact-value">{formatPct(accuracyRate)}</span>
+                <span className="impact-label">accuracy</span>
               </div>
             </div>
 
-            {/* Suggestion Stats */}
-            <div className="shadow-stats">
-              <div className="stat-row">
-                <span className="stat-label">Followed:</span>
-                <span className="stat-value">{suggestionsFollowed}</span>
-              </div>
-              <div className="stat-row">
-                <span className="stat-label">Dismissed:</span>
-                <span className="stat-value">{suggestionsDismissed}</span>
-              </div>
-              <div className="stat-row">
-                <span className="stat-label">Expired:</span>
-                <span className="stat-value">{metrics.suggestions_expired}</span>
-              </div>
-            </div>
+            {/* Expanded Details */}
+            {showDetails && (
+              <div className="shadow-details">
+                {/* Shadow Counters from AI Status */}
+                {shadowCounters && shadowCounters.would_block_total > 0 && (
+                  <div className="shadow-blocks">
+                    <span className="blocks-text">
+                      Would block <strong>{shadowCounters.would_block_total}</strong> signals
+                    </span>
+                    {shadowCounters.ml_would_skip > 0 && (
+                      <span className="blocks-sub">
+                        ML skip {shadowCounters.ml_would_skip}/{shadowCounters.ml_total_decisions}
+                      </span>
+                    )}
+                  </div>
+                )}
 
-            {/* History Toggle */}
-            {metrics.recent_suggestions && metrics.recent_suggestions.length > 0 && (
-              <div className="shadow-history-toggle">
-                <button
-                  className="history-toggle-btn"
-                  onClick={() => setShowHistory(!showHistory)}
-                >
-                  {showHistory ? 'Hide History' : 'Show History'}
-                  <span className="toggle-icon">{showHistory ? '▲' : '▼'}</span>
-                </button>
-              </div>
-            )}
+                {/* Suggestion Stats */}
+                <div className="shadow-stats-compact">
+                  <span className="stat">✓ {suggestionsFollowed} followed</span>
+                  <span className="stat">✗ {suggestionsDismissed} dismissed</span>
+                  <span className="stat">⏱ {metrics.suggestions_expired} expired</span>
+                </div>
 
-            {/* Recent Suggestions History */}
-            {showHistory && metrics.recent_suggestions && (
-              <div className="shadow-history">
-                <div className="history-header">Recent Insights</div>
-                <div className="history-list">
-                  {metrics.recent_suggestions.slice(-5).reverse().map((s) => (
-                    <div key={s.id} className={`history-item outcome-${s.outcome}`}>
-                      <div className="history-type">{getTypeIcon(s.type)}</div>
-                      <div className="history-content">
-                        <div className="history-message">{s.message}</div>
-                        <div className="history-meta">
-                          <span className={`outcome-badge ${s.outcome}`}>
-                            {s.outcome}
-                          </span>
-                          {s.would_have_saved && s.would_have_saved > 0 && (
-                            <span className="would-have saved">
-                              +${s.would_have_saved.toFixed(0)} saved
-                            </span>
-                          )}
-                          {s.would_have_made && s.would_have_made > 0 && (
-                            <span className="would-have made">
-                              +${s.would_have_made.toFixed(0)} made
-                            </span>
-                          )}
+                {/* History Toggle */}
+                {metrics.recent_suggestions && metrics.recent_suggestions.length > 0 && (
+                  <button
+                    className="history-toggle-btn"
+                    onClick={() => setShowHistory(!showHistory)}
+                  >
+                    {showHistory ? 'Hide History ▲' : 'Show History ▼'}
+                  </button>
+                )}
+
+                {/* Recent Suggestions History */}
+                {showHistory && metrics.recent_suggestions && (
+                  <div className="shadow-history">
+                    <div className="history-list">
+                      {metrics.recent_suggestions.slice(-5).reverse().map((s) => (
+                        <div key={s.id} className={`history-item outcome-${s.outcome}`}>
+                          <div className="history-type">{getTypeIcon(s.type)}</div>
+                          <div className="history-content">
+                            <div className="history-message">{s.message}</div>
+                            <div className="history-meta">
+                              <span className={`outcome-badge ${s.outcome}`}>
+                                {s.outcome}
+                              </span>
+                              {s.would_have_saved && s.would_have_saved > 0 && (
+                                <span className="would-have saved">
+                                  +${s.would_have_saved.toFixed(0)}
+                                </span>
+                              )}
+                              {s.would_have_made && s.would_have_made > 0 && (
+                                <span className="would-have made">
+                                  +${s.would_have_made.toFixed(0)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
         {/* Empty State - No Metrics Yet */}
-        {(!metrics || totalSuggestions === 0) && !activeSuggestion && (
+        {(!metrics || totalSuggestions === 0) && !activeSuggestion && !aiStatus && (
           <div className="pearl-empty-state">
             <div className="empty-icon">🔮</div>
             <div className="empty-title">Shadow Mode Active</div>
             <div className="empty-text">
-              Pearl is learning your patterns. Insights will appear as trading continues.
+              Pearl is learning your patterns.
             </div>
           </div>
         )}
-
-        {/* Shadow Mode Indicator */}
-        <div className="pearl-mode-indicator">
-          <span className="mode-dot shadow"></span>
-          <span className="mode-text">Shadow Mode - Tracking only, not affecting trades</span>
-        </div>
       </div>
     </DataPanel>
   )
