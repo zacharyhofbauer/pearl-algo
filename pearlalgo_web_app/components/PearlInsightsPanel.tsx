@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
-import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters } from '@/stores'
+import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
 
 interface PearlInsightsPanelProps {
   insights: PearlInsights | null
   suggestion: PearlSuggestion | null
   aiStatus?: AIStatus | null
   shadowCounters?: ShadowCounters | null
+  mlFilterPerformance?: MLFilterPerformance | null
   onAccept?: () => void
   onDismiss?: () => void
 }
@@ -53,6 +54,7 @@ export default function PearlInsightsPanel({
   suggestion,
   aiStatus,
   shadowCounters,
+  mlFilterPerformance,
   onAccept,
   onDismiss,
 }: PearlInsightsPanelProps) {
@@ -134,6 +136,65 @@ export default function PearlInsightsPanel({
               <div className="ai-gating-compact">
                 <span className="gating-label">Gating:</span>
                 <span className="gating-count">{aiStatus.direction_gating.blocks} blocks</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ML Filter Performance - Win Rate Comparison */}
+        {mlFilterPerformance && (mlFilterPerformance.win_rate_pass !== undefined || mlFilterPerformance.win_rate_fail !== undefined) && (
+          <div className="ml-performance-section">
+            <div className="ml-perf-header">
+              <span className="ml-perf-title">ML Filter Impact</span>
+              {mlFilterPerformance.lift_ok && (
+                <span className="ml-lift-badge positive">
+                  +{((mlFilterPerformance.win_rate_pass || 0) - (mlFilterPerformance.win_rate_fail || 0)) * 100 > 0
+                    ? ((mlFilterPerformance.win_rate_pass || 0) - (mlFilterPerformance.win_rate_fail || 0) * 100).toFixed(0)
+                    : '0'}% lift
+                </span>
+              )}
+            </div>
+            <div className="ml-comparison-bars">
+              <div className="ml-bar-row">
+                <span className="ml-bar-label">PASS</span>
+                <div className="ml-bar-track">
+                  <div
+                    className="ml-bar-fill pass"
+                    style={{ width: `${(mlFilterPerformance.win_rate_pass || 0) * 100}%` }}
+                  />
+                </div>
+                <span className="ml-bar-value">
+                  {mlFilterPerformance.win_rate_pass !== undefined
+                    ? `${(mlFilterPerformance.win_rate_pass * 100).toFixed(0)}%`
+                    : '—'}
+                </span>
+                <span className="ml-bar-count">{mlFilterPerformance.trades_passed}</span>
+              </div>
+              <div className="ml-bar-row">
+                <span className="ml-bar-label">FAIL</span>
+                <div className="ml-bar-track">
+                  <div
+                    className="ml-bar-fill fail"
+                    style={{ width: `${(mlFilterPerformance.win_rate_fail || 0) * 100}%` }}
+                  />
+                </div>
+                <span className="ml-bar-value">
+                  {mlFilterPerformance.win_rate_fail !== undefined
+                    ? `${(mlFilterPerformance.win_rate_fail * 100).toFixed(0)}%`
+                    : '—'}
+                </span>
+                <span className="ml-bar-count">{mlFilterPerformance.trades_blocked}</span>
+              </div>
+            </div>
+            {mlFilterPerformance.lift_ok ? (
+              <div className="ml-value-status positive">
+                <span className="status-icon">✓</span>
+                <span className="status-text">ML filter adding value</span>
+              </div>
+            ) : (
+              <div className="ml-value-status neutral">
+                <span className="status-icon">—</span>
+                <span className="status-text">Collecting data...</span>
               </div>
             )}
           </div>

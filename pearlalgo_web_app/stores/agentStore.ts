@@ -127,6 +127,64 @@ export interface SignalRejections {
   max_positions: number
 }
 
+// Execution state - armed/disarmed status
+export interface ExecutionState {
+  enabled: boolean
+  armed: boolean
+  mode: 'live' | 'paper' | 'shadow'
+  disarm_reason?: string
+}
+
+// Circuit breaker detailed status
+export interface CircuitBreakerStatus {
+  active: boolean
+  in_cooldown: boolean
+  cooldown_remaining_seconds?: number
+  rolling_win_rate?: number
+  trip_reason?: string
+  trips_today: number
+}
+
+// ML Filter detailed performance
+export interface MLFilterPerformance {
+  enabled: boolean
+  mode: string
+  win_rate_pass?: number
+  win_rate_fail?: number
+  trades_passed: number
+  trades_blocked: number
+  lift_ok: boolean
+  lift_win_rate?: number
+  lift_avg_pnl?: number
+}
+
+// Session context
+export interface SessionContext {
+  current_session: string  // 'premarket' | 'morning' | 'midday' | 'afternoon' | 'extended' | 'closed'
+  session_start_time?: string
+  session_end_time?: string
+  session_pnl: number
+  session_trades: number
+  session_wins: number
+  time_until_next_session_seconds?: number
+}
+
+// Signal activity tracking
+export interface SignalActivity {
+  last_signal_time?: string
+  minutes_since_last_signal?: number
+  signals_last_hour: number
+  signals_today: number
+  quiet_reason?: string
+  quiet_period_minutes?: number
+  signal_breakdown: {
+    long_signals: number
+    short_signals: number
+    executed: number
+    blocked: number
+  }
+}
+
 export interface LastSignalDecision {
   signal_type: string
   ml_probability: number
@@ -329,6 +387,12 @@ export interface AgentState {
   analytics: AnalyticsData | null
   pearl_suggestion: PearlSuggestion | null
   pearl_insights: PearlInsights | null
+  // New fields for enhanced transparency
+  execution_state: ExecutionState | null
+  circuit_breaker: CircuitBreakerStatus | null
+  ml_filter_performance: MLFilterPerformance | null
+  session_context: SessionContext | null
+  signal_activity: SignalActivity | null
 }
 
 interface AgentStore {
@@ -376,6 +440,12 @@ const initialAgentState: AgentState = {
   analytics: null,
   pearl_suggestion: null,
   pearl_insights: null,
+  // New fields for enhanced transparency
+  execution_state: null,
+  circuit_breaker: null,
+  ml_filter_performance: null,
+  session_context: null,
+  signal_activity: null,
 }
 
 export const useAgentStore = create<AgentStore>()(
@@ -435,3 +505,8 @@ export const selectEquityCurve = (state: AgentStore) => state.agentState?.equity
 export const selectMarketRegime = (state: AgentStore) => state.agentState?.market_regime
 export const selectBuySellPressure = (state: AgentStore) => state.agentState?.buy_sell_pressure
 export const selectConfig = (state: AgentStore) => state.agentState?.config
+export const selectExecutionState = (state: AgentStore) => state.agentState?.execution_state
+export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.circuit_breaker
+export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
+export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
+export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity

@@ -29,6 +29,12 @@ export type {
   PearlSuggestion,
   PearlShadowMetrics,
   PearlInsights,
+  // New types for enhanced transparency
+  ExecutionState,
+  CircuitBreakerStatus,
+  MLFilterPerformance,
+  SessionContext,
+  SignalActivity,
 } from './agentStore'
 
 // Export selectors
@@ -48,6 +54,12 @@ export {
   selectMarketRegime,
   selectBuySellPressure,
   selectConfig,
+  // New selectors for enhanced transparency
+  selectExecutionState,
+  selectCircuitBreaker,
+  selectMLFilterPerformance,
+  selectSessionContext,
+  selectSignalActivity,
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'

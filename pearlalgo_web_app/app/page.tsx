@@ -19,6 +19,9 @@ import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
 import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import PnLCalendarPanel from '@/components/PnLCalendarPanel'
+import SystemStatusPanel from '@/components/SystemStatusPanel'
+import AIPerformancePanel from '@/components/AIPerformancePanel'
+import SignalActivityPanel from '@/components/SignalActivityPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
@@ -482,7 +485,7 @@ export default function PearlAlgoWebApp() {
         <div className="header-row-main">
           {/* Brand */}
           <div className="header-brand">
-            <Image src="/pearl-emoji.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
+            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
             <div className="header-titles">
               <span className="header-symbol">MNQ</span>
               <span className="header-app-name">Pearl Algo Web App</span>
@@ -698,7 +701,7 @@ export default function PearlAlgoWebApp() {
     return (
       <div className="ultrawide-header">
         <div className="uw-brand">
-          <Image src="/pearl-emoji.png" alt="PEARL" width={20} height={20} priority />
+          <Image src="/logo.png" alt="PEARL" width={20} height={20} priority />
           <span className="uw-symbol">MNQ</span>
         </div>
         <div className="uw-stats">
@@ -753,6 +756,24 @@ export default function PearlAlgoWebApp() {
               suggestion={agentState.pearl_suggestion}
               aiStatus={agentState.ai_status}
               shadowCounters={agentState.shadow_counters}
+              mlFilterPerformance={agentState.ml_filter_performance}
+            />
+          }
+          systemStatusSection={
+            <SystemStatusPanel
+              executionState={agentState.execution_state}
+              circuitBreaker={agentState.circuit_breaker}
+              marketRegime={agentState.market_regime}
+              sessionContext={agentState.session_context}
+              errorSummary={agentState.error_summary}
+              isRunning={agentState.running}
+              isPaused={agentState.paused}
+            />
+          }
+          signalActivitySection={
+            <SignalActivityPanel
+              signalActivity={agentState.signal_activity}
+              lastDecision={agentState.last_signal_decision}
             />
           }
           performanceSection={
@@ -864,12 +885,13 @@ export default function PearlAlgoWebApp() {
       {/* Data Panels */}
       {agentState && (
         <DataPanelsContainer>
-          {/* Pearl AI - Combined insights and AI status */}
+          {/* Pearl AI - Combined insights, AI status, and ML performance */}
           <PearlInsightsPanel
             insights={agentState.pearl_insights}
             suggestion={agentState.pearl_suggestion}
             aiStatus={agentState.ai_status}
             shadowCounters={agentState.shadow_counters}
+            mlFilterPerformance={agentState.ml_filter_performance}
             onAccept={async () => {
               try {
                 const action = agentState.pearl_suggestion?.accept_action ||
@@ -898,6 +920,21 @@ export default function PearlAlgoWebApp() {
                 console.error('Failed to dismiss Pearl insight:', e)
               }
             }}
+          />
+          {/* System Status - Operational Readiness */}
+          <SystemStatusPanel
+            executionState={agentState.execution_state}
+            circuitBreaker={agentState.circuit_breaker}
+            marketRegime={agentState.market_regime}
+            sessionContext={agentState.session_context}
+            errorSummary={agentState.error_summary}
+            isRunning={agentState.running}
+            isPaused={agentState.paused}
+          />
+          {/* Signal Activity - Explain Trading Silence */}
+          <SignalActivityPanel
+            signalActivity={agentState.signal_activity}
+            lastDecision={agentState.last_signal_decision}
           />
           {agentState.performance && (
             <PerformancePanel
