@@ -1,6 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { formatTime as formatTimeUtil } from '@/lib/formatters'
 import type { SignalRejections, LastSignalDecision } from '@/stores'
 
 interface SignalDecisionsPanelProps {
@@ -36,18 +37,10 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
     'Session Filter': 'var(--text-tertiary)',
   }
 
+  // Use centralized formatter without seconds
   const formatTime = (timestamp: string | null) => {
     if (!timestamp) return '--:--'
-    try {
-      const date = new Date(timestamp)
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })
-    } catch {
-      return '--:--'
-    }
+    return formatTimeUtil(timestamp, false) || '--:--'
   }
 
   const totalRejections = rejections

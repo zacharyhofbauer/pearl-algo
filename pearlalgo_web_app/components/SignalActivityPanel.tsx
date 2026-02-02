@@ -1,6 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { formatMinutesAgo } from '@/lib/formatters'
 import type { SignalActivity, LastSignalDecision } from '@/stores'
 
 interface SignalActivityPanelProps {
@@ -12,14 +13,12 @@ export default function SignalActivityPanel({
   signalActivity,
   lastDecision,
 }: SignalActivityPanelProps) {
-  // Format time ago
+  // Format time ago from minutes using centralized formatter
   const formatTimeAgo = (minutes: number | undefined) => {
     if (minutes === undefined || minutes === null) return '—'
     if (minutes < 1) return 'Just now'
-    if (minutes < 60) return `${Math.floor(minutes)}m ago`
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h ${Math.floor(minutes % 60)}m ago`
-    return `${Math.floor(hours / 24)}d ago`
+    const formatted = formatMinutesAgo(minutes)
+    return formatted === '—' ? '—' : `${formatted} ago`
   }
 
   // Get activity level indicator

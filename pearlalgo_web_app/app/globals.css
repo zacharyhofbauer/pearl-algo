@@ -4351,7 +4351,7 @@ body {
 .pearl-chat-input input {
   flex: 1;
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: 16px; /* Prevents iOS auto-zoom on focus */
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
@@ -4898,7 +4898,7 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 20px;
   padding: var(--space-3) var(--space-5);
-  font-size: var(--font-size-sm);
+  font-size: 16px; /* Prevents iOS auto-zoom on focus */
   color: var(--text-primary);
   outline: none;
   transition: border-color var(--duration-fast) ease;

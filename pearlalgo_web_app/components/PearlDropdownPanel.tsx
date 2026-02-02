@@ -108,6 +108,8 @@ export default function PearlDropdownPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const prevMessageCountRef = useRef<number>(0)
+  const hasMountedRef = useRef<boolean>(false)
 
   // Local UI state for history/details
   const [showHistory, setShowHistory] = useState(false)
@@ -146,15 +148,24 @@ export default function PearlDropdownPanel({
   // Format percentage
   const formatPct = (val: number) => `${val.toFixed(0)}%`
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat to bottom - use block: 'nearest' to prevent page scroll
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [])
 
+  // Only scroll on new messages after initial mount, not on page load
   useEffect(() => {
-    if (activeTab === 'chat') {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      prevMessageCountRef.current = messages.length
+      return
+    }
+
+    // Only scroll if there are new messages and chat tab is active
+    if (activeTab === 'chat' && messages.length > prevMessageCountRef.current) {
       scrollToBottom()
     }
+    prevMessageCountRef.current = messages.length
   }, [messages, activeTab, scrollToBottom])
 
   // Count unread messages

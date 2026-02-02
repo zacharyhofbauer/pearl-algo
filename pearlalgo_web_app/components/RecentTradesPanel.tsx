@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
+import { formatPnL, formatTime as formatTimeUtil, formatDuration as formatDurationUtil, formatPrice } from '@/lib/formatters'
 import type { RecentExit, DirectionBreakdown, StatusBreakdown } from '@/stores'
 
 interface RecentTradesPanelProps {
@@ -28,32 +29,9 @@ export default function RecentTradesPanel({
     )
   }
 
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
-
-  const formatTime = (timeStr: string) => {
-    try {
-      const date = new Date(timeStr)
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })
-    } catch {
-      return '--:--'
-    }
-  }
-
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return '—'
-    if (seconds < 60) return `${seconds}s`
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-    const hours = Math.floor(seconds / 3600)
-    const mins = Math.floor((seconds % 3600) / 60)
-    return `${hours}h ${mins}m`
-  }
+  // Use centralized formatters with appropriate options
+  const formatTime = (timeStr: string) => formatTimeUtil(timeStr, false) // no seconds
+  const formatDuration = (seconds?: number) => formatDurationUtil(seconds)
 
   const formatExitReason = (reason: string): { text: string; type: string } => {
     if (!reason) return { text: '', type: '' }
@@ -82,11 +60,6 @@ export default function RecentTradesPanel({
     }
   }
 
-  const formatPrice = (price?: number) => {
-    if (!price) return '—'
-    return price.toFixed(2)
-  }
-
   const toggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id)
   }
@@ -94,10 +67,8 @@ export default function RecentTradesPanel({
   // Apply maxItems limit if specified (for compact ultrawide display)
   const displayExits = maxItems ? recentExits.slice(0, maxItems) : recentExits
 
-  const formatSummaryPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(0)}`
-  }
+  // Use centralized formatPnL with 0 decimals for summary
+  const formatSummaryPnL = (pnl: number) => formatPnL(pnl, 0)
 
   const hasSummaryData = directionBreakdown || statusBreakdown
 

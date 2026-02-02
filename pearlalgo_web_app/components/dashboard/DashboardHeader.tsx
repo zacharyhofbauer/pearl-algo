@@ -9,15 +9,10 @@ import {
   selectRegimeBadge,
   type Timeframe,
 } from '@/stores'
+import { formatPnL } from '@/lib/formatters'
 
 // Stale threshold in seconds
 const STALE_THRESHOLD_SECONDS = 60
-
-// Helper functions
-const formatPnL = (pnl: number) => {
-  const sign = pnl >= 0 ? '+' : ''
-  return `${sign}$${pnl.toFixed(2)}`
-}
 
 const formatMarketCountdown = (marketStatus: { is_open: boolean; next_open?: string | null } | null) => {
   if (!marketStatus) return null

@@ -78,7 +78,7 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `docs/ATS_ROLLOUT_GUIDE.md` | KEEP | ATS rollout |
 | `docs/MOCK_DATA_WARNING.md` | KEEP | Mock data warning |
 | `docs/RESTART_GUIDE.md` | KEEP | Restart guide |
-| `docs/AI_PATCH_GUIDE.md` | REWRITE | AI features moved to CLI (deprecated) |
+| `docs/AI_PATCH_GUIDE.md` | DELETED | AI features moved to CLI (file removed) |
 | `docs/CODESPACES.md` | KEEP | Codespaces guide |
 | `docs/INVENTORY_LEDGER.md` | REWRITE | File-level ledger |
 | `docs/coverage-badge.svg` | KEEP | Coverage badge |
@@ -177,7 +177,7 @@ All source modules are retained.
 | `src/pearlalgo/utils/logger.py` | KEEP | Logger |
 | `src/pearlalgo/utils/logging_config.py` | KEEP | Logging config |
 | `src/pearlalgo/utils/market_hours.py` | KEEP | Market hours |
-| `src/pearlalgo/utils/openai_client.py` | KEEP | OpenAI wrapper |
+| `src/pearlalgo/utils/openai_client.py` | DELETED | OpenAI wrapper (file removed) |
 | `src/pearlalgo/utils/paths.py` | KEEP | Path helpers |
 | `src/pearlalgo/utils/pearl_suggestions.py` | KEEP | Suggestions |
 | `src/pearlalgo/utils/retry.py` | KEEP | Retry helpers |
@@ -201,7 +201,7 @@ in favor of the web-based Live Main Chart.
 | `tests/conftest.py` | KEEP | Pytest fixtures |
 | `tests/mock_data_provider.py` | KEEP | Mock data |
 | `tests/fixtures/__init__.py` | KEEP | Test fixtures |
-| `tests/test_ai_patch.py` | KEEP | AI patch tests |
+| `tests/test_ai_patch.py` | DELETED | AI patch tests (file removed) |
 | `tests/test_async_sqlite_queue.py` | KEEP | Async SQLite tests |
 | `tests/test_bandit_policy.py` | KEEP | Bandit tests |
 | `tests/test_base_cache.py` | KEEP | Cache tests |

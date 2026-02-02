@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
+import { formatPnL } from '@/lib/formatters'
 import type { EquityCurvePoint } from '@/stores'
 
 interface EquityCurvePanelProps {
@@ -103,11 +104,6 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
   // Calculate gap from peak
   const gapFromPeak = lastValue - maxValue
   const showPeakGap = maxValue > 0 && gapFromPeak < -1 // Only show if down more than $1 from peak
-
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
 
   return (
     <DataPanel title="Equity Curve (72h)" icon="📈">

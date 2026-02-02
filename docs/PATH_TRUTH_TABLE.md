@@ -166,8 +166,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `export_datasets.py` – Export datasets for analysis
   - `watch_repo.py` – Watch repository for changes and re-index
 - **Configuration**: `config.yaml` → `knowledge.*`
-- **Docs**:
-  - `docs/AI_PATCH_GUIDE.md` – AI patch feature documentation *(deprecated - AI features moved to CLI)*
+- **Docs**: *(AI_PATCH_GUIDE.md removed - AI features moved to CLI)*
 
 ## Utilities / Cross‑cutting Concerns
 

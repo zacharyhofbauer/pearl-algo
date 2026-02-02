@@ -2,6 +2,7 @@
 
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
+import { formatDuration, formatTime as formatTimeUtil } from '@/lib/formatters'
 import type { AgentState, RecentExit } from '@/stores'
 
 interface ActivePositionsPanelProps {
@@ -26,20 +27,8 @@ export default function ActivePositionsPanel({
         Math.max(1, recentExits.filter(e => e.duration_seconds).length)
     : null
 
-  const formatDuration = (seconds: number) => {
-    if (seconds < 60) return `${Math.round(seconds)}s`
-    if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-    return `${(seconds / 3600).toFixed(1)}h`
-  }
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp)
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    })
-  }
+  // Use centralized formatters
+  const formatTime = (timestamp: string) => formatTimeUtil(timestamp, false)
 
   return (
     <DataPanel title="Active Positions" icon="📍" variant="status">

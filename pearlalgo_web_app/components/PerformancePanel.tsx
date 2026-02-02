@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import { StatDisplay } from './ui'
+import { StatDisplay, Tabs } from './ui'
+import { formatPnL } from '@/lib/formatters'
 import type { PerformanceStats } from '@/stores'
 
 interface PerformancePanelProps {
@@ -16,10 +17,6 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
   const [activePeriod, setActivePeriod] = useState<Period>('24h')
 
   const stats = performance[activePeriod]
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
 
   // Determine WR color based on expectancy, not 50% threshold
   const getWinRatePositivity = (): { positive?: boolean; negative?: boolean } => {
@@ -40,17 +37,17 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
 
   return (
     <DataPanel title="Performance" icon="📊" variant="feature">
-      <div className="perf-tabs">
-        {(['24h', '72h', '30d'] as Period[]).map((period) => (
-          <button
-            key={period}
-            className={`perf-tab ${activePeriod === period ? 'active' : ''}`}
-            onClick={() => setActivePeriod(period)}
-          >
-            {period.toLowerCase()}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { id: '24h' as Period, label: '24h' },
+          { id: '72h' as Period, label: '72h' },
+          { id: '30d' as Period, label: '30d' },
+        ]}
+        activeTab={activePeriod}
+        onTabChange={setActivePeriod}
+        variant="compact"
+        aria-label="Performance period"
+      />
 
       <div className="grid grid-cols-2 gap-md">
         <StatDisplay
