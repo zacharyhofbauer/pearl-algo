@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo, memo, useCallback } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay, Tabs } from './ui'
 import { formatPnL } from '@/lib/formatters'
@@ -13,13 +13,13 @@ interface PerformancePanelProps {
 
 type Period = '24h' | '72h' | '30d'
 
-export default function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
+function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
   const [activePeriod, setActivePeriod] = useState<Period>('24h')
 
   const stats = performance[activePeriod]
 
   // Determine WR color based on expectancy, not 50% threshold
-  const getWinRatePositivity = (): { positive?: boolean; negative?: boolean } => {
+  const getWinRatePositivity = useCallback((): { positive?: boolean; negative?: boolean } => {
     // If we have expectancy data, use that for coloring
     if (expectancy !== undefined) {
       if (expectancy > 0.5) return { positive: true }
@@ -30,10 +30,13 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
     if (stats.pnl > 0) return { positive: true }
     if (stats.pnl < 0) return { negative: true }
     return {}
-  }
+  }, [expectancy, stats.pnl])
 
   // Show tooltip if WR < 50% but still profitable
-  const showWrTooltip = stats.win_rate < 50 && stats.pnl > 0
+  const showWrTooltip = useMemo(
+    () => stats.win_rate < 50 && stats.pnl > 0,
+    [stats.win_rate, stats.pnl]
+  )
 
   return (
     <DataPanel title="Performance" icon="📊" variant="feature">
@@ -130,3 +133,5 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
     </DataPanel>
   )
 }
+
+export default memo(PerformancePanel)

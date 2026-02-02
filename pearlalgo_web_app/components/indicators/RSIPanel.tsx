@@ -44,7 +44,7 @@ export default function RSIPanel({
       },
       rightPriceScale: {
         borderColor: colors.border,
-        scaleMargins: { top: 0.02, bottom: 0.02 },
+        scaleMargins: { top: 0.1, bottom: 0.1 },
         autoScale: false,
       },
       timeScale: {

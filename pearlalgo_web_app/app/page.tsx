@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import Image from 'next/image'
 import HelpPanel from '@/components/HelpPanel'
+import AdminAuthModal from '@/components/AdminAuthModal'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
@@ -17,6 +18,7 @@ import AnalyticsPanel from '@/components/AnalyticsPanel'
 import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import SignalActivityPanel from '@/components/SignalActivityPanel'
+import PositionsStrip from '@/components/PositionsStrip'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useDashboardData } from '@/hooks/useDashboardData'
 import { ChartSection, DashboardHeader, DataPanelsSection } from '@/components/dashboard'
@@ -60,6 +62,8 @@ export default function PearlAlgoWebApp() {
 
   // Local state for active positions (for chart price lines)
   const [positions, setPositions] = useState<Position[]>([])
+  const [latestPrice, setLatestPrice] = useState<number | null>(null)
+  const [tickValue, setTickValue] = useState<number>(2.0)
 
   // Viewport detection for ultrawide layout
   const viewport = useViewportType()
@@ -99,7 +103,11 @@ export default function PearlAlgoWebApp() {
 
   // Data fetching hook
   const { forceRefresh } = useDashboardData({
-    onPositionsUpdate: setPositions,
+    onPositionsUpdate: (pos, price, tv) => {
+      setPositions(pos)
+      setLatestPrice(price)
+      setTickValue(tv)
+    },
   })
 
   // Convert positions to price lines for chart visualization
@@ -208,7 +216,6 @@ export default function PearlAlgoWebApp() {
             <ActivePositionsPanel
               activeTradesCount={agentState.active_trades_count}
               recentExits={agentState.recent_exits}
-              dailyPnL={agentState.daily_pnl}
             />
           }
           challengeSection={
@@ -276,6 +283,9 @@ export default function PearlAlgoWebApp() {
             )
           }
         />
+
+        {/* Admin Auth Modal */}
+        <AdminAuthModal />
       </div>
     )
   }
@@ -307,11 +317,23 @@ export default function PearlAlgoWebApp() {
         onForceRefresh={forceRefresh}
       />
 
+      {/* Positions Strip - detailed view of open positions */}
+      {positions.length > 0 && (
+        <PositionsStrip
+          positions={positions}
+          latestPrice={latestPrice}
+          tickValue={tickValue}
+        />
+      )}
+
       {/* Data Panels */}
       {agentState && <DataPanelsSection agentState={agentState} />}
 
       {/* Help Panel - Quick Reference */}
       <HelpPanel />
+
+      {/* Admin Auth Modal */}
+      <AdminAuthModal />
     </div>
   )
 }

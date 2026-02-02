@@ -54,7 +54,6 @@ export function DataPanelsSection({ agentState }: DataPanelsSectionProps) {
       <ActivePositionsPanel
         activeTradesCount={agentState.active_trades_count}
         recentExits={agentState.recent_exits}
-        dailyPnL={agentState.daily_pnl}
       />
 
       {/* Risk Metrics Panel */}

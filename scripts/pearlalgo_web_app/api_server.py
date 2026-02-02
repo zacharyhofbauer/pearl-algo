@@ -52,6 +52,13 @@ import secrets
 
 import pandas as pd
 
+# Import shared stats computation module
+from pearlalgo.market_agent.stats_computation import (
+    compute_daily_stats as _shared_compute_daily_stats,
+    compute_performance_stats as _shared_compute_performance_stats,
+    get_trading_day_start as _shared_get_trading_day_start,
+)
+
 # Pearl AI imports (optional - graceful degradation if not available)
 _pearl_brain = None
 try:
@@ -961,6 +968,7 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self._broadcast_task: Optional[asyncio.Task] = None
         self._last_state_hash: str = ""
+        self._last_candle_time: int = 0  # Track last candle for change detection
 
     async def connect(self, websocket: WebSocket):
         """Accept and register a new WebSocket connection."""
@@ -1034,12 +1042,70 @@ class ConnectionManager:
                             }
                             await self.broadcast(broadcast_data)
 
+                    # Also broadcast latest candle if changed
+                    await self._broadcast_candle_update()
+
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"[WebSocket] Broadcast error: {e}")
                 await asyncio.sleep(interval)
+
+    async def _broadcast_candle_update(self):
+        """Broadcast latest candle when it changes for real-time chart updates."""
+        if not self.active_connections or not _state_dir:
+            return
+
+        try:
+            # Read latest bar from state
+            state_file = _state_dir / "state.json"
+            state = _load_json_file(state_file)
+            if not state:
+                return
+
+            latest_bar = state.get("latest_bar")
+            if not isinstance(latest_bar, dict):
+                return
+
+            # Get candle time from timestamp
+            ts = latest_bar.get("timestamp")
+            if not ts:
+                return
+
+            try:
+                # Parse timestamp to unix time
+                if isinstance(ts, (int, float)):
+                    candle_time = int(ts)
+                else:
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    candle_time = int(dt.timestamp())
+            except (ValueError, TypeError):
+                return
+
+            # Only broadcast if candle is newer or updated
+            if candle_time < self._last_candle_time:
+                return
+
+            # Check if candle data changed (price update within same bar)
+            candle_data = {
+                "time": candle_time,
+                "open": float(latest_bar.get("open", 0)),
+                "high": float(latest_bar.get("high", 0)),
+                "low": float(latest_bar.get("low", 0)),
+                "close": float(latest_bar.get("close", 0)),
+                "volume": int(latest_bar.get("volume", 0) or 0),
+            }
+
+            # Update tracking and broadcast
+            self._last_candle_time = candle_time
+            await self.broadcast({
+                "type": "candle_update",
+                "data": candle_data,
+            })
+        except Exception as e:
+            # Silently ignore candle broadcast errors
+            pass
 
 
 # Global connection manager
@@ -1264,165 +1330,29 @@ def _get_trading_day_start() -> datetime:
     """
     Get the start of the current trading day (6pm ET previous calendar day).
 
-    Futures trading day runs from 6pm ET to 6pm ET next day.
-    Example: Trading day "Jan 29" starts at 6pm ET on Jan 28 and ends at 6pm ET on Jan 29.
+    Uses the shared stats_computation module for consistency with Telegram.
     """
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
-    et_tz = ZoneInfo("America/New_York")
-    now_et = datetime.now(et_tz)
-
-    # If before 6pm ET, trading day started yesterday at 6pm
-    # If after 6pm ET, trading day started today at 6pm
-    if now_et.hour < 18:
-        # Before 6pm - use yesterday 6pm as start
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        # After 6pm - use today 6pm as start
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
-
-    return trading_day_start.astimezone(timezone.utc)
+    return _shared_get_trading_day_start()
 
 
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET."""
-    signals_file = state_dir / "signals.jsonl"
-    if not signals_file.exists():
-        return {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
+    """
+    Compute daily P&L and trade stats from signals.jsonl since 6pm ET.
 
-    # Get trading day start (6pm ET)
-    trading_day_start = _get_trading_day_start()
-
-    daily_pnl = 0.0
-    daily_wins = 0
-    daily_losses = 0
-
-    try:
-        # Read all signals (we need to check all for today's trades)
-        signals = _load_jsonl_file(signals_file, max_lines=2000)
-        for s in signals:
-            if s.get("status") != "exited":
-                continue
-
-            # Check if trade exited after trading day start (6pm ET)
-            exit_time_str = s.get("exit_time") or s.get("timestamp")
-            if not exit_time_str:
-                continue
-
-            try:
-                # Parse ISO format timestamp
-                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                if exit_time < trading_day_start:
-                    continue
-            except (ValueError, AttributeError):
-                continue
-
-            # Count this trade
-            pnl = s.get("pnl", 0.0)
-            if pnl is not None:
-                daily_pnl += pnl
-                if pnl >= 0:
-                    daily_wins += 1
-                else:
-                    daily_losses += 1
-    except Exception:
-        pass
-
-    return {
-        "daily_pnl": round(daily_pnl, 2),
-        "daily_trades": daily_wins + daily_losses,
-        "daily_wins": daily_wins,
-        "daily_losses": daily_losses,
-    }
+    Uses the shared stats_computation module for consistency with Telegram.
+    Results are cached for 5 seconds to avoid re-parsing on every request.
+    """
+    return _shared_compute_daily_stats(state_dir, use_cache=True)
 
 
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute performance stats for 24h, 72h, and 30d periods."""
-    performance_file = state_dir / "performance.json"
-    if not performance_file.exists():
-        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
-        return {"24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
+    """
+    Compute performance stats for 24h, 72h, and 30d periods.
 
-    now = datetime.now(timezone.utc)
-    cutoffs = {
-        "24h": now - timedelta(hours=24),
-        "72h": now - timedelta(hours=72),
-        "30d": now - timedelta(days=30),
-    }
-
-    stats = {period: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0} for period in cutoffs}
-
-    try:
-        data = json.loads(performance_file.read_text())
-        if not isinstance(data, list):
-            data = []
-
-        for trade in data:
-            exit_time_str = trade.get("exit_time")
-            if not exit_time_str:
-                continue
-            try:
-                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                continue
-
-            pnl = trade.get("pnl", 0.0) or 0.0
-            is_win = trade.get("is_win", pnl > 0)
-
-            for period, cutoff in cutoffs.items():
-                if exit_time >= cutoff:
-                    stats[period]["pnl"] += pnl
-                    stats[period]["trades"] += 1
-                    if is_win:
-                        stats[period]["wins"] += 1
-                    else:
-                        stats[period]["losses"] += 1
-    except Exception:
-        pass
-
-    # Calculate win rates and compute streaks for 24h
-    for period in stats:
-        total = stats[period]["trades"]
-        stats[period]["pnl"] = round(stats[period]["pnl"], 2)
-        stats[period]["win_rate"] = round(stats[period]["wins"] / total * 100, 1) if total > 0 else 0.0
-
-    # Compute current streak for 24h
-    stats["24h"]["streak"] = 0
-    stats["24h"]["streak_type"] = "none"
-    try:
-        data = json.loads(performance_file.read_text())
-        if isinstance(data, list):
-            cutoff_24h = cutoffs["24h"]
-            recent_trades = []
-            for trade in data:
-                exit_time_str = trade.get("exit_time")
-                if not exit_time_str:
-                    continue
-                try:
-                    exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                    if exit_time >= cutoff_24h:
-                        recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
-                except (ValueError, TypeError):
-                    continue
-            # Sort by exit time descending
-            recent_trades.sort(key=lambda x: x[0], reverse=True)
-            if recent_trades:
-                streak = 0
-                streak_type = "win" if recent_trades[0][1] else "loss"
-                for _, is_win in recent_trades:
-                    if (streak_type == "win" and is_win) or (streak_type == "loss" and not is_win):
-                        streak += 1
-                    else:
-                        break
-                stats["24h"]["streak"] = streak
-                stats["24h"]["streak_type"] = streak_type
-    except Exception:
-        pass
-
-    return stats
+    Uses the shared stats_computation module for consistency with Telegram.
+    Results are cached for 5 seconds to avoid re-parsing on every request.
+    """
+    return _shared_compute_performance_stats(state_dir, use_cache=True)
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
@@ -2168,13 +2098,34 @@ async def get_positions(
 ):
     """Get currently open positions with entry price, stop loss, and take profit.
 
-    Returns positions for display on chart as price lines.
+    Returns positions for display on chart as price lines, plus latest price
+    and tick value for unrealized P&L calculation.
+
+    Response:
+        {
+            "positions": [...],
+            "latest_price": 21500.25,
+            "tick_value": 2.0
+        }
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=500)
+
+    # Get latest price from state
+    state_file = _state_dir / "state.json"
+    state = _load_json_file(state_file)
+    latest_price = None
+
+    # Try multiple sources for latest price
+    if state:
+        latest_price = state.get("latest_price")
+        if latest_price is None:
+            latest_bar = state.get("latest_bar")
+            if isinstance(latest_bar, dict):
+                latest_price = latest_bar.get("close")
 
     # Filter to open positions only (not exited)
     positions = []
@@ -2204,7 +2155,11 @@ async def get_positions(
             "take_profit": take_profit,
         })
 
-    return positions
+    return {
+        "positions": positions,
+        "latest_price": latest_price,
+        "tick_value": 2.0,  # MNQ tick value ($2 per tick, 1 tick = 0.25 points)
+    }
 
 
 @app.post("/api/positions/{signal_id}/close")

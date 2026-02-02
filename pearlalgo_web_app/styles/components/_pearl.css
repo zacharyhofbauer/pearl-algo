@@ -1726,3 +1726,196 @@
     height: calc(var(--pearl-header-height) + env(safe-area-inset-top));
   }
 }
+
+/* ===================================
+   ADMIN AUTH MODAL
+   =================================== */
+.admin-auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal, 1000);
+  padding: var(--space-4);
+}
+
+.admin-auth-modal {
+  background: var(--bg-card, #1a1a24);
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: var(--radius-xl, 16px);
+  padding: var(--space-6, 24px);
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.auth-modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  margin-bottom: var(--space-5, 20px);
+}
+
+.auth-modal-icon {
+  font-size: 24px;
+}
+
+.auth-modal-title {
+  font-size: var(--font-size-lg, 18px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--text-primary, #fff);
+}
+
+.auth-modal-input {
+  width: 100%;
+  padding: var(--space-4, 16px);
+  background: var(--bg-secondary, #12121a);
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-primary, #fff);
+  font-size: 16px; /* Prevent iOS zoom */
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.auth-modal-input:focus {
+  border-color: var(--accent-purple, #ab47bc);
+}
+
+.auth-modal-input.error {
+  border-color: var(--color-loss, #ff5252);
+  animation: shake 0.3s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+.auth-modal-error {
+  color: var(--color-loss, #ff5252);
+  font-size: var(--font-size-sm, 13px);
+  margin-top: var(--space-2, 8px);
+}
+
+.auth-modal-actions {
+  display: flex;
+  gap: var(--space-3, 12px);
+  margin-top: var(--space-5, 20px);
+}
+
+.auth-btn {
+  flex: 1;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--font-size-md, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 44px; /* Touch target */
+}
+
+.auth-btn-cancel {
+  background: var(--bg-secondary, #12121a);
+  border: 1px solid var(--border-color, #2a2a3a);
+  color: var(--text-secondary, #888);
+}
+
+.auth-btn-cancel:hover {
+  background: var(--bg-elevated, #1e1e2a);
+  color: var(--text-primary, #fff);
+}
+
+.auth-btn-submit {
+  background: var(--accent-purple, #ab47bc);
+  border: none;
+  color: white;
+}
+
+.auth-btn-submit:hover:not(:disabled) {
+  background: #9c27b0;
+}
+
+.auth-btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Pearl Auth Modal enhancements */
+.pearl-auth-modal {
+  border: 1px solid rgba(171, 71, 188, 0.4);
+  box-shadow:
+    0 0 30px rgba(171, 71, 188, 0.2),
+    0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.pearl-greeting {
+  text-align: center;
+  color: var(--text-secondary, #aaa);
+  font-size: var(--font-size-md, 14px);
+  margin-bottom: var(--space-5, 20px);
+  line-height: 1.6;
+}
+
+.pearl-subtext {
+  color: var(--accent-purple, #ab47bc);
+  font-size: var(--font-size-sm, 13px);
+  opacity: 0.8;
+}
+
+.pearl-auth-modal .auth-modal-input {
+  border-color: rgba(171, 71, 188, 0.3);
+  text-align: center;
+  font-style: italic;
+}
+
+.pearl-auth-modal .auth-modal-input:focus {
+  border-color: var(--accent-purple, #ab47bc);
+  box-shadow: 0 0 10px rgba(171, 71, 188, 0.3);
+}
+
+.pearl-auth-modal .auth-modal-input::placeholder {
+  color: rgba(171, 71, 188, 0.5);
+  font-style: italic;
+}
+
+.pearl-auth-modal .auth-btn-submit {
+  background: linear-gradient(135deg, var(--accent-purple, #ab47bc), #9c27b0);
+}
+
+.pearl-auth-modal .auth-btn-submit:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ba68c8, #ab47bc);
+  box-shadow: 0 0 15px rgba(171, 71, 188, 0.4);
+}
+
+.pearl-footer {
+  margin-top: var(--space-5, 20px);
+  padding-top: var(--space-4, 16px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.pearl-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  font-size: var(--font-size-xs, 12px);
+  color: var(--text-tertiary, #666);
+}
+
+.pearl-status .status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent-purple, #ab47bc);
+  border-radius: 50%;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

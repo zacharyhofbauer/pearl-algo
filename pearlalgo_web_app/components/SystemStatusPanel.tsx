@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import { formatCountdown } from '@/lib/formatters'
@@ -21,7 +22,7 @@ interface SystemStatusPanelProps {
   isPaused: boolean
 }
 
-export default function SystemStatusPanel({
+function SystemStatusPanel({
   executionState,
   circuitBreaker,
   marketRegime,
@@ -30,23 +31,21 @@ export default function SystemStatusPanel({
   isRunning,
   isPaused,
 }: SystemStatusPanelProps) {
-  // Determine overall system readiness
-  const getSystemReadiness = () => {
+  // Determine overall system readiness - memoized
+  const readiness = useMemo(() => {
     if (!isRunning) return { status: 'offline', label: 'Offline', color: 'var(--accent-red)' }
     if (isPaused) return { status: 'paused', label: 'Paused', color: 'var(--accent-yellow)' }
     if (circuitBreaker?.in_cooldown) return { status: 'cooldown', label: 'Cooldown', color: 'var(--accent-yellow)' }
     if (executionState && !executionState.armed) return { status: 'disarmed', label: 'Disarmed', color: 'var(--accent-yellow)' }
     if (executionState?.armed) return { status: 'armed', label: 'Armed', color: 'var(--accent-green)' }
     return { status: 'ready', label: 'Ready', color: 'var(--accent-green)' }
-  }
-
-  const readiness = getSystemReadiness()
+  }, [isRunning, isPaused, circuitBreaker?.in_cooldown, executionState])
 
   // Use centralized countdown formatter
   const formatTimeRemaining = (seconds: number) => formatCountdown(seconds)
 
-  // Get session display info
-  const getSessionDisplay = () => {
+  // Get session display info - memoized
+  const sessionLabel = useMemo(() => {
     if (!sessionContext?.current_session) return null
     const sessionLabels: Record<string, string> = {
       premarket: 'Pre-Market',
@@ -57,10 +56,10 @@ export default function SystemStatusPanel({
       closed: 'Closed',
     }
     return sessionLabels[sessionContext.current_session] || sessionContext.current_session
-  }
+  }, [sessionContext?.current_session])
 
-  // Get direction restriction display
-  const getDirectionDisplay = () => {
+  // Get direction restriction display - memoized
+  const directionInfo = useMemo(() => {
     if (!marketRegime?.allowed_direction) return null
     switch (marketRegime.allowed_direction) {
       case 'long':
@@ -72,21 +71,16 @@ export default function SystemStatusPanel({
       default:
         return null
     }
-  }
+  }, [marketRegime?.allowed_direction])
 
-  const directionInfo = getDirectionDisplay()
-  const sessionLabel = getSessionDisplay()
-
-  // Get error trend indicator
-  const getErrorTrend = () => {
+  // Get error trend indicator - memoized
+  const errorTrend = useMemo(() => {
     if (!errorSummary) return null
     const count = errorSummary.session_error_count
     if (count === 0) return { icon: '✓', label: 'No Errors', color: 'var(--accent-green)' }
     if (count < 5) return { icon: '→', label: `${count} Errors`, color: 'var(--accent-yellow)' }
     return { icon: '↑', label: `${count} Errors`, color: 'var(--accent-red)' }
-  }
-
-  const errorTrend = getErrorTrend()
+  }, [errorSummary])
 
   return (
     <DataPanel title="System Status" icon="🎯" variant="status">
@@ -237,3 +231,5 @@ export default function SystemStatusPanel({
     </DataPanel>
   )
 }
+
+export default memo(SystemStatusPanel)

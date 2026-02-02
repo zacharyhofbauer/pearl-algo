@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { Position, RecentExit } from '@/stores'
+import { useAdminStore } from '@/stores'
 import { apiFetch } from '@/lib/api'
 
 interface OpenPositionsStripProps {
@@ -19,6 +20,7 @@ export default function OpenPositionsStrip({
 }: OpenPositionsStripProps) {
   const [closing, setClosing] = useState<string | null>(null)
   const [closingAll, setClosingAll] = useState(false)
+  const { requireAuth } = useAdminStore()
 
   // Calculate unrealized P/L for a position
   const calcUnrealizedPnL = (pos: Position) => {
@@ -30,8 +32,8 @@ export default function OpenPositionsStrip({
     return diff * 2
   }
 
-  // Close single position
-  const closePosition = async (signalId: string) => {
+  // Close single position (internal, after auth)
+  const doClosePosition = async (signalId: string) => {
     setClosing(signalId)
     try {
       const res = await apiFetch(`/api/positions/${signalId}/close`, {
@@ -47,8 +49,8 @@ export default function OpenPositionsStrip({
     }
   }
 
-  // Close all positions
-  const closeAllPositions = async () => {
+  // Close all positions (internal, after auth)
+  const doCloseAllPositions = async () => {
     setClosingAll(true)
     try {
       const res = await apiFetch('/api/positions/close-all', {
@@ -62,6 +64,15 @@ export default function OpenPositionsStrip({
     } finally {
       setClosingAll(false)
     }
+  }
+
+  // Auth-protected close handlers
+  const closePosition = (signalId: string) => {
+    requireAuth(() => doClosePosition(signalId))
+  }
+
+  const closeAllPositions = () => {
+    requireAuth(() => doCloseAllPositions())
   }
 
   // Calculate total unrealized P/L

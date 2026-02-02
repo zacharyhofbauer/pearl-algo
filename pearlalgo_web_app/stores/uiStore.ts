@@ -131,3 +131,58 @@ export const selectIsFetching = (state: UIStore) => state.isFetching
 export const selectLastFetchDuration = (state: UIStore) => state.lastFetchDuration
 export const selectFetchCount = (state: UIStore) => state.fetchCount
 export const selectChartsLocked = (state: UIStore) => state.chartsLocked
+export const selectLastUpdate = (state: UIStore) => state.lastUpdate
+export const selectIsLive = (state: UIStore) => state.isLive
+
+// Unified connection status selector
+export type UnifiedConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'stale'
+
+export const selectUnifiedConnectionStatus = (state: UIStore): UnifiedConnectionStatus => {
+  // WebSocket status takes priority
+  if (state.wsStatus === 'connected') {
+    // Check data freshness - stale if no update in 60 seconds
+    if (state.lastUpdate) {
+      const ageMs = Date.now() - state.lastUpdate.getTime()
+      if (ageMs > 60000) return 'stale'
+    }
+    return 'connected'
+  }
+
+  if (state.wsStatus === 'connecting') {
+    return 'connecting'
+  }
+
+  // Fallback to HTTP polling status
+  if (state.isLive && state.dataSource === 'live') {
+    // Check if data is fresh
+    if (state.lastUpdate) {
+      const ageMs = Date.now() - state.lastUpdate.getTime()
+      if (ageMs > 60000) return 'stale'
+    }
+    return 'connected'
+  }
+
+  return 'disconnected'
+}
+
+// Get connection status with label for display
+export interface ConnectionStatusInfo {
+  status: UnifiedConnectionStatus
+  label: string
+  color: string
+}
+
+export const selectConnectionStatusInfo = (state: UIStore): ConnectionStatusInfo => {
+  const status = selectUnifiedConnectionStatus(state)
+
+  switch (status) {
+    case 'connected':
+      return { status, label: 'Connected', color: 'var(--accent-green)' }
+    case 'connecting':
+      return { status, label: 'Connecting...', color: 'var(--accent-yellow)' }
+    case 'stale':
+      return { status, label: 'Stale', color: 'var(--accent-yellow)' }
+    case 'disconnected':
+      return { status, label: 'Disconnected', color: 'var(--accent-red)' }
+  }
+}

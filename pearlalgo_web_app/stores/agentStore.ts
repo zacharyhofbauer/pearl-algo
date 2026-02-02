@@ -572,3 +572,58 @@ export const selectRegimeBadge = (state: AgentStore): RegimeBadge | null => {
     confidence: Math.round(regime.confidence * 100)
   }
 }
+
+// Fine-grained selectors for atomic updates - reduces unnecessary re-renders
+export interface DailyStats {
+  daily_pnl: number
+  daily_trades: number
+  daily_wins: number
+  daily_losses: number
+  win_rate: number
+}
+
+export const selectDailyStats = (state: AgentStore): DailyStats => {
+  const s = state.agentState
+  const daily_trades = s?.daily_trades ?? 0
+  const daily_wins = s?.daily_wins ?? 0
+  const daily_losses = s?.daily_losses ?? 0
+  return {
+    daily_pnl: s?.daily_pnl ?? 0,
+    daily_trades,
+    daily_wins,
+    daily_losses,
+    win_rate: daily_trades > 0 ? (daily_wins / daily_trades) * 100 : 0,
+  }
+}
+
+export interface SystemStatus {
+  running: boolean
+  paused: boolean
+  data_fresh: boolean
+  futures_market_open: boolean
+}
+
+export const selectSystemStatus = (state: AgentStore): SystemStatus => ({
+  running: state.agentState?.running ?? false,
+  paused: state.agentState?.paused ?? false,
+  data_fresh: state.agentState?.data_fresh ?? false,
+  futures_market_open: state.agentState?.futures_market_open ?? false,
+})
+
+// Data quality selector
+export const selectDataQuality = (state: AgentStore) => state.agentState?.data_quality
+
+// Error summary selector
+export const selectErrorSummary = (state: AgentStore) => state.agentState?.error_summary
+
+// Pearl insights selector
+export const selectPearlInsights = (state: AgentStore) => state.agentState?.pearl_insights
+
+// Pearl suggestion selector
+export const selectPearlSuggestion = (state: AgentStore) => state.agentState?.pearl_suggestion
+
+// Last signal decision selector
+export const selectLastSignalDecision = (state: AgentStore) => state.agentState?.last_signal_decision
+
+// Connection health selector
+export const selectConnectionHealth = (state: AgentStore) => state.agentState?.connection_health

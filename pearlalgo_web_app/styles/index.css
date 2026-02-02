@@ -57,6 +57,7 @@
 @import './components/_calendar.css';
 @import './components/_analytics.css';
 @import './components/_dashboard-panels.css';
+@import './components/_positions-strip.css';
 
 /* Responsive (must come after components to override at breakpoints) */
 @import './_responsive.css';

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import Image from 'next/image'
-import { usePearlStore, useAgentStore, type PearlMessage } from '@/stores'
+import { usePearlStore, useAgentStore, useAdminStore, type PearlMessage } from '@/stores'
 import PearlDropdownPanel from './PearlDropdownPanel'
 import { apiFetch } from '@/lib/api'
 
@@ -192,11 +192,23 @@ export default function PearlHeaderBar() {
     }
   }
 
+  // Admin auth
+  const { requireAuth, isAuthenticated } = useAdminStore()
+
   const handleHeaderClick = (e: React.MouseEvent) => {
     // Don't toggle if clicking on interactive elements inside the dropdown
     const target = e.target as HTMLElement
     if (target.closest('.pearl-dropdown-panel')) return
-    toggleHeaderExpanded()
+
+    // If trying to expand and not authenticated, require auth
+    if (!isHeaderExpanded) {
+      requireAuth(() => {
+        toggleHeaderExpanded()
+      })
+    } else {
+      // Always allow closing
+      toggleHeaderExpanded()
+    }
   }
 
   return (

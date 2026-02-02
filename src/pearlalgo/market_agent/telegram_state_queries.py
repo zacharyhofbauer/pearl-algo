@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Optional, Any
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_state_file, get_signals_file, parse_utc_timestamp
+from pearlalgo.market_agent.stats_computation import (
+    compute_daily_stats,
+    get_trading_day_start,
+)
 
 if TYPE_CHECKING:
     pass
@@ -258,35 +262,17 @@ class TelegramStateQueriesMixin:
 
     def _get_daily_performance(self, state: Optional[dict] = None) -> dict:
         """
-        Get daily performance metrics from state.
+        Get daily performance metrics computed from signals.jsonl.
+
+        Uses the shared stats_computation module to ensure consistency
+        with the web app API. Cached for 5 seconds to avoid re-parsing
+        on every request.
 
         Returns:
             Dict with keys: daily_pnl, daily_trades, daily_wins, daily_losses, win_rate
         """
-        if state is None:
-            state = self._read_state()
-        if not state:
-            return {
-                "daily_pnl": 0.0,
-                "daily_trades": 0,
-                "daily_wins": 0,
-                "daily_losses": 0,
-                "win_rate": 0.0,
-            }
-
-        daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
-        daily_trades = state.get("daily_trades", 0) or 0
-        daily_wins = state.get("daily_wins", 0) or 0
-        daily_losses = state.get("daily_losses", 0) or 0
-        win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
-
-        return {
-            "daily_pnl": daily_pnl,
-            "daily_trades": daily_trades,
-            "daily_wins": daily_wins,
-            "daily_losses": daily_losses,
-            "win_rate": win_rate,
-        }
+        # Use shared computation module (5-second cache by default)
+        return compute_daily_stats(self.state_dir, use_cache=True)
 
     def _get_gateway_status(self) -> dict:
         """
@@ -443,25 +429,10 @@ class TelegramStateQueriesMixin:
 
         Futures trading day runs from 6pm ET to 6pm ET next day.
         Returns datetime in UTC for comparison with trade timestamps.
+
+        Uses the shared stats_computation module for consistency.
         """
-        from datetime import timedelta
-        from zoneinfo import ZoneInfo
-
-        et_tz = ZoneInfo("America/New_York")
-        now_et = datetime.now(et_tz)
-
-        if now_et.hour < 18:
-            # Before 6pm ET - trading day started yesterday at 6pm
-            trading_day_start = now_et.replace(
-                hour=18, minute=0, second=0, microsecond=0
-            ) - timedelta(days=1)
-        else:
-            # After 6pm ET - trading day started today at 6pm
-            trading_day_start = now_et.replace(
-                hour=18, minute=0, second=0, microsecond=0
-            )
-
-        return trading_day_start.astimezone(timezone.utc)
+        return get_trading_day_start()
 
     def _get_today_trades(self) -> list:
         """

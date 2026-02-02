@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { formatMinutesAgo } from '@/lib/formatters'
 import type { SignalActivity, LastSignalDecision } from '@/stores'
@@ -9,7 +10,7 @@ interface SignalActivityPanelProps {
   lastDecision: LastSignalDecision | null
 }
 
-export default function SignalActivityPanel({
+function SignalActivityPanel({
   signalActivity,
   lastDecision,
 }: SignalActivityPanelProps) {
@@ -21,8 +22,8 @@ export default function SignalActivityPanel({
     return formatted === '—' ? '—' : `${formatted} ago`
   }
 
-  // Get activity level indicator
-  const getActivityLevel = () => {
+  // Get activity level indicator - memoized
+  const activityLevel = useMemo(() => {
     if (!signalActivity) return { level: 'unknown', label: 'Unknown', color: 'var(--text-secondary)' }
 
     const signalsPerHour = signalActivity.signals_last_hour
@@ -30,12 +31,10 @@ export default function SignalActivityPanel({
     if (signalsPerHour >= 1) return { level: 'medium', label: 'Moderate', color: 'var(--accent-yellow)' }
     if (signalsPerHour > 0) return { level: 'low', label: 'Quiet', color: 'var(--accent-yellow)' }
     return { level: 'none', label: 'Silent', color: 'var(--text-tertiary)' }
-  }
+  }, [signalActivity])
 
-  const activityLevel = getActivityLevel()
-
-  // Get quiet reason display
-  const getQuietReason = () => {
+  // Get quiet reason display - memoized
+  const quietReason = useMemo(() => {
     if (!signalActivity?.quiet_reason) return null
 
     // Map internal reasons to user-friendly text
@@ -53,9 +52,7 @@ export default function SignalActivityPanel({
     }
 
     return reasonMap[signalActivity.quiet_reason] || signalActivity.quiet_reason.replace(/_/g, ' ')
-  }
-
-  const quietReason = getQuietReason()
+  }, [signalActivity?.quiet_reason])
 
   // No data state
   if (!signalActivity && !lastDecision) {
@@ -184,3 +181,5 @@ export default function SignalActivityPanel({
     </DataPanel>
   )
 }
+
+export default memo(SignalActivityPanel)

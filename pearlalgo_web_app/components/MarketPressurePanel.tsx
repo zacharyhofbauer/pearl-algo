@@ -1,5 +1,6 @@
 'use client'
 
+import { memo, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import type { BuySellPressure } from '@/stores'
@@ -8,7 +9,7 @@ interface MarketPressurePanelProps {
   pressure: BuySellPressure | null
 }
 
-export default function MarketPressurePanel({ pressure }: MarketPressurePanelProps) {
+function MarketPressurePanel({ pressure }: MarketPressurePanelProps) {
   if (!pressure) {
     return (
       <DataPanel title="Market Pressure" icon="📊">
@@ -120,3 +121,5 @@ export default function MarketPressurePanel({ pressure }: MarketPressurePanelPro
     </DataPanel>
   )
 }
+
+export default memo(MarketPressurePanel)

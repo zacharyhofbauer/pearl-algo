@@ -13,7 +13,7 @@ const MIN_BARS = 500 // Minimum bars to request for a full chart
 const MARKER_HOURS = 72 // Fetch 72 hours (3 days) of markers - API limit
 
 interface UseDashboardDataOptions {
-  onPositionsUpdate?: (positions: Position[]) => void
+  onPositionsUpdate?: (positions: Position[], latestPrice: number | null, tickValue: number) => void
 }
 
 export function useDashboardData(options: UseDashboardDataOptions = {}) {
@@ -34,6 +34,7 @@ export function useDashboardData(options: UseDashboardDataOptions = {}) {
   const setChartLoading = useChartStore((s) => s.setLoading)
   const setChartError = useChartStore((s) => s.setError)
   const setLastDataHash = useChartStore((s) => s.setLastDataHash)
+  const appendCandle = useChartStore((s) => s.appendCandle)
 
   // UI store
   const wsStatus = useUIStore((s) => s.wsStatus)
@@ -61,6 +62,15 @@ export function useDashboardData(options: UseDashboardDataOptions = {}) {
           updateFromWebSocket(data)
           setLastUpdate(new Date())
           setIsLive(true)
+        }
+      }
+
+      // Handle real-time candle updates
+      if (message.type === 'candle_update') {
+        const candle = message.data
+        if (candle && typeof candle.time === 'number') {
+          appendCandle(candle)
+          setLastUpdate(new Date())
         }
       }
     },
@@ -139,15 +149,25 @@ export function useDashboardData(options: UseDashboardDataOptions = {}) {
       }
 
       // Update positions for chart price lines
+      // API now returns { positions: [...], latest_price: number, tick_value: number }
       if (positionsRes && positionsRes.ok) {
         try {
           const positionsData = await positionsRes.json()
-          onPositionsUpdate?.(positionsData)
+          // Handle both old array format and new object format
+          if (Array.isArray(positionsData)) {
+            onPositionsUpdate?.(positionsData, null, 2.0)
+          } else {
+            onPositionsUpdate?.(
+              positionsData.positions || [],
+              positionsData.latest_price ?? null,
+              positionsData.tick_value ?? 2.0
+            )
+          }
         } catch {
-          onPositionsUpdate?.([])
+          onPositionsUpdate?.([], null, 2.0)
         }
       } else {
-        onPositionsUpdate?.([])
+        onPositionsUpdate?.([], null, 2.0)
       }
 
       // Calculate fetch duration and determine data source

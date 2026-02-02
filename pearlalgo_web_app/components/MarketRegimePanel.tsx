@@ -1,5 +1,6 @@
 'use client'
 
+import { memo, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import type { MarketRegime } from '@/stores'
@@ -8,7 +9,7 @@ interface MarketRegimePanelProps {
   regime: MarketRegime | null
 }
 
-export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
+function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
   if (!regime) {
     return (
       <DataPanel title="Market Regime" icon="📈">
@@ -131,3 +132,5 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
     </DataPanel>
   )
 }
+
+export default memo(MarketRegimePanel)

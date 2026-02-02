@@ -64,9 +64,20 @@ export {
   selectAIMode,
   selectAgentModeBadge,
   selectRegimeBadge,
+  // Fine-grained selectors for atomic updates
+  selectDailyStats,
+  selectSystemStatus,
+  selectDataQuality,
+  selectErrorSummary,
+  selectPearlInsights,
+  selectPearlSuggestion,
+  selectLastSignalDecision,
+  selectConnectionHealth,
   type AIMode,
   type AgentModeBadge,
   type RegimeBadge,
+  type DailyStats,
+  type SystemStatus,
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'
@@ -115,7 +126,7 @@ export {
   selectRSI,
 } from './chartStore'
 
-export { useUIStore, type DataSource } from './uiStore'
+export { useUIStore, type DataSource, type UnifiedConnectionStatus, type ConnectionStatusInfo } from './uiStore'
 export {
   selectWsStatus,
   selectIsConnected,
@@ -126,6 +137,10 @@ export {
   selectLastFetchDuration,
   selectFetchCount,
   selectChartsLocked,
+  selectLastUpdate,
+  selectIsLive,
+  selectUnifiedConnectionStatus,
+  selectConnectionStatusInfo,
 } from './uiStore'
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'
@@ -139,3 +154,9 @@ export {
   selectIndicatorVisibility,
   getThemePreset,
 } from './chartSettingsStore'
+
+export {
+  useAdminStore,
+  selectIsAuthenticated,
+  selectShowAuthModal,
+} from './adminStore'
