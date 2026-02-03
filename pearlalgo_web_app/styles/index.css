@@ -58,7 +58,9 @@
 @import './components/_analytics.css';
 @import './components/_dashboard-panels.css';
 @import './components/_positions-strip.css';
+@import './components/_trades-history.css';
 
 /* Responsive (must come after components to override at breakpoints) */
 @import './_responsive.css';
 @import './_mobile.css';
+@import './_iphone16pro.css';

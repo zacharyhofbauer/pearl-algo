@@ -307,9 +307,9 @@ sudo apt-get install -y nodejs
 **Start/Stop:**
 
 ```bash
-./pearl.sh webapp start     # Start (API + Chart)
-./pearl.sh webapp stop      # Stop all
-./pearl.sh webapp restart   # Restart all
+./pearl.sh chart start     # Start (API + Chart)
+./pearl.sh chart stop      # Stop all
+./pearl.sh chart restart   # Restart all
 ```
 
 **Access:**
@@ -337,8 +337,9 @@ sudo apt-get install -y nodejs
 | `PEARL_MINI_APP_URL` | `https://pearlalgo.io/` | Public HTTPS URL |
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
-| `PEARL_API_AUTH_ENABLED` | `false` | Enable API key authentication |
-| `PEARL_API_KEY` | *(auto-gen)* | API key for protected endpoints |
+| `PEARL_API_AUTH_ENABLED` | `true` | Enable API key authentication |
+| `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
+| `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |
 
 ⚠️ **Client ID Conflicts:** If you see "Error 326: client id already in use", change `IB_CLIENT_ID_LIVE_CHART` to an unused ID (96, 95, etc.) and restart.
 
@@ -381,7 +382,7 @@ systemctl status cloudflared-pearlalgo  # Systemd service status
 **Troubleshooting:**
 - **pearlalgo.io unreachable**: Run `./pearl.sh tunnel status` - if not running, run `sudo ./scripts/setup-cloudflared-service.sh`
 - **Chart shows "No Data"**: IBKR Gateway is offline or disconnected
-- **Chart not loading**: Check if web app processes are running (`./pearl.sh webapp status`)
+- **Chart not loading**: Check if web app processes are running (`./pearl.sh chart status`)
 - **Data delayed**: This is normal! Chart often shows fresher data than TradingView
 
 ---

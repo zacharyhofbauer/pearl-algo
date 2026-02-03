@@ -37,6 +37,14 @@ _cache_file: Optional[Path] = None
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(Path.home() / ".config" / "pearlalgo" / "secrets.env")
+except ImportError:
+    pass  # dotenv not installed, rely on shell environment
+
 try:
     from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
     from fastapi.middleware.cors import CORSMiddleware
@@ -105,7 +113,7 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 from collections import defaultdict
 import time as time_module
 
-_rate_limit_requests = int(os.getenv("PEARL_RATE_LIMIT_REQUESTS", "100"))  # requests per window
+_rate_limit_requests = int(os.getenv("PEARL_RATE_LIMIT_REQUESTS", "10000"))  # requests per window (high default for Cloudflare tunnel)
 _rate_limit_window = int(os.getenv("PEARL_RATE_LIMIT_WINDOW", "60"))  # window in seconds
 _rate_limit_store: Dict[str, List[float]] = defaultdict(list)
 
@@ -2090,6 +2098,145 @@ async def get_trades(
     ]
     
     return trades[-limit:]
+
+
+@app.get("/api/trades/history")
+async def get_trades_history(
+    start_date: Optional[str] = Query(default=None, description="Filter from date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(default=None, description="Filter to date (YYYY-MM-DD)"),
+    direction: Optional[str] = Query(default=None, description="Filter by direction (long/short)"),
+    exit_reason: Optional[str] = Query(default=None, description="Filter by exit reason type"),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Get full trade history with filtering, pagination, and daily aggregates.
+
+    Returns:
+        {
+            "trades": [...],
+            "daily_summary": {...},
+            "total_count": 100,
+            "page": 1,
+            "page_size": 50,
+            "total_pages": 2,
+            "filters_applied": {...}
+        }
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    signals_file = _state_dir / "signals.jsonl"
+    # Load all signals for full history
+    all_signals = _load_jsonl_file(signals_file, max_lines=10000)
+
+    # Filter to exited trades only
+    trades = []
+    for s in all_signals:
+        if s.get("status") != "exited":
+            continue
+
+        signal_data = s.get("signal", {})
+        exit_time = s.get("exit_time") or signal_data.get("exit_time")
+        entry_time = s.get("entry_time") or signal_data.get("entry_time")
+
+        trade = {
+            "signal_id": s.get("signal_id"),
+            "direction": signal_data.get("direction") if isinstance(signal_data, dict) else s.get("direction"),
+            "entry_time": entry_time,
+            "entry_price": s.get("entry_price") or signal_data.get("entry_price"),
+            "exit_time": exit_time,
+            "exit_price": s.get("exit_price") or signal_data.get("exit_price"),
+            "pnl": s.get("pnl") or signal_data.get("pnl"),
+            "exit_reason": s.get("exit_reason") or signal_data.get("exit_reason"),
+            "duration_seconds": s.get("duration_seconds"),
+            "ml_probability": signal_data.get("ml_probability") if isinstance(signal_data, dict) else None,
+            "regime_at_entry": signal_data.get("regime") if isinstance(signal_data, dict) else None,
+            "entry_reason": signal_data.get("reason") if isinstance(signal_data, dict) else None,
+        }
+        trades.append(trade)
+
+    # Apply filters
+    filters_applied = {}
+
+    if start_date:
+        try:
+            trades = [t for t in trades if t.get("exit_time", "")[:10] >= start_date]
+            filters_applied["start_date"] = start_date
+        except:
+            pass
+
+    if end_date:
+        try:
+            trades = [t for t in trades if t.get("exit_time", "")[:10] <= end_date]
+            filters_applied["end_date"] = end_date
+        except:
+            pass
+
+    if direction and direction.lower() in ("long", "short"):
+        trades = [t for t in trades if t.get("direction", "").lower() == direction.lower()]
+        filters_applied["direction"] = direction
+
+    if exit_reason:
+        reason_lower = exit_reason.lower()
+        def matches_reason(t):
+            r = (t.get("exit_reason") or "").lower()
+            if reason_lower == "target":
+                return "target" in r or "tp_" in r or "profit" in r
+            elif reason_lower == "stop":
+                return "stop" in r or "sl_" in r
+            elif reason_lower == "trail":
+                return "trail" in r
+            elif reason_lower == "time":
+                return "time" in r or "eod" in r or "session" in r
+            elif reason_lower == "manual":
+                return "close_all" in r or "close all" in r
+            return False
+        trades = [t for t in trades if matches_reason(t)]
+        filters_applied["exit_reason"] = exit_reason
+
+    # Sort by exit time (newest first)
+    trades.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
+
+    total_count = len(trades)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+
+    # Paginate
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_trades = trades[start_idx:end_idx]
+
+    # Calculate daily summary for all filtered trades
+    daily_summary = {}
+    for t in trades:
+        date = (t.get("exit_time") or "")[:10]
+        if not date:
+            continue
+        if date not in daily_summary:
+            daily_summary[date] = {"trades": 0, "pnl": 0, "wins": 0, "losses": 0}
+        daily_summary[date]["trades"] += 1
+        pnl = t.get("pnl") or 0
+        daily_summary[date]["pnl"] += pnl
+        if pnl > 0:
+            daily_summary[date]["wins"] += 1
+        elif pnl < 0:
+            daily_summary[date]["losses"] += 1
+
+    # Add win rate to daily summary
+    for date in daily_summary:
+        total = daily_summary[date]["trades"]
+        wins = daily_summary[date]["wins"]
+        daily_summary[date]["win_rate"] = (wins / total * 100) if total > 0 else 0
+
+    return {
+        "trades": paginated_trades,
+        "daily_summary": daily_summary,
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "filters_applied": filters_applied,
+    }
 
 
 @app.get("/api/positions")

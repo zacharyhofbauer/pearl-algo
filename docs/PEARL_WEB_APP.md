@@ -94,9 +94,9 @@ node --version  # v20.x.x
 Start API server + Next.js chart:
 
 ```bash
-./pearl.sh webapp start
+./pearl.sh chart start
 # or
-./pearl.sh webapp restart
+./pearl.sh chart restart
 ```
 
 Open the chart:
@@ -105,7 +105,7 @@ Open the chart:
 Stop:
 
 ```bash
-./pearl.sh webapp stop
+./pearl.sh chart stop
 ```
 
 ---
@@ -121,7 +121,7 @@ Official references:
 
 ### Quick workflow (recommended for `pearlalgo_web_app/`)
 
-1. Start the app (`./pearl.sh webapp start`) and open `http://localhost:3001`.
+1. Start the app (`./pearl.sh chart start`) and open `http://localhost:3001`.
 2. In Cursor, open the Browser on that URL and open the **design sidebar / Visual Editor**.
 3. Select an element (and multi-select when helpful) to:
    - rearrange with drag-and-drop
@@ -151,22 +151,27 @@ The app uses Zustand stores for centralized state:
 
 ---
 
-## API Authentication (Optional)
+## API Authentication (Recommended)
 
-Enable API key authentication for protected endpoints:
+Auth is enabled by default. Store the API key in the secrets file:
 
 ```bash
-# Enable authentication
-export PEARL_API_AUTH_ENABLED=true
-
-# Set API key (or auto-generates one)
-export PEARL_API_KEY=your-secret-key
-
-# Frontend API key
-export NEXT_PUBLIC_API_KEY=your-secret-key
+# ~/.config/pearlalgo/secrets.env
+PEARL_API_KEY=your-secret-key
 ```
 
-Protected endpoints require `X-API-Key` header or `api_key` query parameter.
+When starting via `./pearl.sh chart start`, the script exports `NEXT_PUBLIC_API_KEY`
+from `PEARL_API_KEY` so the frontend sends the `X-API-Key` header automatically.
+
+If you change the key, restart the web app and hard refresh the browser.
+
+To disable auth for local development only:
+
+```bash
+export PEARL_API_AUTH_ENABLED=false
+```
+
+Protected endpoints require the `X-API-Key` header.
 
 ---
 
@@ -219,9 +224,11 @@ See cloudflared tunnel setup documentation for details.
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
 | `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | CORS origins for API (comma-separated) |
-| `PEARL_API_AUTH_ENABLED` | `false` | Enable API authentication |
-| `PEARL_API_KEY` | *(auto-gen)* | API key for protected endpoints |
-| `NEXT_PUBLIC_API_KEY` | *(unset)* | Frontend API key |
+| `PEARL_API_AUTH_ENABLED` | `true` | Enable API authentication |
+| `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
+| `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |
+| `PEARL_RATE_LIMIT_REQUESTS` | `50000` | Rate limit requests per window |
+| `PEARL_RATE_LIMIT_WINDOW` | `60` | Rate limit window (seconds) |
 
 ---
 
@@ -245,6 +252,11 @@ Ensure:
 1. Market Agent is running (`./pearl.sh status`)
 2. IBKR Gateway is connected (`./pearl.sh gateway status`)
 3. API server is running (check `http://localhost:8000/health`)
+
+### API returns "Missing API key"
+1. Set `PEARL_API_KEY` in `~/.config/pearlalgo/secrets.env`
+2. Restart the web app (`./pearl.sh chart restart`)
+3. Hard refresh the browser (client env is baked at startup)
 
 ### WebSocket not connecting
 1. Check API server logs for WebSocket errors

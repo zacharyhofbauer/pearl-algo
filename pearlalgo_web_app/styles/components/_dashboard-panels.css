@@ -213,7 +213,8 @@
 }
 
 /* Add padding to dashboard when banner is shown */
-.dashboard:has(.market-closed-banner) {
+/* Using explicit class instead of :has() for broader browser support */
+.dashboard.has-banner {
   padding-top: max(32px, calc(env(safe-area-inset-top, 12px) + 24px));
 }
 

@@ -681,5 +681,78 @@
     grid-column: span 2;
     justify-self: center;
   }
+
+  /* ===================
+     P&L CALENDAR - Very small screens
+     =================== */
+  .pnl-calendar {
+    font-size: 10px;
+  }
+
+  .calendar-nav {
+    gap: 4px;
+  }
+
+  .calendar-nav-btn {
+    padding: 3px 6px;
+    font-size: 10px;
+  }
+
+  .calendar-month {
+    font-size: 12px;
+  }
+
+  .calendar-summary {
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+  }
+
+  .calendar-summary .summary-pnl {
+    font-size: 16px;
+  }
+
+  .calendar-summary .summary-stats {
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .calendar-header-day {
+    font-size: 8px;
+    padding: 2px;
+  }
+
+  .calendar-grid {
+    gap: 1px;
+  }
+
+  .calendar-day {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 2px;
+  }
+
+  .calendar-day .day-number {
+    font-size: 9px;
+  }
+
+  .calendar-day .day-pnl {
+    font-size: 8px;
+  }
+
+  .calendar-legend {
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .calendar-legend .legend-item {
+    font-size: 8px;
+  }
+
+  .calendar-legend .legend-dot {
+    width: 8px;
+    height: 8px;
+  }
 }
 

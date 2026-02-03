@@ -66,6 +66,19 @@ parse_options() {
     done
 }
 
+# Load env files (non-sensitive + secrets)
+load_env_files() {
+    set -a
+    [ -f "$SCRIPT_DIR/.env" ] && source "$SCRIPT_DIR/.env"
+    local secrets_file="$HOME/.config/pearlalgo/secrets.env"
+    [ -f "$secrets_file" ] && source "$secrets_file"
+    set +a
+
+    if [ -n "${PEARL_API_KEY:-}" ] && [ -z "${NEXT_PUBLIC_API_KEY:-}" ]; then
+        export NEXT_PUBLIC_API_KEY="$PEARL_API_KEY"
+    fi
+}
+
 # Activate virtual environment
 activate_venv() {
     if [ -f ".venv/bin/activate" ]; then
@@ -144,8 +157,13 @@ check_tunnel_status() {
 }
 
 check_api_status() {
-    if curl -s "http://localhost:8000/api/state" &>/dev/null; then
-        local data=$(curl -s "http://localhost:8000/api/state")
+    load_env_files
+    local header=()
+    if [ -n "${PEARL_API_KEY:-}" ]; then
+        header=(-H "X-API-Key: $PEARL_API_KEY")
+    fi
+    if curl -s "${header[@]}" "http://localhost:8000/api/state" &>/dev/null; then
+        local data=$(curl -s "${header[@]}" "http://localhost:8000/api/state")
         local pnl=$(echo "$data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d.get('daily_pnl', 0):+.2f}\")" 2>/dev/null || echo "N/A")
         local trades=$(echo "$data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d.get('daily_wins',0)}W/{d.get('daily_losses',0)}L\")" 2>/dev/null || echo "N/A")
         echo -e "${GREEN}●${NC} API - P&L: \$$pnl | Trades: $trades"
@@ -240,6 +258,8 @@ start_chart() {
     fi
 
     echo -e "${CYAN}▶ Starting Web App (pearlalgo.io)...${NC}"
+
+    load_env_files
 
     local LOG_DIR="$SCRIPT_DIR/logs"
     local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"

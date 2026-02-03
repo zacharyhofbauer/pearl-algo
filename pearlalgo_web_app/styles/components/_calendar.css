@@ -91,6 +91,9 @@
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
   text-align: center;
+  /* Match grid overflow behavior */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .calendar-header-day {
@@ -105,6 +108,9 @@
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
+  /* Prevent overflow on very narrow screens */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .calendar-day {

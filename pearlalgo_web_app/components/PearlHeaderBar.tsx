@@ -155,9 +155,9 @@ export default function PearlHeaderBar() {
       }
     }
 
-    // Fetch immediately and then every 10 seconds
+    // Fetch immediately and then every 60 seconds
     fetchContext()
-    const interval = setInterval(fetchContext, 10000)
+    const interval = setInterval(fetchContext, 60000)
 
     return () => clearInterval(interval)
   }, [setTradingContext])

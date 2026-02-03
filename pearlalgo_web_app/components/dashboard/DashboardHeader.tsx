@@ -156,6 +156,12 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
             </button>
           ))}
         </div>
+
+        {/* Live Status Indicator */}
+        <div className={`header-live-status ${stale ? 'stale' : 'live'}`}>
+          <span className="live-dot"></span>
+          <span className="live-text">{stale ? 'STALE' : 'LIVE'}</span>
+        </div>
       </div>
 
       {/* Secondary Row - Badges, Health, Legends */}
