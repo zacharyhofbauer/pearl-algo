@@ -1433,7 +1433,6 @@ The system is ready for production use and optimized for prop firm trading with 
   - Dynamic viewport (bar count adjusts to screen width automatically)
   - Fit All / Go Live buttons for quick navigation
   - EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) indicators
-  - RSI(14) panel with overbought/oversold lines
   - Trade markers with hover tooltips showing signal details
   - WebSocket real-time updates with authentication
   - Zustand state management with 3 stores (agent, chart, UI)

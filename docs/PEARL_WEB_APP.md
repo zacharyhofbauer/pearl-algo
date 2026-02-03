@@ -52,7 +52,6 @@ node --version  # v20.x.x
 | **Dynamic Viewport** | Bar count adjusts to screen width automatically |
 | **Fit All / Go Live** | Quick buttons (top-right) to fit all data or jump to live edge |
 | **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
-| **RSI Panel** | Separate RSI(14) panel with overbought/oversold lines |
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 | **WebSocket Updates** | Real-time state updates via WebSocket (2-second broadcast) |
 | **Error Boundaries** | Graceful component failure handling |
@@ -69,7 +68,7 @@ node --version  # v20.x.x
 - **IBKR Client ID**: 88 (configurable via `IB_CLIENT_ID_LIVE_CHART`)
 - **Endpoints**:
   - `GET /api/candles` - OHLCV candle data
-  - `GET /api/indicators` - EMA9, EMA21, VWAP, RSI
+  - `GET /api/indicators` - EMA9, EMA21, VWAP, Bollinger Bands, ATR Bands, Volume Profile
   - `GET /api/markers` - Trade entry/exit markers (authenticated)
   - `GET /api/state` - Agent state with full system health (authenticated)
   - `GET /api/trades` - Recent trades (authenticated)

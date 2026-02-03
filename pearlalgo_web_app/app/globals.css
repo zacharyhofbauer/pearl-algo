@@ -1342,7 +1342,7 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
-  min-height: 340px;
+  min-height: 380px;
 }
 
 /* Chart Actions */
@@ -1832,33 +1832,6 @@ body {
   border-radius: 8px;
   border: 1px solid var(--border-color);
   overflow: hidden;
-}
-
-/* RSI Panel */
-.rsi-panel {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-  height: clamp(100px, 15vh, 160px);
-}
-
-.rsi-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.rsi-label {
-  position: absolute;
-  top: 8px;
-  left: 12px;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  z-index: 10;
-  background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
 /* Live Price & Candle Countdown Overlay */
@@ -2524,10 +2497,6 @@ body {
 @media (max-width: 1024px) {
   .chart-wrapper {
     min-height: 350px;
-  }
-
-  .rsi-panel {
-    height: clamp(80px, 12vh, 120px);
   }
 }
 
@@ -6497,7 +6466,7 @@ body {
   overflow: hidden;
 }
 
-/* Left Column: Header + Chart + RSI */
+/* Left Column: Header + Chart */
 .ultrawide-left {
   display: flex;
   flex-direction: column;
@@ -6637,16 +6606,6 @@ body {
   height: 100%;
 }
 
-/* RSI Area */
-.ultrawide-rsi-area {
-  height: 60px;
-  flex-shrink: 0;
-}
-
-.ultrawide-rsi-area .rsi-panel {
-  height: 100%;
-}
-
 /* Right Area: Panels Grid */
 .ultrawide-right {
   display: flex;
@@ -6762,11 +6721,6 @@ body {
 
 .ultrawide-chart-column .chart-container {
   height: 100%;
-}
-
-.ultrawide-chart-column .rsi-panel {
-  height: 70px;
-  flex-shrink: 0;
 }
 
 /* Column 2: Key Metrics (Performance + Active + Challenge) */
@@ -7161,16 +7115,6 @@ body {
 .ultrawide-layout .chart-action-btn {
   width: 32px;
   height: 32px;
-}
-
-/* RSI Panel - compact */
-.ultrawide-layout .rsi-label {
-  font-size: var(--font-size-xs);
-  padding: 2px 6px;
-}
-
-.ultrawide-layout .rsi-container {
-  height: 100%;
 }
 
 /* Active Positions Panel - ultrawide */
@@ -9376,41 +9320,6 @@ body {
 .indicator-chart {
   width: 100%;
   overflow: hidden;
-}
-
-/* RSI Panel specific */
-.rsi-panel .indicator-header {
-  background: linear-gradient(90deg, rgba(171, 71, 188, 0.1) 0%, transparent 100%);
-}
-
-/* MACD Panel specific */
-.macd-panel .indicator-header {
-  background: linear-gradient(90deg, rgba(33, 150, 243, 0.1) 0%, transparent 100%);
-}
-
-.macd-panel .indicator-values {
-  gap: var(--space-3);
-}
-
-.macd-panel .indicator-value.macd::before {
-  content: 'M:';
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  margin-right: 2px;
-}
-
-.macd-panel .indicator-value.signal::before {
-  content: 'S:';
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  margin-right: 2px;
-}
-
-.macd-panel .indicator-value.histogram::before {
-  content: 'H:';
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  margin-right: 2px;
 }
 
 /* ===================================

@@ -475,11 +475,11 @@ async def _fetch_candles_with_source(
 
 
 def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculate EMA, VWAP, RSI, MACD, Bollinger Bands, ATR Bands, and Volume Profile from candle data."""
+    """Calculate EMA, VWAP, Bollinger Bands, ATR Bands, and Volume Profile from candle data."""
     if not candles:
         return {
-            "ema9": [], "ema21": [], "vwap": [], "rsi": [],
-            "macd": [], "bollingerBands": [], "atrBands": [], "volumeProfile": None
+            "ema9": [], "ema21": [], "vwap": [],
+            "bollingerBands": [], "atrBands": [], "volumeProfile": None
         }
 
     closes = [c["close"] for c in candles]
@@ -516,58 +516,6 @@ def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         cum_vol_price += typical_price * volumes[i]
         cum_vol += volumes[i]
         vwap.append(cum_vol_price / cum_vol if cum_vol > 0 else typical_price)
-
-    # RSI calculation
-    def rsi(data, period=14):
-        result = []
-        gains = []
-        losses = []
-        for i in range(1, len(data)):
-            change = data[i] - data[i-1]
-            gains.append(max(0, change))
-            losses.append(max(0, -change))
-
-        for i in range(len(data)):
-            if i < period:
-                result.append(None)
-            else:
-                avg_gain = sum(gains[i-period:i]) / period
-                avg_loss = sum(losses[i-period:i]) / period
-                if avg_loss == 0:
-                    result.append(100)
-                else:
-                    rs = avg_gain / avg_loss
-                    result.append(100 - (100 / (1 + rs)))
-        return result
-
-    rsi_values = rsi(closes, 14)
-
-    # MACD calculation (12, 26, 9)
-    def calculate_macd(data, fast=12, slow=26, signal=9):
-        ema_fast = ema(data, fast)
-        ema_slow = ema(data, slow)
-
-        macd_line = []
-        for i in range(len(data)):
-            if ema_fast[i] is not None and ema_slow[i] is not None:
-                macd_line.append(ema_fast[i] - ema_slow[i])
-            else:
-                macd_line.append(None)
-
-        # Signal line (EMA of MACD line)
-        valid_macd = [m for m in macd_line if m is not None]
-        signal_line = []
-        if len(valid_macd) >= signal:
-            signal_ema = ema(valid_macd, signal)
-            # Pad with None to align with macd_line
-            none_count = len(macd_line) - len(valid_macd)
-            signal_line = [None] * none_count + signal_ema
-        else:
-            signal_line = [None] * len(macd_line)
-
-        return macd_line, signal_line
-
-    macd_line, signal_line = calculate_macd(closes)
 
     # Bollinger Bands (20 SMA, 2 std dev)
     def calculate_bollinger_bands(data, period=20, num_std=2):
@@ -733,18 +681,6 @@ def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     volume_profile = calculate_volume_profile(candles)
 
-    # Format MACD data
-    macd_data = []
-    for i in range(len(times)):
-        if macd_line[i] is not None and signal_line[i] is not None:
-            histogram = macd_line[i] - signal_line[i]
-            macd_data.append({
-                "time": times[i],
-                "macd": round(macd_line[i], 2),
-                "signal": round(signal_line[i], 2),
-                "histogram": round(histogram, 2)
-            })
-
     # Format Bollinger Bands data
     bb_data = [
         {
@@ -772,8 +708,6 @@ def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         "ema9": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(ema9) if v is not None],
         "ema21": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(ema21) if v is not None],
         "vwap": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(vwap)],
-        "rsi": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(rsi_values) if v is not None],
-        "macd": macd_data,
         "bollingerBands": bb_data,
         "atrBands": atr_data,
         "volumeProfile": volume_profile,
@@ -2158,7 +2092,7 @@ async def get_indicators(
     timeframe: str = Query(default="5m", description="Timeframe"),
     bars: int = Query(default=72, ge=10, le=500, description="Number of bars"),
 ):
-    """Get technical indicators (EMA, VWAP, RSI) for overlay.
+    """Get technical indicators for overlay.
     
     Returns 503 if real data is unavailable.
     """

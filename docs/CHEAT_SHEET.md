@@ -344,7 +344,6 @@ Known-good baseline tag:
 | **Dynamic Viewport** | Bar count adjusts to screen width automatically |
 | **Fit All / Go Live** | Quick buttons (top-right) to fit all data or jump to live edge |
 | **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
-| **RSI Panel** | Separate RSI(14) panel with overbought/oversold lines |
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 | **WebSocket Updates** | Real-time state updates via WebSocket |
 | **Error Boundaries** | Graceful component failure handling |

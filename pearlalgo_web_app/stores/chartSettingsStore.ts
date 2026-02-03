@@ -7,8 +7,6 @@ export interface IndicatorVisibility {
   ema9: boolean
   ema21: boolean
   vwap: boolean
-  rsi: boolean
-  macd: boolean
   bollingerBands: boolean
   atrBands: boolean
   volumeProfile: boolean
@@ -76,8 +74,6 @@ interface ChartSettingsStore {
   indicators: IndicatorVisibility
 
   // Panel visibility
-  showRSIPanel: boolean
-  showMACDPanel: boolean
   showVolumeProfilePanel: boolean
 
   // Chart preferences
@@ -90,8 +86,6 @@ interface ChartSettingsStore {
   setTheme: (theme: ChartTheme) => void
   toggleIndicator: (indicator: keyof IndicatorVisibility) => void
   setIndicatorVisibility: (indicator: keyof IndicatorVisibility, visible: boolean) => void
-  toggleRSIPanel: () => void
-  toggleMACDPanel: () => void
   toggleVolumeProfilePanel: () => void
   setShowVolume: (show: boolean) => void
   setShowSessionHighlights: (show: boolean) => void
@@ -104,8 +98,6 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   ema9: true,
   ema21: true,
   vwap: true,
-  rsi: true,
-  macd: true,
   bollingerBands: false,
   atrBands: false,
   volumeProfile: false,
@@ -119,8 +111,6 @@ export const useChartSettingsStore = create<ChartSettingsStore>()(
       theme: 'dark',
       colors: THEME_PRESETS.dark,
       indicators: DEFAULT_INDICATORS,
-      showRSIPanel: true,
-      showMACDPanel: true,
       showVolumeProfilePanel: false,
       showVolume: true,
       showSessionHighlights: true,
@@ -150,12 +140,6 @@ export const useChartSettingsStore = create<ChartSettingsStore>()(
           },
         })),
 
-      toggleRSIPanel: () =>
-        set((state) => ({ showRSIPanel: !state.showRSIPanel })),
-
-      toggleMACDPanel: () =>
-        set((state) => ({ showMACDPanel: !state.showMACDPanel })),
-
       toggleVolumeProfilePanel: () =>
         set((state) => ({ showVolumeProfilePanel: !state.showVolumeProfilePanel })),
 
@@ -172,8 +156,6 @@ export const useChartSettingsStore = create<ChartSettingsStore>()(
           theme: 'dark',
           colors: THEME_PRESETS.dark,
           indicators: DEFAULT_INDICATORS,
-          showRSIPanel: true,
-          showMACDPanel: true,
           showVolumeProfilePanel: false,
           showVolume: true,
           showSessionHighlights: true,
@@ -186,8 +168,6 @@ export const useChartSettingsStore = create<ChartSettingsStore>()(
       partialize: (state) => ({
         theme: state.theme,
         indicators: state.indicators,
-        showRSIPanel: state.showRSIPanel,
-        showMACDPanel: state.showMACDPanel,
         showVolumeProfilePanel: state.showVolumeProfilePanel,
         showVolume: state.showVolume,
         showSessionHighlights: state.showSessionHighlights,

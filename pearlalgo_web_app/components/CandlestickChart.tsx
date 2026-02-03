@@ -341,10 +341,15 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
+      // Keep volume visible but don't let it add right-axis labels (TradingView-like).
+      priceLineVisible: false,
+      lastValueVisible: false,
     })
     volumeSeries.priceScale().applyOptions({
       // Make volume bars smaller (less busy, more room for price action)
       scaleMargins: { top: 0.88, bottom: 0 },
+      // Hide the volume scale entirely so it doesn't stack with price labels.
+      visible: false,
     })
 
     // Connection line - added LAST so it renders ON TOP of everything when hovering

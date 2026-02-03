@@ -15,13 +15,6 @@ export interface IndicatorData {
   value: number
 }
 
-export interface MACDData {
-  time: number
-  macd: number
-  signal: number
-  histogram: number
-}
-
 export interface BollingerBandsData {
   time: number
   upper: number
@@ -54,8 +47,6 @@ export interface Indicators {
   ema9?: IndicatorData[]
   ema21?: IndicatorData[]
   vwap?: IndicatorData[]
-  rsi?: IndicatorData[]
-  macd?: MACDData[]
   bollingerBands?: BollingerBandsData[]
   atrBands?: ATRBandsData[]
   volumeProfile?: VolumeProfile
@@ -217,5 +208,3 @@ export const selectPriceChange = (state: ChartStore) => {
 
 export const selectIsMarketOpen = (state: ChartStore) =>
   state.marketStatus?.is_open ?? true
-
-export const selectRSI = (state: ChartStore) => state.indicators.rsi

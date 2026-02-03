@@ -32,7 +32,7 @@ import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
 // Indicator panels
-import { RSIPanel, MACDPanel, VolumeProfilePanel } from '@/components/indicators'
+import { VolumeProfilePanel } from '@/components/indicators'
 
 // Import stores and types
 import {
@@ -661,33 +661,7 @@ export default function PearlAlgoWebApp() {
   )
 
   // Chart settings store for indicator visibility
-  const showRSIPanel = useChartSettingsStore((s) => s.showRSIPanel)
-  const showMACDPanel = useChartSettingsStore((s) => s.showMACDPanel)
   const showVolumeProfilePanel = useChartSettingsStore((s) => s.showVolumeProfilePanel)
-
-  // RSI section component
-  const renderRSI = () => (
-    showRSIPanel && indicators.rsi && indicators.rsi.length > 0 && (
-      <RSIPanel
-        data={indicators.rsi}
-        barSpacing={barSpacing}
-        mainChart={mainChartApi}
-        height={100}
-      />
-    )
-  )
-
-  // MACD section component
-  const renderMACD = () => (
-    showMACDPanel && indicators.macd && indicators.macd.length > 0 && (
-      <MACDPanel
-        data={indicators.macd}
-        barSpacing={barSpacing}
-        mainChart={mainChartApi}
-        height={120}
-      />
-    )
-  )
 
   // Volume Profile section component
   const renderVolumeProfile = () => (
@@ -757,7 +731,6 @@ export default function PearlAlgoWebApp() {
             <UltrawideLayout
               headerSection={renderUltrawideHeader()}
               chartSection={renderChart()}
-              rsiSection={renderRSI()}
               pearlAISection={
                 <PearlInsightsPanel
                   insights={agentState.pearl_insights}
@@ -892,8 +865,6 @@ export default function PearlAlgoWebApp() {
           {renderHeader()}
           {renderStatusPanel()}
           {renderChart()}
-          {renderRSI()}
-          {renderMACD()}
 
           {/* Data Panels */}
           {agentState && (

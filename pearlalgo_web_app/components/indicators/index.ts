@@ -1,5 +1,3 @@
-export { default as RSIPanel } from './RSIPanel'
-export { default as MACDPanel } from './MACDPanel'
 export {
   default as BollingerBandsOverlay,
   calculateBollingerBands

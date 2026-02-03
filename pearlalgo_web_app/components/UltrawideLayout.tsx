@@ -3,10 +3,9 @@
 import { ReactNode } from 'react'
 
 interface UltrawideLayoutProps {
-  // Left Column (30%): Header + Chart + RSI
+  // Left Column (30%): Header + Chart
   headerSection?: ReactNode
   chartSection: ReactNode
-  rsiSection?: ReactNode
   // Right Area (70%): All data panels
   pearlAISection?: ReactNode         // Pearl AI (includes ML filter performance)
   systemStatusSection?: ReactNode    // System readiness dashboard
@@ -37,14 +36,12 @@ interface UltrawideLayoutProps {
  * │    CHART     │  ANALYTICS  │  HEALTH  │  SIGNALS  │  PRESSURE  │  CONFIG  │
  * │              │                                                             │
  * ├──────────────┤                                                             │
- * │     RSI      │                                                             │
  * └──────────────┴─────────────────────────────────────────────────────────────┘
  *      30%                                    70%
  */
 export default function UltrawideLayout({
   headerSection,
   chartSection,
-  rsiSection,
   pearlAISection,
   systemStatusSection,
   signalActivitySection,
@@ -63,7 +60,7 @@ export default function UltrawideLayout({
 }: UltrawideLayoutProps) {
   return (
     <div className="ultrawide-layout-v2">
-      {/* Left Column: Header + Chart + RSI (30%) */}
+      {/* Left Column: Header + Chart (30%) */}
       <div className="ultrawide-left">
         {headerSection && (
           <div className="ultrawide-header-compact">
@@ -73,11 +70,6 @@ export default function UltrawideLayout({
         <div className="ultrawide-chart-area">
           {chartSection}
         </div>
-        {rsiSection && (
-          <div className="ultrawide-rsi-area">
-            {rsiSection}
-          </div>
-        )}
       </div>
 
       {/* Right Area: All Panels Grid (70%) */}
