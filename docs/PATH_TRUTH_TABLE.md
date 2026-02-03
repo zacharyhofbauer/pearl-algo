@@ -168,6 +168,47 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Configuration**: `config.yaml` → `knowledge.*`
 - **Docs**: *(AI_PATCH_GUIDE.md removed - AI features moved to CLI)*
 
+## AI Modules
+
+There are two separate AI-related modules in this repository, serving different purposes:
+
+### `pearl_ai/` (Top-level Module)
+
+- **Logical component**: Pearl AI 3.0 - Data-grounded trading analyst with RAG
+- **Purpose**: Comprehensive AI system for CLI/terminal and web app usage
+- **Python modules**:
+  - `pearl_ai.brain` – Core AI orchestrator (routes between local/Claude)
+  - `pearl_ai.narrator` – Narrative generation for briefings
+  - `pearl_ai.memory` – Conversation persistence
+  - `pearl_ai.data_access` – Trade database RAG integration
+  - `pearl_ai.cache` – Response caching with semantic hashing
+  - `pearl_ai.tools` – Tool execution for structured queries
+  - `pearl_ai.metrics` – Observability and cost tracking
+  - `pearl_ai.llm_claude` – Claude API integration
+  - `pearl_ai.llm_local` – Local LLM (Ollama) integration
+  - `pearl_ai.llm_mock` – Mock LLM for testing
+  - `pearl_ai.config` – Configuration management
+  - `pearl_ai.api_router` – FastAPI router for AI endpoints
+- **Features**: RAG, tool use, streaming, caching, cost tracking
+- **Tests**: `tests/test_pearl_brain.py`, `tests/test_pearl_cache.py`, `tests/test_pearl_tools.py`
+
+### `src/pearlalgo/ai/` (In-package Module)
+
+- **Logical component**: Telegram AI integration and shadow tracking
+- **Purpose**: Telegram-specific AI wrappers and suggestion tracking
+- **Python modules**:
+  - `pearlalgo.ai.chat` – PearlAIChat class for conversational AI
+  - `pearlalgo.ai.shadow_tracker` – Shadow tracking for AI suggestion outcomes
+- **Features**: Telegram integration, outcome tracking
+- **Note**: AI chat features have been removed from Telegram; this module provides shadow tracking for ML signal evaluation
+
+### Relationship
+
+- `pearl_ai/` is the newer, more comprehensive AI system (v3.0) for CLI and web app
+- `src/pearlalgo/ai/` provides lightweight wrappers for Telegram integration and outcome tracking
+- Both modules can coexist; they serve different integration points
+- `pearl_ai/` has its own versioning (`__version__ = "3.0.0"`) and is kept separate intentionally
+
 ## Utilities / Cross‑cutting Concerns
 
 - **Logical component**: Logging, error handling, retry, paths, data quality, and shared helpers
@@ -185,7 +226,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.volume_pressure` – Signed-volume pressure computations
   - `pearlalgo.utils.telegram_alerts` – Core Telegram messaging
   - `pearlalgo.utils.telegram_ui_contract` – Telegram UI contract
-  - `pearlalgo.utils.openai_client` – OpenAI client wrapper
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.absolute_mode` – Absolute mode utilities
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine

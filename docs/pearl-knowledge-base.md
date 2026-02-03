@@ -47,6 +47,8 @@ Format: `[Price] | [Countdown Dot + TF + Time] | [Legend]`
 - Show AI status pills (Bandit, Contextual, ML modes)
 - Shadow impact metrics in responsive grid
 
+**Note**: AI chat features have been removed from Telegram. For AI-powered analysis and assistance, use the CLI/terminal interface or the web app Pearl AI panel instead.
+
 ## Troubleshooting
 
 ### Agent Not Running/Stale Data

@@ -378,11 +378,19 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         window.removeEventListener('resize', resizeHandlerRef.current)
         resizeHandlerRef.current = null
       }
+      hasInitialFit.current = false
       onChartReady?.(null)
       chart.remove()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barSpacing]) // onChartReady intentionally excluded to avoid recreation
+  }, []) // Only create chart once on mount - barSpacing changes handled separately
+
+  // Update barSpacing without recreating the chart
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.timeScale().applyOptions({ barSpacing })
+    }
+  }, [barSpacing])
 
   // Subscribe to crosshair move for tooltip
   useEffect(() => {
@@ -446,6 +454,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
   // Track previous data length to detect major changes (like timeframe switch)
   const prevDataLength = useRef(0)
+  const hasInitialFit = useRef(false)
 
   // Update candle data
   useEffect(() => {
@@ -469,9 +478,16 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     volumeSeriesRef.current.setData(volumeData)
 
     if (chartRef.current) {
-      // Always auto-fit so the chart doesn't hug the top/bottom edges
-      chartRef.current.priceScale('right').applyOptions({ autoScale: true })
-      chartRef.current.timeScale().fitContent()
+      // Only fit content on initial load or significant data change (timeframe switch)
+      // This prevents the chart from "spazzing out" on every WebSocket update
+      const isSignificantChange = !hasInitialFit.current || 
+        Math.abs(data.length - prevDataLength.current) > 50
+      
+      if (isSignificantChange) {
+        chartRef.current.priceScale('right').applyOptions({ autoScale: true })
+        chartRef.current.timeScale().fitContent()
+        hasInitialFit.current = true
+      }
       prevDataLength.current = data.length
     }
   }, [data])

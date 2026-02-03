@@ -4,15 +4,11 @@ import Image from 'next/image'
 import {
   useAgentStore,
   useChartStore,
-  useUIStore,
   selectAIMode,
   selectRegimeBadge,
   type Timeframe,
 } from '@/stores'
 import { formatPnL } from '@/lib/formatters'
-
-// Stale threshold in seconds
-const STALE_THRESHOLD_SECONDS = 60
 
 const formatMarketCountdown = (marketStatus: { is_open: boolean; next_open?: string | null } | null) => {
   if (!marketStatus) return null
@@ -56,19 +52,8 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
   const setTimeframe = useChartStore((s) => s.setTimeframe)
   const marketStatus = useChartStore((s) => s.marketStatus)
 
-  // UI store
-  const lastUpdate = useUIStore((s) => s.lastUpdate)
-
   const countdown = formatMarketCountdown(marketStatus)
   const dirGate = agentState?.ai_status?.direction_gating
-
-  const isDataStale = () => {
-    if (!lastUpdate) return true
-    const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000)
-    return seconds > STALE_THRESHOLD_SECONDS
-  }
-
-  const stale = isDataStale()
 
   // Ultrawide compact header
   if (variant === 'ultrawide') {
@@ -96,10 +81,6 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
               {tf}
             </button>
           ))}
-        </div>
-        <div className={`uw-status ${stale ? 'stale' : 'live'}`}>
-          <span className="uw-status-dot"></span>
-          {stale ? 'STALE' : 'LIVE'}
         </div>
       </div>
     )
@@ -155,12 +136,6 @@ export function DashboardHeader({ variant = 'standard' }: DashboardHeaderProps) 
               {tf}
             </button>
           ))}
-        </div>
-
-        {/* Live Status Indicator */}
-        <div className={`header-live-status ${stale ? 'stale' : 'live'}`}>
-          <span className="live-dot"></span>
-          <span className="live-text">{stale ? 'STALE' : 'LIVE'}</span>
         </div>
       </div>
 

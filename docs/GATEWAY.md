@@ -222,7 +222,45 @@ cd /path/to/pearlalgo-dev-ai-agents
 
 ---
 
-**Last Updated:** 2025-12-12  
+## 🔧 Systemd Service Deployment
+
+The repository includes systemd service files in `scripts/systemd/` for production deployment:
+
+- `ibkr-gateway.service` — IBKR Gateway service
+- `pearlalgo-agent.service` — Market agent service
+- `pearlalgo-api.service` — API server service
+- `pearlalgo-webapp.service` — Web app service
+- `pearlalgo-telegram.service` — Telegram handler service
+- `pearlalgo-monitor.service` / `.timer` — Health monitoring
+
+### Path Customization
+
+The systemd services use hardcoded paths for the default installation at `/home/pearlalgo/pearlalgo-dev-ai-agents`. If deploying to a different location:
+
+1. **Edit the service files** before installation:
+   ```bash
+   # Replace all occurrences of the default path
+   sed -i 's|/home/pearlalgo/pearlalgo-dev-ai-agents|/your/custom/path|g' scripts/systemd/*.service
+   ```
+
+2. **Update `WorkingDirectory`** in each service file to match your installation.
+
+3. **Update `EnvironmentFile`** paths if your `.env` is in a different location.
+
+4. **Install the services**:
+   ```bash
+   ./scripts/systemd/install-services.sh
+   ```
+
+### Notes
+
+- The hardcoded paths are intentional for single-user deployments where the path is known at install time.
+- For multi-user or templated deployments, consider using systemd template units or environment variables.
+- Always verify paths after editing: `systemctl cat pearlalgo-agent.service`
+
+---
+
+**Last Updated:** 2026-02-03  
 **Gateway Version:** 1041 | **IBC Version:** 3.23.0
 
 ---

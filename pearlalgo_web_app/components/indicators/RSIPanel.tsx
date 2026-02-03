@@ -24,6 +24,7 @@ export default function RSIPanel({
   const overboughtRef = useRef<ISeriesApi<'Line'> | null>(null)
   const oversoldRef = useRef<ISeriesApi<'Line'> | null>(null)
   const midlineRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const hasInitialFit = useRef(false)
 
   const colors = useChartSettingsStore((s) => s.colors)
 
@@ -140,9 +141,34 @@ export default function RSIPanel({
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      hasInitialFit.current = false
       chart.remove()
     }
-  }, [barSpacing, colors, height])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [height]) // Only recreate on height change - barSpacing/colors handled separately
+
+  // Update barSpacing without recreating the chart
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.timeScale().applyOptions({ barSpacing })
+    }
+  }, [barSpacing])
+
+  // Update colors without recreating the chart
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({
+        layout: {
+          background: { type: ColorType.Solid, color: colors.background },
+          textColor: colors.text,
+        },
+        grid: {
+          vertLines: { color: colors.grid },
+          horzLines: { color: colors.grid },
+        },
+      })
+    }
+  }, [colors])
 
   // Sync time scale with main chart
   useEffect(() => {
@@ -184,9 +210,10 @@ export default function RSIPanel({
     oversoldRef.current.setData(oversoldData)
     midlineRef.current.setData(midlineData)
 
-    // Auto-fit content
-    if (chartRef.current) {
+    // Only fit content on initial load to prevent glitching
+    if (chartRef.current && !hasInitialFit.current) {
       chartRef.current.timeScale().fitContent()
+      hasInitialFit.current = true
     }
   }, [data])
 
