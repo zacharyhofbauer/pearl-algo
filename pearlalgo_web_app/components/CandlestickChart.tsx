@@ -130,6 +130,13 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     return map
   }, [markers])
 
+  // Build a lookup map for candles by time (for marker hit-testing)
+  const candlesByTime = useMemo(() => {
+    const map = new Map<number, CandleData>()
+    for (const c of data) map.set(c.time, c)
+    return map
+  }, [data])
+
   // Aggregate markers by time - combine stacked markers into single visual marker
   const aggregatedMarkers = useMemo(() => {
     if (!markers) return []
@@ -257,6 +264,9 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       color: '#2962ff',
       lineWidth: 2,
       lineStyle: 0,
+      // Don't let VWAP (or any outlier points) blow out the chart's vertical scaling.
+      // The candlestick series should drive autoscale; VWAP will still render when within range.
+      autoscaleInfoProvider: () => null,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -404,7 +414,45 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       const markersAtTime = markersByTime.get(time)
 
       if (markersAtTime && markersAtTime.length > 0) {
-        const marker = markersAtTime[0]
+        // Only trigger tooltip when the pointer is actually near a marker (not anywhere along the crosshair line).
+        const series = candleSeriesRef.current
+        const candle = candlesByTime.get(time)
+        const HIT_RADIUS_PX = 22
+
+        let bestMarker: MarkerData | null = null
+        let bestDist = Number.POSITIVE_INFINITY
+
+        if (series) {
+          for (const m of markersAtTime) {
+            // Markers are drawn above/below the bar, so use candle high/low as anchor.
+            // Fallback to entry/exit price if candle is missing (rare).
+            const anchorPrice =
+              candle
+                ? (m.position === 'aboveBar' ? candle.high : candle.low)
+                : (m.kind === 'exit'
+                    ? (m.exit_price ?? m.entry_price)
+                    : (m.entry_price ?? m.exit_price))
+
+            if (anchorPrice === undefined || anchorPrice === null) continue
+
+            const y = series.priceToCoordinate(anchorPrice)
+            if (y === null || y === undefined) continue
+
+            const dist = Math.abs(y - param.point.y)
+            if (dist < bestDist) {
+              bestDist = dist
+              bestMarker = m
+            }
+          }
+        }
+
+        if (!bestMarker || bestDist > HIT_RADIUS_PX) {
+          setTooltip((prev) => ({ ...prev, visible: false, groupedMarkers: null }))
+          setActiveSignalId(null)
+          return
+        }
+
+        const marker = bestMarker
         
         // Show tooltip near the crosshair
         const containerRect = container.getBoundingClientRect()
@@ -444,7 +492,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshairMove)
     }
-  }, [markersByTime])
+  }, [markersByTime, candlesByTime])
 
   // Track previous data length to detect major changes (like timeframe switch)
   const prevDataLength = useRef(0)

@@ -316,9 +316,12 @@ sudo apt-get install -y nodejs
 
 If a UI/CSS refactor goes sideways, roll back **only** the web app paths (safe; no history rewrite):
 
+Known-good baseline tag:
+- `baseline/webapp-2026-02-03-0803Z`
+
 ```bash
 ./scripts/maintenance/git_rollback_paths.sh \
-  --target c14a7d34 \
+  --target baseline/webapp-2026-02-03-0803Z \
   --path pearlalgo_web_app \
   --path scripts/pearlalgo_web_app \
   --run "cd pearlalgo_web_app && npm run build" \

@@ -170,9 +170,12 @@ If the UI gets messy, do a **path-scoped rollback** (no history rewrite) using:
 
 Example (rollback web app + API server to a known-good commit/tag):
 
+Known-good baseline tag:
+- `baseline/webapp-2026-02-03-0803Z`
+
 ```bash
 ./scripts/maintenance/git_rollback_paths.sh \
-  --target c14a7d34 \
+  --target baseline/webapp-2026-02-03-0803Z \
   --path pearlalgo_web_app \
   --path scripts/pearlalgo_web_app \
   --run "cd pearlalgo_web_app && npm run build" \

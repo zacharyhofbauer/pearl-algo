@@ -114,7 +114,8 @@ export default function PearlAlgoWebApp() {
       // Entry price line - blue/purple, more visible
       lines.push({
         price: pos.entry_price,
-        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
+        // Slightly lighter (less busy) but still readable
+        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.42)' : 'rgba(156, 39, 176, 0.42)',
         title: '',
         kind: 'entry',
         lineStyle: 2, // dashed
@@ -125,7 +126,7 @@ export default function PearlAlgoWebApp() {
       if (pos.stop_loss) {
         lines.push({
           price: pos.stop_loss,
-          color: 'rgba(244, 67, 54, 0.55)',
+          color: 'rgba(244, 67, 54, 0.42)',
           title: '',
           kind: 'sl',
           lineStyle: 2, // dashed
@@ -137,7 +138,7 @@ export default function PearlAlgoWebApp() {
       if (pos.take_profit) {
         lines.push({
           price: pos.take_profit,
-          color: 'rgba(76, 175, 80, 0.55)',
+          color: 'rgba(76, 175, 80, 0.42)',
           title: '',
           kind: 'tp',
           lineStyle: 2, // dashed
