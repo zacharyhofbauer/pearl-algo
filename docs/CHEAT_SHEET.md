@@ -354,6 +354,8 @@ If a UI/CSS refactor goes sideways, roll back **only** the web app paths (safe; 
 | `PEARL_MINI_APP_URL` | `https://pearlalgo.io/` | Public HTTPS URL |
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
+| `PEARL_WEBAPP_AUTH_ENABLED` | `false` | Enable passcode-gated access to the dashboard (recommended when sharing link) |
+| `PEARL_WEBAPP_PASSCODE` | *(unset)* | Passcode when auth is enabled (set in secrets file; never commit) |
 | `PEARL_API_AUTH_ENABLED` | `true` | Enable API key authentication |
 | `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
 | `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |

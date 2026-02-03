@@ -57,6 +57,8 @@ node --version  # v20.x.x
 | **WebSocket Updates** | Real-time state updates via WebSocket (2-second broadcast) |
 | **Error Boundaries** | Graceful component failure handling |
 | **API Authentication** | Optional API key authentication for protected endpoints |
+| **Passcode Gate** | Optional passcode login screen for shared/public dashboards |
+| **Pearl AI Chat (LLM)** | Optional LLM chat box (local/Ollama + Claude) backed by `/api/pearl/*` |
 
 ---
 
@@ -270,6 +272,9 @@ See cloudflared tunnel setup documentation for details.
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
 | `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | CORS origins for API (comma-separated) |
+| `PEARL_WEBAPP_AUTH_ENABLED` | `false` | Enable passcode-gated access to the Next.js dashboard |
+| `PEARL_WEBAPP_PASSCODE` | *(unset)* | Passcode required when `PEARL_WEBAPP_AUTH_ENABLED=true` (set in local secrets) |
+| `PEARL_AI_API_ENABLED` | `false` | Enable Pearl AI LLM endpoints on the API server (`/api/pearl/*`) |
 | `PEARL_API_AUTH_ENABLED` | `true` | Enable API authentication |
 | `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
 | `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |

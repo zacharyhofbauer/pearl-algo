@@ -18,6 +18,7 @@ to methods in this mixin.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -446,7 +447,10 @@ class TelegramHandlersMixin:
             strategy_name: Name of the strategy to toggle
             reply_markup: Fallback keyboard markup
         """
-        config_path = Path("config/config.yaml")
+        config_path = Path(os.getenv("PEARLALGO_CONFIG_PATH", "config/config.yaml"))
+        if not config_path.is_absolute():
+            repo_root = Path(__file__).resolve().parents[3]
+            config_path = (repo_root / config_path).resolve()
         if not config_path.exists():
             await self._safe_edit_or_send(
                 query,

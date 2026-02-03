@@ -93,6 +93,15 @@ from pearlalgo.utils.pearl_suggestions import (
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 
+# Optional: Knowledge / RAG retriever (used for code context during diagnostics).
+try:
+    from pearlalgo.knowledge.retriever import KnowledgeRetriever, RetrieverConfig
+    KNOWLEDGE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    KnowledgeRetriever = None  # type: ignore[assignment]
+    RetrieverConfig = None  # type: ignore[assignment]
+    KNOWLEDGE_AVAILABLE = False
+
 try:
     from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
     try:

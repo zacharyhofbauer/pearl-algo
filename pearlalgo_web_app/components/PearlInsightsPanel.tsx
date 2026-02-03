@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
+import { apiFetchJson } from '@/lib/api'
 import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
 
 interface PearlInsightsPanelProps {
@@ -16,6 +17,22 @@ interface PearlInsightsPanelProps {
 }
 
 type Mode = 'off' | 'shadow' | 'live'
+
+type PearlChatResponse = {
+  response: string
+  timestamp: string
+  complexity: string
+  source?: string
+}
+
+type ChatMessage = {
+  role: 'user' | 'pearl'
+  text: string
+  meta?: {
+    complexity?: string
+    source?: string
+  }
+}
 
 function ModePill({ label, mode }: { label: string; mode: Mode }) {
   const getModeClass = () => {
@@ -60,6 +77,11 @@ export default function PearlInsightsPanel({
 }: PearlInsightsPanelProps) {
   const [showHistory, setShowHistory] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatInput, setChatInput] = useState('')
+  const [chatBusy, setChatBusy] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
 
   const metrics = insights?.shadow_metrics
   const activeSuggestion = suggestion || metrics?.active_suggestion
@@ -93,6 +115,34 @@ export default function PearlInsightsPanel({
 
   // Format percentage
   const formatPct = (val: number) => `${val.toFixed(0)}%`
+
+  const sendChat = async () => {
+    const message = chatInput.trim()
+    if (!message || chatBusy) return
+
+    setChatError(null)
+    setChatBusy(true)
+    setChatInput('')
+
+    setChatMessages((prev) => [...prev, { role: 'user' as const, text: message }].slice(-12))
+
+    try {
+      const res = await apiFetchJson<PearlChatResponse>('/api/pearl/chat', {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      })
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'pearl' as const, text: res.response, meta: { complexity: res.complexity, source: res.source } },
+      ].slice(-12))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Pearl AI request failed'
+      setChatError(msg)
+      setChatMessages((prev) => [...prev, { role: 'pearl' as const, text: `Error: ${msg}` }].slice(-12))
+    } finally {
+      setChatBusy(false)
+    }
+  }
 
   return (
     <DataPanel
@@ -140,6 +190,83 @@ export default function PearlInsightsPanel({
             )}
           </div>
         )}
+
+        {/* PEARL AI Banner (Shadow Mode) */}
+        {hasShadowMode && (
+          <div className="shadow-mode-banner">
+            <span className="shadow-mode-icon">🦪</span>
+            <span className="shadow-mode-text">
+              <em>PEARL AI</em> is in <em>SHADOW</em> mode — observing trades but not affecting decisions.
+            </span>
+          </div>
+        )}
+
+        {/* LLM Chat (Pearl AI 3.0) */}
+        <div className="pearl-chat">
+          <button
+            className="pearl-chat-toggle"
+            onClick={() => setChatOpen(!chatOpen)}
+            type="button"
+          >
+            {chatOpen ? '−' : '+'} Ask Pearl (LLM)
+          </button>
+          {chatOpen && (
+            <div className="pearl-chat-body">
+              <div className="pearl-chat-messages">
+                {chatMessages.length === 0 ? (
+                  <div className="pearl-chat-empty">
+                    Ask about today’s setup, why signals are quiet, or what to watch next.
+                  </div>
+                ) : (
+                  chatMessages.map((m, idx) => (
+                    <div key={idx} className={`pearl-chat-msg ${m.role}`}>
+                      <div className="pearl-chat-role">{m.role === 'user' ? 'You' : 'Pearl'}</div>
+                      <div className="pearl-chat-text">{m.text}</div>
+                      {m.role === 'pearl' && (m.meta?.complexity || m.meta?.source) && (
+                        <div className="pearl-chat-meta">
+                          {m.meta?.complexity && <span className="meta-pill">{m.meta.complexity}</span>}
+                          {m.meta?.source && <span className="meta-pill">{m.meta.source}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <form
+                className="pearl-chat-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void sendChat()
+                }}
+              >
+                <input
+                  className="pearl-chat-input"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask Pearl…"
+                  disabled={chatBusy}
+                />
+                <button className="pearl-chat-send" type="submit" disabled={chatBusy || !chatInput.trim()}>
+                  {chatBusy ? '…' : 'Send'}
+                </button>
+                <button
+                  className="pearl-chat-clear"
+                  type="button"
+                  onClick={() => setChatMessages([])}
+                  disabled={chatBusy || chatMessages.length === 0}
+                >
+                  Clear
+                </button>
+              </form>
+
+              {chatError && <div className="pearl-chat-error">{chatError}</div>}
+              <div className="pearl-chat-hint">
+                Requires API server Pearl AI endpoints (<code>/api/pearl</code>) and API auth if enabled.
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ML Filter Performance - Win Rate Comparison */}
         {mlFilterPerformance && (mlFilterPerformance.win_rate_pass !== undefined || mlFilterPerformance.win_rate_fail !== undefined) && (

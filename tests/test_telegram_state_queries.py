@@ -445,13 +445,14 @@ class TestGetDailyPerformance:
 
     def test_returns_performance_metrics(self, state_queries_mixin, temp_state_dir):
         """Should return daily performance metrics."""
-        state = {
-            "daily_pnl": 250.00,
-            "daily_trades": 10,
-            "daily_wins": 7,
-            "daily_losses": 3,
-        }
-        write_state_file(temp_state_dir, state)
+        now = datetime.now(timezone.utc).isoformat()
+        signals = (
+            # 7 wins @ +100
+            [{"status": "exited", "exit_time": now, "pnl": 100.0} for _ in range(7)]
+            # 3 losses @ -150  => total = 700 - 450 = +250
+            + [{"status": "exited", "exit_time": now, "pnl": -150.0} for _ in range(3)]
+        )
+        write_signals_file(temp_state_dir, signals)
 
         result = state_queries_mixin._get_daily_performance()
 

@@ -553,6 +553,9 @@ export default function PearlAlgoWebApp() {
                 {countdown && <span className="countdown">{countdown}</span>}
               </span>
             )}
+            <a className="badge lock-badge" href="/logout" title="Lock dashboard">
+              🔒 LOCK
+            </a>
           </div>
 
           {/* Health Indicators */}

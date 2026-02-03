@@ -796,7 +796,7 @@ def _cors_origins() -> list[str]:
 
     - Local dev defaults include localhost ports.
     - For Telegram Mini App / production deployments, set:
-        PEARL_WEB_APP_ORIGINS="https://your-domain.com,https://another-domain.com"
+        PEARL_LIVE_CHART_ORIGINS="https://your-domain.com,https://another-domain.com"
     """
     raw = str(os.getenv("PEARL_LIVE_CHART_ORIGINS") or "").strip()
     if raw:
@@ -880,6 +880,13 @@ class ConnectionManager:
                         if state_hash != self._last_state_hash:
                             self._last_state_hash = state_hash
 
+                            # Keep Pearl AI brain in sync (optional)
+                            if _pearl_brain is not None:
+                                try:
+                                    _pearl_brain.update_state(state)
+                                except Exception as e:
+                                    print(f"[Pearl AI] State update failed: {e}")
+
                             # Build the same response as /api/state
                             daily_stats = _compute_daily_stats(_state_dir)
                             broadcast_data = {
@@ -918,11 +925,76 @@ class ConnectionManager:
 # Global connection manager
 ws_manager = ConnectionManager()
 
+# ---------------------------------------------------------------------------
+# Pearl AI (optional) - LLM chat + metrics API
+# ---------------------------------------------------------------------------
+
+_pearl_ai_enabled: bool = os.getenv("PEARL_AI_API_ENABLED", "false").lower() == "true"
+_pearl_ai_mounted: bool = False
+_pearl_brain = None
+
+
+def _init_pearl_ai() -> None:
+    """
+    Optionally mount the Pearl AI API router under /api/pearl.
+
+    Safe-by-default: disabled unless PEARL_AI_API_ENABLED=true.
+    """
+    global _pearl_ai_mounted, _pearl_brain
+
+    if _pearl_ai_mounted or not _pearl_ai_enabled:
+        return
+
+    try:
+        from pearl_ai.api_router import create_pearl_router
+        from pearl_ai.brain import PearlBrain
+
+        claude_key = os.getenv("ANTHROPIC_API_KEY") or None
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        ollama_model = os.getenv("PEARL_OLLAMA_MODEL", "llama3.1:8b")
+
+        # Optional: attach trade DB for RAG grounding if available for this market
+        trade_db_path = None
+        if _state_dir:
+            db_path = _state_dir / "trades.db"
+            if db_path.exists():
+                trade_db_path = str(db_path)
+
+        _pearl_brain = PearlBrain(
+            claude_api_key=claude_key,
+            ollama_model=ollama_model,
+            ollama_host=ollama_host,
+            enable_local=True,
+            enable_claude=True,
+            trade_db_path=trade_db_path,
+        )
+
+        app.include_router(
+            create_pearl_router(_pearl_brain, auth_dependency=verify_api_key),
+            prefix="/api/pearl",
+        )
+
+        _pearl_ai_mounted = True
+        print("[Pearl AI] Enabled at /api/pearl")
+    except Exception as e:
+        _pearl_brain = None
+        _pearl_ai_mounted = False
+        print(f"[Pearl AI] Disabled (init failed): {e}")
+
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize authentication and start WebSocket broadcast loop."""
+    global _market, _state_dir
+
+    # Support uvicorn --reload import mode (main() may not run in that process)
+    if not _market:
+        _market = str(os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET)).strip().upper()
+    if _state_dir is None:
+        _state_dir = _resolve_state_dir(_market)
+
     _init_auth()
+    _init_pearl_ai()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
 

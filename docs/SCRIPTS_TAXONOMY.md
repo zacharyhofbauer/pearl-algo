@@ -112,9 +112,9 @@ RAG (Retrieval-Augmented Generation) system for CLI-based AI assistance and code
 Web-based TradingView chart interface for real-time market visualization. Uses Next.js 14 with TypeScript.
 
 **Start/Stop via pearl.sh:**
-- `./pearl.sh webapp start` - Start API server + Next.js chart
-- `./pearl.sh webapp stop` - Stop web app services
-- `./pearl.sh webapp restart` - Restart web app
+- `./pearl.sh chart start` - Start API server + Next.js chart
+- `./pearl.sh chart stop` - Stop web app services
+- `./pearl.sh chart restart` - Restart web app
 
 **Components:**
 - `scripts/pearlalgo_web_app/api_server.py`

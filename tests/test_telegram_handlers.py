@@ -555,12 +555,13 @@ class TestHandleToggleStrategy:
     """Tests for _handle_toggle_strategy method."""
 
     @pytest.mark.asyncio
-    async def test_toggles_strategy_on(self, handlers_mixin, temp_state_dir):
+    async def test_toggles_strategy_on(self, handlers_mixin, temp_state_dir, monkeypatch):
         """Should enable a disabled strategy."""
         # Create config file
-        config_dir = Path("config")
-        config_dir.mkdir(exist_ok=True)
+        config_dir = temp_state_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
         config_file = config_dir / "config.yaml"
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(config_file))
 
         config = {
             "strategy": {
@@ -590,11 +591,12 @@ class TestHandleToggleStrategy:
                 (config_dir / "config.yaml.backup").unlink()
 
     @pytest.mark.asyncio
-    async def test_toggles_strategy_off(self, handlers_mixin, temp_state_dir):
+    async def test_toggles_strategy_off(self, handlers_mixin, temp_state_dir, monkeypatch):
         """Should disable an enabled strategy."""
-        config_dir = Path("config")
-        config_dir.mkdir(exist_ok=True)
+        config_dir = temp_state_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
         config_file = config_dir / "config.yaml"
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(config_file))
 
         config = {
             "strategy": {
@@ -622,12 +624,13 @@ class TestHandleToggleStrategy:
                 (config_dir / "config.yaml.backup").unlink()
 
     @pytest.mark.asyncio
-    async def test_creates_backup(self, handlers_mixin, temp_state_dir):
+    async def test_creates_backup(self, handlers_mixin, temp_state_dir, monkeypatch):
         """Should create backup before modifying config."""
-        config_dir = Path("config")
-        config_dir.mkdir(exist_ok=True)
+        config_dir = temp_state_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
         config_file = config_dir / "config.yaml"
         backup_file = config_dir / "config.yaml.backup"
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(config_file))
 
         config = {"strategy": {"enabled_signals": []}}
         import yaml
@@ -648,12 +651,10 @@ class TestHandleToggleStrategy:
                 backup_file.unlink()
 
     @pytest.mark.asyncio
-    async def test_handles_missing_config(self, handlers_mixin):
+    async def test_handles_missing_config(self, handlers_mixin, temp_state_dir, monkeypatch):
         """Should handle missing config file."""
-        # Ensure config file doesn't exist
-        config_file = Path("config/config.yaml")
-        if config_file.exists():
-            pytest.skip("Config file exists, cannot test missing file handling")
+        missing_config = temp_state_dir / "config" / "does_not_exist.yaml"
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(missing_config))
 
         await handlers_mixin._handle_toggle_strategy(
             query=MagicMock(),
@@ -664,11 +665,12 @@ class TestHandleToggleStrategy:
         assert "not found" in handlers_mixin.last_message
 
     @pytest.mark.asyncio
-    async def test_sends_restart_reminder(self, handlers_mixin, temp_state_dir):
+    async def test_sends_restart_reminder(self, handlers_mixin, temp_state_dir, monkeypatch):
         """Should remind user to restart agent."""
-        config_dir = Path("config")
-        config_dir.mkdir(exist_ok=True)
+        config_dir = temp_state_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
         config_file = config_dir / "config.yaml"
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(config_file))
 
         config = {"strategy": {"enabled_signals": []}}
         import yaml
