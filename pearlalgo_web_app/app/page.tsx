@@ -8,6 +8,7 @@ import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
 import PearlInsightsPanel from '@/components/PearlInsightsPanel'
+import PearlHeaderBar from '@/components/PearlHeaderBar'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import HelpPanel from '@/components/HelpPanel'
@@ -737,193 +738,165 @@ export default function PearlAlgoWebApp() {
   // Ultrawide layout for Xeneon Edge (2560x720)
   if (viewport.isUltrawide && agentState) {
     return (
-      <div className={`dashboard ultrawide-mode`} data-chart-ready={isChartReady ? 'true' : 'false'}>
-        {/* Market Closed Banner */}
-        {marketStatus && !marketStatus.is_open && (
-          <div className="market-closed-banner ultrawide-banner">
-            <span className="market-closed-icon">🔴</span>
-            <span className="market-closed-text">
-              Market Closed ({marketStatus.close_reason})
-              {marketStatus.next_open && <> — Opens {formatNextOpen(marketStatus.next_open)}</>}
-            </span>
-          </div>
-        )}
+      <>
+        <PearlHeaderBar />
+        <div className="main-content">
+          <div className={`dashboard ultrawide-mode`} data-chart-ready={isChartReady ? 'true' : 'false'}>
+            {/* Market Closed Banner */}
+            {marketStatus && !marketStatus.is_open && (
+              <div className="market-closed-banner ultrawide-banner">
+                <span className="market-closed-icon">🔴</span>
+                <span className="market-closed-text">
+                  Market Closed ({marketStatus.close_reason})
+                  {marketStatus.next_open && <> — Opens {formatNextOpen(marketStatus.next_open)}</>}
+                </span>
+              </div>
+            )}
 
-        <UltrawideLayout
-          headerSection={renderUltrawideHeader()}
-          chartSection={renderChart()}
-          rsiSection={renderRSI()}
-          pearlAISection={
-            <PearlInsightsPanel
-              insights={agentState.pearl_insights}
-              suggestion={agentState.pearl_suggestion}
-              aiStatus={agentState.ai_status}
-              shadowCounters={agentState.shadow_counters}
-              mlFilterPerformance={agentState.ml_filter_performance}
+            <UltrawideLayout
+              headerSection={renderUltrawideHeader()}
+              chartSection={renderChart()}
+              rsiSection={renderRSI()}
+              pearlAISection={
+                <PearlInsightsPanel
+                  insights={agentState.pearl_insights}
+                  suggestion={agentState.pearl_suggestion}
+                  aiStatus={agentState.ai_status}
+                  shadowCounters={agentState.shadow_counters}
+                  mlFilterPerformance={agentState.ml_filter_performance}
+                />
+              }
+              systemStatusSection={
+                <SystemStatusPanel
+                  executionState={agentState.execution_state}
+                  circuitBreaker={agentState.circuit_breaker}
+                  marketRegime={agentState.market_regime}
+                  sessionContext={agentState.session_context}
+                  errorSummary={agentState.error_summary}
+                  isRunning={agentState.running}
+                  isPaused={agentState.paused}
+                />
+              }
+              signalActivitySection={
+                <SignalActivityPanel
+                  signalActivity={agentState.signal_activity}
+                  lastDecision={agentState.last_signal_decision}
+                />
+              }
+              performanceSection={
+                agentState.performance && (
+                  <PerformancePanel
+                    performance={agentState.performance}
+                    expectancy={agentState.risk_metrics?.expectancy}
+                  />
+                )
+              }
+              activePositionsSection={
+                <ActivePositionsPanel
+                  activeTradesCount={agentState.active_trades_count}
+                  recentExits={agentState.recent_exits}
+                  dailyPnL={agentState.daily_pnl}
+                />
+              }
+              challengeSection={
+                agentState.challenge && (
+                  <ChallengePanel
+                    challenge={agentState.challenge}
+                    equityCurve={agentState.equity_curve}
+                  />
+                )
+              }
+              regimeSection={
+                agentState.market_regime && (
+                  <MarketRegimePanel regime={agentState.market_regime} />
+                )
+              }
+              riskMetricsSection={
+                agentState.risk_metrics && (
+                  <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
+                )
+              }
+              equityCurveSection={
+                agentState.equity_curve && agentState.equity_curve.length > 0 && (
+                  <EquityCurvePanel equityCurve={agentState.equity_curve} />
+                )
+              }
+              recentTradesSection={
+                agentState.recent_exits && agentState.recent_exits.length > 0 && (
+                  <RecentTradesPanel
+                    recentExits={agentState.recent_exits}
+                    maxItems={8}
+                  />
+                )
+              }
+              analyticsSection={
+                agentState.analytics && (
+                  <AnalyticsPanel
+                    analytics={agentState.analytics}
+                    recentExits={agentState.recent_exits}
+                  />
+                )
+              }
+              systemHealthSection={
+                (agentState.cadence_metrics || agentState.gateway_status) && (
+                  <SystemHealthPanel
+                    cadenceMetrics={agentState.cadence_metrics || null}
+                    dataFresh={agentState.data_fresh || false}
+                    gatewayStatus={agentState.gateway_status}
+                    connectionHealth={agentState.connection_health}
+                    errorSummary={agentState.error_summary}
+                    dataQuality={agentState.data_quality}
+                  />
+                )
+              }
+              signalDecisionsSection={
+                (agentState.signal_rejections_24h || agentState.last_signal_decision) && (
+                  <SignalDecisionsPanel
+                    rejections={agentState.signal_rejections_24h || null}
+                    lastDecision={agentState.last_signal_decision || null}
+                  />
+                )
+              }
+              marketPressureSection={
+                agentState.buy_sell_pressure && (
+                  <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
+                )
+              }
             />
-          }
-          systemStatusSection={
-            <SystemStatusPanel
-              executionState={agentState.execution_state}
-              circuitBreaker={agentState.circuit_breaker}
-              marketRegime={agentState.market_regime}
-              sessionContext={agentState.session_context}
-              errorSummary={agentState.error_summary}
-              isRunning={agentState.running}
-              isPaused={agentState.paused}
-            />
-          }
-          signalActivitySection={
-            <SignalActivityPanel
-              signalActivity={agentState.signal_activity}
-              lastDecision={agentState.last_signal_decision}
-            />
-          }
-          performanceSection={
-            agentState.performance && (
-              <PerformancePanel
-                performance={agentState.performance}
-                expectancy={agentState.risk_metrics?.expectancy}
-              />
-            )
-          }
-          activePositionsSection={
-            <ActivePositionsPanel
-              activeTradesCount={agentState.active_trades_count}
-              recentExits={agentState.recent_exits}
-              dailyPnL={agentState.daily_pnl}
-            />
-          }
-          challengeSection={
-            agentState.challenge && (
-              <ChallengePanel
-                challenge={agentState.challenge}
-                equityCurve={agentState.equity_curve}
-              />
-            )
-          }
-          regimeSection={
-            agentState.market_regime && (
-              <MarketRegimePanel regime={agentState.market_regime} />
-            )
-          }
-          riskMetricsSection={
-            agentState.risk_metrics && (
-              <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
-            )
-          }
-          equityCurveSection={
-            agentState.equity_curve && agentState.equity_curve.length > 0 && (
-              <EquityCurvePanel equityCurve={agentState.equity_curve} />
-            )
-          }
-          recentTradesSection={
-            agentState.recent_exits && agentState.recent_exits.length > 0 && (
-              <RecentTradesPanel
-                recentExits={agentState.recent_exits}
-                maxItems={8}
-              />
-            )
-          }
-          analyticsSection={
-            agentState.analytics && (
-              <AnalyticsPanel
-                analytics={agentState.analytics}
-                recentExits={agentState.recent_exits}
-              />
-            )
-          }
-          systemHealthSection={
-            (agentState.cadence_metrics || agentState.gateway_status) && (
-              <SystemHealthPanel
-                cadenceMetrics={agentState.cadence_metrics || null}
-                dataFresh={agentState.data_fresh || false}
-                gatewayStatus={agentState.gateway_status}
-                connectionHealth={agentState.connection_health}
-                errorSummary={agentState.error_summary}
-                dataQuality={agentState.data_quality}
-              />
-            )
-          }
-          signalDecisionsSection={
-            (agentState.signal_rejections_24h || agentState.last_signal_decision) && (
-              <SignalDecisionsPanel
-                rejections={agentState.signal_rejections_24h || null}
-                lastDecision={agentState.last_signal_decision || null}
-              />
-            )
-          }
-          marketPressureSection={
-            agentState.buy_sell_pressure && (
-              <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
-            )
-          }
-        />
-      </div>
+          </div>
+        </div>
+      </>
     )
   }
 
   // Standard layout (mobile, tablet, desktop)
   return (
-    <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
-      {/* Market Closed Banner */}
-      {marketStatus && !marketStatus.is_open && (
-        <div className="market-closed-banner">
-          <span className="market-closed-icon">🔴</span>
-          <span className="market-closed-text">
-            Market Closed ({marketStatus.close_reason})
-            {marketStatus.next_open && (
-              <> — Opens {formatNextOpen(marketStatus.next_open)}</>
-            )}
-          </span>
-        </div>
-      )}
+    <>
+      <PearlHeaderBar />
+      <div className="main-content">
+        <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
+          {/* Market Closed Banner */}
+          {marketStatus && !marketStatus.is_open && (
+            <div className="market-closed-banner">
+              <span className="market-closed-icon">🔴</span>
+              <span className="market-closed-text">
+                Market Closed ({marketStatus.close_reason})
+                {marketStatus.next_open && (
+                  <> — Opens {formatNextOpen(marketStatus.next_open)}</>
+                )}
+              </span>
+            </div>
+          )}
 
-      {renderHeader()}
-      {renderStatusPanel()}
-      {renderChart()}
-      {renderRSI()}
-      {renderMACD()}
+          {renderHeader()}
+          {renderStatusPanel()}
+          {renderChart()}
+          {renderRSI()}
+          {renderMACD()}
 
-      {/* Data Panels */}
-      {agentState && (
-        <DataPanelsContainer>
-          {/* Pearl AI - Combined insights, AI status, and ML performance */}
-          <PearlInsightsPanel
-            insights={agentState.pearl_insights}
-            suggestion={agentState.pearl_suggestion}
-            aiStatus={agentState.ai_status}
-            shadowCounters={agentState.shadow_counters}
-            mlFilterPerformance={agentState.ml_filter_performance}
-            onAccept={async () => {
-              try {
-                const action = agentState.pearl_suggestion?.accept_action ||
-                  agentState.pearl_insights?.shadow_metrics?.active_suggestion?.action
-                if (action) {
-                  await apiFetch('/api/pearl-suggestion/accept', {
-                    method: 'POST',
-                    body: JSON.stringify({ action }),
-                  })
-                }
-              } catch (e) {
-                console.error('Failed to accept Pearl insight:', e)
-              }
-            }}
-            onDismiss={async () => {
-              try {
-                const key = agentState.pearl_suggestion?.cooldown_key ||
-                  agentState.pearl_insights?.shadow_metrics?.active_suggestion?.id
-                if (key) {
-                  await apiFetch('/api/pearl-suggestion/dismiss', {
-                    method: 'POST',
-                    body: JSON.stringify({ cooldown_key: key }),
-                  })
-                }
-              } catch (e) {
-                console.error('Failed to dismiss Pearl insight:', e)
-              }
-            }}
-          />
+          {/* Data Panels */}
+          {agentState && (
+            <DataPanelsContainer>
           {/* System Status - Operational Readiness */}
           <SystemStatusPanel
             executionState={agentState.execution_state}
@@ -1010,11 +983,13 @@ export default function PearlAlgoWebApp() {
           {agentState.recent_exits && agentState.recent_exits.length > 0 && (
             <PnLCalendarPanel recentExits={agentState.recent_exits} />
           )}
-        </DataPanelsContainer>
-      )}
+            </DataPanelsContainer>
+          )}
 
-      {/* Help Panel - Quick Reference */}
-      <HelpPanel />
-    </div>
+          {/* Help Panel - Quick Reference */}
+          <HelpPanel />
+        </div>
+      </div>
+    </>
   )
 }

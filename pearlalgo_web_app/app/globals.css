@@ -11416,6 +11416,149 @@ body {
   opacity: 1;
 }
 
+/* =====================================================
+   PEARL AI PERSISTENT HEADER BAR (skinny)
+   ===================================================== */
+
+:root {
+  --pearl-header-height: 32px;
+}
+
+.main-content {
+  padding-top: var(--pearl-header-height);
+}
+
+.pearl-header-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--pearl-header-height);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease;
+}
+
+.pearl-header-bar:hover {
+  background: var(--bg-elevated);
+}
+
+.pearl-header-bar.expanded {
+  background: var(--bg-elevated);
+  border-bottom-color: var(--accent-cyan);
+}
+
+.pearl-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pearl-header-icon img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+.pearl-header-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background-color var(--duration-fast) ease;
+}
+
+.pearl-header-status-dot.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
+
+.pearl-header-preview {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.pearl-header-arrow {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) ease;
+}
+
+.pearl-header-bar.expanded .pearl-header-arrow {
+  transform: rotate(180deg);
+}
+
+.pearl-header-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height var(--duration-slow) ease-out;
+  background: var(--bg-card);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  cursor: default;
+}
+
+.pearl-header-bar.expanded .pearl-header-dropdown {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.pearl-header-dropdown .pearl-dropdown-panel {
+  padding: var(--space-4);
+  min-height: 200px;
+  max-height: calc(60vh - var(--space-4) * 2);
+  overflow-y: auto;
+}
+
+.pearl-dropdown-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .pearl-header-bar {
+    padding: 0 var(--space-3);
+  }
+
+  .pearl-header-preview {
+    font-size: var(--font-size-xs);
+  }
+
+  .pearl-header-bar.expanded .pearl-header-dropdown {
+    max-height: 70vh;
+  }
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .pearl-header-bar {
+    padding-top: env(safe-area-inset-top);
+    height: calc(var(--pearl-header-height) + env(safe-area-inset-top));
+  }
+
+  .main-content {
+    padding-top: calc(var(--pearl-header-height) + env(safe-area-inset-top));
+  }
+}
+
 /* Pearl AI Chat (LLM) */
 .pearl-chat {
   margin-top: var(--space-4);

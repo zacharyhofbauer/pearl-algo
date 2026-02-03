@@ -14,6 +14,7 @@ interface PearlInsightsPanelProps {
   mlFilterPerformance?: MLFilterPerformance | null
   onAccept?: () => void
   onDismiss?: () => void
+  initialChatOpen?: boolean
 }
 
 type Mode = 'off' | 'shadow' | 'live'
@@ -74,10 +75,11 @@ export default function PearlInsightsPanel({
   mlFilterPerformance,
   onAccept,
   onDismiss,
+  initialChatOpen = false,
 }: PearlInsightsPanelProps) {
   const [showHistory, setShowHistory] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(initialChatOpen)
   const [chatInput, setChatInput] = useState('')
   const [chatBusy, setChatBusy] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
