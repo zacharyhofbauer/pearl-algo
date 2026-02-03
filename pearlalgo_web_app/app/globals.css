@@ -1342,7 +1342,7 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
-  min-height: 400px;
+  min-height: 340px;
 }
 
 /* Chart Actions */

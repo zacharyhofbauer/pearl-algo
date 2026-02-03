@@ -10,6 +10,7 @@ interface PositionLine {
   price: number
   color: string
   title: string
+  kind?: 'entry' | 'sl' | 'tp'
   lineStyle?: number
   axisLabelVisible?: boolean
 }
@@ -199,7 +200,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       },
       rightPriceScale: {
         borderColor: '#2a2a3a',
-        scaleMargins: { top: 0.1, bottom: 0.2 },
+        // Reduce unused bottom space; volume is handled by its own scale margins below
+        scaleMargins: { top: 0.08, bottom: 0.12 },
       },
       timeScale: {
         visible: true,
@@ -331,7 +333,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       priceScaleId: 'volume',
     })
     volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0 },
+      // Make volume bars smaller (less busy, more room for price action)
+      scaleMargins: { top: 0.88, bottom: 0 },
     })
 
     // Connection line - added LAST so it renders ON TOP of everything when hovering
@@ -668,15 +671,85 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     // If no position lines, we're done
     if (!positionLines?.length) return
 
+    // Neat label de-clutter: keep the lines, but hide axis labels that would stack.
+    // We use pixel coordinates to be zoom-aware.
+    const series = candleSeriesRef.current
+    const MIN_LABEL_GAP_PX = 18
+    const priorityForKind = (kind?: string) => {
+      switch (kind) {
+        case 'entry': return 3
+        case 'tp': return 2
+        case 'sl': return 1
+        default: return 0
+      }
+    }
+
+    type Candidate = { idx: number; y: number | null; priority: number }
+    const candidates: Candidate[] = positionLines.map((l, idx) => ({
+      idx,
+      y: series?.priceToCoordinate(l.price) ?? null,
+      priority: priorityForKind((l as any).kind),
+    }))
+
+    const keepAxisLabels = new Set<number>()
+
+    // Keep all labels with unknown coordinates (rare), otherwise cluster by pixel gap
+    const sortable = candidates
+      .filter((c) => c.y !== null && c.y !== undefined)
+      .map((c) => ({ ...c, y: c.y as number }))
+      .sort((a, b) => a.y - b.y)
+
+    let cluster: typeof sortable = []
+    const flushCluster = () => {
+      if (cluster.length === 0) return
+      // Pick the most important label within the cluster
+      let best = cluster[0]
+      for (const c of cluster) {
+        if (c.priority > best.priority) best = c
+      }
+      keepAxisLabels.add(best.idx)
+      cluster = []
+    }
+
+    for (const item of sortable) {
+      // Respect caller preference: if axis label is explicitly disabled, skip it.
+      const requested = positionLines[item.idx].axisLabelVisible ?? true
+      if (!requested) continue
+
+      if (cluster.length === 0) {
+        cluster.push(item)
+        continue
+      }
+
+      const last = cluster[cluster.length - 1]
+      if (item.y - last.y < MIN_LABEL_GAP_PX) {
+        cluster.push(item)
+      } else {
+        flushCluster()
+        cluster.push(item)
+      }
+    }
+    flushCluster()
+
+    // Lines with unknown coordinates: keep label if requested
+    for (const c of candidates) {
+      if (c.y === null) {
+        const requested = positionLines[c.idx].axisLabelVisible ?? true
+        if (requested) keepAxisLabels.add(c.idx)
+      }
+    }
+
     // Create price lines for each position
-    positionLines.forEach((line) => {
+    positionLines.forEach((line, idx) => {
       if (candleSeriesRef.current) {
+        const requested = line.axisLabelVisible ?? true
+        const axisVisible = requested && keepAxisLabels.has(idx)
         const priceLine = candleSeriesRef.current.createPriceLine({
           price: line.price,
           color: line.color,
           lineWidth: 1,
           lineStyle: line.lineStyle ?? 2, // dashed by default
-          axisLabelVisible: line.axisLabelVisible ?? true,
+          axisLabelVisible: axisVisible,
           title: line.title || '',
         })
         positionPriceLinesRef.current.push(priceLine)
@@ -723,7 +796,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
   // Responsive min-height based on viewport
   const minHeight = typeof window !== 'undefined'
-    ? Math.max(300, window.innerHeight * 0.5)
+    ? Math.max(260, window.innerHeight * 0.42)
     : 500
 
   // Get current price and change

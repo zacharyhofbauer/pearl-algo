@@ -73,15 +73,15 @@ export default function DataFreshnessIndicator({
   const getWsDisplay = () => {
     switch (wsStatus) {
       case 'connected':
-        return { icon: '⚡', label: 'WS', className: 'ws-connected' }
+        return { label: 'WS', className: 'ws-connected' }
       case 'connecting':
-        return { icon: '🔄', label: 'WS', className: 'ws-connecting' }
+        return { label: 'WS', className: 'ws-connecting' }
       case 'disconnected':
-        return { icon: '📡', label: 'Poll', className: 'ws-disconnected' }
+        return { label: 'POLL', className: 'ws-disconnected' }
       case 'error':
-        return { icon: '❌', label: 'Err', className: 'ws-error' }
+        return { label: 'ERR', className: 'ws-error' }
       default:
-        return { icon: '❓', label: '?', className: 'ws-unknown' }
+        return { label: '?', className: 'ws-unknown' }
     }
   }
 
@@ -132,7 +132,7 @@ export default function DataFreshnessIndicator({
             </div>
             <div className="freshness-panel-row">
               <span className="panel-label">Connection</span>
-              <span className={`panel-badge ${wsDisplay.className}`}>{wsDisplay.icon} {wsDisplay.label}</span>
+              <span className={`panel-badge ${wsDisplay.className}`}>{wsDisplay.label}</span>
             </div>
             {onRefresh && (
               <button
@@ -160,7 +160,7 @@ export default function DataFreshnessIndicator({
           <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
-          <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.icon}</span>
+          <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.label}</span>
           {onRefresh && (
             <button
               className={`freshness-refresh-btn ${isLoading ? 'spinning' : ''}`}
@@ -237,7 +237,6 @@ export default function DataFreshnessIndicator({
         {sourceDisplay.label}
       </div>
       <div className={`freshness-ws ${wsDisplay.className}`} title={`WebSocket: ${wsStatus}`}>
-        <span className="ws-icon">{wsDisplay.icon}</span>
         <span className="ws-label">{wsDisplay.label}</span>
       </div>
       {onRefresh && (

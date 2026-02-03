@@ -115,7 +115,8 @@ export default function PearlAlgoWebApp() {
       lines.push({
         price: pos.entry_price,
         color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
-        title: pos.direction === 'long' ? '↑' : '↓',
+        title: '',
+        kind: 'entry',
         lineStyle: 2, // dashed
         axisLabelVisible: true,
       })
@@ -125,7 +126,8 @@ export default function PearlAlgoWebApp() {
         lines.push({
           price: pos.stop_loss,
           color: 'rgba(244, 67, 54, 0.55)',
-          title: '×',
+          title: '',
+          kind: 'sl',
           lineStyle: 2, // dashed
           axisLabelVisible: true,
         })
@@ -136,7 +138,8 @@ export default function PearlAlgoWebApp() {
         lines.push({
           price: pos.take_profit,
           color: 'rgba(76, 175, 80, 0.55)',
-          title: '✓',
+          title: '',
+          kind: 'tp',
           lineStyle: 2, // dashed
           axisLabelVisible: true,
         })
@@ -554,9 +557,6 @@ export default function PearlAlgoWebApp() {
                 {countdown && <span className="countdown">{countdown}</span>}
               </span>
             )}
-            <a className="badge lock-badge" href="/logout" title="Lock dashboard">
-              🔒 LOCK
-            </a>
           </div>
 
           {/* Health Indicators */}
