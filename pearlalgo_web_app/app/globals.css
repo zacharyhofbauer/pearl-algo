@@ -31,242 +31,24 @@
   }
 }
 
-/* ===================================
-   STATUS PANEL - Compact & Dynamic
-   =================================== */
-.status-panel {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(3px, 0.8vw, 6px);
-  padding: clamp(5px, 1.2vw, 10px) clamp(8px, 1.8vw, 16px);
-  background: linear-gradient(145deg, rgba(16, 16, 24, 0.97) 0%, rgba(22, 22, 32, 0.95) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 10px;
-  border: 1px solid rgba(42, 42, 58, 0.5);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
+/* Status Panel - Migrated to styles/components/_status-panels.css */
 
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: clamp(6px, 1.5vw, 12px);
-  flex-wrap: wrap;
-}
 
-.status-row-main {
-  gap: clamp(8px, 2vw, 14px);
-}
+/* Price value - Migrated to styles/components/_charts.css */
 
-.status-row-secondary {
-  gap: clamp(6px, 1.5vw, 10px);
-  padding-top: clamp(3px, 0.8vw, 6px);
-  border-top: 1px solid rgba(42, 42, 58, 0.3);
-}
 
-/* Price value */
-.price-value {
-  font-size: clamp(16px, 4vw, 24px);
-  font-weight: 700;
-  font-family: var(--font-mono);
-  letter-spacing: -0.5px;
-  padding-right: clamp(6px, 1.5vw, 12px);
-  border-right: 1px solid rgba(42, 42, 58, 0.4);
-}
-.price-value.positive { color: var(--accent-green); }
-.price-value.negative { color: var(--accent-red); }
+/* Mini badges - Moved to styles/components/_status-badge.css */
+/* Stat values - Moved to styles/components/_stat-display.css */
 
-/* Mini badges */
-.mini-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: clamp(2px, 0.5vw, 4px);
-  padding: clamp(2px, 0.5vw, 4px) clamp(4px, 1vw, 8px);
-  border-radius: 4px;
-  font-size: clamp(9px, 2.2vw, 11px);
-  font-weight: 700;
-  letter-spacing: 0.3px;
-}
-.mini-badge .mini-dot {
-  width: clamp(5px, 1.2vw, 7px);
-  height: clamp(5px, 1.2vw, 7px);
-  border-radius: 50%;
-  background: currentColor;
-}
-.mini-badge.live {
-  background: rgba(var(--accent-green-rgb), 0.15);
-  color: var(--accent-green);
-}
-.mini-badge.live .mini-dot { box-shadow: 0 0 4px var(--accent-green); }
-.mini-badge.paused {
-  background: rgba(var(--accent-yellow-rgb), 0.15);
-  color: var(--accent-yellow);
-}
-.mini-badge.off {
-  background: rgba(42, 42, 58, 0.4);
-  color: var(--text-tertiary);
-}
-.mini-badge.ai-live {
-  background: rgba(var(--accent-green-rgb), 0.12);
-  color: var(--accent-green);
-}
-.mini-badge.ai-shadow {
-  background: rgba(171, 71, 188, 0.15);
-  color: var(--accent-purple);
-}
-.mini-badge.ai-off {
-  background: rgba(42, 42, 58, 0.3);
-  color: var(--text-tertiary);
-}
 
-/* Stat values */
-.stat-val {
-  font-size: clamp(11px, 2.8vw, 14px);
-  font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-.stat-val.positive { color: var(--accent-green); }
-.stat-val.negative { color: var(--accent-red); }
-.stat-val.highlight { color: var(--accent-cyan); }
-.stat-val.trades-value .win { color: var(--accent-green); }
-.stat-val.trades-value .loss { color: var(--accent-red); }
+/* Health row - Migrated to styles/components/_status-panels.css */
 
-/* Health row - compact inline */
-.health-row {
-  display: flex;
-  align-items: center;
-  gap: clamp(3px, 0.7vw, 5px);
-  padding: clamp(2px, 0.5vw, 4px) clamp(6px, 1.2vw, 10px);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 5px;
-}
-.h-dot {
-  width: clamp(5px, 1.2vw, 7px);
-  height: clamp(5px, 1.2vw, 7px);
-  border-radius: 50%;
-}
-.h-dot.ok { background: var(--accent-green); box-shadow: 0 0 4px rgba(var(--accent-green-rgb), 0.6); }
-.h-dot.err { background: var(--accent-red); box-shadow: 0 0 4px rgba(var(--accent-red-rgb), 0.6); }
-.h-dot.warn { background: var(--accent-yellow); box-shadow: 0 0 4px rgba(var(--accent-yellow-rgb), 0.6); }
-.h-lbl {
-  font-size: clamp(8px, 2vw, 10px);
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-right: clamp(2px, 0.5vw, 4px);
-}
 
-/* Chart & Marker Legend - compact */
-.chart-legend, .marker-legend {
-  display: flex;
-  align-items: center;
-  gap: clamp(4px, 1vw, 8px);
-  padding: clamp(2px, 0.5vw, 4px) clamp(6px, 1.2vw, 10px);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 5px;
-  font-size: clamp(8px, 2vw, 10px);
-  color: var(--text-secondary);
-}
-.chart-legend { margin-left: auto; }
+/* Chart & Marker Legend - Migrated to styles/components/_charts.css */
 
-.lg-item {
-  display: flex;
-  align-items: center;
-  gap: clamp(2px, 0.5vw, 4px);
-}
-.lg-line {
-  width: clamp(8px, 2vw, 12px);
-  height: 2px;
-  border-radius: 1px;
-}
-.lg-line.ema9 { background: #00d4ff; }
-.lg-line.ema21 { background: #ffc107; }
-.lg-line.vwap { background: #2962ff; }
 
-.mk {
-  font-size: clamp(8px, 2vw, 10px);
-  line-height: 1;
-}
-.mk.entry { color: #b4b4b4; }
-.mk.exit-win { color: #64c8b4; }
-.mk.exit-loss { color: #dc8c64; }
+/* Status Badge - Moved to styles/components/_status-badge.css */
 
-/* Status Badge */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: clamp(4px, 1vw, 6px);
-  padding: clamp(3px, 0.8vw, 5px) clamp(6px, 1.5vw, 10px);
-  border-radius: 5px;
-  font-size: clamp(9px, 2.2vw, 11px);
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.status-badge .status-dot {
-  width: clamp(5px, 1.2vw, 7px);
-  height: clamp(5px, 1.2vw, 7px);
-  border-radius: 50%;
-}
-
-.status-badge.live {
-  background: rgba(var(--accent-green-rgb), 0.15);
-  color: var(--accent-green);
-  border: 1px solid rgba(var(--accent-green-rgb), 0.3);
-}
-.status-badge.live .status-dot {
-  background: var(--accent-green);
-  box-shadow: 0 0 6px var(--accent-green);
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-.status-badge.paused {
-  background: rgba(var(--accent-yellow-rgb), 0.15);
-  color: var(--accent-yellow);
-  border: 1px solid rgba(var(--accent-yellow-rgb), 0.3);
-}
-.status-badge.paused .status-dot {
-  background: var(--accent-yellow);
-}
-
-.status-badge.off {
-  background: rgba(var(--accent-red-rgb), 0.08);
-  color: var(--text-tertiary);
-  border: 1px solid rgba(42, 42, 58, 0.4);
-}
-.status-badge.off .status-dot {
-  background: var(--accent-red);
-  opacity: 0.5;
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--accent-green); }
-  50% { opacity: 0.7; box-shadow: 0 0 10px var(--accent-green); }
-}
-
-/* AI Mode Badge */
-.status-badge.ai-mode {
-  gap: clamp(3px, 0.7vw, 5px);
-}
-.status-badge.ai-mode .ai-icon {
-  font-size: clamp(10px, 2.5vw, 13px);
-  line-height: 1;
-}
-.status-badge.ai-live {
-  background: rgba(var(--accent-green-rgb), 0.15);
-  color: var(--accent-green);
-  border: 1px solid rgba(var(--accent-green-rgb), 0.3);
-}
-.status-badge.ai-shadow {
-  background: rgba(var(--accent-purple-rgb, 171, 71, 188), 0.15);
-  color: var(--accent-purple);
-  border: 1px solid rgba(171, 71, 188, 0.3);
-}
-.status-badge.ai-off {
-  background: rgba(42, 42, 58, 0.3);
-  color: var(--text-tertiary);
-  border: 1px solid rgba(42, 42, 58, 0.4);
-}
 
 /* Direction Gate & Warning text */
 .stat-value.warn-text {
@@ -320,56 +102,8 @@
   box-shadow: 0 0 4px rgba(var(--accent-red-rgb), 0.6);
 }
 
-/* Chart Legend */
-.chart-legend {
-  display: flex;
-  align-items: center;
-  gap: clamp(6px, 1.5vw, 10px);
-  padding: clamp(3px, 0.8vw, 5px) clamp(8px, 2vw, 12px);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  font-size: clamp(9px, 2.2vw, 11px);
-  color: var(--text-secondary);
-  margin-left: auto;
-}
+/* Chart Legend - Migrated to styles/components/_charts.css */
 
-/* Marker Legend */
-.marker-legend {
-  display: flex;
-  align-items: center;
-  gap: clamp(6px, 1.5vw, 10px);
-  padding: clamp(3px, 0.8vw, 5px) clamp(8px, 2vw, 12px);
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  font-size: clamp(9px, 2.2vw, 11px);
-  color: var(--text-secondary);
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: clamp(3px, 0.8vw, 5px);
-}
-
-.legend-line {
-  width: clamp(10px, 2.5vw, 14px);
-  height: 2px;
-  border-radius: 1px;
-}
-
-/* Chart line colors - exact match */
-.legend-line.ema9 { background: #00d4ff; }
-.legend-line.ema21 { background: #ffc107; }
-.legend-line.vwap { background: #2962ff; }
-
-/* Marker colors - exact match */
-.marker-sym {
-  font-size: clamp(9px, 2.2vw, 11px);
-  line-height: 1;
-}
-.marker-sym.entry { color: #b4b4b4; }
-.marker-sym.exit-win { color: #64c8b4; }
-.marker-sym.exit-loss { color: #dc8c64; }
 
 /* ===================================
    RESPONSIVE - Dynamic sizing via clamp()
@@ -401,41 +135,8 @@
   }
 }
 
-/* Chart container */
-.chart-container {
-  flex: 1;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-}
+/* Chart container - Migrated to styles/components/_charts.css */
 
-/* RSI Panel */
-.rsi-panel {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-  height: clamp(100px, 15vh, 160px);
-}
-
-.rsi-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.rsi-label {
-  position: absolute;
-  top: 8px;
-  left: 12px;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  z-index: 10;
-  background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
 
 /* Marker Tooltip - Clean Design */
 .marker-tooltip {
@@ -782,128 +483,11 @@
   opacity: 0.7;
 }
 
-/* Chart focus state - dim when hovering on a trade */
-.chart-container-inner {
-  transition: all var(--duration-normal) var(--ease-default);
-}
+/* Chart focus state - Migrated to styles/components/_charts.css */
 
-.chart-container-inner.trade-focused canvas {
-  filter: brightness(0.7) saturate(0.8);
-  transition: filter 0.2s ease;
-}
 
-/* Loading Screen */
-.loading-screen {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 20px;
-  background: var(--bg-primary);
-}
+/* Loading/Error/NoData - Moved to styles/components/_loading.css */
 
-.loading-logo {
-  width: 80px;
-  height: 80px;
-  animation: pulse 1.5s ease-in-out infinite;
-  filter: drop-shadow(0 0 15px rgba(0, 212, 255, 0.2));
-}
-
-@keyframes pulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.5;
-  }
-  50% {
-    transform: scale(1.05);
-    opacity: 0.7;
-  }
-}
-
-.loading-text {
-  color: var(--text-secondary);
-  font-size: var(--font-size-lg);
-  letter-spacing: 0.5px;
-}
-
-.loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--border-color);
-  border-top-color: var(--accent-cyan);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Legacy loading state (keeping for compatibility) */
-.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-secondary);
-  font-size: var(--font-size-lg);
-}
-
-/* Error state */
-.error {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--accent-red);
-  font-size: var(--font-size-lg);
-}
-
-/* No Data state */
-.no-data-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 16px;
-  padding: 40px;
-  text-align: center;
-  background: var(--bg-primary);
-}
-
-.no-data-logo {
-  width: 64px;
-  height: 64px;
-  opacity: 0.5;
-  filter: grayscale(50%);
-}
-
-.no-data-icon {
-  font-size: 48px;
-  opacity: 0.6;
-}
-
-.no-data-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.no-data-message {
-  font-size: var(--font-size-lg);
-  color: var(--accent-yellow);
-  max-width: 400px;
-}
-
-.no-data-hint {
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
 
 /* Responsive - Tablet */
 @media (max-width: 1024px) {

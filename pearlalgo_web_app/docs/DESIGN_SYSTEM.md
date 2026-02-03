@@ -238,6 +238,23 @@ CSS utility classes for grid layouts.
 - `.col-span-3` - Span 3 columns
 - `.col-span-full` - Span all columns
 
+## CSS Modules (New)
+
+The styling architecture is modularized. New components should use their own CSS files in `styles/components/`.
+
+### Status Badges (`_status-badge.css`)
+- `.status-badge`: Main status indicator
+- `.mini-badge`: Compact status dot
+
+### Tooltips (`_tooltips.css`)
+- `.marker-tooltip`: Chart marker popups
+- `.info-tooltip`: Contextual help
+
+### Loading & States (`_loading.css`)
+- `.loading-screen`: Full screen loader
+- `.loading-spinner`: Animated spinner
+- `.no-data-container`: Empty state placeholder
+
 ## Migration Guide
 
 ### Replacing Inline InfoTooltip
@@ -326,7 +343,16 @@ components/
   DataPanelsContainer.tsx  # Panel wrapper with variants
 
 app/
-  globals.css          # Design tokens and global styles
+  globals.css          # Design tokens and global styles (Legacy styles being migrated)
+
+styles/
+  _tokens.css          # Design tokens
+  index.css            # CSS Module orchestrator
+  components/          # Component-specific styles
+    _status-badge.css
+    _tooltips.css
+    _loading.css
+    ...
 
 docs/
   DESIGN_SYSTEM.md     # This file

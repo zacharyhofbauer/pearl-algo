@@ -1,0 +1,119 @@
+/**
+ * Loading & Empty States
+ *
+ * Styles for loading screens, spinners, error states, and empty data placeholders.
+ * Migrated from globals.css (U1.3).
+ */
+
+/* Loading Screen */
+.loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-7);
+  background: var(--bg-primary);
+}
+
+.loading-logo {
+  width: 80px;
+  height: 80px;
+  animation: pulse 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 15px rgba(var(--accent-cyan-rgb), 0.2));
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.7;
+  }
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
+  letter-spacing: 0.5px;
+}
+
+.loading-spinner {
+  width: var(--space-7);
+  height: var(--space-7);
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-cyan);
+  border-radius: var(--radius-full);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Legacy loading state (keeping for compatibility) */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
+}
+
+/* Error state */
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--accent-red);
+  font-size: var(--font-size-lg);
+}
+
+/* No Data state */
+.no-data-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-6);
+  padding: 40px;
+  text-align: center;
+  background: var(--bg-primary);
+}
+
+.no-data-logo {
+  width: 64px;
+  height: 64px;
+  opacity: 0.5;
+  filter: grayscale(50%);
+}
+
+.no-data-icon {
+  font-size: 48px;
+  opacity: 0.6;
+}
+
+.no-data-title {
+  font-size: var(--font-size-xl); /* Was 20px */
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.no-data-message {
+  font-size: var(--font-size-lg);
+  color: var(--accent-yellow);
+  max-width: 400px;
+}
+
+.no-data-hint {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  opacity: 0.7;
+}

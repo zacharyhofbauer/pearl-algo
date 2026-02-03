@@ -17,7 +17,8 @@
  *   components/
  *     _panels.css       - DataPanel base variants
  *     _tabs.css         - Tab components
- *     _badges.css       - Status badges and chips
+ *     _badges.css       - Status badges and chips (Legacy)
+ *     _status-badge.css - Status badges (New)
  *     _forms.css        - Form elements
  *     _pearl.css        - Pearl AI components
  *     _charts.css       - Chart-related styles
@@ -29,6 +30,10 @@
  *     _calendar.css     - P&L calendar and annotations
  *     _analytics.css    - Analytics panel components
  *     _dashboard-panels.css - Dashboard-specific panels
+ *     _positions-strip.css - Positions strip component
+ *     _trades-history.css - Trades history component
+ *     _tooltips.css     - Tooltip components
+ *     _loading.css      - Loading and empty states
  *   index.css           - This file (import orchestrator)
  */
 
@@ -46,6 +51,7 @@
 @import './components/_panels.css';
 @import './components/_tabs.css';
 @import './components/_badges.css';
+@import './components/_status-badge.css';
 @import './components/_forms.css';
 @import './components/_pearl.css';
 @import './components/_charts.css';
@@ -59,6 +65,8 @@
 @import './components/_dashboard-panels.css';
 @import './components/_positions-strip.css';
 @import './components/_trades-history.css';
+@import './components/_tooltips.css';
+@import './components/_loading.css';
 
 /* Responsive (must come after components to override at breakpoints) */
 @import './_responsive.css';
