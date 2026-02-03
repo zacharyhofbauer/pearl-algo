@@ -63,4 +63,3 @@
 /* Responsive (must come after components to override at breakpoints) */
 @import './_responsive.css';
 @import './_mobile.css';
-@import './_iphone16pro.css';

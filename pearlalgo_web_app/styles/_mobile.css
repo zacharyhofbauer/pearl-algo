@@ -1,13 +1,94 @@
 /**
  * Mobile Responsive Styles
  *
- * Mobile-specific responsive styles for data panels and dashboard components.
- * Migrated from globals.css as part of CSS modularization (U1.1).
+ * Universal mobile-specific responsive styles for all devices.
+ * Uses standard breakpoints instead of device-specific media queries.
+ *
+ * Breakpoints:
+ * - Tablet: max-width 900px
+ * - Mobile: max-width 600px  
+ * - Small mobile: max-width 400px
  *
  * Includes:
+ * - Safe area handling (notches, Dynamic Island, home indicator)
+ * - OLED dark mode optimizations
+ * - Touch target sizing (44pt minimum per Apple HIG)
  * - Data panels mobile layouts
  * - Component-specific mobile adjustments
  */
+
+/* ============================================
+   SAFE AREA HANDLING - All Modern Phones
+   ============================================ */
+
+/* Safe area handling for notches, Dynamic Island, and home indicators */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .dashboard {
+    padding-top: max(12px, calc(env(safe-area-inset-top, 0px) + 8px));
+    padding-bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
+  }
+
+  /* Standalone PWA mode needs extra space for status bar */
+  @media all and (display-mode: standalone) {
+    .dashboard {
+      padding-top: max(48px, calc(env(safe-area-inset-top, 0px) + 8px));
+    }
+  }
+}
+
+/* ============================================
+   OLED DARK MODE OPTIMIZATIONS
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+  /* True black for OLED power saving */
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #0a0a0f;
+    --bg-card: #141419;
+    --bg-elevated: #1c1c23;
+    --bg-tertiary: #0f0f14;
+  }
+
+  /* Subtle borders on true black */
+  .data-panel {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* ============================================
+   TOUCH TARGET SIZING - Mobile
+   ============================================ */
+
+@media (pointer: coarse) {
+  /* Minimum 44px touch targets per Apple/Google HIG */
+  button,
+  .filter-btn,
+  .perf-tab,
+  .analytics-tab,
+  .expand-btn,
+  .day-header,
+  .recent-trade,
+  .tf-btn,
+  .uw-tf-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Disable tap highlight for cleaner touch feedback */
+  button,
+  .filter-btn,
+  .perf-tab,
+  .analytics-tab,
+  .day-header,
+  .recent-trade,
+  .expand-btn {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
 
 /* ============================================
    DATA PANELS - Mobile Responsive Styles

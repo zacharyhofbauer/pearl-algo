@@ -25,6 +25,7 @@ export default function RSIPanel({
   const oversoldRef = useRef<ISeriesApi<'Line'> | null>(null)
   const midlineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const hasInitialFit = useRef(false)
+  const prevDataLength = useRef(0)
 
   const colors = useChartSettingsStore((s) => s.colors)
 
@@ -193,10 +194,21 @@ export default function RSIPanel({
     }
   }, [mainChart])
 
-  // Update data
+  // Update data - with protection against unnecessary full updates
   useEffect(() => {
     if (!rsiSeriesRef.current || !overboughtRef.current ||
         !oversoldRef.current || !midlineRef.current || !data?.length) return
+
+    // Check if this is a significant change (timeframe switch) or just a minor update
+    const isSignificantChange = Math.abs(data.length - prevDataLength.current) > 10
+
+    // For minor updates when chart is already initialized, use update() for last point
+    if (!isSignificantChange && hasInitialFit.current && data.length === prevDataLength.current) {
+      const lastPoint = data[data.length - 1]
+      rsiSeriesRef.current.update({ time: lastPoint.time as Time, value: lastPoint.value })
+      prevDataLength.current = data.length
+      return
+    }
 
     const rsiData = data.map(d => ({ time: d.time as Time, value: d.value }))
     rsiSeriesRef.current.setData(rsiData)
@@ -210,11 +222,12 @@ export default function RSIPanel({
     oversoldRef.current.setData(oversoldData)
     midlineRef.current.setData(midlineData)
 
-    // Only fit content on initial load to prevent glitching
-    if (chartRef.current && !hasInitialFit.current) {
+    // Only fit content on initial load or significant change
+    if (chartRef.current && (!hasInitialFit.current || isSignificantChange)) {
       chartRef.current.timeScale().fitContent()
       hasInitialFit.current = true
     }
+    prevDataLength.current = data.length
   }, [data])
 
   // Get current RSI value for display

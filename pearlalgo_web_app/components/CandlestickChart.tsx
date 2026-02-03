@@ -452,43 +452,84 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }
   }, [markersByTime])
 
-  // Track previous data length to detect major changes (like timeframe switch)
+  // Track previous data to detect changes and prevent unnecessary updates
   const prevDataLength = useRef(0)
+  const prevLastCandleTime = useRef<number>(0)
   const hasInitialFit = useRef(false)
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Update candle data
+  // Update candle data - with debouncing for real-time updates
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    // Cast time to Time type for lightweight-charts
-    const candleData = data.map((d) => ({
-      time: d.time as Time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }))
-    candleSeriesRef.current.setData(candleData)
+    const lastCandle = data[data.length - 1]
+    const isRealTimeUpdate = data.length === prevDataLength.current && 
+      lastCandle.time === prevLastCandleTime.current
+    const isSignificantChange = Math.abs(data.length - prevDataLength.current) > 50
 
-    const volumeData = data.map((d) => ({
-      time: d.time as Time,
-      value: d.volume || 0,
-      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
-    }))
-    volumeSeriesRef.current.setData(volumeData)
+    // For real-time updates (same length, same last candle time), use update() instead of setData()
+    // This is much more efficient and doesn't cause visual flickering
+    if (isRealTimeUpdate && !isSignificantChange) {
+      // Just update the last candle - no full refresh needed
+      candleSeriesRef.current.update({
+        time: lastCandle.time as Time,
+        open: lastCandle.open,
+        high: lastCandle.high,
+        low: lastCandle.low,
+        close: lastCandle.close,
+      })
+      volumeSeriesRef.current.update({
+        time: lastCandle.time as Time,
+        value: lastCandle.volume || 0,
+        color: lastCandle.close >= lastCandle.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+      })
+      return
+    }
 
-    if (chartRef.current) {
-      // Only fit content on initial load or significant data change (timeframe switch)
-      // This prevents the chart from "spazzing out" on every WebSocket update
-      const isSignificantChange = !hasInitialFit.current || 
-        Math.abs(data.length - prevDataLength.current) > 50
-      
-      if (isSignificantChange) {
-        chartRef.current.priceScale('right').applyOptions({ autoScale: true })
-        chartRef.current.timeScale().fitContent()
-        hasInitialFit.current = true
+    // For new candles or significant changes, debounce the full update
+    // Clear any pending update
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current)
+    }
+
+    // Debounce full updates to prevent flickering from rapid data changes
+    updateTimeoutRef.current = setTimeout(() => {
+      if (!candleSeriesRef.current || !volumeSeriesRef.current) return
+
+      // Cast time to Time type for lightweight-charts
+      const candleData = data.map((d) => ({
+        time: d.time as Time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }))
+      candleSeriesRef.current.setData(candleData)
+
+      const volumeData = data.map((d) => ({
+        time: d.time as Time,
+        value: d.volume || 0,
+        color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+      }))
+      volumeSeriesRef.current.setData(volumeData)
+
+      if (chartRef.current) {
+        // Only fit content on initial load or significant data change (timeframe switch)
+        if (!hasInitialFit.current || isSignificantChange) {
+          chartRef.current.priceScale('right').applyOptions({ autoScale: true })
+          chartRef.current.timeScale().fitContent()
+          hasInitialFit.current = true
+        }
       }
+
       prevDataLength.current = data.length
+      prevLastCandleTime.current = lastCandle.time
+    }, isSignificantChange ? 0 : 100) // Immediate for timeframe changes, 100ms debounce otherwise
+
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current)
+      }
     }
   }, [data])
 

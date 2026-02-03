@@ -25,6 +25,7 @@ export default function MACDPanel({
   const histogramRef = useRef<ISeriesApi<'Histogram'> | null>(null)
   const zeroLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const hasInitialFit = useRef(false)
+  const prevDataLength = useRef(0)
 
   const colors = useChartSettingsStore((s) => s.colors)
 
@@ -182,10 +183,29 @@ export default function MACDPanel({
     }
   }, [mainChart])
 
-  // Update data
+  // Update data - with protection against unnecessary full updates
   useEffect(() => {
     if (!macdLineRef.current || !signalLineRef.current ||
         !histogramRef.current || !zeroLineRef.current || !data?.length) return
+
+    // Check if this is a significant change (timeframe switch) or just a minor update
+    const isSignificantChange = Math.abs(data.length - prevDataLength.current) > 10
+
+    // For minor updates when chart is already initialized, use update() for last points
+    if (!isSignificantChange && hasInitialFit.current && data.length === prevDataLength.current) {
+      const lastPoint = data[data.length - 1]
+      const prevHistogram = data.length > 1 ? data[data.length - 2].histogram : 0
+      const isRising = lastPoint.histogram >= prevHistogram
+      const histColor = lastPoint.histogram >= 0 
+        ? (isRising ? '#26a69a' : '#1e8c7e')
+        : (isRising ? '#ef5350' : '#c62828')
+
+      macdLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.macd })
+      signalLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.signal })
+      histogramRef.current.update({ time: lastPoint.time as Time, value: lastPoint.histogram, color: histColor })
+      prevDataLength.current = data.length
+      return
+    }
 
     // MACD line data
     const macdData = data.map(d => ({
@@ -230,11 +250,12 @@ export default function MACDPanel({
     }))
     zeroLineRef.current.setData(zeroData)
 
-    // Only fit content on initial load to prevent glitching
-    if (chartRef.current && !hasInitialFit.current) {
+    // Only fit content on initial load or significant change
+    if (chartRef.current && (!hasInitialFit.current || isSignificantChange)) {
       chartRef.current.timeScale().fitContent()
       hasInitialFit.current = true
     }
+    prevDataLength.current = data.length
   }, [data])
 
   // Get current values for display
