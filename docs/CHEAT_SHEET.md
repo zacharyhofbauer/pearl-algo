@@ -312,6 +312,23 @@ sudo apt-get install -y nodejs
 ./pearl.sh chart restart   # Restart all
 ```
 
+**Emergency rollback (Web App UI template):**
+
+If a UI/CSS refactor goes sideways, roll back **only** the web app paths (safe; no history rewrite):
+
+```bash
+./scripts/maintenance/git_rollback_paths.sh \
+  --target c14a7d34 \
+  --path pearlalgo_web_app \
+  --path scripts/pearlalgo_web_app \
+  --run "cd pearlalgo_web_app && npm run build" \
+  --commit \
+  --message "Rollback web app UI to known-good template" \
+  --yes
+```
+
+> Creates a backup branch `backup/pre-rollback-...` first.
+
 **Access:**
 - **Local:** http://localhost:3001
 - **Public:** https://pearlalgo.io (via Cloudflare Tunnel)

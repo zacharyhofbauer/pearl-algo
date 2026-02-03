@@ -1,0 +1,36 @@
+---
+description: Safety guardrails and rollback playbook (avoid costly refactor mistakes)
+alwaysApply: true
+---
+
+# Safety + Rollback Guardrails
+
+## Before risky changes (especially `pearlalgo_web_app/`)
+
+- Work on a branch (avoid direct edits on `master` during market hours).
+- Capture a baseline (tag/branch) before big UI/CSS refactors or Visual Editor sessions.
+- Run a preflight build before and after (`cd pearlalgo_web_app && npm run build`).
+- Keep changes small and review diffs; prefer incremental commits over “big bang” refactors.
+
+## Emergency rollback (path-scoped, no history rewrite)
+
+When asked to revert quickly:
+
+- Create a backup branch at current HEAD.
+- Restore only the affected paths to a known-good commit/tag.
+- Remove any tracked files under those paths that do not exist in the target commit.
+- Verify the staged result matches the target exactly for those paths.
+- Run build/tests, then create a single rollback commit.
+
+Preferred command (repo root):
+
+```bash
+./scripts/maintenance/git_rollback_paths.sh \
+  --target <commit-or-tag> \
+  --path pearlalgo_web_app \
+  --path scripts/pearlalgo_web_app \
+  --run "cd pearlalgo_web_app && npm run build" \
+  --commit \
+  --message "Rollback web app UI to <target>" \
+  --yes
+```

@@ -67,6 +67,10 @@ Scripts for repository hygiene and cleanup operations.
   - **Role**: Safe cleanup of runtime/build artifacts (data, logs, telemetry, tmp images, `__pycache__`, egg-info).
   - **Behavior**: Requires explicit `--yes` flag to execute deletions. Supports `--dry-run` to preview what would be removed.
 
+- `git_rollback_paths.sh`
+  - **Role**: Safe, path-scoped git rollback helper (creates backup branch, restores paths to a target commit/tag, deletes post-target added files, verifies exact match).
+  - **Use cases**: Emergency web app UI rollbacks (undo bad refactors without rewriting history).
+
 - `reset_30d_performance.py`
   - **Role**: Reset 30-day performance metrics (testing/debugging).
 

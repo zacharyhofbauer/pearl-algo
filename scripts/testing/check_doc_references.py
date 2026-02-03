@@ -58,7 +58,8 @@ RUNTIME_PREFIXES = (
 )
 
 LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-CODE_PATTERN = re.compile(r"`([^`]+)`")
+# Inline code only (avoid accidentally scanning fenced code blocks like ```bash ... ```)
+CODE_PATTERN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 PATH_TOKEN_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:\./)?(?:"
     r"src|scripts|docs|config|tests|models|resources|ibkr|\.github|\.devcontainer|data|logs"

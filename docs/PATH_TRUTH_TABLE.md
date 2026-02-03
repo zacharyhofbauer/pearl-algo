@@ -120,10 +120,12 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Repository hygiene and cleanup
 - **Shell scripts** (`scripts/maintenance/`):
   - `purge_runtime_artifacts.sh` – safe cleanup of runtime/build artifacts (requires `--yes` flag)
+  - `git_rollback_paths.sh` – safe, path-scoped git rollback helper (creates backup branch, restores paths to a target commit/tag, deletes post-target added files)
 - **Python scripts**:
   - `scripts/maintenance/reset_30d_performance.py` – reset 30-day performance (testing/debugging)
 - **Docs**:
   - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
+  - `docs/PEARL_WEB_APP.md` (emergency UI rollback section)
 
 ## Monitoring
 

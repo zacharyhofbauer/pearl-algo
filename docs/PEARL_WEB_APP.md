@@ -115,9 +115,9 @@ Stop:
 Cursor includes a **visual editor inside the built-in Browser** that lets you manipulate rendered UI (layout + styles) and then have Cursor apply the corresponding changes back into your codebase.
 
 Official references:
-- Blog: `https://cursor.com/blog/browser-visual-editor`
-- Changelog (2.2): `https://cursor.com/changelog/2-2`
-- Docs: `https://cursor.com/docs/agent/browser`
+- Blog: [Cursor blog: Browser Visual Editor](https://cursor.com/blog/browser-visual-editor)
+- Changelog (2.2): [Cursor changelog 2.2](https://cursor.com/changelog/2-2)
+- Docs: [Cursor docs: Agent Browser](https://cursor.com/docs/agent/browser)
 
 ### Quick workflow (recommended for `pearlalgo_web_app/`)
 
@@ -136,6 +136,52 @@ Official references:
 - **Undo/redo/delete**: depending on Cursor version, common shortcuts (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z) and Backspace may work inside the visual editor.
 - **QoL improvements to look for** (varies by Cursor version): reduced selection animations (snappier selection) and finer-grained blur controls (e.g., 0.1 steps).
 - **Text/content changes**: if direct text editing isn’t available in your build, edit the JSX/HTML source for copy changes.
+
+### Safety checklist (before big UI edits)
+
+This prevents “9-hour rollback” situations.
+
+1. **Work on a branch** (avoid direct edits on `master` during market hours):
+
+```bash
+git switch -c ui/webapp-$(date -u +%Y-%m-%d)
+```
+
+2. **Capture a baseline** (optional but recommended):
+
+```bash
+# Lightweight tag you can roll back to quickly
+git tag "baseline/webapp-$(date -u +%Y-%m-%d-%H%MZ)" -m "Known-good web app UI"
+```
+
+3. **Preflight build before/after changes**:
+
+```bash
+cd pearlalgo_web_app && npm run build
+```
+
+### Emergency rollback (UI/layout/CSS)
+
+If the UI gets messy, do a **path-scoped rollback** (no history rewrite) using:
+
+- `scripts/maintenance/git_rollback_paths.sh`
+
+Example (rollback web app + API server to a known-good commit/tag):
+
+```bash
+./scripts/maintenance/git_rollback_paths.sh \
+  --target c14a7d34 \
+  --path pearlalgo_web_app \
+  --path scripts/pearlalgo_web_app \
+  --run "cd pearlalgo_web_app && npm run build" \
+  --commit \
+  --message "Rollback web app UI to known-good template" \
+  --yes
+```
+
+Notes:
+- The script **requires a clean working tree** and creates a backup branch automatically (`backup/pre-rollback-...`).
+- To undo the rollback: `git switch <that-backup-branch>`.
 
 ---
 
@@ -254,7 +300,7 @@ Ensure:
 3. API server is running (check `http://localhost:8000/health`)
 
 ### API returns "Missing API key"
-1. Set `PEARL_API_KEY` in `~/.config/pearlalgo/secrets.env`
+1. Set `PEARL_API_KEY` in your local secrets file (for example, $HOME/.config/pearlalgo/secrets.env)
 2. Restart the web app (`./pearl.sh chart restart`)
 3. Hard refresh the browser (client env is baked at startup)
 
@@ -265,5 +311,5 @@ Ensure:
 
 ---
 
-**Last Updated**: 2026-01-31
+**Last Updated**: 2026-02-03
 **Maintainer**: PEARLalgo Development Team
