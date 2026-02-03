@@ -177,23 +177,11 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-sm">
+      <div className="grid grid-cols-3 gap-sm">
         <StatDisplay
           label="Trades"
           value={challenge.trades}
           variant="compact"
-        />
-        <StatDisplay
-          label="Wins"
-          value={challenge.wins}
-          variant="compact"
-          positive
-        />
-        <StatDisplay
-          label="Losses"
-          value={challenge.trades - challenge.wins}
-          variant="compact"
-          negative={challenge.trades - challenge.wins > 0}
         />
         <StatDisplay
           label="Win Rate"
@@ -203,20 +191,11 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
           positive={challenge.win_rate >= 50}
           negative={challenge.win_rate < 50}
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-sm" style={{ marginTop: 'var(--spacing-sm)' }}>
         <StatDisplay
-          label="Profit Target"
+          label="Target"
           value={`$${challenge.profit_target.toLocaleString()}`}
           variant="compact"
           positive
-        />
-        <StatDisplay
-          label="Max Drawdown"
-          value={`$${challenge.max_drawdown.toLocaleString()}`}
-          variant="compact"
-          negative
         />
       </div>
 

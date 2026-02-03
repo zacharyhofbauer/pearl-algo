@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import { formatPnL as formatPnLUtil } from '@/lib/formatters'
 import type { RecentExit } from '@/stores'
 
 interface PnLCalendarPanelProps {
@@ -92,8 +91,10 @@ export default function PnLCalendarPanel({ recentExits }: PnLCalendarPanelProps)
     return { totalPnL, totalTrades, totalWins, profitDays, lossDays }
   }, [calendarDays])
 
-  // Use centralized formatter with 0 decimals for calendar display
-  const formatPnL = (pnl: number) => formatPnLUtil(pnl, 0)
+  const formatPnL = (pnl: number) => {
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${Math.abs(pnl).toFixed(0)}`
+  }
 
   const getPnLClass = (pnl: number, trades: number) => {
     if (trades === 0) return 'calendar-day-empty'

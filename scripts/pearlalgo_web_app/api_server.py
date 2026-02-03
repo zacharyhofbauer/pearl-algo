@@ -37,14 +37,6 @@ _cache_file: Optional[Path] = None
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Load environment variables from .env file
-try:
-    from dotenv import load_dotenv
-    load_dotenv(PROJECT_ROOT / ".env")
-    load_dotenv(Path.home() / ".config" / "pearlalgo" / "secrets.env")
-except ImportError:
-    pass  # dotenv not installed, rely on shell environment
-
 try:
     from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
     from fastapi.middleware.cors import CORSMiddleware
@@ -60,23 +52,6 @@ import secrets
 
 import pandas as pd
 
-# Import shared stats computation module
-from pearlalgo.market_agent.stats_computation import (
-    compute_daily_stats as _shared_compute_daily_stats,
-    compute_performance_stats as _shared_compute_performance_stats,
-    get_trading_day_start as _shared_get_trading_day_start,
-)
-
-# Pearl AI imports (optional - graceful degradation if not available)
-_pearl_brain = None
-try:
-    from pearl_ai import PearlBrain
-    from pearl_ai.api_router import create_pearl_router
-    _pearl_ai_available = True
-except ImportError:
-    _pearl_ai_available = False
-    print("[Pearl AI] Module not available - chat features disabled")
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -90,32 +65,17 @@ DEFAULT_MARKET = "NQ"
 # ---------------------------------------------------------------------------
 
 # Environment variables for auth:
-# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: true for security)
+# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: false for local)
 # PEARL_API_KEY=<key>          - Set a specific API key (optional, auto-generates if not set)
 # PEARL_API_KEY_FILE=<path>    - Path to file containing API keys (one per line)
-#
-# To disable auth for local development only:
-#   PEARL_API_AUTH_ENABLED=false
 
-_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "true").lower() == "true"
+_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "false").lower() == "true"
 _api_keys: set = set()
 _api_key_file: Optional[Path] = None
 
-# Security schemes - header only (query param removed for security)
+# Security schemes
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-# ---------------------------------------------------------------------------
-# Rate Limiting Configuration
-# ---------------------------------------------------------------------------
-
-# Simple in-memory rate limiter (per-IP, sliding window)
-# For production, consider using Redis-backed rate limiting
-from collections import defaultdict
-import time as time_module
-
-_rate_limit_requests = int(os.getenv("PEARL_RATE_LIMIT_REQUESTS", "10000"))  # requests per window (high default for Cloudflare tunnel)
-_rate_limit_window = int(os.getenv("PEARL_RATE_LIMIT_WINDOW", "60"))  # window in seconds
-_rate_limit_store: Dict[str, List[float]] = defaultdict(list)
+api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 
 
 def _load_api_keys() -> set:
@@ -163,32 +123,33 @@ def _init_auth():
 
 async def verify_api_key(
     api_key_header: Optional[str] = Security(api_key_header),
+    api_key_query: Optional[str] = Security(api_key_query),
 ) -> Optional[str]:
     """
-    Verify API key from header.
+    Verify API key from header or query parameter.
 
     Returns the API key if valid, None if auth disabled.
     Raises HTTPException if auth enabled but key invalid/missing.
-
-    Note: Query parameter auth has been removed for security reasons.
-    Always use the X-API-Key header.
     """
     if not _auth_enabled:
         return None
 
-    if not api_key_header:
+    # Check header first, then query param
+    api_key = api_key_header or api_key_query
+
+    if not api_key:
         raise HTTPException(
             status_code=401,
-            detail="Missing API key. Provide X-API-Key header.",
+            detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
         )
 
-    if api_key_header not in _api_keys:
+    if api_key not in _api_keys:
         raise HTTPException(
             status_code=403,
             detail="Invalid API key.",
         )
 
-    return api_key_header
+    return api_key
 
 
 # Dependency for protected routes
@@ -857,109 +818,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ---------------------------------------------------------------------------
-# Rate Limiting Middleware
-# ---------------------------------------------------------------------------
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
-
-
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory rate limiting middleware (per-IP, sliding window)."""
-
-    async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health check
-        if request.url.path == "/health":
-            return await call_next(request)
-
-        # Get client IP (handle proxy headers)
-        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if not client_ip:
-            client_ip = request.client.host if request.client else "unknown"
-
-        # Clean up old requests and check rate limit
-        now = time_module.time()
-        window_start = now - _rate_limit_window
-
-        # Remove old entries
-        _rate_limit_store[client_ip] = [
-            t for t in _rate_limit_store[client_ip] if t > window_start
-        ]
-
-        # Check if over limit
-        if len(_rate_limit_store[client_ip]) >= _rate_limit_requests:
-            return Response(
-                content='{"detail": "Rate limit exceeded. Try again later."}',
-                status_code=429,
-                headers={
-                    "Content-Type": "application/json",
-                    "Retry-After": str(_rate_limit_window),
-                    "X-RateLimit-Limit": str(_rate_limit_requests),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(window_start + _rate_limit_window)),
-                },
-            )
-
-        # Record this request
-        _rate_limit_store[client_ip].append(now)
-
-        # Add rate limit headers to response
-        response = await call_next(request)
-        remaining = _rate_limit_requests - len(_rate_limit_store[client_ip])
-        response.headers["X-RateLimit-Limit"] = str(_rate_limit_requests)
-        response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
-        response.headers["X-RateLimit-Reset"] = str(int(now + _rate_limit_window))
-
-        return response
-
-
-# Add rate limiting middleware
-app.add_middleware(RateLimitMiddleware)
-
-# ---------------------------------------------------------------------------
-# Pearl AI Router (Optional - graceful degradation if not available)
-# ---------------------------------------------------------------------------
-
-def _init_pearl_ai():
-    """Initialize Pearl AI brain and mount router."""
-    global _pearl_brain
-
-    if not _pearl_ai_available:
-        return
-
-    # Get Claude API key from environment
-    claude_api_key = os.getenv("ANTHROPIC_API_KEY")
-    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    ollama_model = os.getenv("PEARL_OLLAMA_MODEL", "llama3.1:8b")
-
-    try:
-        # Initialize Pearl Brain with available LLMs
-        _pearl_brain = PearlBrain(
-            claude_api_key=claude_api_key,
-            ollama_model=ollama_model,
-            ollama_host=ollama_host,
-            enable_local=True,  # Try Ollama
-            enable_claude=bool(claude_api_key),
-        )
-
-        # Create and mount the Pearl AI router
-        pearl_router = create_pearl_router(_pearl_brain)
-        app.include_router(pearl_router, prefix="/api/pearl")
-
-        print(f"[Pearl AI] Initialized successfully")
-        print(f"  - Local LLM (Ollama): {'enabled' if True else 'disabled'} ({ollama_model})")
-        print(f"  - Claude API: {'enabled' if claude_api_key else 'disabled (no API key)'}")
-
-    except Exception as e:
-        print(f"[Pearl AI] Failed to initialize: {e}")
-        _pearl_brain = None
-
-# Initialize Pearl AI at module load time (before startup)
-_init_pearl_ai()
-
 # Global state
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
@@ -976,7 +834,6 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self._broadcast_task: Optional[asyncio.Task] = None
         self._last_state_hash: str = ""
-        self._last_candle_time: int = 0  # Track last candle for change detection
 
     async def connect(self, websocket: WebSocket):
         """Accept and register a new WebSocket connection."""
@@ -1050,70 +907,12 @@ class ConnectionManager:
                             }
                             await self.broadcast(broadcast_data)
 
-                    # Also broadcast latest candle if changed
-                    await self._broadcast_candle_update()
-
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"[WebSocket] Broadcast error: {e}")
                 await asyncio.sleep(interval)
-
-    async def _broadcast_candle_update(self):
-        """Broadcast latest candle when it changes for real-time chart updates."""
-        if not self.active_connections or not _state_dir:
-            return
-
-        try:
-            # Read latest bar from state
-            state_file = _state_dir / "state.json"
-            state = _load_json_file(state_file)
-            if not state:
-                return
-
-            latest_bar = state.get("latest_bar")
-            if not isinstance(latest_bar, dict):
-                return
-
-            # Get candle time from timestamp
-            ts = latest_bar.get("timestamp")
-            if not ts:
-                return
-
-            try:
-                # Parse timestamp to unix time
-                if isinstance(ts, (int, float)):
-                    candle_time = int(ts)
-                else:
-                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-                    candle_time = int(dt.timestamp())
-            except (ValueError, TypeError):
-                return
-
-            # Only broadcast if candle is newer or updated
-            if candle_time < self._last_candle_time:
-                return
-
-            # Check if candle data changed (price update within same bar)
-            candle_data = {
-                "time": candle_time,
-                "open": float(latest_bar.get("open", 0)),
-                "high": float(latest_bar.get("high", 0)),
-                "low": float(latest_bar.get("low", 0)),
-                "close": float(latest_bar.get("close", 0)),
-                "volume": int(latest_bar.get("volume", 0) or 0),
-            }
-
-            # Update tracking and broadcast
-            self._last_candle_time = candle_time
-            await self.broadcast({
-                "type": "candle_update",
-                "data": candle_data,
-            })
-        except Exception as e:
-            # Silently ignore candle broadcast errors
-            pass
 
 
 # Global connection manager
@@ -1338,29 +1137,165 @@ def _get_trading_day_start() -> datetime:
     """
     Get the start of the current trading day (6pm ET previous calendar day).
 
-    Uses the shared stats_computation module for consistency with Telegram.
+    Futures trading day runs from 6pm ET to 6pm ET next day.
+    Example: Trading day "Jan 29" starts at 6pm ET on Jan 28 and ends at 6pm ET on Jan 29.
     """
-    return _shared_get_trading_day_start()
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+
+    # If before 6pm ET, trading day started yesterday at 6pm
+    # If after 6pm ET, trading day started today at 6pm
+    if now_et.hour < 18:
+        # Before 6pm - use yesterday 6pm as start
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    else:
+        # After 6pm - use today 6pm as start
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    return trading_day_start.astimezone(timezone.utc)
 
 
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
-    """
-    Compute daily P&L and trade stats from signals.jsonl since 6pm ET.
+    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET."""
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
 
-    Uses the shared stats_computation module for consistency with Telegram.
-    Results are cached for 5 seconds to avoid re-parsing on every request.
-    """
-    return _shared_compute_daily_stats(state_dir, use_cache=True)
+    # Get trading day start (6pm ET)
+    trading_day_start = _get_trading_day_start()
+
+    daily_pnl = 0.0
+    daily_wins = 0
+    daily_losses = 0
+
+    try:
+        # Read all signals (we need to check all for today's trades)
+        signals = _load_jsonl_file(signals_file, max_lines=2000)
+        for s in signals:
+            if s.get("status") != "exited":
+                continue
+
+            # Check if trade exited after trading day start (6pm ET)
+            exit_time_str = s.get("exit_time") or s.get("timestamp")
+            if not exit_time_str:
+                continue
+
+            try:
+                # Parse ISO format timestamp
+                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                if exit_time < trading_day_start:
+                    continue
+            except (ValueError, AttributeError):
+                continue
+
+            # Count this trade
+            pnl = s.get("pnl", 0.0)
+            if pnl is not None:
+                daily_pnl += pnl
+                if pnl >= 0:
+                    daily_wins += 1
+                else:
+                    daily_losses += 1
+    except Exception:
+        pass
+
+    return {
+        "daily_pnl": round(daily_pnl, 2),
+        "daily_trades": daily_wins + daily_losses,
+        "daily_wins": daily_wins,
+        "daily_losses": daily_losses,
+    }
 
 
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
-    """
-    Compute performance stats for 24h, 72h, and 30d periods.
+    """Compute performance stats for 24h, 72h, and 30d periods."""
+    performance_file = state_dir / "performance.json"
+    if not performance_file.exists():
+        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
+        return {"24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
 
-    Uses the shared stats_computation module for consistency with Telegram.
-    Results are cached for 5 seconds to avoid re-parsing on every request.
-    """
-    return _shared_compute_performance_stats(state_dir, use_cache=True)
+    now = datetime.now(timezone.utc)
+    cutoffs = {
+        "24h": now - timedelta(hours=24),
+        "72h": now - timedelta(hours=72),
+        "30d": now - timedelta(days=30),
+    }
+
+    stats = {period: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0} for period in cutoffs}
+
+    try:
+        data = json.loads(performance_file.read_text())
+        if not isinstance(data, list):
+            data = []
+
+        for trade in data:
+            exit_time_str = trade.get("exit_time")
+            if not exit_time_str:
+                continue
+            try:
+                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+
+            pnl = trade.get("pnl", 0.0) or 0.0
+            is_win = trade.get("is_win", pnl > 0)
+
+            for period, cutoff in cutoffs.items():
+                if exit_time >= cutoff:
+                    stats[period]["pnl"] += pnl
+                    stats[period]["trades"] += 1
+                    if is_win:
+                        stats[period]["wins"] += 1
+                    else:
+                        stats[period]["losses"] += 1
+    except Exception:
+        pass
+
+    # Calculate win rates and compute streaks for 24h
+    for period in stats:
+        total = stats[period]["trades"]
+        stats[period]["pnl"] = round(stats[period]["pnl"], 2)
+        stats[period]["win_rate"] = round(stats[period]["wins"] / total * 100, 1) if total > 0 else 0.0
+
+    # Compute current streak for 24h
+    stats["24h"]["streak"] = 0
+    stats["24h"]["streak_type"] = "none"
+    try:
+        data = json.loads(performance_file.read_text())
+        if isinstance(data, list):
+            cutoff_24h = cutoffs["24h"]
+            recent_trades = []
+            for trade in data:
+                exit_time_str = trade.get("exit_time")
+                if not exit_time_str:
+                    continue
+                try:
+                    exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                    if exit_time >= cutoff_24h:
+                        recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
+                except (ValueError, TypeError):
+                    continue
+            # Sort by exit time descending
+            recent_trades.sort(key=lambda x: x[0], reverse=True)
+            if recent_trades:
+                streak = 0
+                streak_type = "win" if recent_trades[0][1] else "loss"
+                for _, is_win in recent_trades:
+                    if (streak_type == "win" and is_win) or (streak_type == "loss" and not is_win):
+                        streak += 1
+                    else:
+                        break
+                stats["24h"]["streak"] = streak
+                stats["24h"]["streak_type"] = streak_type
+    except Exception:
+        pass
+
+    return stats
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
@@ -2100,179 +2035,19 @@ async def get_trades(
     return trades[-limit:]
 
 
-@app.get("/api/trades/history")
-async def get_trades_history(
-    start_date: Optional[str] = Query(default=None, description="Filter from date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(default=None, description="Filter to date (YYYY-MM-DD)"),
-    direction: Optional[str] = Query(default=None, description="Filter by direction (long/short)"),
-    exit_reason: Optional[str] = Query(default=None, description="Filter by exit reason type"),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
-    api_key: Optional[str] = Depends(verify_api_key),
-):
-    """Get full trade history with filtering, pagination, and daily aggregates.
-
-    Returns:
-        {
-            "trades": [...],
-            "daily_summary": {...},
-            "total_count": 100,
-            "page": 1,
-            "page_size": 50,
-            "total_pages": 2,
-            "filters_applied": {...}
-        }
-    """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
-
-    signals_file = _state_dir / "signals.jsonl"
-    # Load all signals for full history
-    all_signals = _load_jsonl_file(signals_file, max_lines=10000)
-
-    # Filter to exited trades only
-    trades = []
-    for s in all_signals:
-        if s.get("status") != "exited":
-            continue
-
-        signal_data = s.get("signal", {})
-        exit_time = s.get("exit_time") or signal_data.get("exit_time")
-        entry_time = s.get("entry_time") or signal_data.get("entry_time")
-
-        trade = {
-            "signal_id": s.get("signal_id"),
-            "direction": signal_data.get("direction") if isinstance(signal_data, dict) else s.get("direction"),
-            "entry_time": entry_time,
-            "entry_price": s.get("entry_price") or signal_data.get("entry_price"),
-            "exit_time": exit_time,
-            "exit_price": s.get("exit_price") or signal_data.get("exit_price"),
-            "pnl": s.get("pnl") or signal_data.get("pnl"),
-            "exit_reason": s.get("exit_reason") or signal_data.get("exit_reason"),
-            "duration_seconds": s.get("duration_seconds"),
-            "ml_probability": signal_data.get("ml_probability") if isinstance(signal_data, dict) else None,
-            "regime_at_entry": signal_data.get("regime") if isinstance(signal_data, dict) else None,
-            "entry_reason": signal_data.get("reason") if isinstance(signal_data, dict) else None,
-        }
-        trades.append(trade)
-
-    # Apply filters
-    filters_applied = {}
-
-    if start_date:
-        try:
-            trades = [t for t in trades if t.get("exit_time", "")[:10] >= start_date]
-            filters_applied["start_date"] = start_date
-        except:
-            pass
-
-    if end_date:
-        try:
-            trades = [t for t in trades if t.get("exit_time", "")[:10] <= end_date]
-            filters_applied["end_date"] = end_date
-        except:
-            pass
-
-    if direction and direction.lower() in ("long", "short"):
-        trades = [t for t in trades if t.get("direction", "").lower() == direction.lower()]
-        filters_applied["direction"] = direction
-
-    if exit_reason:
-        reason_lower = exit_reason.lower()
-        def matches_reason(t):
-            r = (t.get("exit_reason") or "").lower()
-            if reason_lower == "target":
-                return "target" in r or "tp_" in r or "profit" in r
-            elif reason_lower == "stop":
-                return "stop" in r or "sl_" in r
-            elif reason_lower == "trail":
-                return "trail" in r
-            elif reason_lower == "time":
-                return "time" in r or "eod" in r or "session" in r
-            elif reason_lower == "manual":
-                return "close_all" in r or "close all" in r
-            return False
-        trades = [t for t in trades if matches_reason(t)]
-        filters_applied["exit_reason"] = exit_reason
-
-    # Sort by exit time (newest first)
-    trades.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
-
-    total_count = len(trades)
-    total_pages = max(1, (total_count + page_size - 1) // page_size)
-
-    # Paginate
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated_trades = trades[start_idx:end_idx]
-
-    # Calculate daily summary for all filtered trades
-    daily_summary = {}
-    for t in trades:
-        date = (t.get("exit_time") or "")[:10]
-        if not date:
-            continue
-        if date not in daily_summary:
-            daily_summary[date] = {"trades": 0, "pnl": 0, "wins": 0, "losses": 0}
-        daily_summary[date]["trades"] += 1
-        pnl = t.get("pnl") or 0
-        daily_summary[date]["pnl"] += pnl
-        if pnl > 0:
-            daily_summary[date]["wins"] += 1
-        elif pnl < 0:
-            daily_summary[date]["losses"] += 1
-
-    # Add win rate to daily summary
-    for date in daily_summary:
-        total = daily_summary[date]["trades"]
-        wins = daily_summary[date]["wins"]
-        daily_summary[date]["win_rate"] = (wins / total * 100) if total > 0 else 0
-
-    return {
-        "trades": paginated_trades,
-        "daily_summary": daily_summary,
-        "total_count": total_count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "filters_applied": filters_applied,
-    }
-
-
 @app.get("/api/positions")
 async def get_positions(
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get currently open positions with entry price, stop loss, and take profit.
 
-    Returns positions for display on chart as price lines, plus latest price
-    and tick value for unrealized P&L calculation.
-
-    Response:
-        {
-            "positions": [...],
-            "latest_price": 21500.25,
-            "tick_value": 2.0
-        }
+    Returns positions for display on chart as price lines.
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=500)
-
-    # Get latest price from state
-    state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file)
-    latest_price = None
-
-    # Try multiple sources for latest price
-    if state:
-        latest_price = state.get("latest_price")
-        if latest_price is None:
-            latest_bar = state.get("latest_bar")
-            if isinstance(latest_bar, dict):
-                latest_price = latest_bar.get("close")
 
     # Filter to open positions only (not exited)
     positions = []
@@ -2302,100 +2077,7 @@ async def get_positions(
             "take_profit": take_profit,
         })
 
-    return {
-        "positions": positions,
-        "latest_price": latest_price,
-        "tick_value": 2.0,  # MNQ tick value ($2 per tick, 1 tick = 0.25 points)
-    }
-
-
-@app.post("/api/positions/{signal_id}/close")
-async def close_position(
-    signal_id: str,
-    api_key: Optional[str] = Depends(verify_api_key),
-):
-    """Request to close a specific position by signal_id.
-
-    Sets close_signal_requested in state.json which the market agent will pick up.
-    """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
-
-    # Verify the position exists and is open
-    signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=500)
-
-    position_exists = False
-    for s in signals:
-        if s.get("signal_id") == signal_id and s.get("status") != "exited":
-            if s.get("entry_price"):  # Has an entry = open position
-                position_exists = True
-                break
-
-    if not position_exists:
-        raise HTTPException(status_code=404, detail=f"Position {signal_id} not found or already closed")
-
-    # Set the close request in state.json
-    state_file = _state_dir / "state.json"
-    try:
-        state = _load_json_file(state_file) or {}
-    except Exception:
-        state = {}
-
-    # Add to close_signals_requested list
-    close_requests = state.get("close_signals_requested", [])
-    if signal_id not in close_requests:
-        close_requests.append(signal_id)
-    state["close_signals_requested"] = close_requests
-    state["close_signals_requested_time"] = datetime.now(timezone.utc).isoformat()
-
-    try:
-        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write state: {e}")
-
-    return {"status": "close_requested", "signal_id": signal_id}
-
-
-@app.post("/api/positions/close-all")
-async def close_all_positions(
-    api_key: Optional[str] = Depends(verify_api_key),
-):
-    """Request to close all open positions.
-
-    Sets close_all_requested flag in state.json which the market agent will pick up.
-    """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
-
-    # Count open positions first
-    signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=500)
-
-    open_count = 0
-    for s in signals:
-        if s.get("status") != "exited" and s.get("entry_price"):
-            open_count += 1
-
-    if open_count == 0:
-        return {"status": "no_positions", "message": "No open positions to close"}
-
-    # Set the close_all_requested flag in state.json
-    state_file = _state_dir / "state.json"
-    try:
-        state = _load_json_file(state_file) or {}
-    except Exception:
-        state = {}
-
-    state["close_all_requested"] = True
-    state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
-
-    try:
-        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write state: {e}")
-
-    return {"status": "close_all_requested", "positions_count": open_count}
+    return positions
 
 
 @app.get("/api/indicators")
@@ -2790,170 +2472,6 @@ async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
 
 
 # ---------------------------------------------------------------------------
-# Prometheus Metrics Endpoint
-# ---------------------------------------------------------------------------
-
-@app.get("/api/metrics")
-async def get_metrics(api_key: Optional[str] = Depends(verify_api_key)):
-    """
-    Prometheus-compatible metrics endpoint.
-
-    Returns metrics in Prometheus text format:
-    - pearl_active_positions: Number of currently open positions
-    - pearl_daily_pnl_dollars: Today's P&L in dollars
-    - pearl_daily_trades_total: Total trades today
-    - pearl_daily_wins_total: Winning trades today
-    - pearl_daily_losses_total: Losing trades today
-    - pearl_signal_rate_per_hour: Signal generation rate (last hour)
-    - pearl_websocket_connections: Active WebSocket connections
-    - pearl_api_requests_total: Total API requests (by endpoint)
-    - pearl_agent_running: Whether the agent is running (1/0)
-    - pearl_data_fresh: Whether data is fresh (1/0)
-    - pearl_gateway_status: IBKR gateway status (1=online, 0=offline)
-    - pearl_rate_limit_remaining: Remaining rate limit for client
-    """
-    if _state_dir is None:
-        return Response(
-            content="# No state directory configured\n",
-            media_type="text/plain; version=0.0.4",
-        )
-
-    # Load state
-    state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file)
-
-    # Load daily stats
-    daily_stats = _compute_daily_stats(_state_dir)
-
-    # Count active positions from signals
-    signals_file = _state_dir / "signals.jsonl"
-    active_positions = 0
-    signals_last_hour = 0
-
-    if signals_file.exists():
-        signals = _load_jsonl_file(signals_file, max_lines=500)
-        now_ts = datetime.now(timezone.utc)
-        hour_ago = (now_ts - timedelta(hours=1)).isoformat()
-
-        for s in signals:
-            # Count active (non-exited) positions
-            if s.get("status") != "exited" and s.get("entry_price"):
-                active_positions += 1
-
-            # Count signals in last hour
-            ts = s.get("timestamp", "")
-            if ts and ts >= hour_ago:
-                signals_last_hour += 1
-
-    # Gateway status
-    gateway = _get_gateway_status()
-    gateway_online = 1 if gateway.get("status") == "online" else 0
-
-    # Build Prometheus text output
-    lines = [
-        "# HELP pearl_active_positions Number of currently open positions",
-        "# TYPE pearl_active_positions gauge",
-        f"pearl_active_positions {active_positions}",
-        "",
-        "# HELP pearl_daily_pnl_dollars Today's P&L in dollars",
-        "# TYPE pearl_daily_pnl_dollars gauge",
-        f"pearl_daily_pnl_dollars {daily_stats['daily_pnl']}",
-        "",
-        "# HELP pearl_daily_trades_total Total trades completed today",
-        "# TYPE pearl_daily_trades_total counter",
-        f"pearl_daily_trades_total {daily_stats['daily_trades']}",
-        "",
-        "# HELP pearl_daily_wins_total Winning trades today",
-        "# TYPE pearl_daily_wins_total counter",
-        f"pearl_daily_wins_total {daily_stats['daily_wins']}",
-        "",
-        "# HELP pearl_daily_losses_total Losing trades today",
-        "# TYPE pearl_daily_losses_total counter",
-        f"pearl_daily_losses_total {daily_stats['daily_losses']}",
-        "",
-        "# HELP pearl_signal_rate_per_hour Signals generated in the last hour",
-        "# TYPE pearl_signal_rate_per_hour gauge",
-        f"pearl_signal_rate_per_hour {signals_last_hour}",
-        "",
-        "# HELP pearl_websocket_connections Active WebSocket connections",
-        "# TYPE pearl_websocket_connections gauge",
-        f"pearl_websocket_connections {len(ws_manager.active_connections)}",
-        "",
-        "# HELP pearl_agent_running Whether the trading agent is running (1=yes, 0=no)",
-        "# TYPE pearl_agent_running gauge",
-        f"pearl_agent_running {1 if state.get('running', False) else 0}",
-        "",
-        "# HELP pearl_agent_paused Whether the trading agent is paused (1=yes, 0=no)",
-        "# TYPE pearl_agent_paused gauge",
-        f"pearl_agent_paused {1 if state.get('paused', False) else 0}",
-        "",
-        "# HELP pearl_data_fresh Whether market data is fresh (1=yes, 0=no)",
-        "# TYPE pearl_data_fresh gauge",
-        f"pearl_data_fresh {1 if state.get('data_fresh', False) else 0}",
-        "",
-        "# HELP pearl_gateway_status IBKR gateway connection status (1=online, 0=offline)",
-        "# TYPE pearl_gateway_status gauge",
-        f"pearl_gateway_status {gateway_online}",
-        "",
-        "# HELP pearl_gateway_port_listening IBKR gateway port responding (1=yes, 0=no)",
-        "# TYPE pearl_gateway_port_listening gauge",
-        f"pearl_gateway_port_listening {1 if gateway.get('port_listening', False) else 0}",
-        "",
-    ]
-
-    # Add circuit breaker metrics if available
-    circuit_breaker = state.get("trading_circuit_breaker", {})
-    if circuit_breaker:
-        blocks = circuit_breaker.get("blocks_by_reason", {})
-        lines.extend([
-            "# HELP pearl_circuit_breaker_blocks Signals blocked by circuit breaker (by reason)",
-            "# TYPE pearl_circuit_breaker_blocks counter",
-        ])
-        for reason, count in blocks.items():
-            lines.append(f'pearl_circuit_breaker_blocks{{reason="{reason}"}} {count}')
-        lines.append("")
-
-    # Add performance metrics
-    perf = _compute_performance_stats(_state_dir)
-    if perf:
-        lines.extend([
-            "# HELP pearl_win_rate_24h Win rate in the last 24 hours (percentage)",
-            "# TYPE pearl_win_rate_24h gauge",
-            f"pearl_win_rate_24h {perf.get('24h', {}).get('win_rate', 0)}",
-            "",
-            "# HELP pearl_pnl_24h P&L in the last 24 hours",
-            "# TYPE pearl_pnl_24h gauge",
-            f"pearl_pnl_24h {perf.get('24h', {}).get('pnl', 0)}",
-            "",
-        ])
-
-    # Add risk metrics
-    risk = _get_risk_metrics(_state_dir)
-    if risk:
-        lines.extend([
-            "# HELP pearl_max_drawdown Maximum drawdown in dollars",
-            "# TYPE pearl_max_drawdown gauge",
-            f"pearl_max_drawdown {risk.get('max_drawdown', 0)}",
-            "",
-            "# HELP pearl_profit_factor Profit factor (gross profit / gross loss)",
-            "# TYPE pearl_profit_factor gauge",
-            f"pearl_profit_factor {risk.get('profit_factor', 0) or 0}",
-            "",
-            "# HELP pearl_expectancy Expected value per trade",
-            "# TYPE pearl_expectancy gauge",
-            f"pearl_expectancy {risk.get('expectancy', 0)}",
-            "",
-        ])
-
-    # Return as Prometheus text format
-    from starlette.responses import Response as StarletteResponse
-    return StarletteResponse(
-        content="\n".join(lines) + "\n",
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2983,7 +2501,6 @@ def main():
     print(f"  GET /api/sessions?hours=6")
     print(f"  GET /api/state")
     print(f"  GET /api/trades")
-    print(f"  GET /api/metrics (Prometheus format)")
     print(f"  GET /health")
     print(f"")
     print(f"Tips:")

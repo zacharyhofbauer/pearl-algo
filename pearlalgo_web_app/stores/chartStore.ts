@@ -136,7 +136,6 @@ interface ChartStore {
     markers?: MarkerData[]
     marketStatus?: MarketStatus
   }) => void
-  appendCandle: (candle: CandleData) => void
   reset: () => void
 }
 
@@ -191,31 +190,6 @@ export const useChartStore = create<ChartStore>((set) => ({
       isLoading: false,
       error: null,
     })),
-
-  // Append or update the latest candle for real-time WebSocket updates
-  appendCandle: (candle) =>
-    set((state) => {
-      if (state.candles.length === 0) {
-        return { candles: [candle] }
-      }
-
-      const lastCandle = state.candles[state.candles.length - 1]
-
-      // If same timestamp, update the last candle (real-time update to current bar)
-      if (lastCandle.time === candle.time) {
-        const updatedCandles = [...state.candles]
-        updatedCandles[updatedCandles.length - 1] = candle
-        return { candles: updatedCandles }
-      }
-
-      // If newer timestamp, append as new candle
-      if (candle.time > lastCandle.time) {
-        return { candles: [...state.candles, candle] }
-      }
-
-      // Older timestamp - ignore (out of order data)
-      return state
-    }),
 
   reset: () =>
     set({

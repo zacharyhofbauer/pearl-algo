@@ -1,36 +1,48 @@
 'use client'
 
-import { memo, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
-import { formatDuration, formatTime as formatTimeUtil } from '@/lib/formatters'
-import type { RecentExit } from '@/stores'
+import type { AgentState, RecentExit } from '@/stores'
 
 interface ActivePositionsPanelProps {
   activeTradesCount: number
   recentExits?: RecentExit[]
+  dailyPnL?: number
 }
 
-function ActivePositionsPanel({
+export default function ActivePositionsPanel({
   activeTradesCount,
   recentExits = [],
+  dailyPnL = 0
 }: ActivePositionsPanelProps) {
   // Get the most recent trade if any (to show recent activity)
   const lastTrade = recentExits[0]
 
   // Calculate average trade duration from recent exits
-  const avgDuration = useMemo(() => {
-    if (recentExits.length === 0) return null
-    const withDuration = recentExits.filter(e => e.duration_seconds)
-    if (withDuration.length === 0) return null
-    return withDuration.reduce((sum, e) => sum + (e.duration_seconds || 0), 0) / withDuration.length
-  }, [recentExits])
+  const avgDuration = recentExits.length > 0
+    ? recentExits
+        .filter(e => e.duration_seconds)
+        .reduce((sum, e) => sum + (e.duration_seconds || 0), 0) /
+        Math.max(1, recentExits.filter(e => e.duration_seconds).length)
+    : null
 
-  // Use centralized formatters
-  const formatTime = (timestamp: string) => formatTimeUtil(timestamp, false)
+  const formatDuration = (seconds: number) => {
+    if (seconds < 60) return `${Math.round(seconds)}s`
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+    return `${(seconds / 3600).toFixed(1)}h`
+  }
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+  }
 
   return (
-    <DataPanel title="Open Positions" icon="📍" variant="status">
+    <DataPanel title="Active Positions" icon="📍" variant="status">
       <div className="grid grid-cols-2 gap-md">
         <StatDisplay
           label="Open Trades"
@@ -40,11 +52,31 @@ function ActivePositionsPanel({
           fullWidth={activeTradesCount === 0}
         />
 
+        {activeTradesCount > 0 && (
+          <StatDisplay
+            label="Unrealized"
+            value="—"
+            tooltip="Position details not available from backend"
+          />
+        )}
+
         {activeTradesCount === 0 && (
           <div className="col-span-full active-positions-empty">
             <span className="empty-icon">🎯</span>
             <span className="empty-text">No active positions</span>
           </div>
+        )}
+
+        {activeTradesCount > 0 && (
+          <>
+            <div className="col-span-full active-positions-note">
+              <span className="note-icon">ℹ️</span>
+              <span className="note-text">
+                {activeTradesCount} position{activeTradesCount > 1 ? 's' : ''} open.
+                Entry details available after exit.
+              </span>
+            </div>
+          </>
         )}
       </div>
 
@@ -64,19 +96,25 @@ function ActivePositionsPanel({
         </div>
       )}
 
-      {/* Session Stats - only show avg duration if we have data */}
-      {avgDuration !== null && (
-        <div className="session-stats-row">
+      {/* Session Stats */}
+      <div className="session-stats-row">
+        <StatDisplay
+          label="Day P&L"
+          value={`${dailyPnL >= 0 ? '+' : ''}$${dailyPnL.toFixed(2)}`}
+          variant="compact"
+          colorMode="financial"
+          positive={dailyPnL > 0}
+          negative={dailyPnL < 0}
+        />
+        {avgDuration !== null && (
           <StatDisplay
             label="Avg Duration"
             value={formatDuration(avgDuration)}
             variant="compact"
-            tooltip="Average trade holding time from recent exits"
+            tooltip="Average trade holding time"
           />
-        </div>
-      )}
+        )}
+      </div>
     </DataPanel>
   )
 }
-
-export default memo(ActivePositionsPanel)

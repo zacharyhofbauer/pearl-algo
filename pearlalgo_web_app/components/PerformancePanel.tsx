@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useMemo, memo, useCallback } from 'react'
+import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import { StatDisplay, Tabs } from './ui'
-import { formatPnL } from '@/lib/formatters'
+import { StatDisplay } from './ui'
 import type { PerformanceStats } from '@/stores'
 
 interface PerformancePanelProps {
@@ -13,13 +12,17 @@ interface PerformancePanelProps {
 
 type Period = '24h' | '72h' | '30d'
 
-function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
+export default function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
   const [activePeriod, setActivePeriod] = useState<Period>('24h')
 
   const stats = performance[activePeriod]
+  const formatPnL = (pnl: number) => {
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${pnl.toFixed(2)}`
+  }
 
   // Determine WR color based on expectancy, not 50% threshold
-  const getWinRatePositivity = useCallback((): { positive?: boolean; negative?: boolean } => {
+  const getWinRatePositivity = (): { positive?: boolean; negative?: boolean } => {
     // If we have expectancy data, use that for coloring
     if (expectancy !== undefined) {
       if (expectancy > 0.5) return { positive: true }
@@ -30,27 +33,24 @@ function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
     if (stats.pnl > 0) return { positive: true }
     if (stats.pnl < 0) return { negative: true }
     return {}
-  }, [expectancy, stats.pnl])
+  }
 
   // Show tooltip if WR < 50% but still profitable
-  const showWrTooltip = useMemo(
-    () => stats.win_rate < 50 && stats.pnl > 0,
-    [stats.win_rate, stats.pnl]
-  )
+  const showWrTooltip = stats.win_rate < 50 && stats.pnl > 0
 
   return (
     <DataPanel title="Performance" icon="📊" variant="feature">
-      <Tabs
-        tabs={[
-          { id: '24h' as Period, label: '24h' },
-          { id: '72h' as Period, label: '72h' },
-          { id: '30d' as Period, label: '30d' },
-        ]}
-        activeTab={activePeriod}
-        onTabChange={setActivePeriod}
-        variant="compact"
-        aria-label="Performance period"
-      />
+      <div className="perf-tabs">
+        {(['24h', '72h', '30d'] as Period[]).map((period) => (
+          <button
+            key={period}
+            className={`perf-tab ${activePeriod === period ? 'active' : ''}`}
+            onClick={() => setActivePeriod(period)}
+          >
+            {period.toLowerCase()}
+          </button>
+        ))}
+      </div>
 
       <div className="grid grid-cols-2 gap-md">
         <StatDisplay
@@ -133,5 +133,3 @@ function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
     </DataPanel>
   )
 }
-
-export default memo(PerformancePanel)

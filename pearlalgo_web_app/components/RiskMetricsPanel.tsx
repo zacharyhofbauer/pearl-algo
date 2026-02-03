@@ -1,6 +1,5 @@
 'use client'
 
-import { memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import type { RiskMetrics } from '@/stores'
@@ -9,7 +8,7 @@ interface RiskMetricsPanelProps {
   riskMetrics: RiskMetrics
 }
 
-function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps) {
+export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps) {
   const formatCurrency = (value: number) => {
     const sign = value >= 0 ? '+' : ''
     return `${sign}$${value.toFixed(2)}`
@@ -192,5 +191,3 @@ function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps) {
     </DataPanel>
   )
 }
-
-export default memo(RiskMetricsPanel)

@@ -1,9 +1,7 @@
 'use client'
 
-import { useMemo, memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
-import { formatCountdown } from '@/lib/formatters'
 import type {
   ExecutionState,
   CircuitBreakerStatus,
@@ -22,7 +20,7 @@ interface SystemStatusPanelProps {
   isPaused: boolean
 }
 
-function SystemStatusPanel({
+export default function SystemStatusPanel({
   executionState,
   circuitBreaker,
   marketRegime,
@@ -31,21 +29,30 @@ function SystemStatusPanel({
   isRunning,
   isPaused,
 }: SystemStatusPanelProps) {
-  // Determine overall system readiness - memoized
-  const readiness = useMemo(() => {
+  // Determine overall system readiness
+  const getSystemReadiness = () => {
     if (!isRunning) return { status: 'offline', label: 'Offline', color: 'var(--accent-red)' }
     if (isPaused) return { status: 'paused', label: 'Paused', color: 'var(--accent-yellow)' }
     if (circuitBreaker?.in_cooldown) return { status: 'cooldown', label: 'Cooldown', color: 'var(--accent-yellow)' }
     if (executionState && !executionState.armed) return { status: 'disarmed', label: 'Disarmed', color: 'var(--accent-yellow)' }
     if (executionState?.armed) return { status: 'armed', label: 'Armed', color: 'var(--accent-green)' }
     return { status: 'ready', label: 'Ready', color: 'var(--accent-green)' }
-  }, [isRunning, isPaused, circuitBreaker?.in_cooldown, executionState])
+  }
 
-  // Use centralized countdown formatter
-  const formatTimeRemaining = (seconds: number) => formatCountdown(seconds)
+  const readiness = getSystemReadiness()
 
-  // Get session display info - memoized
-  const sessionLabel = useMemo(() => {
+  // Format time remaining
+  const formatTimeRemaining = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    if (mins < 60) return `${mins}m ${secs}s`
+    const hours = Math.floor(mins / 60)
+    return `${hours}h ${mins % 60}m`
+  }
+
+  // Get session display info
+  const getSessionDisplay = () => {
     if (!sessionContext?.current_session) return null
     const sessionLabels: Record<string, string> = {
       premarket: 'Pre-Market',
@@ -56,10 +63,10 @@ function SystemStatusPanel({
       closed: 'Closed',
     }
     return sessionLabels[sessionContext.current_session] || sessionContext.current_session
-  }, [sessionContext?.current_session])
+  }
 
-  // Get direction restriction display - memoized
-  const directionInfo = useMemo(() => {
+  // Get direction restriction display
+  const getDirectionDisplay = () => {
     if (!marketRegime?.allowed_direction) return null
     switch (marketRegime.allowed_direction) {
       case 'long':
@@ -71,28 +78,32 @@ function SystemStatusPanel({
       default:
         return null
     }
-  }, [marketRegime?.allowed_direction])
+  }
 
-  // Get error trend indicator - memoized
-  const errorTrend = useMemo(() => {
+  const directionInfo = getDirectionDisplay()
+  const sessionLabel = getSessionDisplay()
+
+  // Get error trend indicator
+  const getErrorTrend = () => {
     if (!errorSummary) return null
     const count = errorSummary.session_error_count
     if (count === 0) return { icon: '✓', label: 'No Errors', color: 'var(--accent-green)' }
     if (count < 5) return { icon: '→', label: `${count} Errors`, color: 'var(--accent-yellow)' }
     return { icon: '↑', label: `${count} Errors`, color: 'var(--accent-red)' }
-  }, [errorSummary])
+  }
+
+  const errorTrend = getErrorTrend()
 
   return (
     <DataPanel title="System Status" icon="🎯" variant="status">
-      <div className="system-status-panel" role="region" aria-label="System Status">
-        {/* Main Readiness Indicator - with ARIA live region */}
-        <div className="status-readiness" role="status" aria-live="polite" aria-atomic="true">
+      <div className="system-status-panel">
+        {/* Main Readiness Indicator */}
+        <div className="status-readiness">
           <div
             className={`readiness-badge readiness-${readiness.status}`}
             style={{ '--badge-color': readiness.color } as React.CSSProperties}
-            aria-label={`System readiness: ${readiness.label}`}
           >
-            <span className="readiness-dot" aria-hidden="true"></span>
+            <span className="readiness-dot"></span>
             <span className="readiness-label">{readiness.label}</span>
           </div>
           {executionState?.mode && executionState.mode !== 'live' && (
@@ -100,8 +111,8 @@ function SystemStatusPanel({
           )}
         </div>
 
-        {/* Status Grid - items update independently */}
-        <div className="status-grid" aria-live="polite">
+        {/* Status Grid */}
+        <div className="status-grid">
           {/* Execution State */}
           <div className="status-item">
             <span className="status-item-label">Execution</span>
@@ -231,5 +242,3 @@ function SystemStatusPanel({
     </DataPanel>
   )
 }
-
-export default memo(SystemStatusPanel)

@@ -24,8 +24,6 @@ export default function RSIPanel({
   const overboughtRef = useRef<ISeriesApi<'Line'> | null>(null)
   const oversoldRef = useRef<ISeriesApi<'Line'> | null>(null)
   const midlineRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const hasInitialFit = useRef(false)
-  const prevDataLength = useRef(0)
 
   const colors = useChartSettingsStore((s) => s.colors)
 
@@ -142,34 +140,9 @@ export default function RSIPanel({
 
     return () => {
       window.removeEventListener('resize', handleResize)
-      hasInitialFit.current = false
       chart.remove()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height]) // Only recreate on height change - barSpacing/colors handled separately
-
-  // Update barSpacing without recreating the chart
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.timeScale().applyOptions({ barSpacing })
-    }
-  }, [barSpacing])
-
-  // Update colors without recreating the chart
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.applyOptions({
-        layout: {
-          background: { type: ColorType.Solid, color: colors.background },
-          textColor: colors.text,
-        },
-        grid: {
-          vertLines: { color: colors.grid },
-          horzLines: { color: colors.grid },
-        },
-      })
-    }
-  }, [colors])
+  }, [barSpacing, colors, height])
 
   // Sync time scale with main chart
   useEffect(() => {
@@ -194,70 +167,26 @@ export default function RSIPanel({
     }
   }, [mainChart])
 
-  // Track previous state for optimized updates
-  const prevLastTimeRef = useRef<number>(0)
-  const updateThrottleRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Update data - optimized to prevent flickering
+  // Update data
   useEffect(() => {
     if (!rsiSeriesRef.current || !overboughtRef.current ||
         !oversoldRef.current || !midlineRef.current || !data?.length) return
 
-    const lastPoint = data[data.length - 1]
-    const isInitialLoad = prevDataLength.current === 0
-    const isTimeframeChange = Math.abs(data.length - prevDataLength.current) > 10
-    const isSameTime = lastPoint.time === prevLastTimeRef.current
-    
-    // For real-time updates to the same time, use update()
-    if (isSameTime && !isInitialLoad) {
-      rsiSeriesRef.current.update({ time: lastPoint.time as Time, value: lastPoint.value })
-      return
-    }
-    
-    // For new data points, use update() if not a major change
-    if (!isInitialLoad && !isTimeframeChange) {
-      rsiSeriesRef.current.update({ time: lastPoint.time as Time, value: lastPoint.value })
-      overboughtRef.current.update({ time: lastPoint.time as Time, value: 70 })
-      oversoldRef.current.update({ time: lastPoint.time as Time, value: 30 })
-      midlineRef.current.update({ time: lastPoint.time as Time, value: 50 })
-      prevLastTimeRef.current = lastPoint.time
-      prevDataLength.current = data.length
-      return
-    }
-    
-    // For initial load or timeframe change, do full setData with throttle
-    if (updateThrottleRef.current) {
-      clearTimeout(updateThrottleRef.current)
-    }
-    
-    updateThrottleRef.current = setTimeout(() => {
-      if (!rsiSeriesRef.current || !overboughtRef.current ||
-          !oversoldRef.current || !midlineRef.current) return
-          
-      const rsiData = data.map(d => ({ time: d.time as Time, value: d.value }))
-      rsiSeriesRef.current.setData(rsiData)
+    const rsiData = data.map(d => ({ time: d.time as Time, value: d.value }))
+    rsiSeriesRef.current.setData(rsiData)
 
-      const overboughtData = data.map(d => ({ time: d.time as Time, value: 70 }))
-      const oversoldData = data.map(d => ({ time: d.time as Time, value: 30 }))
-      const midlineData = data.map(d => ({ time: d.time as Time, value: 50 }))
+    // Create horizontal lines for the full time range
+    const overboughtData = data.map(d => ({ time: d.time as Time, value: 70 }))
+    const oversoldData = data.map(d => ({ time: d.time as Time, value: 30 }))
+    const midlineData = data.map(d => ({ time: d.time as Time, value: 50 }))
 
-      overboughtRef.current.setData(overboughtData)
-      oversoldRef.current.setData(oversoldData)
-      midlineRef.current.setData(midlineData)
+    overboughtRef.current.setData(overboughtData)
+    oversoldRef.current.setData(oversoldData)
+    midlineRef.current.setData(midlineData)
 
-      if (chartRef.current && (!hasInitialFit.current || isTimeframeChange)) {
-        chartRef.current.timeScale().fitContent()
-        hasInitialFit.current = true
-      }
-      
-      prevLastTimeRef.current = lastPoint.time
-      prevDataLength.current = data.length
-    }, isInitialLoad ? 0 : 100)
-
-    return () => {
-      if (updateThrottleRef.current) {
-        clearTimeout(updateThrottleRef.current)
-      }
+    // Auto-fit content
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent()
     }
   }, [data])
 

@@ -24,8 +24,6 @@ export default function MACDPanel({
   const signalLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const histogramRef = useRef<ISeriesApi<'Histogram'> | null>(null)
   const zeroLineRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const hasInitialFit = useRef(false)
-  const prevDataLength = useRef(0)
 
   const colors = useChartSettingsStore((s) => s.colors)
 
@@ -132,34 +130,9 @@ export default function MACDPanel({
 
     return () => {
       window.removeEventListener('resize', handleResize)
-      hasInitialFit.current = false
       chart.remove()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [height]) // Only recreate on height change - barSpacing/colors handled separately
-
-  // Update barSpacing without recreating the chart
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.timeScale().applyOptions({ barSpacing })
-    }
-  }, [barSpacing])
-
-  // Update colors without recreating the chart
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.applyOptions({
-        layout: {
-          background: { type: ColorType.Solid, color: colors.background },
-          textColor: colors.text,
-        },
-        grid: {
-          vertLines: { color: colors.grid },
-          horzLines: { color: colors.grid },
-        },
-      })
-    }
-  }, [colors])
+  }, [barSpacing, colors, height])
 
   // Sync time scale with main chart
   useEffect(() => {
@@ -183,112 +156,57 @@ export default function MACDPanel({
     }
   }, [mainChart])
 
-  // Track previous state for optimized updates
-  const prevLastTimeRef = useRef<number>(0)
-  const updateThrottleRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Helper to get histogram color
-  const getHistogramColor = (histogram: number, prevHistogram: number): string => {
-    const isRising = histogram >= prevHistogram
-    if (histogram >= 0) {
-      return isRising ? '#26a69a' : '#1e8c7e'
-    } else {
-      return isRising ? '#ef5350' : '#c62828'
-    }
-  }
-
-  // Update data - optimized to prevent flickering
+  // Update data
   useEffect(() => {
     if (!macdLineRef.current || !signalLineRef.current ||
         !histogramRef.current || !zeroLineRef.current || !data?.length) return
 
-    const lastPoint = data[data.length - 1]
-    const prevPoint = data.length > 1 ? data[data.length - 2] : null
-    const isInitialLoad = prevDataLength.current === 0
-    const isTimeframeChange = Math.abs(data.length - prevDataLength.current) > 10
-    const isSameTime = lastPoint.time === prevLastTimeRef.current
-    
-    // For real-time updates to the same time, use update()
-    if (isSameTime && !isInitialLoad) {
-      macdLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.macd })
-      signalLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.signal })
-      histogramRef.current.update({
-        time: lastPoint.time as Time,
-        value: lastPoint.histogram,
-        color: getHistogramColor(lastPoint.histogram, prevPoint?.histogram || 0)
-      })
-      return
-    }
-    
-    // For new data points, use update() if not a major change
-    if (!isInitialLoad && !isTimeframeChange) {
-      macdLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.macd })
-      signalLineRef.current.update({ time: lastPoint.time as Time, value: lastPoint.signal })
-      histogramRef.current.update({
-        time: lastPoint.time as Time,
-        value: lastPoint.histogram,
-        color: getHistogramColor(lastPoint.histogram, prevPoint?.histogram || 0)
-      })
-      zeroLineRef.current.update({ time: lastPoint.time as Time, value: 0 })
-      prevLastTimeRef.current = lastPoint.time
-      prevDataLength.current = data.length
-      return
-    }
-    
-    // For initial load or timeframe change, do full setData with throttle
-    if (updateThrottleRef.current) {
-      clearTimeout(updateThrottleRef.current)
-    }
-    
-    updateThrottleRef.current = setTimeout(() => {
-      if (!macdLineRef.current || !signalLineRef.current ||
-          !histogramRef.current || !zeroLineRef.current) return
+    // MACD line data
+    const macdData = data.map(d => ({
+      time: d.time as Time,
+      value: d.macd
+    }))
+    macdLineRef.current.setData(macdData)
 
-      // MACD line data
-      const macdData = data.map(d => ({
-        time: d.time as Time,
-        value: d.macd
-      }))
-      macdLineRef.current.setData(macdData)
+    // Signal line data
+    const signalData = data.map(d => ({
+      time: d.time as Time,
+      value: d.signal
+    }))
+    signalLineRef.current.setData(signalData)
 
-      // Signal line data
-      const signalData = data.map(d => ({
-        time: d.time as Time,
-        value: d.signal
-      }))
-      signalLineRef.current.setData(signalData)
+    // Histogram data with colors based on value and direction
+    const histogramData = data.map((d, i) => {
+      const prevHistogram = i > 0 ? data[i - 1].histogram : 0
+      const isRising = d.histogram >= prevHistogram
 
-      // Histogram data with colors
-      const histogramData = data.map((d, i) => {
-        const prevHistogram = i > 0 ? data[i - 1].histogram : 0
-        return {
-          time: d.time as Time,
-          value: d.histogram,
-          color: getHistogramColor(d.histogram, prevHistogram)
-        }
-      })
-      histogramRef.current.setData(histogramData)
-
-      // Zero line
-      const zeroData = data.map(d => ({
-        time: d.time as Time,
-        value: 0
-      }))
-      zeroLineRef.current.setData(zeroData)
-
-      if (chartRef.current && (!hasInitialFit.current || isTimeframeChange)) {
-        chartRef.current.timeScale().fitContent()
-        hasInitialFit.current = true
+      let color: string
+      if (d.histogram >= 0) {
+        // Positive: green shades
+        color = isRising ? '#26a69a' : '#1e8c7e'
+      } else {
+        // Negative: red shades
+        color = isRising ? '#ef5350' : '#c62828'
       }
-      
-      prevLastTimeRef.current = lastPoint.time
-      prevDataLength.current = data.length
-    }, isInitialLoad ? 0 : 100)
 
-    return () => {
-      if (updateThrottleRef.current) {
-        clearTimeout(updateThrottleRef.current)
+      return {
+        time: d.time as Time,
+        value: d.histogram,
+        color: color
       }
+    })
+    histogramRef.current.setData(histogramData)
+
+    // Zero line
+    const zeroData = data.map(d => ({
+      time: d.time as Time,
+      value: 0
+    }))
+    zeroLineRef.current.setData(zeroData)
+
+    // Auto-fit content
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent()
     }
   }, [data])
 

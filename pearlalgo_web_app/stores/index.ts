@@ -60,51 +60,9 @@ export {
   selectMLFilterPerformance,
   selectSessionContext,
   selectSignalActivity,
-  // AI mode selectors (consolidated from page.tsx)
-  selectAIMode,
-  selectAgentModeBadge,
-  selectRegimeBadge,
-  // Fine-grained selectors for atomic updates
-  selectDailyStats,
-  selectSystemStatus,
-  selectDataQuality,
-  selectErrorSummary,
-  selectPearlInsights,
-  selectPearlSuggestion,
-  selectLastSignalDecision,
-  selectConnectionHealth,
-  type AIMode,
-  type AgentModeBadge,
-  type RegimeBadge,
-  type DailyStats,
-  type SystemStatus,
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'
-
-export {
-  usePearlStore,
-  type PearlMessage,
-  type TradingContext,
-  type PearlTab,
-  type DismissFeedbackReason,
-  type SuggestionFeedback,
-  type PearlSettings,
-  selectMessages,
-  selectIsConnected as selectPearlIsConnected,
-  selectIsHeaderExpanded,
-  selectActiveTab,
-  selectTradingContext,
-  selectInputValue,
-  selectIsLoading as selectPearlIsLoading,
-  selectShowContext,
-  selectUnreadCount,
-  selectSessionId,
-  selectFeedbackHistory,
-  selectSettings,
-  selectShowFeedbackModal,
-  selectPendingDismissSuggestionId,
-} from './pearlStore'
 export type {
   CandleData,
   IndicatorData,
@@ -126,7 +84,7 @@ export {
   selectRSI,
 } from './chartStore'
 
-export { useUIStore, type DataSource, type UnifiedConnectionStatus, type ConnectionStatusInfo } from './uiStore'
+export { useUIStore, type DataSource } from './uiStore'
 export {
   selectWsStatus,
   selectIsConnected,
@@ -136,11 +94,6 @@ export {
   selectIsFetching,
   selectLastFetchDuration,
   selectFetchCount,
-  selectChartsLocked,
-  selectLastUpdate,
-  selectIsLive,
-  selectUnifiedConnectionStatus,
-  selectConnectionStatusInfo,
 } from './uiStore'
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'
@@ -154,9 +107,3 @@ export {
   selectIndicatorVisibility,
   getThemePreset,
 } from './chartSettingsStore'
-
-export {
-  useAdminStore,
-  selectIsAuthenticated,
-  selectShowAuthModal,
-} from './adminStore'

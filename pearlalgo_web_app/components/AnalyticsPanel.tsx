@@ -2,8 +2,6 @@
 
 import { useState, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import { Tabs } from './ui'
-import { formatPnL } from '@/lib/formatters'
 import type { AnalyticsData, RecentExit } from '@/stores'
 
 interface AnalyticsPanelProps {
@@ -25,6 +23,11 @@ interface DayPnL {
 
 export default function AnalyticsPanel({ analytics, recentExits = [] }: AnalyticsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>('sessions')
+
+  const formatPnL = (pnl: number) => {
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${pnl.toFixed(2)}`
+  }
 
   // Find max absolute P&L for bar scaling
   const maxSessionPnL = Math.max(
@@ -297,21 +300,29 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     )
   }
 
+  const getTabLabel = (tab: TabType): string => {
+    switch (tab) {
+      case 'sessions': return 'Sessions'
+      case 'hours': return 'Hours'
+      case 'duration': return 'Duration'
+      case 'calendar': return 'Calendar'
+    }
+  }
+
   return (
     <DataPanel title="Analytics" icon="📈">
       {/* Tab Navigation */}
-      <Tabs
-        tabs={[
-          { id: 'sessions' as TabType, label: 'Sessions' },
-          { id: 'hours' as TabType, label: 'Hours' },
-          { id: 'duration' as TabType, label: 'Duration' },
-          { id: 'calendar' as TabType, label: 'Calendar' },
-        ]}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        variant="compact"
-        aria-label="Analytics view"
-      />
+      <div className="analytics-tabs">
+        {(['sessions', 'hours', 'duration', 'calendar'] as TabType[]).map((tab) => (
+          <button
+            key={tab}
+            className={`analytics-tab ${activeTab === tab ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {getTabLabel(tab)}
+          </button>
+        ))}
+      </div>
 
       {/* Tab Content */}
       <div className="analytics-content">

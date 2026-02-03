@@ -1,8 +1,6 @@
 'use client'
 
-import { useMemo, memo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import { formatMinutesAgo } from '@/lib/formatters'
 import type { SignalActivity, LastSignalDecision } from '@/stores'
 
 interface SignalActivityPanelProps {
@@ -10,20 +8,22 @@ interface SignalActivityPanelProps {
   lastDecision: LastSignalDecision | null
 }
 
-function SignalActivityPanel({
+export default function SignalActivityPanel({
   signalActivity,
   lastDecision,
 }: SignalActivityPanelProps) {
-  // Format time ago from minutes using centralized formatter
+  // Format time ago
   const formatTimeAgo = (minutes: number | undefined) => {
     if (minutes === undefined || minutes === null) return '—'
     if (minutes < 1) return 'Just now'
-    const formatted = formatMinutesAgo(minutes)
-    return formatted === '—' ? '—' : `${formatted} ago`
+    if (minutes < 60) return `${Math.floor(minutes)}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ${Math.floor(minutes % 60)}m ago`
+    return `${Math.floor(hours / 24)}d ago`
   }
 
-  // Get activity level indicator - memoized
-  const activityLevel = useMemo(() => {
+  // Get activity level indicator
+  const getActivityLevel = () => {
     if (!signalActivity) return { level: 'unknown', label: 'Unknown', color: 'var(--text-secondary)' }
 
     const signalsPerHour = signalActivity.signals_last_hour
@@ -31,10 +31,12 @@ function SignalActivityPanel({
     if (signalsPerHour >= 1) return { level: 'medium', label: 'Moderate', color: 'var(--accent-yellow)' }
     if (signalsPerHour > 0) return { level: 'low', label: 'Quiet', color: 'var(--accent-yellow)' }
     return { level: 'none', label: 'Silent', color: 'var(--text-tertiary)' }
-  }, [signalActivity])
+  }
 
-  // Get quiet reason display - memoized
-  const quietReason = useMemo(() => {
+  const activityLevel = getActivityLevel()
+
+  // Get quiet reason display
+  const getQuietReason = () => {
     if (!signalActivity?.quiet_reason) return null
 
     // Map internal reasons to user-friendly text
@@ -52,7 +54,9 @@ function SignalActivityPanel({
     }
 
     return reasonMap[signalActivity.quiet_reason] || signalActivity.quiet_reason.replace(/_/g, ' ')
-  }, [signalActivity?.quiet_reason])
+  }
+
+  const quietReason = getQuietReason()
 
   // No data state
   if (!signalActivity && !lastDecision) {
@@ -181,5 +185,3 @@ function SignalActivityPanel({
     </DataPanel>
   )
 }
-
-export default memo(SignalActivityPanel)

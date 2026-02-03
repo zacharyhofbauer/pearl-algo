@@ -199,8 +199,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       },
       rightPriceScale: {
         borderColor: '#2a2a3a',
-        autoScale: true,
-        scaleMargins: { top: 0.16, bottom: 0.24 },
+        scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
         visible: true,
@@ -378,19 +377,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         window.removeEventListener('resize', resizeHandlerRef.current)
         resizeHandlerRef.current = null
       }
-      hasInitialFit.current = false
       onChartReady?.(null)
       chart.remove()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only create chart once on mount - barSpacing changes handled separately
-
-  // Update barSpacing without recreating the chart
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.timeScale().applyOptions({ barSpacing })
-    }
-  }, [barSpacing])
+  }, [barSpacing]) // onChartReady intentionally excluded to avoid recreation
 
   // Subscribe to crosshair move for tooltip
   useEffect(() => {
@@ -452,99 +443,38 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }
   }, [markersByTime])
 
-  // Track previous state to detect changes and prevent unnecessary updates
-  const prevDataRef = useRef<{ length: number; lastTime: number; lastClose: number }>({ length: 0, lastTime: 0, lastClose: 0 })
-  const hasInitialFit = useRef(false)
-  const updateThrottleRef = useRef<NodeJS.Timeout | null>(null)
+  // Track previous data length to detect major changes (like timeframe switch)
+  const prevDataLength = useRef(0)
 
-  // Update candle data - optimized to prevent flickering
+  // Update candle data
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    const lastCandle = data[data.length - 1]
-    const prev = prevDataRef.current
-    
-    // Detect what kind of update this is
-    const isInitialLoad = prev.length === 0
-    const isTimeframeChange = Math.abs(data.length - prev.length) > 50
-    const isSameCandle = data.length === prev.length && lastCandle.time === prev.lastTime
-    const isNewCandle = lastCandle.time !== prev.lastTime && !isTimeframeChange
-    
-    // For real-time updates to the same candle, use update() to avoid flicker
-    if (isSameCandle && lastCandle.close !== prev.lastClose) {
-      candleSeriesRef.current.update({
-        time: lastCandle.time as Time,
-        open: lastCandle.open,
-        high: lastCandle.high,
-        low: lastCandle.low,
-        close: lastCandle.close,
-      })
-      volumeSeriesRef.current.update({
-        time: lastCandle.time as Time,
-        value: lastCandle.volume || 0,
-        color: lastCandle.close >= lastCandle.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
-      })
-      prevDataRef.current = { length: data.length, lastTime: lastCandle.time, lastClose: lastCandle.close }
-      return
-    }
-    
-    // For new candles, append with update() and then do a full update occasionally
-    if (isNewCandle && !isInitialLoad) {
-      candleSeriesRef.current.update({
-        time: lastCandle.time as Time,
-        open: lastCandle.open,
-        high: lastCandle.high,
-        low: lastCandle.low,
-        close: lastCandle.close,
-      })
-      volumeSeriesRef.current.update({
-        time: lastCandle.time as Time,
-        value: lastCandle.volume || 0,
-        color: lastCandle.close >= lastCandle.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
-      })
-      prevDataRef.current = { length: data.length, lastTime: lastCandle.time, lastClose: lastCandle.close }
-      return
-    }
-    
-    // For initial load or timeframe change, do full setData
-    // Throttle to prevent rapid updates
-    if (updateThrottleRef.current) {
-      clearTimeout(updateThrottleRef.current)
-    }
-    
-    updateThrottleRef.current = setTimeout(() => {
-      if (!candleSeriesRef.current || !volumeSeriesRef.current) return
-      
-      // Cast time to Time type for lightweight-charts
-      const candleData = data.map((d) => ({
-        time: d.time as Time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-      }))
-      candleSeriesRef.current.setData(candleData)
+    // Cast time to Time type for lightweight-charts
+    const candleData = data.map((d) => ({
+      time: d.time as Time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }))
+    candleSeriesRef.current.setData(candleData)
 
-      const volumeData = data.map((d) => ({
-        time: d.time as Time,
-        value: d.volume || 0,
-        color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
-      }))
-      volumeSeriesRef.current.setData(volumeData)
+    const volumeData = data.map((d) => ({
+      time: d.time as Time,
+      value: d.volume || 0,
+      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+    }))
+    volumeSeriesRef.current.setData(volumeData)
 
-      if (chartRef.current && (isInitialLoad || isTimeframeChange || !hasInitialFit.current)) {
-        chartRef.current.priceScale('right').applyOptions({ autoScale: true })
+    // Auto-fit when data length changes significantly (timeframe switch) or on initial load
+    if (chartRef.current) {
+      const lengthChanged = Math.abs(data.length - prevDataLength.current) > 5
+      if (lengthChanged || prevDataLength.current === 0) {
         chartRef.current.timeScale().fitContent()
-        hasInitialFit.current = true
       }
-      
-      prevDataRef.current = { length: data.length, lastTime: lastCandle.time, lastClose: lastCandle.close }
-    }, isInitialLoad ? 0 : 100)
-
-    return () => {
-      if (updateThrottleRef.current) {
-        clearTimeout(updateThrottleRef.current)
-      }
+      chartRef.current.timeScale().scrollToRealTime()
+      prevDataLength.current = data.length
     }
   }, [data])
 
@@ -611,7 +541,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       // When hovering on a single trade, show that trade's entry+exit
       // Otherwise show aggregated markers
       let displayMarkers: any[] = []
-
+      
       if (activeSignalId && markers) {
         // Show individual markers for the active trade
         displayMarkers = markers
@@ -621,10 +551,10 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
             if (m.kind === 'exit') {
               position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
             }
-            let color = m.kind === 'entry'
-              ? 'rgba(180, 180, 180, 0.9)'
+            let color = m.kind === 'entry' 
+              ? 'rgba(180, 180, 180, 0.9)' 
               : ((m.pnl || 0) >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
-
+            
             return {
               time: m.time as any,
               position,
@@ -640,7 +570,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           if (m.kind === 'exit' && !m._isGrouped) {
             position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
           }
-
+          
           let color = m.color
           if (!m._isGrouped) {
             if (m.kind === 'entry') {
@@ -650,7 +580,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
               color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'
             }
           }
-
+          
           return {
             time: m.time as any,
             position,
@@ -662,7 +592,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           }
         })
       }
-
+      
       candleSeriesRef.current.setMarkers(displayMarkers)
     } catch (e) {
       console.warn('Failed to set markers:', e)

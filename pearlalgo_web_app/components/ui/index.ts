@@ -1,6 +1,2 @@
 export { InfoTooltip } from './InfoTooltip'
 export { StatDisplay } from './StatDisplay'
-export { StatusBadge } from './StatusBadge'
-export type { StatusType, BadgeVariant } from './StatusBadge'
-export { Tabs } from './Tabs'
-export type { Tab, TabVariant } from './Tabs'

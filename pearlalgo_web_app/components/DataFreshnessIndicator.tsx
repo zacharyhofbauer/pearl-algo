@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { WebSocketStatus } from '@/hooks/useWebSocket'
 
 interface DataFreshnessIndicatorProps {
@@ -12,9 +12,7 @@ interface DataFreshnessIndicatorProps {
   onRefresh?: () => void
   variant?: 'full' | 'compact' | 'floating'
   onFitAll?: () => void  // Chart action: fit all content
-  onGoLive?: () => void  // Chart action: scroll to real time (deprecated, use lock instead)
-  chartsLocked?: boolean  // Chart lock state
-  onToggleLock?: () => void  // Toggle chart lock
+  onGoLive?: () => void  // Chart action: scroll to real time
 }
 
 export default function DataFreshnessIndicator({
@@ -27,8 +25,6 @@ export default function DataFreshnessIndicator({
   variant = 'compact',
   onFitAll,
   onGoLive,
-  chartsLocked = false,
-  onToggleLock,
 }: DataFreshnessIndicatorProps) {
   const [secondsAgo, setSecondsAgo] = useState<number>(0)
   const [pulseKey, setPulseKey] = useState<number>(0)
@@ -77,7 +73,7 @@ export default function DataFreshnessIndicator({
   const getWsDisplay = () => {
     switch (wsStatus) {
       case 'connected':
-        return { icon: '●', label: 'WS', className: 'ws-connected' }
+        return { icon: '⚡', label: 'WS', className: 'ws-connected' }
       case 'connecting':
         return { icon: '🔄', label: 'WS', className: 'ws-connecting' }
       case 'disconnected':
@@ -112,12 +108,8 @@ export default function DataFreshnessIndicator({
         className={`freshness-compact ${statusClass}`}
         onClick={() => setIsExpanded(!isExpanded)}
         title="Click for details"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)}`}
       >
-        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey} aria-hidden="true"></span>
+        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
         <span className="freshness-time-compact">{formatTimeAgo(secondsAgo)}</span>
         {isLoading && <span className="freshness-loading-dot"></span>}
 
@@ -160,17 +152,12 @@ export default function DataFreshnessIndicator({
   // Floating version - under price with expand
   if (variant === 'floating') {
     return (
-      <div
-        className={`freshness-floating ${statusClass} ${isExpanded ? 'expanded' : ''}`}
-        role="status"
-        aria-live="polite"
-        aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}`}
-      >
+      <div className={`freshness-floating ${statusClass} ${isExpanded ? 'expanded' : ''}`}>
         <div
           className="freshness-floating-header"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey} aria-hidden="true"></span>
+          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
           <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.icon}</span>
@@ -197,27 +184,7 @@ export default function DataFreshnessIndicator({
               </svg>
             </button>
           )}
-          {onToggleLock && (
-            <button
-              className={`freshness-action-btn ${chartsLocked ? 'chart-locked-active' : ''}`}
-              onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
-              title={chartsLocked ? 'Unlock charts' : 'Lock charts (scroll mode)'}
-              aria-pressed={chartsLocked}
-            >
-              {chartsLocked ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 9.9-1" />
-                </svg>
-              )}
-            </button>
-          )}
-          {!onToggleLock && onGoLive && (
+          {onGoLive && (
             <button
               className="freshness-action-btn"
               onClick={(e) => { e.stopPropagation(); onGoLive(); }}
@@ -256,15 +223,9 @@ export default function DataFreshnessIndicator({
 
   // Full version (original)
   return (
-    <div
-      className={`data-freshness-indicator ${statusClass}`}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      aria-label={`Data freshness: ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)}`}
-    >
+    <div className={`data-freshness-indicator ${statusClass}`}>
       <div className="freshness-heartbeat" key={pulseKey}>
-        <span className={`heartbeat-dot ${isLoading ? 'loading' : ''}`} aria-hidden="true"></span>
+        <span className={`heartbeat-dot ${isLoading ? 'loading' : ''}`}></span>
       </div>
       <div className="freshness-time">
         <span className="time-label">Updated</span>
