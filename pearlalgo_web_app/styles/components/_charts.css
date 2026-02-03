@@ -31,8 +31,12 @@
   background: var(--bg-secondary);
   border-radius: var(--radius-xl);
   border: 1px solid var(--border-color);
-  overflow: hidden;
+  overflow: visible;
   position: relative;
+}
+
+.chart-container canvas {
+  border-radius: var(--radius-xl);
 }
 
 .chart-container-inner {

@@ -7,8 +7,8 @@ import { apiFetch } from '@/lib/api'
 import type { Position, DataSource } from '@/stores'
 
 // Configuration constants
-const REFRESH_INTERVAL = 30000 // 30 seconds (fallback when WebSocket disconnected)
-const WS_REFRESH_INTERVAL = 120000 // 120 seconds (slower when WebSocket connected)
+const REFRESH_INTERVAL = 60000 // 60 seconds (fallback when WebSocket disconnected)
+const WS_REFRESH_INTERVAL = 180000 // 180 seconds (slower when WebSocket connected)
 const MIN_BARS = 500 // Minimum bars to request for a full chart
 const MARKER_HOURS = 72 // Fetch 72 hours (3 days) of markers - API limit
 

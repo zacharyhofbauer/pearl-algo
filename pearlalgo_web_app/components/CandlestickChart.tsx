@@ -199,7 +199,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       },
       rightPriceScale: {
         borderColor: '#2a2a3a',
-        scaleMargins: { top: 0.1, bottom: 0.2 },
+        autoScale: true,
+        scaleMargins: { top: 0.16, bottom: 0.24 },
       },
       timeScale: {
         visible: true,
@@ -467,13 +468,10 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }))
     volumeSeriesRef.current.setData(volumeData)
 
-    // Auto-fit when data length changes significantly (timeframe switch) or on initial load
     if (chartRef.current) {
-      const lengthChanged = Math.abs(data.length - prevDataLength.current) > 5
-      if (lengthChanged || prevDataLength.current === 0) {
-        chartRef.current.timeScale().fitContent()
-      }
-      chartRef.current.timeScale().scrollToRealTime()
+      // Always auto-fit so the chart doesn't hug the top/bottom edges
+      chartRef.current.priceScale('right').applyOptions({ autoScale: true })
+      chartRef.current.timeScale().fitContent()
       prevDataLength.current = data.length
     }
   }, [data])
