@@ -2578,6 +2578,66 @@ body {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--space-4);
+  align-items: start;
+}
+
+/* Utility: force a panel to span the full grid width */
+.panel-span-all {
+  grid-column: 1 / -1;
+}
+
+/* Post-Trades panel grouping (core + advanced toggle) */
+.post-trades-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.post-trades-advanced-toggle-wrap {
+  padding: 4px;
+}
+
+.post-trades-advanced-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-default),
+              color var(--duration-fast) var(--ease-default),
+              border-color var(--duration-fast) var(--ease-default);
+}
+
+.post-trades-advanced-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  border-color: rgba(var(--accent-cyan-rgb), 0.22);
+}
+
+.post-trades-advanced-label {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.post-trades-advanced-sub {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.post-trades-advanced-icon {
+  font-size: 10px;
+  color: var(--text-tertiary);
 }
 
 /* Individual Data Panel */
@@ -4264,6 +4324,10 @@ body {
 
   .data-panels-grid {
     gap: 8px;
+  }
+
+  .post-trades-advanced-sub {
+    display: none;
   }
 
   /* Panel base styles */
@@ -12082,120 +12146,10 @@ body {
   color: var(--text-primary);
 }
 
-.trade-dock-table-scroll {
-  max-height: 240px;
-  overflow: auto;
-}
-
 .trade-dock-empty {
   padding: 14px 12px;
   color: var(--text-tertiary);
   font-size: 12px;
-}
-
-.trade-dock-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  min-width: 760px; /* Enables horizontal scroll on smaller screens */
-}
-
-.trade-dock-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  text-align: left;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-tertiary);
-  background: var(--bg-secondary);
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(42, 42, 58, 0.35);
-}
-
-.trade-dock-table tbody td {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(42, 42, 58, 0.25);
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.trade-dock-table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.trade-dock-table .num {
-  text-align: right;
-}
-
-.trade-dock-table .mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.trade-dock-symbol {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.trade-dock-symbol-main {
-  font-weight: 900;
-  letter-spacing: 0.2px;
-}
-
-.trade-dock-symbol-sub {
-  font-size: 10px;
-  color: var(--text-tertiary);
-}
-
-.trade-dock-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  border: 1px solid rgba(42, 42, 58, 0.35);
-  background: rgba(0, 0, 0, 0.18);
-}
-
-.trade-dock-pill.side-long {
-  color: rgba(var(--accent-green-rgb), 0.95);
-  border-color: rgba(var(--accent-green-rgb), 0.25);
-  background: rgba(var(--accent-green-rgb), 0.08);
-}
-
-.trade-dock-pill.side-short {
-  color: rgba(var(--accent-red-rgb), 0.95);
-  border-color: rgba(var(--accent-red-rgb), 0.25);
-  background: rgba(var(--accent-red-rgb), 0.08);
-}
-
-.trade-dock-reason {
-  display: inline-flex;
-  max-width: 220px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  color: var(--text-secondary);
-  border: 1px solid rgba(42, 42, 58, 0.35);
-  background: rgba(0, 0, 0, 0.18);
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-
-.trade-dock-table .pos {
-  color: var(--accent-green);
-}
-
-.trade-dock-table .neg {
-  color: var(--accent-red);
 }
 
 @media (max-width: 768px) {

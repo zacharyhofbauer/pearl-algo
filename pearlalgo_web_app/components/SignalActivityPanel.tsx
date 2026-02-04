@@ -1,16 +1,14 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-import type { SignalActivity, LastSignalDecision } from '@/stores'
+import type { SignalActivity } from '@/stores'
 
 interface SignalActivityPanelProps {
   signalActivity: SignalActivity | null
-  lastDecision: LastSignalDecision | null
 }
 
 export default function SignalActivityPanel({
   signalActivity,
-  lastDecision,
 }: SignalActivityPanelProps) {
   // Format time ago
   const formatTimeAgo = (minutes: number | undefined) => {
@@ -59,7 +57,7 @@ export default function SignalActivityPanel({
   const quietReason = getQuietReason()
 
   // No data state
-  if (!signalActivity && !lastDecision) {
+  if (!signalActivity) {
     return (
       <DataPanel title="Signal Activity" icon="📡" variant="status">
         <div className="signal-activity-empty">
@@ -145,29 +143,6 @@ export default function SignalActivityPanel({
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Last Decision */}
-        {lastDecision && lastDecision.timestamp && (
-          <div className="last-decision">
-            <div className="decision-header">
-              <span className="decision-label">Last Decision</span>
-              <span className={`decision-action ${lastDecision.action}`}>
-                {lastDecision.action === 'execute' ? '✓ Execute' : '✗ Skip'}
-              </span>
-            </div>
-            <div className="decision-details">
-              <span className="decision-type">{lastDecision.signal_type}</span>
-              {lastDecision.ml_probability !== undefined && lastDecision.ml_probability > 0 && (
-                <span className="decision-ml">
-                  ML: {(lastDecision.ml_probability * 100).toFixed(0)}%
-                </span>
-              )}
-              {lastDecision.reason && (
-                <span className="decision-reason">{lastDecision.reason}</span>
-              )}
-            </div>
           </div>
         )}
 

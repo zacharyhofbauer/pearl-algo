@@ -3,26 +3,21 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
-import DataPanelsContainer from '@/components/DataPanelsContainer'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
 import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
-import HelpPanel from '@/components/HelpPanel'
 import MarketPressurePanel from '@/components/MarketPressurePanel'
 import SystemHealthPanel from '@/components/SystemHealthPanel'
-import ConfigPanel from '@/components/ConfigPanel'
 import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
-import ActivePositionsPanel from '@/components/ActivePositionsPanel'
-import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
-import AIPerformancePanel from '@/components/AIPerformancePanel'
 import SignalActivityPanel from '@/components/SignalActivityPanel'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
+import PostTradesPanels from '@/components/PostTradesPanels'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
@@ -796,7 +791,6 @@ export default function PearlAlgoWebApp() {
               signalActivitySection={
                 <SignalActivityPanel
                   signalActivity={agentState.signal_activity}
-                  lastDecision={agentState.last_signal_decision}
                 />
               }
               performanceSection={
@@ -806,13 +800,6 @@ export default function PearlAlgoWebApp() {
                     expectancy={agentState.risk_metrics?.expectancy}
                   />
                 )
-              }
-              activePositionsSection={
-                <ActivePositionsPanel
-                  activeTradesCount={agentState.active_trades_count}
-                  recentExits={agentState.recent_exits}
-                  dailyPnL={agentState.daily_pnl}
-                />
               }
               challengeSection={
                 agentState.challenge && (
@@ -914,93 +901,8 @@ export default function PearlAlgoWebApp() {
             maxRecentRows={10}
           />
 
-          {/* Data Panels */}
-          {agentState && (
-            <DataPanelsContainer>
-          {/* System Status - Operational Readiness */}
-          <SystemStatusPanel
-            executionState={agentState.execution_state}
-            circuitBreaker={agentState.circuit_breaker}
-            marketRegime={agentState.market_regime}
-            sessionContext={agentState.session_context}
-            errorSummary={agentState.error_summary}
-            isRunning={agentState.running}
-            isPaused={agentState.paused}
-          />
-          {/* Signal Activity - Explain Trading Silence */}
-          <SignalActivityPanel
-            signalActivity={agentState.signal_activity}
-            lastDecision={agentState.last_signal_decision}
-          />
-          {agentState.performance && (
-            <PerformancePanel
-              performance={agentState.performance}
-              expectancy={agentState.risk_metrics?.expectancy}
-            />
-          )}
-          {/* Active Positions Panel */}
-          <ActivePositionsPanel
-            activeTradesCount={agentState.active_trades_count}
-            recentExits={agentState.recent_exits}
-            dailyPnL={agentState.daily_pnl}
-          />
-          {agentState.risk_metrics && (
-            <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
-          )}
-          {agentState.equity_curve && agentState.equity_curve.length > 0 && (
-            <EquityCurvePanel equityCurve={agentState.equity_curve} />
-          )}
-          {agentState.challenge && (
-            <ChallengePanel
-              challenge={agentState.challenge}
-              equityCurve={agentState.equity_curve}
-            />
-          )}
-          {/* Market Pressure Panel */}
-          {agentState.buy_sell_pressure && (
-            <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
-          )}
-          {/* Market Regime Panel */}
-          {agentState.market_regime && (
-            <MarketRegimePanel regime={agentState.market_regime} />
-          )}
-          {/* Signal Decisions Panel */}
-          {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
-            <SignalDecisionsPanel
-              rejections={agentState.signal_rejections_24h || null}
-              lastDecision={agentState.last_signal_decision || null}
-            />
-          )}
-          {/* Config Panel */}
-          {agentState.config && (
-            <ConfigPanel config={agentState.config} />
-          )}
-          {/* System Health Panel */}
-          {(agentState.cadence_metrics || agentState.gateway_status || agentState.connection_health || agentState.data_quality) && (
-            <SystemHealthPanel
-              cadenceMetrics={agentState.cadence_metrics || null}
-              dataFresh={agentState.data_fresh || false}
-              gatewayStatus={agentState.gateway_status}
-              connectionHealth={agentState.connection_health}
-              errorSummary={agentState.error_summary}
-              dataQuality={agentState.data_quality}
-            />
-          )}
-          {agentState.analytics && (
-            <AnalyticsPanel
-              analytics={agentState.analytics}
-              recentExits={agentState.recent_exits}
-            />
-          )}
-          {/* P&L Calendar */}
-          {agentState.recent_exits && agentState.recent_exits.length > 0 && (
-            <PnLCalendarPanel recentExits={agentState.recent_exits} />
-          )}
-            </DataPanelsContainer>
-          )}
-
-          {/* Help Panel - Quick Reference */}
-          <HelpPanel />
+          {/* Post-trade panels (signals / ops / advanced analytics) */}
+          {agentState && <PostTradesPanels agentState={agentState} />}
         </div>
       </div>
     </>

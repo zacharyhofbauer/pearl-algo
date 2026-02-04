@@ -6,12 +6,15 @@ import type { AgentState, RecentExit } from '@/stores'
 
 interface ActivePositionsPanelProps {
   activeTradesCount: number
+  /** Aggregate unrealized P&L across open (virtual) trades (USD) */
+  unrealizedPnL?: number | null
   recentExits?: RecentExit[]
   dailyPnL?: number
 }
 
 export default function ActivePositionsPanel({
   activeTradesCount,
+  unrealizedPnL = null,
   recentExits = [],
   dailyPnL = 0
 }: ActivePositionsPanelProps) {
@@ -41,6 +44,11 @@ export default function ActivePositionsPanel({
     })
   }
 
+  const formatPnL = (pnl: number) => {
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${pnl.toFixed(2)}`
+  }
+
   return (
     <DataPanel title="Active Positions" icon="📍" variant="status">
       <div className="grid grid-cols-2 gap-md">
@@ -55,8 +63,10 @@ export default function ActivePositionsPanel({
         {activeTradesCount > 0 && (
           <StatDisplay
             label="Unrealized"
-            value="—"
-            tooltip="Position details not available from backend"
+            value={unrealizedPnL === null || unrealizedPnL === undefined ? '—' : formatPnL(unrealizedPnL)}
+            colorMode="financial"
+            positive={typeof unrealizedPnL === 'number' && unrealizedPnL > 0}
+            negative={typeof unrealizedPnL === 'number' && unrealizedPnL < 0}
           />
         )}
 
@@ -72,8 +82,7 @@ export default function ActivePositionsPanel({
             <div className="col-span-full active-positions-note">
               <span className="note-icon">ℹ️</span>
               <span className="note-text">
-                {activeTradesCount} position{activeTradesCount > 1 ? 's' : ''} open.
-                Entry details available after exit.
+                {activeTradesCount} open trade{activeTradesCount > 1 ? 's' : ''}. Full details in the Trades dock above.
               </span>
             </div>
           </>
