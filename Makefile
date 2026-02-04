@@ -1,4 +1,4 @@
-.PHONY: help install test coverage arch secrets smoke ruff ruff-bugs audit docs ci
+.PHONY: help install test coverage arch secrets smoke ruff ruff-bugs audit docs eval eval-expanded eval-changed ci
 
 # Prefer the project virtualenv when present.
 PYTHON := $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
@@ -16,6 +16,9 @@ help:
 	@echo "  make ruff      - Run Ruff (may report pre-existing issues)"
 	@echo "  make audit     - Run pip-audit dependency scan"
 	@echo "  make docs      - Validate documentation path references"
+	@echo "  make eval      - Run Pearl AI prompt eval (mock mode, core dataset)"
+	@echo "  make eval-expanded - Run Pearl AI prompt eval (mock mode, expanded dataset)"
+	@echo "  make eval-changed  - Run prompt eval only if prompt files changed"
 	@echo "  make ci        - Run the same checks CI runs"
 
 install:
@@ -50,6 +53,15 @@ audit:
 
 docs:
 	$(PYTHON) scripts/testing/check_doc_references.py
+
+eval:
+	$(PYTHON) -m pearl_ai.eval.ci --mock
+
+eval-expanded:
+	$(PYTHON) -m pearl_ai.eval.ci --dataset golden_expanded.json --mock
+
+eval-changed:
+	$(PYTHON) -m pearl_ai.eval.ci --changed-only --mock
 
 ci: ruff-bugs arch secrets docs smoke audit test
 

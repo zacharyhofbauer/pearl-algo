@@ -76,8 +76,11 @@ class EvalCase:
     input_query: str
     input_state: Dict[str, Any] = field(default_factory=dict)
     expected_routing: Optional[str] = None  # "quick" or "deep"
+    expected_cache_hit: Optional[bool] = None
+    expected_fallback_used: Optional[bool] = None
     expected_tool: Optional[str] = None
     expected_tool_args: Optional[Dict[str, Any]] = None
+    max_sentences: Optional[int] = None  # Narration length constraint override
     quality_criteria: List[str] = field(default_factory=list)
     reference_response: Optional[str] = None
     failure_modes: List[str] = field(default_factory=list)
@@ -98,8 +101,11 @@ class EvalCase:
             input_query=data.get("input_query", ""),
             input_state=data.get("input_state", {}),
             expected_routing=data.get("expected_routing"),
+            expected_cache_hit=data.get("expected_cache_hit"),
+            expected_fallback_used=data.get("expected_fallback_used"),
             expected_tool=data.get("expected_tool"),
             expected_tool_args=data.get("expected_tool_args"),
+            max_sentences=data.get("max_sentences"),
             quality_criteria=data.get("quality_criteria", []),
             reference_response=data.get("reference_response"),
             failure_modes=data.get("failure_modes", []),
@@ -116,8 +122,11 @@ class EvalCase:
             "input_query": self.input_query,
             "input_state": self.input_state,
             "expected_routing": self.expected_routing,
+            "expected_cache_hit": self.expected_cache_hit,
+            "expected_fallback_used": self.expected_fallback_used,
             "expected_tool": self.expected_tool,
             "expected_tool_args": self.expected_tool_args,
+            "max_sentences": self.max_sentences,
             "quality_criteria": self.quality_criteria,
             "reference_response": self.reference_response,
             "failure_modes": self.failure_modes,

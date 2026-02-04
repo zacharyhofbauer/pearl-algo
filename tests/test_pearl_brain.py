@@ -370,3 +370,44 @@ class TestProactiveEngagement:
         assert "trade_entered" in brain.always_narrate_events
         assert "trade_exited" in brain.always_narrate_events
         assert "circuit_breaker_triggered" in brain.always_narrate_events
+
+
+class TestNarrationExpandedDetails:
+    """Narrations should include expanded details payload for dropdown UI."""
+
+    @pytest.mark.asyncio
+    async def test_narration_message_contains_details_metadata(self):
+        brain = PearlBrain(enable_local=False, enable_claude=False)
+        brain._current_state = {
+            "daily_pnl": 150.0,
+            "daily_trades": 5,
+            "daily_wins": 4,
+            "daily_losses": 1,
+            "market_regime": {"regime": "trending_up", "confidence": 0.75},
+            "buy_sell_pressure": {"bias": "buyer", "intensity": 0.6},
+            "last_signal_decision": {"ml_probability": 0.72},
+        }
+
+        captured = []
+        brain.add_message_handler(lambda m: captured.append(m))
+
+        await brain.narrate_event(
+            "trade_exited",
+            {"direction": "long", "pnl": 45.50, "exit_reason": "take_profit"},
+        )
+
+        assert len(captured) == 1
+        msg = captured[0]
+        assert msg.content
+        # One-sentence headline should not contain sentence break ". "
+        assert ". " not in msg.content
+
+        assert msg.metadata.get("headline") == msg.content
+        details = msg.metadata.get("details")
+        assert isinstance(details, dict)
+        assert details.get("title") == "Trade exited"
+        assert isinstance(details.get("lines"), list)
+        assert isinstance(details.get("fields"), dict)
+        assert isinstance(details.get("text"), str)
+        assert isinstance(details.get("kv"), list)
+        assert any(item.get("label") == "Trade P&L" for item in details.get("kv") or [])

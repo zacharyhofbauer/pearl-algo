@@ -17,6 +17,7 @@ dependencies = [
     "pytz>=2024.1",
     "ib-insync>=0.9.86,<1.0",
     "pyarrow>=16.0.0,<18.0",
+    "aiohttp>=3.10,<4.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,17 @@ all = ["openai>=1.40.0", "anthropic>=0.40.0", "httpx>=0.27.0"]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# Avoid accidentally bundling non-package artifacts (e.g., Next.js node_modules)
+# into wheels/sdists. We explicitly specify required package data below.
+include-package-data = false
+
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["pearlalgo", "pearlalgo.*", "pearl_ai", "pearl_ai.*"]
+namespaces = false
+exclude = ["pearlalgo_web_app*"]
+
+[tool.setuptools.package-data]
+pearl_ai = ["eval/datasets/*.json"]
 

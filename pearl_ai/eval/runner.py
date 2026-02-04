@@ -90,6 +90,8 @@ class EvalRunner:
         self.brain = brain
         self.mock_mode = mock_mode or brain is None
         self.config = config or {}
+        # Small cache to simulate cache_hit behavior in mock mode
+        self._mock_cache_keys: set[str] = set()
 
     async def run(
         self,
@@ -282,19 +284,47 @@ class EvalRunner:
 
         # Mock tool calls if expected
         tool_calls = []
+        tool_results = []
         if case.expected_tool:
             tool_calls = [{
                 "name": case.expected_tool,
                 "input": case.expected_tool_args or {},
             }]
+            tool_results = [{
+                "name": case.expected_tool,
+                "success": True,
+                "data": {},
+                "error": None,
+            }]
+
+        # Mock cache/fallback debug fields when requested
+        cache_hit = False
+        try:
+            key = json.dumps(
+                {"query": case.input_query, "state": case.input_state},
+                sort_keys=True,
+                default=str,
+            )
+            cache_hit = key in self._mock_cache_keys
+            self._mock_cache_keys.add(key)
+        except Exception:
+            cache_hit = False
+
+        if case.expected_cache_hit is not None:
+            cache_hit = bool(case.expected_cache_hit)
+
+        fallback_used = bool(case.expected_fallback_used) if case.expected_fallback_used is not None else False
 
         debug_info = ResponseDebugInfo(
             routing=routing,
             model_used=model,
             tool_calls=tool_calls,
+            tool_results=tool_results,
             input_tokens=100,
             output_tokens=50,
             latency_ms=50.0,
+            cache_hit=cache_hit,
+            fallback_used=fallback_used,
         )
 
         return response, debug_info

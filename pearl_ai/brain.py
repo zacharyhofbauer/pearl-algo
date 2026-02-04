@@ -26,7 +26,7 @@ from .data_access import TradeDataAccess
 from .cache import ResponseCache
 from .tools import ToolExecutor, format_tool_result_for_llm, PEARL_TOOLS
 from .config import get_config, PearlConfig
-from .types import SanitizationResult, TradingContextSummary, ChatResponseDict
+from .types import SanitizationResult, TradingContextSummary, ChatResponseDict, NarrationOutputDict
 
 logger = logging.getLogger(__name__)
 
@@ -321,12 +321,18 @@ class PearlBrain:
         latency_ms = (time.time() - start_time) * 1000
 
         if narration:
+            # Provide expanded details for dropdown/expanded UI without affecting the 1-line headline.
+            details = self.narrator.build_narration_details(event_type, context, self._current_state)
+            metadata = {"event_type": event_type, **context}
+            metadata["headline"] = narration
+            metadata["details"] = details
+
             message = PearlMessage(
                 content=narration,
                 message_type="narration",
                 priority="high" if event_type in self.always_narrate_events else "normal",
                 related_trade_id=context.get("signal_id"),
-                metadata={"event_type": event_type, **context},
+                metadata=metadata,
             )
             await self._emit_message(message)
             self._last_narration_time = datetime.now()
@@ -354,19 +360,59 @@ class PearlBrain:
                 response = await self.local_llm.generate(
                     prompt,
                     system="You are Pearl, an AI trading assistant. "
-                           "CRITICAL: Keep responses to 1-2 SHORT sentences only. "
-                           "Never exceed 40 words total. Be extremely concise. "
+                           "CRITICAL: Output EXACTLY 1 sentence only. "
+                           "Never exceed 25 words total. Be extremely concise. "
                            "State facts directly without elaboration.",
-                    max_tokens=80,  # Reduced to enforce brevity
+                    max_tokens=60,  # Reduced to enforce brevity
                 )
                 # Strip quotes if LLM wrapped the response
                 response = response.strip().strip('"').strip("'")
-                return response
+                return self._clamp_narration(event_type, response)
             except Exception as e:
                 logger.error(f"Local LLM error: {e}")
 
         # Fallback to template-based narration
-        return self.narrator.template_narration(event_type, context)
+        return self._clamp_narration(
+            event_type,
+            self.narrator.template_narration(event_type, context, self._current_state),
+        )
+
+    def _clamp_narration(self, event_type: str, text: str) -> str:
+        """
+        Enforce brevity constraints for narrations.
+
+        Many narrator prompts specify EXACTLY 1 sentence; this post-process ensures
+        we don't emit multi-sentence outputs due to model variance.
+        """
+        if not text:
+            return text
+
+        # Only clamp the high-frequency narration/event outputs.
+        clamp_one_sentence = event_type in {
+            "trade_entered",
+            "trade_exited",
+            "signal_generated",
+            "signal_rejected",
+            "circuit_breaker_triggered",
+            "direction_blocked",
+        }
+        if not clamp_one_sentence:
+            return text.strip()
+
+        import re
+
+        # Avoid splitting on decimal points in numbers (e.g., "$45.50").
+        safe = re.sub(r"(?<=\d)\.(?=\d)", "<DECIMAL>", text.strip())
+        parts = re.split(r"[.!?]+", safe)
+        parts = [p.strip() for p in parts if p.strip()]
+        if not parts:
+            return text.strip()
+
+        first = parts[0].replace("<DECIMAL>", ".").strip()
+        # Ensure it ends like a sentence.
+        if not re.search(r"[.!?]$", first):
+            first += "."
+        return first
 
     async def narrate(self, event_type: str, context: Dict[str, Any]) -> str:
         """
@@ -383,6 +429,19 @@ class PearlBrain:
             Generated narration text
         """
         return await self._generate_narration(event_type, context)
+
+    async def narrate_rich(self, event_type: str, context: Dict[str, Any]) -> NarrationOutputDict:
+        """
+        Generate narration headline + expanded details (UI-friendly).
+
+        Returns:
+            Dict with:
+            - headline: 1-sentence narration suitable for header/notification
+            - details: structured + text details for expanded view
+        """
+        headline = await self._generate_narration(event_type, context)
+        details = self.narrator.build_narration_details(event_type, context, self._current_state)
+        return {"headline": headline, "details": details}
 
     async def chat(
         self,
@@ -430,7 +489,10 @@ class PearlBrain:
                 self.memory.add_assistant_message(cached)
                 self._last_response_source = ResponseSource.CACHE
                 # Update eval instrumentation for cache hit
-                self._last_routing = "cache"
+                routed = complexity
+                if routed == QueryComplexity.AUTO:
+                    routed = self._classify_query(sanitized_message)
+                self._last_routing = routed.value
                 self._last_model = "cache"
                 self._last_input_tokens = 0
                 self._last_output_tokens = 0

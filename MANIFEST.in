@@ -1,0 +1,27 @@
+# Keep Python package distributions lean and reproducible.
+#
+# The repo contains a Next.js web app with large runtime/build artifacts (node_modules/.next)
+# that must never be shipped in Python sdists/wheels.
+
+prune pearlalgo_web_app/node_modules
+prune pearlalgo_web_app/.next
+prune node_modules
+prune .next
+
+# Some build backends can still pick up stray files under these trees;
+# ensure they are excluded even if the directory itself wasn't included.
+recursive-exclude pearlalgo_web_app/node_modules *
+recursive-exclude pearlalgo_web_app/.next *
+recursive-exclude node_modules *
+recursive-exclude .next *
+
+# Local outputs
+prune eval-reports
+prune pearl_ai/eval/reports
+prune dist
+prune build
+
+# Caches / temp
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store

@@ -17,6 +17,7 @@
         "running": true
       },
       "expected_routing": "quick",
+      "expected_cache_hit": false,
       "quality_criteria": [
         "Must mention $150",
         "Should mention wins or trades"
@@ -26,6 +27,25 @@
         "I placed"
       ],
       "tags": ["pnl", "status"]
+    },
+    {
+      "id": "cache_001",
+      "category": "quick",
+      "input_query": "What's my P&L?",
+      "input_state": {
+        "daily_pnl": 150.50,
+        "daily_trades": 5,
+        "daily_wins": 3,
+        "daily_losses": 2,
+        "active_trades_count": 0,
+        "running": true
+      },
+      "expected_routing": "quick",
+      "expected_cache_hit": true,
+      "quality_criteria": [
+        "Must mention $150"
+      ],
+      "tags": ["pnl", "status", "cache"]
     },
     {
       "id": "quick_002",
@@ -179,6 +199,20 @@
       "tags": ["analysis", "coaching"]
     },
     {
+      "id": "fallback_001",
+      "category": "deep",
+      "input_query": "Give me a detailed breakdown of my performance and what to improve.",
+      "input_state": {
+        "daily_pnl": 10.00,
+        "daily_trades": 1,
+        "daily_wins": 1,
+        "daily_losses": 0
+      },
+      "expected_routing": "deep",
+      "expected_fallback_used": true,
+      "tags": ["analysis", "fallback"]
+    },
+    {
       "id": "narration_001",
       "category": "narration",
       "input_query": "",
@@ -197,6 +231,7 @@
           "ml_probability": 0.72
         }
       },
+      "max_sentences": 1,
       "quality_criteria": [
         "Must mention LONG",
         "Must mention 25530",
@@ -219,6 +254,7 @@
         "daily_trades": 5,
         "daily_wins": 4
       },
+      "max_sentences": 1,
       "quality_criteria": [
         "Must mention P&L",
         "Should mention exit reason",
@@ -242,6 +278,7 @@
         "daily_losses": 1,
         "consecutive_losses": 1
       },
+      "max_sentences": 1,
       "quality_criteria": [
         "Should acknowledge loss constructively",
         "Should not blame user"
@@ -271,6 +308,7 @@
           }
         }
       },
+      "max_sentences": 1,
       "quality_criteria": [
         "Should explain ML filter rejection",
         "Should be 2 sentences or less"
@@ -289,6 +327,7 @@
       "input_state": {
         "daily_pnl": -200.00
       },
+      "max_sentences": 1,
       "quality_criteria": [
         "Should explain circuit breaker",
         "Should mention cooldown duration",

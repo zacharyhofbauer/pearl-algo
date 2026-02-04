@@ -244,6 +244,15 @@ If you prefer individual control:
   PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch # strict
   ```
 
+- **Prompt regression eval (Pearl AI prompts/tools):**
+  ```bash
+  # Fast, deterministic, no API calls
+  python3 -m pearl_ai.eval.ci --mock
+
+  # Optional: install pre-commit hook (runs eval when prompt files are staged)
+  ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit
+  ```
+
 ---
 
 ## 6. Logs (systemd / journalctl)

@@ -39,6 +39,7 @@ for compatibility with existing Telegram/mobile views.
 
 - **Telegram**: use *Health → Doctor* or `/doctor` for a 24h rollup (signals, rejects, stops, sizing)
 - **CLI**: `python scripts/monitoring/doctor_cli.py --hours 24`
+- **Pearl AI prompts**: `make eval` (prompt regression suite; mock mode, no API calls)
 
 ### Execution safety model (non-negotiable)
 

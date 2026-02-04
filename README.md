@@ -63,6 +63,9 @@ Service behavior is configured in `config/config.yaml`.
 # Validation runner (telegram/signals/service/arch)
 python3 scripts/testing/test_all.py
 
+# Pearl AI prompt regression eval (fast, no API calls)
+python3 -m pearl_ai.eval.ci --mock
+
 # Type checking (mypy)
 mypy src/pearlalgo
 
@@ -79,6 +82,9 @@ make install
 # Run the same checks CI runs locally
 make ci
 
+# Pearl AI prompt eval (mock mode)
+make eval
+
 # Optional: dependency vulnerability scan
 make audit
 ```
@@ -90,6 +96,8 @@ GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs:
 - Architecture boundary enforcement
 - Secret scan on tracked files
 - Multi-market config + state isolation smoke test
+
+Prompt regression testing lives at `.github/workflows/eval.yml` and runs Pearl AI eval suites when prompt-related files change (uploads an eval report artifact and posts a PR summary).
 
 ## Docs (start here)
 

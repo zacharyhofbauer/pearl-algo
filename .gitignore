@@ -10,6 +10,8 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+build/
+dist/
 
 # Secrets / local environment (never commit)
 .env
@@ -26,6 +28,8 @@ signals/
 journal/
 telemetry/
 reports/
+eval-reports/
+pearl_ai/eval/reports/
 state_cache/
 tests/artifacts/
 

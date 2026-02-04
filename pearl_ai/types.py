@@ -113,6 +113,23 @@ class ChatResponseDict(TypedDict):
     source: Literal["cache", "local", "claude", "template"]
 
 
+class NarrationDetailsDict(TypedDict, total=False):
+    """Expanded narration payload for dropdown/expanded UI."""
+    title: str
+    lines: List[str]
+    text: str
+    fields: Dict[str, Any]
+    kv: List[Dict[str, Any]]
+    sections: List[Dict[str, Any]]
+    truncated: bool
+
+
+class NarrationOutputDict(TypedDict):
+    """Narration headline + expanded details."""
+    headline: str
+    details: NarrationDetailsDict
+
+
 class MarketRegimeInfo(TypedDict, total=False):
     """Market regime information."""
     regime: str

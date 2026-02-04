@@ -60,6 +60,23 @@ python3 scripts/testing/smoke_multi_market.py
 pytest tests/
 ```
 
+### Option 4: Pearl AI prompt regression eval (fast, no API calls)
+```bash
+# Core golden suite (mock mode)
+python3 -m pearl_ai.eval.ci --mock
+
+# Expanded suite
+python3 -m pearl_ai.eval.ci --dataset golden_expanded.json --mock
+
+# Only run if prompt files changed (handy before committing)
+python3 -m pearl_ai.eval.ci --changed-only --mock
+```
+
+**Optional pre-commit hook (runs eval when prompt files are staged):**
+```bash
+ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit
+```
+
 ---
 
 ## 🎯 Testing Levels

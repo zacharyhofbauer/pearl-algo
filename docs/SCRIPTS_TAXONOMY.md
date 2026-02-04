@@ -59,6 +59,14 @@ Backtesting scripts for strategy validation on historical data.
 - `report_orphan_modules.py`
   - **Role**: Orphan-module report; lists src modules not reachable from entry points/tests/scripts.
 
+## Git hooks / CI guardrails (`scripts/`)
+
+- `pre-commit-eval.sh`
+  - **Role**: Optional pre-commit hook that runs Pearl AI prompt regression eval when prompt files are staged.
+  - **Triggers on**: staged changes to `pearl_ai/(brain|narrator|tools|config).py`.
+  - **Runs**: `python -m pearl_ai.eval.ci --mock` (fast, no API calls).
+  - **Install**: `ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit`
+
 ## Maintenance (`scripts/maintenance/`)
 
 Scripts for repository hygiene and cleanup operations.

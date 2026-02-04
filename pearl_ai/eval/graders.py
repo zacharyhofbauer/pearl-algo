@@ -163,6 +163,74 @@ def grade_tool_selection(
     )
 
 
+# -----------------------------------------------------------------------------
+# Tool Results Grader
+# -----------------------------------------------------------------------------
+
+def grade_tool_results(
+    case: EvalCase,
+    response: str,
+    debug_info: ResponseDebugInfo,
+) -> GradeResult:
+    """
+    Grade whether tool results were captured when tools are called.
+
+    PASS if:
+    - No expected tool is specified (SKIP)
+    - Expected tool was called and a corresponding tool_result exists
+
+    FAIL if tool was called but tool_results is missing or doesn't include the tool.
+    """
+    expected_tool = case.expected_tool
+    if expected_tool is None:
+        return GradeResult(
+            grader_name="tool_results",
+            status=GradeStatus.SKIP,
+            score=1.0,
+            reason="No expected tool specified",
+        )
+
+    tool_calls = debug_info.tool_calls or []
+    if not tool_calls:
+        return GradeResult(
+            grader_name="tool_results",
+            status=GradeStatus.SKIP,
+            score=1.0,
+            reason="No tool calls captured",
+        )
+
+    tool_results = debug_info.tool_results or []
+    if not tool_results:
+        return GradeResult(
+            grader_name="tool_results",
+            status=GradeStatus.FAIL,
+            score=0.0,
+            reason="Tool was called but tool_results is empty/missing",
+            details={"expected_tool": expected_tool, "tool_calls": tool_calls},
+        )
+
+    matching = [tr for tr in tool_results if tr.get("name") == expected_tool]
+    if matching:
+        # Basic schema sanity checks
+        tr0 = matching[0]
+        has_success = "success" in tr0
+        return GradeResult(
+            grader_name="tool_results",
+            status=GradeStatus.PASS if has_success else GradeStatus.PARTIAL,
+            score=1.0 if has_success else 0.7,
+            reason=f"Captured tool result for '{expected_tool}'",
+            details={"tool_result": tr0},
+        )
+
+    return GradeResult(
+        grader_name="tool_results",
+        status=GradeStatus.FAIL,
+        score=0.0,
+        reason=f"No tool_result found for expected tool '{expected_tool}'",
+        details={"expected_tool": expected_tool, "tool_results": tool_results},
+    )
+
+
 def _check_tool_args(expected: Dict[str, Any], actual: Dict[str, Any]) -> bool:
     """Check if actual args match expected (expected is subset check)."""
     for key, value in expected.items():
@@ -272,6 +340,10 @@ def grade_length_compliance(
             reason="Length check only applies to narration",
         )
 
+    # Allow per-case override (e.g., EXACTLY 1 sentence narrations)
+    if case.max_sentences is not None:
+        max_sentences = int(case.max_sentences)
+
     # Count sentences (split on sentence-ending punctuation).
     # Avoid counting decimal points in numbers (e.g., "$45.50") as sentence breaks.
     text = re.sub(r"(?<=\d)\.(?=\d)", "<DECIMAL>", response)
@@ -313,6 +385,78 @@ def grade_length_compliance(
             reason=f"Too verbose ({sentence_count} sentences, {word_count} words)",
             details={"sentences": sentence_count, "words": word_count},
         )
+
+
+# -----------------------------------------------------------------------------
+# Debug Field Graders
+# -----------------------------------------------------------------------------
+
+def grade_cache_hit(
+    case: EvalCase,
+    response: str,
+    debug_info: ResponseDebugInfo,
+) -> GradeResult:
+    """Grade whether cache_hit matches expectation when specified."""
+    if case.expected_cache_hit is None:
+        return GradeResult(
+            grader_name="cache_hit",
+            status=GradeStatus.SKIP,
+            score=1.0,
+            reason="No expected cache_hit specified",
+        )
+
+    actual = bool(debug_info.cache_hit)
+    expected = bool(case.expected_cache_hit)
+    if actual == expected:
+        return GradeResult(
+            grader_name="cache_hit",
+            status=GradeStatus.PASS,
+            score=1.0,
+            reason=f"cache_hit matches expected ({expected})",
+            details={"actual": actual, "expected": expected},
+        )
+
+    return GradeResult(
+        grader_name="cache_hit",
+        status=GradeStatus.FAIL,
+        score=0.0,
+        reason=f"Expected cache_hit={expected}, got {actual}",
+        details={"actual": actual, "expected": expected},
+    )
+
+
+def grade_fallback_used(
+    case: EvalCase,
+    response: str,
+    debug_info: ResponseDebugInfo,
+) -> GradeResult:
+    """Grade whether fallback_used matches expectation when specified."""
+    if case.expected_fallback_used is None:
+        return GradeResult(
+            grader_name="fallback_used",
+            status=GradeStatus.SKIP,
+            score=1.0,
+            reason="No expected fallback_used specified",
+        )
+
+    actual = bool(debug_info.fallback_used)
+    expected = bool(case.expected_fallback_used)
+    if actual == expected:
+        return GradeResult(
+            grader_name="fallback_used",
+            status=GradeStatus.PASS,
+            score=1.0,
+            reason=f"fallback_used matches expected ({expected})",
+            details={"actual": actual, "expected": expected},
+        )
+
+    return GradeResult(
+        grader_name="fallback_used",
+        status=GradeStatus.FAIL,
+        score=0.0,
+        reason=f"Expected fallback_used={expected}, got {actual}",
+        details={"actual": actual, "expected": expected},
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -726,12 +870,14 @@ class GraderRegistry:
         grade_no_hallucination_patterns,
         grade_voice_basic,
         grade_quality_criteria,
+        grade_cache_hit,
+        grade_fallback_used,
     ]
 
     # Category-specific graders
     CATEGORY_GRADERS = {
         "quick": [grade_routing, grade_factual_numbers],
-        "deep": [grade_routing, grade_tool_selection, grade_format_compliance, grade_factual_numbers],
+        "deep": [grade_routing, grade_tool_selection, grade_tool_results, grade_format_compliance, grade_factual_numbers],
         "narration": [grade_length_compliance, grade_factual_numbers],
         "tool_selection": [grade_tool_selection],
         "coaching": [grade_factual_numbers],

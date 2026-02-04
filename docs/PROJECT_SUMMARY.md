@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
 **Version:** 0.2.4  
-**Last Updated:** 2026-01-29 (Live Chart Enhancements, Cloudflare Tunnel, Maintenance Scripts)  
+**Last Updated:** 2026-02-04 (Pearl AI prompt eval framework + CI workflow)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -872,6 +872,7 @@ In practice:
    - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
    - `smoke_multi_market.py`: Multi-market config + state isolation smoke
    - `check_no_secrets.py`: Secret detection guardrail
+   - `python -m pearl_ai.eval.ci --mock`: Pearl AI prompt regression eval (golden suite; see `.github/workflows/eval.yml`)
 
 ### Running Tests
 
