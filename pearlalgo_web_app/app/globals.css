@@ -286,9 +286,9 @@ body {
 .header-row-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: clamp(8px, 2vw, 16px);
-  padding: clamp(8px, 2vw, 12px) clamp(12px, 2vw, 20px);
+  justify-content: flex-start;
+  gap: 10px;
+  padding: clamp(8px, 2vw, 12px) clamp(10px, 2vw, 16px);
   background: linear-gradient(165deg, rgba(18, 18, 28, 0.95) 0%, rgba(24, 24, 36, 0.92) 100%);
   backdrop-filter: blur(16px);
   border-radius: 12px;
@@ -375,6 +375,7 @@ body {
 /* Timeframe Selector */
 .header-timeframe {
   display: flex;
+  justify-content: flex-start;
   gap: 3px;
   background: rgba(0, 0, 0, 0.35);
   padding: 3px;
@@ -445,14 +446,15 @@ body {
 .header-row-secondary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: clamp(8px, 2vw, 16px);
+  justify-content: flex-start;
+  gap: clamp(10px, 2.5vw, 16px);
   padding: 8px clamp(12px, 2vw, 20px);
   margin-top: 6px;
   background: rgba(18, 18, 28, 0.7);
   border-radius: 10px;
   border: 1px solid rgba(60, 60, 80, 0.25);
   flex-wrap: wrap;
+  min-height: 34px;
 }
 
 /* Badges */
@@ -461,10 +463,11 @@ body {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .header-badges .badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
@@ -474,6 +477,7 @@ body {
   letter-spacing: 0.3px;
   flex-shrink: 0;
   white-space: nowrap;
+  min-width: fit-content;
 }
 
 .header-badges .agent-badge {
@@ -550,6 +554,8 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .header-health .health-dot {
@@ -617,10 +623,10 @@ body {
 
   .header-row-main {
     padding: 8px 10px;
-    gap: 6px;
+    gap: 8px;
     border-radius: 8px;
     flex-wrap: nowrap;
-    justify-content: space-between;
+    justify-content: flex-start;
     overflow: visible;
   }
 
@@ -648,37 +654,23 @@ body {
     flex-shrink: 0;
   }
 
-  /* Timeframe - scrollable with fade indicator */
+  /* Timeframe - scrollable on mobile */
   .header-timeframe {
-    flex: 1;
-    min-width: 0;
+    flex-shrink: 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     justify-content: flex-start;
-    position: relative;
-    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
   }
 
   .header-timeframe::-webkit-scrollbar {
     display: none;
   }
 
-  /* Header badges - scrollable on mobile */
+  /* Header badges - wrap on mobile (no scroll/mask to avoid clipping) */
   .header-badges {
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    flex-wrap: nowrap;
-    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
-  }
-
-  .header-badges::-webkit-scrollbar {
-    display: none;
+    flex-wrap: wrap;
   }
 
   .header-badges .badge {
@@ -739,7 +731,7 @@ body {
     padding: 6px 10px;
     margin-top: 4px;
     gap: 8px;
-    justify-content: space-between;
+    justify-content: flex-start;
     border-radius: 6px;
   }
 
@@ -2680,10 +2672,12 @@ body {
 .data-panel-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  min-height: 36px;
 }
 
 .data-panel-header-right {
@@ -2692,6 +2686,7 @@ body {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .data-panel-header-right .data-panel-badge {
@@ -11975,7 +11970,7 @@ body {
 
 .trade-dock-header-stats {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
@@ -11983,10 +11978,15 @@ body {
 
 .trade-dock-header-stats .dock-stat {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(60, 60, 80, 0.35);
   font-size: 11px;
-  line-height: 1.1;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .trade-dock-header-stats .dock-stat-k {
@@ -12001,7 +12001,16 @@ body {
   font-family: var(--font-mono);
   font-weight: 900;
   color: var(--text-primary);
-  white-space: nowrap;
+}
+
+.trade-dock-header-stats .dock-stat.pnl.positive {
+  background: rgba(0, 230, 118, 0.08);
+  border-color: rgba(0, 230, 118, 0.25);
+}
+
+.trade-dock-header-stats .dock-stat.pnl.negative {
+  background: rgba(255, 82, 82, 0.08);
+  border-color: rgba(255, 82, 82, 0.25);
 }
 
 .trade-dock-header-stats .dock-stat.pnl.positive .dock-stat-v { color: var(--accent-green); }
@@ -12010,20 +12019,28 @@ body {
 .trade-dock-header-stats .dock-stat.wl .dock-stat-v .win { color: var(--accent-green); }
 .trade-dock-header-stats .dock-stat.wl .dock-stat-v .loss { color: var(--accent-red); }
 
+.trade-dock-header-stats .dock-stat.pos {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: rgba(0, 212, 255, 0.3);
+}
+
 .trade-dock-header-stats .dock-stat.pos .dock-stat-v {
   color: var(--accent-cyan);
-  background: rgba(var(--accent-cyan-rgb), 0.14);
-  border: 1px solid rgba(var(--accent-cyan-rgb), 0.25);
-  padding: 2px 6px;
-  border-radius: 8px;
+  font-weight: 900;
 }
 
 @media (max-width: 480px) {
   .trade-dock-header-stats {
-    gap: 8px;
+    gap: 6px;
+  }
+  .trade-dock-header-stats .dock-stat {
+    padding: 3px 6px;
   }
   .trade-dock-header-stats .dock-stat-k {
-    display: none;
+    font-size: 8px;
+  }
+  .trade-dock-header-stats .dock-stat-v {
+    font-size: 10px;
   }
 }
 
