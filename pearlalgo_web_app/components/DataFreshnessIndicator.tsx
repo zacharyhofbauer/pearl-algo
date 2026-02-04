@@ -69,19 +69,53 @@ export default function DataFreshnessIndicator({
     return 'fresh'
   }
 
-  // Get WebSocket status display
+  // Get WebSocket status display with icons
   const getWsDisplay = () => {
     switch (wsStatus) {
       case 'connected':
-        return { label: 'WS', className: 'ws-connected' }
+        return {
+          label: 'WS',
+          className: 'ws-connected',
+          icon: (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 3L4 14h7l-2 7 9-11h-7l2-7z"/>
+            </svg>
+          )
+        }
       case 'connecting':
-        return { label: 'WS', className: 'ws-connecting' }
+        return {
+          label: 'WS',
+          className: 'ws-connecting',
+          icon: (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin-icon">
+              <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity="0.25"/>
+              <path d="M21 12a9 9 0 01-9 9"/>
+            </svg>
+          )
+        }
       case 'disconnected':
-        return { label: 'POLL', className: 'ws-disconnected' }
+        return {
+          label: 'POLL',
+          className: 'ws-disconnected',
+          icon: (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M2 12h4M18 12h4M12 2v4M12 18v4"/>
+            </svg>
+          )
+        }
       case 'error':
-        return { label: 'ERR', className: 'ws-error' }
+        return {
+          label: 'ERR',
+          className: 'ws-error',
+          icon: (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L2 22h20L12 2zm0 6v6m0 4h.01"/>
+            </svg>
+          )
+        }
       default:
-        return { label: '?', className: 'ws-unknown' }
+        return { label: '?', className: 'ws-unknown', icon: null }
     }
   }
 
@@ -132,7 +166,10 @@ export default function DataFreshnessIndicator({
             </div>
             <div className="freshness-panel-row">
               <span className="panel-label">Connection</span>
-              <span className={`panel-badge ${wsDisplay.className}`}>{wsDisplay.label}</span>
+              <span className={`panel-badge ${wsDisplay.className}`}>
+                {wsDisplay.icon}
+                {wsDisplay.label}
+              </span>
             </div>
             {onRefresh && (
               <button
@@ -160,7 +197,10 @@ export default function DataFreshnessIndicator({
           <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
-          <span className={`freshness-ws-badge ${wsDisplay.className}`}>{wsDisplay.label}</span>
+          <span className={`freshness-ws-badge ${wsDisplay.className}`}>
+            {wsDisplay.icon}
+            {wsDisplay.label}
+          </span>
           {onRefresh && (
             <button
               className={`freshness-refresh-btn ${isLoading ? 'spinning' : ''}`}
@@ -237,6 +277,7 @@ export default function DataFreshnessIndicator({
         {sourceDisplay.label}
       </div>
       <div className={`freshness-ws ${wsDisplay.className}`} title={`WebSocket: ${wsStatus}`}>
+        {wsDisplay.icon}
         <span className="ws-label">{wsDisplay.label}</span>
       </div>
       {onRefresh && (

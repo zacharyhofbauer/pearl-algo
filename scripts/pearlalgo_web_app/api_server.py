@@ -1006,7 +1006,7 @@ class ConnectionManager:
                         if self.active_connections and combined_hash != self._last_state_hash:
                             self._last_state_hash = combined_hash
 
-                            # Build the same response as /api/state
+                            # Build the same response as /api/state (full data for real-time updates)
                             daily_stats = _compute_daily_stats(_state_dir)
                             broadcast_data = {
                                 "type": "state_update",
@@ -1019,6 +1019,7 @@ class ConnectionManager:
                                     "daily_losses": daily_stats["daily_losses"],
                                     "active_trades_count": state.get("active_trades_count", 0),
                                     "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+                                    "futures_market_open": state.get("futures_market_open", False),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
@@ -1030,7 +1031,23 @@ class ConnectionManager:
                                     "error_summary": _get_error_summary(_state_dir, state),
                                     "config": _get_config(state),
                                     "data_quality": _get_data_quality(state),
+                                    # Performance data (previously HTTP-only)
+                                    "challenge": _get_challenge_status(_state_dir),
+                                    "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                                    "performance": _compute_performance_stats(_state_dir),
+                                    "equity_curve": _get_equity_curve(_state_dir, hours=72),
+                                    "risk_metrics": _get_risk_metrics(_state_dir),
+                                    # Signal activity & execution state
+                                    "signal_rejections_24h": state.get("signal_rejections_24h"),
+                                    "last_signal_decision": state.get("last_signal_decision"),
+                                    "shadow_counters": state.get("shadow_counters"),
+                                    "execution_state": state.get("execution_state"),
+                                    "circuit_breaker": state.get("circuit_breaker"),
+                                    "ml_filter_performance": state.get("ml_filter_performance"),
+                                    "session_context": state.get("session_context"),
+                                    "signal_activity": state.get("signal_activity"),
                                     # Pearl AI (read-only) insights from agent state (shadow mode)
+                                    "pearl_suggestion": _get_pearl_suggestion(),
                                     "pearl_insights": state.get("pearl_insights"),
                                     # Whether LLM chat endpoints are mounted/available on this API server
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
