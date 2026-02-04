@@ -39,6 +39,25 @@ interface PearlInsightsPanelProps {
 type DropdownTab = 'overview' | 'feed' | 'chat' | 'costs'
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Simple markdown-to-HTML converter for Pearl AI messages */
+function renderSimpleMarkdown(text: string): string {
+  return text
+    // Bold: **text** or __text__
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    // Italic: *text* or _text_
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>')
+    // Bullet points at start of line
+    .replace(/^[•\-\*]\s+/gm, '<span class="md-bullet">•</span> ')
+    // Line breaks
+    .replace(/\n/g, '<br />')
+}
+
+// ============================================================================
 // Sub-components
 // ============================================================================
 
@@ -478,7 +497,10 @@ export default function PearlInsightsPanel({
               <div className="pearl-dropdown-headline-row">
                 <span className={`pearl-heartbeat-dot ${data.status.heartbeatRecent ? 'on' : 'off'}`} />
                 <span className={`pearl-dropdown-mode ${data.status.mode}`}>{data.status.mode.toUpperCase()}</span>
-                <span className="pearl-dropdown-headline-text">{data.headline.text}</span>
+                <span
+                  className="pearl-dropdown-headline-text"
+                  dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(data.headline.text) }}
+                />
               </div>
               <span className="pearl-dropdown-ago">{formatAgo(data.status.lastActivityTs)}</span>
             </div>

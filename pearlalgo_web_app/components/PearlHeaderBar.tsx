@@ -120,7 +120,7 @@ export default function PearlHeaderBar() {
   return (
     <div
       ref={headerRef}
-      className={`pearl-header-bar ${expanded ? 'expanded' : ''}`}
+      className={`pearl-header-bar ${expanded ? 'expanded' : ''} mode-${aiMode}`}
       onClick={handleToggle}
       onKeyDown={handleKeyDown}
       role="button"
