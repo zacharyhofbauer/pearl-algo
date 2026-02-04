@@ -80,6 +80,18 @@ class MockExecutionAdapter(ExecutionAdapter):
             status=OrderStatus.CANCELLED,
             signal_id="kill_switch",
         )]
+
+    async def flatten_all_positions(self) -> list[ExecutionResult]:
+        """Mock flatten all positions (kill switch)."""
+        # Mirror safety behavior: disarm immediately.
+        self.disarm()
+        # No broker in tests; clear tracked positions and return a successful no-op.
+        self._positions.clear()
+        return [ExecutionResult(
+            success=True,
+            status=OrderStatus.PLACED,
+            signal_id="kill_switch_flatten",
+        )]
     
     async def get_positions(self) -> list[Position]:
         """Mock get positions."""

@@ -26,6 +26,10 @@ def api_server_module(monkeypatch, tmp_path):
     monkeypatch.setattr(api_server.ws_manager, "start_broadcast_loop", _noop_broadcast_loop)
     monkeypatch.setattr(api_server, "_init_auth", lambda: None)
     monkeypatch.setattr(api_server, "_init_pearl_ai", lambda: None)
+    # Ensure operator lock does not interfere with API-key auth tests, even if
+    # the local environment has PEARL_OPERATOR_PASSPHRASE set.
+    monkeypatch.setattr(api_server, "_operator_passphrase", "")
+    monkeypatch.setattr(api_server, "_operator_enabled", False)
 
     # Ensure the state dir is isolated per-test
     api_server._state_dir = tmp_path

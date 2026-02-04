@@ -4946,8 +4946,6 @@ class MarketAgentService:
 
     def _auto_flat_due(self, now_utc: datetime, *, market_open: Optional[bool]) -> Optional[str]:
         """Return auto-flat reason if daily/Friday/weekend rule should trigger."""
-        if not self._auto_flat_enabled:
-            return None
         try:
             tz = ZoneInfo(self._auto_flat_timezone)
         except Exception:
@@ -4956,7 +4954,9 @@ class MarketAgentService:
         local_now = now_utc.astimezone(tz)
         weekday = local_now.weekday()  # 0=Mon .. 6=Sun
 
-        if self._auto_flat_daily_enabled:
+        # Daily auto-flat is gated by the master toggle; Friday/weekend are safety rules
+        # that may remain enabled even when daily auto-flat is disabled.
+        if self._auto_flat_enabled and self._auto_flat_daily_enabled:
             dh, dm = self._auto_flat_daily_time
             if local_now.time() >= time(dh, dm):
                 if self._auto_flat_last_dates.get("daily_auto_flat") != local_now.date():
