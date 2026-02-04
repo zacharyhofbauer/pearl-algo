@@ -47,6 +47,7 @@ export interface PeriodStats {
 }
 
 export interface PerformanceStats {
+  'yesterday': PeriodStats
   '24h': PeriodStats
   '72h': PeriodStats
   '30d': PeriodStats
@@ -365,6 +366,8 @@ export interface AgentState {
   daily_wins: number
   daily_losses: number
   active_trades_count: number
+  /** Aggregate unrealized P&L across open (virtual) trades */
+  active_trades_unrealized_pnl?: number | null
   futures_market_open: boolean
   data_fresh: boolean
   ai_status: AIStatus | null
@@ -418,6 +421,7 @@ const initialAgentState: AgentState = {
   daily_wins: 0,
   daily_losses: 0,
   active_trades_count: 0,
+  active_trades_unrealized_pnl: null,
   futures_market_open: false,
   data_fresh: false,
   ai_status: null,

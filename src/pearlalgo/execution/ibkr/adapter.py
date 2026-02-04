@@ -30,6 +30,7 @@ from pearlalgo.execution.ibkr.tasks import (
     CancelOrderTask,
     GetOpenOrdersTask,
     GetPositionsTask,
+    FlattenAllPositionsTask,
     PlaceBracketOrderTask,
 )
 from pearlalgo.utils.logger import logger
@@ -539,6 +540,79 @@ class IBKRExecutionAdapter(ExecutionAdapter):
                 success=False,
                 status=OrderStatus.ERROR,
                 signal_id="kill_switch",
+                error_message=str(e),
+            )]
+
+    async def flatten_all_positions(self) -> List[ExecutionResult]:
+        """
+        Flatten all open broker positions (kill switch).
+
+        Uses market orders to offset any open FUT positions.
+        """
+        logger.warning("KILL SWITCH ACTIVATED - Flattening all positions")
+
+        # Disarm immediately (safety)
+        self.disarm()
+
+        if self.config.mode.value == "dry_run":
+            logger.info("DRY_RUN: Would flatten all positions")
+            return [ExecutionResult(
+                success=True,
+                status=OrderStatus.PLACED,
+                signal_id="kill_switch_flatten",
+            )]
+
+        if not self.is_connected():
+            return [ExecutionResult(
+                success=False,
+                status=OrderStatus.ERROR,
+                signal_id="kill_switch_flatten",
+                error_message="Not connected to IBKR",
+            )]
+
+        task = FlattenAllPositionsTask(task_id=f"flatten_{time.time()}")
+
+        try:
+            future = self._submit_task(task)
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: future.result(timeout=30)
+            )
+
+            results: List[ExecutionResult] = []
+
+            for item in (result.get("flattened", []) or []):
+                order_id = item.get("order_id")
+                results.append(ExecutionResult(
+                    success=True,
+                    status=OrderStatus.PLACED,
+                    signal_id="kill_switch_flatten",
+                    order_id=str(order_id) if order_id is not None else None,
+                ))
+
+            for err in (result.get("errors", []) or []):
+                results.append(ExecutionResult(
+                    success=False,
+                    status=OrderStatus.ERROR,
+                    signal_id="kill_switch_flatten",
+                    error_message=err.get("error") or "Flatten error",
+                ))
+
+            if not results:
+                # No open positions to flatten (still a successful no-op)
+                results.append(ExecutionResult(
+                    success=True,
+                    status=OrderStatus.PLACED,
+                    signal_id="kill_switch_flatten",
+                ))
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error flattening positions: {e}", exc_info=True)
+            return [ExecutionResult(
+                success=False,
+                status=OrderStatus.ERROR,
+                signal_id="kill_switch_flatten",
                 error_message=str(e),
             )]
     

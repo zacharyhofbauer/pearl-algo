@@ -3083,6 +3083,9 @@ class TelegramCommandHandler:
             keyboard.append([
                 InlineKeyboardButton(f"🚨 Emergency ({positions_count})", callback_data="action:emergency_stop"),
             ])
+            keyboard.append([
+                InlineKeyboardButton(f"🛑 Kill Switch ({positions_count})", callback_data="action:kill_switch"),
+            ])
         
         # Back
         keyboard.append(self._nav_back_row())
@@ -3610,6 +3613,59 @@ class TelegramCommandHandler:
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode="Markdown"
                 )
+            elif action_type == "kill_switch":
+                # Kill switch: disarm + cancel orders + flatten positions + close virtual trades (agent keeps running)
+                state = self._read_state()
+                positions_count = 0
+                daily_pnl = 0.0
+                impact_lines = []
+
+                if state:
+                    positions = state.get("execution", {}).get("positions", 0) or 0
+                    active_trades = state.get("active_trades_count", 0) or 0
+                    positions_count = int(positions + active_trades)
+                    daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+
+                    if positions_count > 0:
+                        impact_lines.append("📊 *Impact Preview:*")
+                        impact_lines.append(f"• Will close/flatten {positions_count} position(s)/trade(s)")
+                        if daily_pnl != 0:
+                            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                            pnl_sign = "+" if daily_pnl >= 0 else ""
+                            impact_lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                        impact_lines.append("")
+
+                lines = [
+                    "🛑 *KILL SWITCH*",
+                    "",
+                ]
+
+                if impact_lines:
+                    lines.extend(impact_lines)
+
+                lines.extend([
+                    "⚠️ *This will:*",
+                    "• Disarm execution (no new orders)",
+                    "• Cancel ALL open orders",
+                    "• Flatten broker FUT positions at market",
+                    "• Close ALL virtual trades",
+                    "",
+                    "✅ Agent will remain running (but disarmed)",
+                    "",
+                    "🔴 *WARNING:* Use only if you need an immediate safety stop",
+                    "",
+                    "*Are you absolutely sure?*",
+                ])
+
+                keyboard = [
+                    [InlineKeyboardButton("🛑 YES - KILL SWITCH", callback_data="confirm:kill_switch")],
+                    [InlineKeyboardButton("❌ No - Cancel", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "\n".join(lines),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
             elif action_type == "close_all_trades":
                 # Get detailed position info - ONLY virtual trades for transparency
                 state = self._read_state()
@@ -3879,6 +3935,34 @@ class TelegramCommandHandler:
                     await query.edit_message_text(
                         f"❌ Error resetting challenge: {e}\n\nPlease check logs.",
                         reply_markup=reply_markup
+                    )
+
+            elif confirm_action == "kill_switch":
+                # Kill switch: write kill flag (agent will disarm/cancel/flatten/close)
+                try:
+                    kill_file = self.state_dir / "kill_request.flag"
+                    kill_file.write_text(
+                        f"requested_at={datetime.now(timezone.utc).isoformat()}\nsource=telegram\n",
+                        encoding="utf-8",
+                    )
+
+                    keyboard = [
+                        [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                        [InlineKeyboardButton("🛡️ Health", callback_data="menu:status")],
+                        self._nav_back_row(),
+                    ]
+                    await query.edit_message_text(
+                        "✅ Kill switch requested.\n\n"
+                        "The agent will execute it on the next cycle (~5 seconds).\n\n"
+                        "You’ll receive a critical status message when complete.",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                    )
+                    logger.warning("KILL SWITCH requested via Telegram")
+                except Exception as e:
+                    logger.error(f"Kill switch request error: {e}", exc_info=True)
+                    await query.edit_message_text(
+                        f"❌ Kill switch request failed: {e}",
+                        reply_markup=reply_markup,
                     )
 
             elif confirm_action == "emergency_stop":

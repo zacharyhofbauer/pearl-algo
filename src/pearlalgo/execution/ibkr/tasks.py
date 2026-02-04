@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from ib_insync import IB, Future, LimitOrder, StopOrder
+from ib_insync import IB, Future, LimitOrder, StopOrder, MarketOrder
 
 from pearlalgo.utils.logger import logger
 
@@ -245,6 +245,89 @@ class CancelAllOrdersTask:
                 "success": False,
                 "error": str(e),
                 "cancelled": [],
+            }
+
+
+@dataclass
+class FlattenAllPositionsTask:
+    """
+    Task to flatten all open FUT positions (kill switch).
+
+    Places market orders to offset the current position size for each FUT contract.
+    """
+    task_id: str
+    symbol_filter: Optional[str] = None
+
+    def execute(self, ib: IB) -> Dict[str, Any]:
+        """Flatten all open positions."""
+        logger.warning("FlattenAllPositionsTask: KILL SWITCH - flattening all FUT positions")
+
+        try:
+            flattened = []
+            errors = []
+
+            for pos in ib.positions():
+                try:
+                    contract = getattr(pos, "contract", None)
+                    if contract is None:
+                        continue
+
+                    # Only futures positions (this bot is futures-focused)
+                    if getattr(contract, "secType", None) != "FUT":
+                        continue
+
+                    if self.symbol_filter and getattr(contract, "symbol", None) != self.symbol_filter:
+                        continue
+
+                    qty = int(getattr(pos, "position", 0) or 0)
+                    if qty == 0:
+                        continue
+
+                    action = "SELL" if qty > 0 else "BUY"
+                    order = MarketOrder(action=action, totalQuantity=abs(qty))
+                    trade = ib.placeOrder(contract, order)
+
+                    order_id = None
+                    try:
+                        order_id = getattr(trade, "order", None).orderId if trade else None
+                    except Exception:
+                        order_id = None
+
+                    flattened.append({
+                        "symbol": getattr(contract, "symbol", ""),
+                        "local_symbol": getattr(contract, "localSymbol", ""),
+                        "quantity": qty,
+                        "action": action,
+                        "order_id": order_id,
+                        "account": getattr(pos, "account", None),
+                    })
+                except Exception as e:
+                    errors.append({
+                        "symbol": getattr(getattr(pos, "contract", None), "symbol", None),
+                        "error": str(e),
+                    })
+
+            # Give IB a moment to acknowledge orders
+            ib.sleep(1)
+
+            logger.warning(
+                f"FlattenAllPositionsTask complete: submitted {len(flattened)} flatten order(s), "
+                f"{len(errors)} error(s)"
+            )
+
+            return {
+                "success": len(errors) == 0,
+                "flattened": flattened,
+                "errors": errors,
+                "total_flattened": len(flattened),
+            }
+        except Exception as e:
+            logger.error(f"Error flattening positions: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "flattened": [],
+                "errors": [],
             }
 
 

@@ -10,7 +10,14 @@ interface PerformancePanelProps {
   expectancy?: number  // From risk metrics
 }
 
-type Period = '24h' | '72h' | '30d'
+type Period = 'yesterday' | '24h' | '72h' | '30d'
+
+const periodLabels: Record<Period, string> = {
+  'yesterday': 'yday',
+  '24h': '24h',
+  '72h': '72h',
+  '30d': '30d',
+}
 
 export default function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
   const [activePeriod, setActivePeriod] = useState<Period>('24h')
@@ -41,13 +48,13 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
   return (
     <DataPanel title="Performance" icon="📊" variant="feature">
       <div className="perf-tabs">
-        {(['24h', '72h', '30d'] as Period[]).map((period) => (
+        {(['yesterday', '24h', '72h', '30d'] as Period[]).map((period) => (
           <button
             key={period}
             className={`perf-tab ${activePeriod === period ? 'active' : ''}`}
             onClick={() => setActivePeriod(period)}
           >
-            {period.toLowerCase()}
+            {periodLabels[period]}
           </button>
         ))}
       </div>

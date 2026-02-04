@@ -6,6 +6,8 @@ interface UltrawideLayoutProps {
   // Left Column (30%): Header + Chart
   headerSection?: ReactNode
   chartSection: ReactNode
+  /** Optional dock below chart (e.g., Positions/Trades) */
+  belowChartSection?: ReactNode
   // Right Area (70%): All data panels
   pearlAISection?: ReactNode         // Pearl AI (includes ML filter performance)
   systemStatusSection?: ReactNode    // System readiness dashboard
@@ -42,6 +44,7 @@ interface UltrawideLayoutProps {
 export default function UltrawideLayout({
   headerSection,
   chartSection,
+  belowChartSection,
   pearlAISection,
   systemStatusSection,
   signalActivitySection,
@@ -70,6 +73,11 @@ export default function UltrawideLayout({
         <div className="ultrawide-chart-area">
           {chartSection}
         </div>
+        {belowChartSection && (
+          <div className="ultrawide-below-chart">
+            {belowChartSection}
+          </div>
+        )}
       </div>
 
       {/* Right Area: All Panels Grid (70%) */}

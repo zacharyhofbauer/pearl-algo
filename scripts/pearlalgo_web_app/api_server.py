@@ -38,7 +38,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
+    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -833,6 +833,7 @@ class ConnectionManager:
                                     "daily_wins": daily_stats["daily_wins"],
                                     "daily_losses": daily_stats["daily_losses"],
                                     "active_trades_count": state.get("active_trades_count", 0),
+                                    "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
@@ -962,6 +963,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "daily_wins": daily_stats["daily_wins"],
                         "daily_losses": daily_stats["daily_losses"],
                         "active_trades_count": state.get("active_trades_count", 0),
+                        "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
                         "data_fresh": state.get("data_fresh", False),
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
@@ -1012,6 +1014,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "daily_wins": daily_stats["daily_wins"],
                                     "daily_losses": daily_stats["daily_losses"],
                                     "active_trades_count": state.get("active_trades_count", 0),
+                                    "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
@@ -1218,14 +1221,45 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     }
 
 
+def _get_previous_trading_day_bounds() -> tuple:
+    """
+    Get the start and end of the previous trading day (6pm ET to 6pm ET).
+
+    Returns (start_utc, end_utc) for the previous complete trading day.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+
+    # Current trading day start
+    if now_et.hour < 18:
+        # Before 6pm - current trading day started yesterday at 6pm
+        current_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    else:
+        # After 6pm - current trading day started today at 6pm
+        current_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    # Previous trading day is the 24h window before current trading day start
+    prev_day_end = current_day_start
+    prev_day_start = current_day_start - timedelta(days=1)
+
+    return prev_day_start.astimezone(timezone.utc), prev_day_end.astimezone(timezone.utc)
+
+
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute performance stats for 24h, 72h, and 30d periods."""
+    """Compute performance stats for yesterday, 24h, 72h, and 30d periods."""
     performance_file = state_dir / "performance.json"
     if not performance_file.exists():
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
-        return {"24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
+        return {"yesterday": empty_stats.copy(), "24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
 
     now = datetime.now(timezone.utc)
+    prev_day_start, prev_day_end = _get_previous_trading_day_bounds()
+
     cutoffs = {
         "24h": now - timedelta(hours=24),
         "72h": now - timedelta(hours=72),
@@ -1233,6 +1267,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     }
 
     stats = {period: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0} for period in cutoffs}
+    stats["yesterday"] = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
 
     try:
         data = json.loads(performance_file.read_text())
@@ -1251,6 +1286,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
             pnl = trade.get("pnl", 0.0) or 0.0
             is_win = trade.get("is_win", pnl > 0)
 
+            # Check rolling periods (24h, 72h, 30d)
             for period, cutoff in cutoffs.items():
                 if exit_time >= cutoff:
                     stats[period]["pnl"] += pnl
@@ -1259,6 +1295,15 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                         stats[period]["wins"] += 1
                     else:
                         stats[period]["losses"] += 1
+
+            # Check yesterday (previous complete trading day window)
+            if prev_day_start <= exit_time < prev_day_end:
+                stats["yesterday"]["pnl"] += pnl
+                stats["yesterday"]["trades"] += 1
+                if is_win:
+                    stats["yesterday"]["wins"] += 1
+                else:
+                    stats["yesterday"]["losses"] += 1
     except Exception:
         pass
 
@@ -1950,6 +1995,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "daily_wins": daily_stats["daily_wins"],
         "daily_losses": daily_stats["daily_losses"],
         "active_trades_count": state.get("active_trades_count", 0),
+        "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
         "futures_market_open": state.get("futures_market_open", False),
         "data_fresh": state.get("data_fresh", False),
         "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -2010,6 +2056,278 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     }
 
 
+@app.post("/api/kill-switch")
+async def kill_switch(api_key: Optional[str] = Depends(verify_api_key)):
+    """
+    Trigger the kill switch (operator action).
+
+    Writes `kill_request.flag` into the active market state directory.
+
+    Safety policy:
+    - Always requires API authentication to be enabled (PEARL_API_AUTH_ENABLED=true)
+    - Always requires a valid API key
+    """
+    if not _auth_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Kill switch requires API authentication (set PEARL_API_AUTH_ENABLED=true).",
+        )
+
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    try:
+        _state_dir.mkdir(parents=True, exist_ok=True)
+        kill_file = _state_dir / "kill_request.flag"
+        payload = {
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "source": "web",
+        }
+        kill_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {"ok": True, "message": "Kill switch requested."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write kill flag: {str(e)[:200]}")
+
+
+@app.post("/api/close-all-trades")
+async def close_all_trades(api_key: Optional[str] = Depends(verify_api_key)):
+    """
+    Request the agent to close ALL virtual trades (status=entered).
+
+    Implementation: sets `close_all_requested=true` in state.json. The Market Agent
+    will process this within its next cycle.
+
+    Safety policy:
+    - If API authentication is enabled (PEARL_API_AUTH_ENABLED=true), requires a valid API key
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    state_file = _state_dir / "state.json"
+    if not state_file.exists():
+        raise HTTPException(status_code=404, detail="State file not found. Is the agent running?")
+
+    try:
+        raw = state_file.read_text(encoding="utf-8")
+        state = json.loads(raw) if raw else {}
+        if not isinstance(state, dict):
+            state = {}
+
+        state["close_all_requested"] = True
+        state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
+        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+        return {"ok": True, "message": "Close-all requested."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to request close-all: {str(e)[:200]}")
+
+
+@app.post("/api/close-trade")
+async def close_trade(
+    payload: Dict[str, Any] = Body(default={}),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Request the agent to close a specific virtual trade by signal_id.
+
+    Implementation: appends to `close_signals_requested` array in state.json.
+
+    Safety policy:
+    - If API authentication is enabled (PEARL_API_AUTH_ENABLED=true), requires a valid API key
+    """
+    signal_id = str((payload or {}).get("signal_id") or "").strip()
+    if not signal_id:
+        raise HTTPException(status_code=422, detail="Missing required field: signal_id")
+
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    state_file = _state_dir / "state.json"
+    if not state_file.exists():
+        raise HTTPException(status_code=404, detail="State file not found. Is the agent running?")
+
+    try:
+        raw = state_file.read_text(encoding="utf-8")
+        state = json.loads(raw) if raw else {}
+        if not isinstance(state, dict):
+            state = {}
+
+        requested = state.get("close_signals_requested", [])
+        if not isinstance(requested, list):
+            requested = []
+
+        if signal_id not in requested:
+            requested.append(signal_id)
+        state["close_signals_requested"] = requested
+        state["close_signals_requested_time"] = datetime.now(timezone.utc).isoformat()
+
+        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        return {"ok": True, "message": "Close requested.", "signal_id": signal_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to request close: {str(e)[:200]}")
+
+
+def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime, end: datetime = None) -> Dict[str, Any]:
+    """Aggregate performance from cutoff onwards, optionally bounded by end time."""
+    pnl = 0.0
+    wins = 0
+    losses = 0
+    total = 0
+
+    for trade in trades:
+        exit_time_str = trade.get("exit_time")
+        if not exit_time_str:
+            continue
+        try:
+            exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if exit_time < cutoff:
+            continue
+        if end is not None and exit_time >= end:
+            continue
+
+        p = trade.get("pnl", 0.0)
+        try:
+            p_val = float(p or 0.0)
+        except Exception:
+            p_val = 0.0
+
+        is_win = trade.get("is_win", p_val > 0)
+
+        total += 1
+        pnl += p_val
+        if bool(is_win):
+            wins += 1
+        else:
+            losses += 1
+
+    win_rate = round((wins / total) * 100, 1) if total > 0 else 0.0
+    return {
+        "pnl": round(pnl, 2),
+        "trades": int(total),
+        "wins": int(wins),
+        "losses": int(losses),
+        "win_rate": win_rate,
+    }
+
+
+def _get_trading_week_start(now_utc: datetime) -> datetime:
+    """Start of current futures trading week (Sunday 6pm ET), returned in UTC."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = now_utc.astimezone(et_tz)
+
+    # Most recent Sunday
+    days_since_sunday = (now_et.weekday() + 1) % 7  # Mon=0 -> 1 day since Sunday, Sun=6 -> 0
+    sunday_date = (now_et - timedelta(days=days_since_sunday)).date()
+    start_et = datetime(
+        year=sunday_date.year,
+        month=sunday_date.month,
+        day=sunday_date.day,
+        hour=18,
+        minute=0,
+        second=0,
+        microsecond=0,
+        tzinfo=et_tz,
+    )
+
+    # If it's Sunday but before 6pm, the "current" trading week hasn't started yet
+    if now_et < start_et:
+        start_et = start_et - timedelta(days=7)
+
+    return start_et.astimezone(timezone.utc)
+
+
+def _get_month_to_date_start(now_utc: datetime) -> datetime:
+    """Month-to-date start aligned to futures trading day boundary (6pm ET)."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = now_utc.astimezone(et_tz)
+    first_day = now_et.replace(day=1, hour=18, minute=0, second=0, microsecond=0)
+    # Include the trading day for the 1st (which begins 6pm ET on the prior calendar day)
+    start_et = first_day - timedelta(days=1)
+    return start_et.astimezone(timezone.utc)
+
+
+def _get_year_to_date_start(now_utc: datetime) -> datetime:
+    """Year-to-date start aligned to futures trading day boundary (6pm ET)."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = now_utc.astimezone(et_tz)
+    jan1_6pm = now_et.replace(month=1, day=1, hour=18, minute=0, second=0, microsecond=0)
+    start_et = jan1_6pm - timedelta(days=1)  # include trading day that starts Dec 31 6pm ET
+    return start_et.astimezone(timezone.utc)
+
+
+@app.get("/api/performance-summary")
+async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
+    """
+    Performance summary for common operator timeframes.
+
+    Periods:
+    - td: trading-day-to-date (6pm ET boundary)
+    - yday: previous complete trading day (6pm ET to 6pm ET)
+    - wtd: week-to-date (Sunday 6pm ET boundary)
+    - mtd: month-to-date (6pm ET boundary)
+    - ytd: year-to-date (6pm ET boundary)
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    performance_file = _state_dir / "performance.json"
+    if not performance_file.exists():
+        empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "td": empty,
+            "yday": empty,
+            "wtd": empty,
+            "mtd": empty,
+            "ytd": empty,
+            "all": empty,
+        }
+
+    try:
+        raw = performance_file.read_text(encoding="utf-8")
+        trades = json.loads(raw) if raw else []
+        if not isinstance(trades, list):
+            trades = []
+    except Exception:
+        trades = []
+
+    now = datetime.now(timezone.utc)
+    td_start = _get_trading_day_start()
+    yday_start, yday_end = _get_previous_trading_day_bounds()
+    wtd_start = _get_trading_week_start(now)
+    mtd_start = _get_month_to_date_start(now)
+    ytd_start = _get_year_to_date_start(now)
+
+    # All time - use a very old date as cutoff
+    all_time_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+    return {
+        "as_of": now.isoformat(),
+        "td": _aggregate_performance_since(trades, td_start),
+        "yday": _aggregate_performance_since(trades, yday_start, yday_end),
+        "wtd": _aggregate_performance_since(trades, wtd_start),
+        "mtd": _aggregate_performance_since(trades, mtd_start),
+        "ytd": _aggregate_performance_since(trades, ytd_start),
+        "all": _aggregate_performance_since(trades, all_time_start),
+    }
+
 @app.get("/api/trades")
 async def get_trades(
     limit: int = Query(default=20, ge=1, le=100, description="Max trades to return"),
@@ -2020,23 +2338,38 @@ async def get_trades(
         raise HTTPException(status_code=500, detail="State directory not configured")
     
     signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=limit * 2)
+    # Load enough lines to reliably return `limit` exited trades even if many
+    # recent lines are still-open positions.
+    signals = _load_jsonl_file(signals_file, max_lines=max(500, limit * 10))
     
     # Filter to exited trades only
-    trades = [
-        {
-            "signal_id": s.get("signal_id"),
-            "direction": s.get("direction"),
-            "entry_time": s.get("entry_time"),
-            "entry_price": s.get("entry_price"),
-            "exit_time": s.get("exit_time"),
-            "exit_price": s.get("exit_price"),
-            "pnl": s.get("pnl"),
-            "exit_reason": s.get("exit_reason"),
-        }
-        for s in signals
-        if s.get("status") == "exited"
-    ]
+    trades = []
+    for s in signals:
+        if s.get("status") != "exited":
+            continue
+
+        signal_data = s.get("signal", {})
+        if not isinstance(signal_data, dict):
+            signal_data = {}
+
+        direction = signal_data.get("direction") or s.get("direction")
+        symbol = signal_data.get("symbol") or s.get("symbol") or "MNQ"
+        position_size = signal_data.get("position_size")
+
+        trades.append(
+            {
+                "signal_id": s.get("signal_id"),
+                "symbol": symbol,
+                "direction": direction,
+                "position_size": position_size,
+                "entry_time": s.get("entry_time"),
+                "entry_price": s.get("entry_price"),
+                "exit_time": s.get("exit_time"),
+                "exit_price": s.get("exit_price"),
+                "pnl": s.get("pnl"),
+                "exit_reason": s.get("exit_reason"),
+            }
+        )
     
     return trades[-limit:]
 
@@ -2069,6 +2402,8 @@ async def get_positions(
 
         signal_data = s.get("signal", {})
         direction = signal_data.get("direction", "long") if isinstance(signal_data, dict) else s.get("direction", "long")
+        symbol = signal_data.get("symbol") if isinstance(signal_data, dict) else None
+        position_size = signal_data.get("position_size") if isinstance(signal_data, dict) else None
 
         # Get stop loss and take profit from signal data
         stop_loss = signal_data.get("stop_loss") if isinstance(signal_data, dict) else None
@@ -2076,7 +2411,9 @@ async def get_positions(
 
         positions.append({
             "signal_id": s.get("signal_id"),
+            "symbol": symbol or "MNQ",
             "direction": direction,
+            "position_size": position_size,
             "entry_price": entry_price,
             "entry_time": s.get("entry_time"),
             "stop_loss": stop_loss,

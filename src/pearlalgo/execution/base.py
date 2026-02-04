@@ -490,6 +490,19 @@ class ExecutionAdapter(ABC):
             List of ExecutionResults for each cancellation
         """
         pass
+
+    @abstractmethod
+    async def flatten_all_positions(self) -> List[ExecutionResult]:
+        """
+        Flatten all open broker positions (kill switch).
+
+        This should place market orders to offset any open positions, and is
+        intended to be used as part of an emergency/kill-switch workflow.
+
+        Returns:
+            List of ExecutionResults for each flatten order (or a single no-op result).
+        """
+        pass
     
     @abstractmethod
     async def get_positions(self) -> List[Position]:

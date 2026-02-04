@@ -6,7 +6,6 @@ import CandlestickChart from '@/components/CandlestickChart'
 import DataPanelsContainer from '@/components/DataPanelsContainer'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
-import RecentTradesPanel from '@/components/RecentTradesPanel'
 import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
@@ -23,6 +22,7 @@ import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import AIPerformancePanel from '@/components/AIPerformancePanel'
 import SignalActivityPanel from '@/components/SignalActivityPanel'
+import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
@@ -105,6 +105,8 @@ export default function PearlAlgoWebApp() {
 
   // Local state for active positions (for chart price lines)
   const [positions, setPositions] = useState<Position[]>([])
+  const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
+  const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
 
   // Convert positions to price lines for chart visualization (more visible than live price)
   const positionLines = useMemo<PositionLine[]>(() => {
@@ -212,7 +214,7 @@ export default function PearlAlgoWebApp() {
       const requestBars = Math.max(MIN_BARS, bars)
 
       // Fetch all data in parallel (apiFetch includes auth headers when configured)
-      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes] = await Promise.all([
+      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes, tradesRes, perfSummaryRes] = await Promise.all([
         apiFetch(`/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         apiFetch(`/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         apiFetch(`/api/markers?hours=${MARKER_HOURS}`),
@@ -220,6 +222,8 @@ export default function PearlAlgoWebApp() {
         apiFetch(`/api/market-status`),
         apiFetch(`/api/analytics`).catch(() => null),  // Analytics is optional
         apiFetch(`/api/positions`).catch(() => null),  // Positions for chart lines
+        apiFetch(`/api/trades?limit=50`).catch(() => null), // Recent trades for trade dock
+        apiFetch(`/api/performance-summary`).catch(() => null), // Common performance timeframes
       ])
 
       // Update market status
@@ -285,6 +289,30 @@ export default function PearlAlgoWebApp() {
         }
       } else {
         setPositions([])
+      }
+
+      // Update recent trades for the below-chart trade dock
+      if (tradesRes && tradesRes.ok) {
+        try {
+          const tradesData = await tradesRes.json()
+          setRecentTrades(Array.isArray(tradesData) ? tradesData : [])
+        } catch {
+          setRecentTrades([])
+        }
+      } else {
+        setRecentTrades([])
+      }
+
+      // Update performance summary (TD/7D/30D/WTD/MTD/YTD)
+      if (perfSummaryRes && perfSummaryRes.ok) {
+        try {
+          const perfData = await perfSummaryRes.json()
+          setPerformanceSummary(perfData || null)
+        } catch {
+          setPerformanceSummary(null)
+        }
+      } else {
+        setPerformanceSummary(null)
       }
 
       // Calculate fetch duration and determine data source
@@ -731,6 +759,20 @@ export default function PearlAlgoWebApp() {
             <UltrawideLayout
               headerSection={renderUltrawideHeader()}
               chartSection={renderChart()}
+              belowChartSection={
+                <TradeDockPanel
+                  positions={positions}
+                  recentTrades={recentTrades}
+                  symbol={agentState?.config?.symbol || 'MNQ'}
+                  currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+                  openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
+                  performanceSummary={performanceSummary}
+                  directionBreakdown={agentState.analytics?.direction_breakdown || null}
+                  statusBreakdown={agentState.analytics?.status_breakdown || null}
+                  maxOpenRows={4}
+                  maxRecentRows={6}
+                />
+              }
               pearlAISection={
                 <PearlInsightsPanel
                   insights={agentState.pearl_insights}
@@ -795,14 +837,6 @@ export default function PearlAlgoWebApp() {
                   <EquityCurvePanel equityCurve={agentState.equity_curve} />
                 )
               }
-              recentTradesSection={
-                agentState.recent_exits && agentState.recent_exits.length > 0 && (
-                  <RecentTradesPanel
-                    recentExits={agentState.recent_exits}
-                    maxItems={8}
-                  />
-                )
-              }
               analyticsSection={
                 agentState.analytics && (
                   <AnalyticsPanel
@@ -865,6 +899,20 @@ export default function PearlAlgoWebApp() {
           {renderHeader()}
           {renderStatusPanel()}
           {renderChart()}
+
+          {/* Trades Dock (Open / Recent) - TradingView-style section */}
+          <TradeDockPanel
+            positions={positions}
+            recentTrades={recentTrades}
+            symbol={agentState?.config?.symbol || 'MNQ'}
+            currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+            openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
+            performanceSummary={performanceSummary}
+            directionBreakdown={agentState?.analytics?.direction_breakdown || null}
+            statusBreakdown={agentState?.analytics?.status_breakdown || null}
+            maxOpenRows={6}
+            maxRecentRows={10}
+          />
 
           {/* Data Panels */}
           {agentState && (
@@ -936,13 +984,6 @@ export default function PearlAlgoWebApp() {
               connectionHealth={agentState.connection_health}
               errorSummary={agentState.error_summary}
               dataQuality={agentState.data_quality}
-            />
-          )}
-          {agentState.recent_exits && agentState.recent_exits.length > 0 && (
-            <RecentTradesPanel
-              recentExits={agentState.recent_exits}
-              directionBreakdown={agentState.analytics?.direction_breakdown}
-              statusBreakdown={agentState.analytics?.status_breakdown}
             />
           )}
           {agentState.analytics && (

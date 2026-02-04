@@ -3916,7 +3916,7 @@ class MarketAgentService:
         Flag files:
         - arm_request.flag: Arm the execution adapter
         - disarm_request.flag: Disarm the execution adapter
-        - kill_request.flag: Cancel all orders and disarm
+        - kill_request.flag: Disarm, cancel all orders, flatten positions, and close virtual trades
         
         Safety features:
         - Flags older than FLAG_TTL_SECONDS are ignored and deleted (prevents stale flags)
@@ -3957,12 +3957,47 @@ class MarketAgentService:
                 if flag_file.exists() and _is_flag_stale(flag_file):
                     logger.warning(f"Clearing stale flag file: {flag_file.name} (older than {FLAG_TTL_SECONDS}s)")
                     flag_file.unlink(missing_ok=True)
+
+            # Use last known market data for close/flatten helpers (best-effort).
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            if not isinstance(last_market_data, dict):
+                last_market_data = {}
             
             # ==========================================================================
             # If execution adapter is None, clear any remaining flags and warn
             # ==========================================================================
             if self.execution_adapter is None:
-                for flag_file, action in [(kill_file, "kill"), (disarm_file, "disarm"), (arm_file, "arm")]:
+                # Kill switch still closes virtual trades even if execution is disabled.
+                if kill_file.exists():
+                    logger.warning("🚨 KILL flag detected but execution adapter is disabled - closing virtual trades only")
+                    closed_virtual = 0
+                    close_err: Optional[str] = None
+                    try:
+                        closed_virtual = await self._close_all_virtual_trades(
+                            market_data=last_market_data,
+                            reason="kill_switch",
+                        )
+                    except Exception as e:
+                        close_err = str(e)
+                        logger.error(f"Kill switch (no execution adapter): failed to close virtual trades: {e}", exc_info=True)
+                    finally:
+                        kill_file.unlink(missing_ok=True)
+
+                    try:
+                        err_note = f"\n⚠️ Close error: `{close_err[:80]}`" if close_err else ""
+                        await self.notification_queue.enqueue_raw_message(
+                            "🚨 *KILL SWITCH EXECUTED*\n\n"
+                            "Execution adapter: `DISABLED`\n"
+                            f"Closed Trades: `{closed_virtual}` (virtual){err_note}",
+                            parse_mode="Markdown",
+                            priority=Priority.CRITICAL,
+                            dedupe=False,
+                        )
+                    except Exception:
+                        pass
+
+                # Arm/disarm are execution-only; clear + warn if requested.
+                for flag_file, action in [(disarm_file, "disarm"), (arm_file, "arm")]:
                     if flag_file.exists():
                         logger.warning(
                             f"Clearing {action} flag - execution adapter is disabled. "
@@ -3986,21 +4021,39 @@ class MarketAgentService:
             # Process kill flag (highest priority)
             # ==========================================================================
             if kill_file.exists():
-                logger.warning("🚨 KILL flag detected - cancelling all orders and disarming")
-                cancelled_count = 0
+                logger.warning("🚨 KILL flag detected - cancelling orders, flattening positions, and disarming")
+                cancelled_order_ids: list[str] = []
                 cancel_errors: list[str] = []
+                flattened_order_ids: list[str] = []
+                flatten_errors: list[str] = []
+                closed_virtual = 0
+                close_virtual_err: Optional[str] = None
                 try:
                     # SAFETY: Disarm FIRST to prevent new orders while cancelling
                     self.execution_adapter.disarm()
                     logger.warning("Kill switch: execution adapter disarmed")
                     
                     # Cancel all open orders
-                    results = await self.execution_adapter.cancel_all()
-                    cancelled_count = sum(1 for r in results if r.success)
-                    cancel_errors = [r.error_message for r in results if not r.success and r.error_message]
-                    logger.warning(f"Kill switch: cancelled {cancelled_count} orders")
+                    cancel_results = await self.execution_adapter.cancel_all()
+                    cancelled_order_ids = [
+                        str(r.order_id) for r in cancel_results
+                        if r.success and r.order_id
+                    ]
+                    cancel_errors = [r.error_message for r in cancel_results if not r.success and r.error_message]
+                    logger.warning(f"Kill switch: cancelled {len(cancelled_order_ids)} orders")
                     if cancel_errors:
                         logger.warning(f"Kill switch: {len(cancel_errors)} cancellation errors: {cancel_errors[:3]}")
+
+                    # Flatten open broker positions (market orders)
+                    flatten_results = await self.execution_adapter.flatten_all_positions()
+                    flattened_order_ids = [
+                        str(r.order_id) for r in flatten_results
+                        if r.success and r.order_id
+                    ]
+                    flatten_errors = [r.error_message for r in flatten_results if not r.success and r.error_message]
+                    logger.warning(f"Kill switch: submitted {len(flattened_order_ids)} flatten order(s)")
+                    if flatten_errors:
+                        logger.warning(f"Kill switch: {len(flatten_errors)} flatten errors: {flatten_errors[:3]}")
                 except Exception as e:
                     logger.error(f"Error executing kill switch: {e}", exc_info=True)
                     # Even if cancel_all fails, ensure we're disarmed
@@ -4012,18 +4065,38 @@ class MarketAgentService:
                     kill_file.unlink(missing_ok=True)
                     # Also remove any pending disarm flag (kill already disarms)
                     disarm_file.unlink(missing_ok=True)
+
+                # Close all virtual trades (best-effort; uses last known market data)
+                try:
+                    closed_virtual = await self._close_all_virtual_trades(
+                        market_data=last_market_data,
+                        reason="kill_switch",
+                    )
+                except Exception as e:
+                    close_virtual_err = str(e)
+                    logger.error(f"Kill switch: failed to close virtual trades: {e}", exc_info=True)
                     
                 # Notify via Telegram (through notification queue)
                 try:
-                    error_note = ""
+                    errors_total = len(cancel_errors) + len(flatten_errors) + (1 if close_virtual_err else 0)
+                    error_note = f"\n⚠️ Errors: {errors_total}" if errors_total else ""
+                    first_err = None
                     if cancel_errors:
-                        error_note = f"\n⚠️ Errors: {len(cancel_errors)}"
+                        first_err = cancel_errors[0]
+                    elif flatten_errors:
+                        first_err = flatten_errors[0]
+                    elif close_virtual_err:
+                        first_err = close_virtual_err
+                    first_err_note = f"\n`{str(first_err)[:80]}`" if first_err else ""
                     await self.notification_queue.enqueue_raw_message(
                         f"🚨 *KILL SWITCH EXECUTED*\n\n"
-                        f"Cancelled: `{cancelled_count}` orders\n"
-                        f"Execution: `DISARMED`{error_note}",
+                        f"Cancelled Orders: `{len(cancelled_order_ids)}`\n"
+                        f"Flattened Positions: `{len(flattened_order_ids)}`\n"
+                        f"Closed Trades: `{closed_virtual}` (virtual)\n"
+                        f"Execution: `DISARMED`{error_note}{first_err_note}",
                         parse_mode="Markdown",
                         priority=Priority.CRITICAL,
+                        dedupe=False,
                     )
                 except Exception:
                     pass

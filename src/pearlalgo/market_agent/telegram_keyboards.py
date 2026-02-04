@@ -246,6 +246,12 @@ class TelegramKeyboardsMixin:
                     callback_data="action:emergency_stop",
                 ),
             ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🛑 Kill Switch ({positions_count})",
+                    callback_data="action:kill_switch",
+                ),
+            ])
 
         # Back
         keyboard.append(self._nav_back_row())

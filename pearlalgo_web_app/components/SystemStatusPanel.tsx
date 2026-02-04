@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import type {
@@ -9,6 +10,7 @@ import type {
   SessionContext,
   ErrorSummary,
 } from '@/stores'
+import { apiFetch, isAuthConfigured } from '@/lib/api'
 
 interface SystemStatusPanelProps {
   executionState: ExecutionState | null
@@ -29,6 +31,10 @@ export default function SystemStatusPanel({
   isRunning,
   isPaused,
 }: SystemStatusPanelProps) {
+  const [confirmKill, setConfirmKill] = useState(false)
+  const [killBusy, setKillBusy] = useState(false)
+  const [killResult, setKillResult] = useState<{ type: 'idle' | 'ok' | 'error'; message: string } | null>(null)
+
   // Determine overall system readiness
   const getSystemReadiness = () => {
     if (!isRunning) return { status: 'offline', label: 'Offline', color: 'var(--accent-red)' }
@@ -94,6 +100,48 @@ export default function SystemStatusPanel({
 
   const errorTrend = getErrorTrend()
 
+  const canUseKillSwitch = useMemo(() => {
+    // We intentionally require API auth to be configured for web kill-switch.
+    // The backend endpoint also enforces this.
+    return isAuthConfigured()
+  }, [])
+
+  const requestKillSwitch = async () => {
+    setKillBusy(true)
+    setKillResult(null)
+    try {
+      const res = await apiFetch('/api/kill-switch', { method: 'POST' })
+      const raw = await res.text()
+      let body: any = null
+      try {
+        body = raw ? JSON.parse(raw) : null
+      } catch {
+        body = null
+      }
+
+      if (!res.ok) {
+        const detail =
+          body?.detail?.message ||
+          body?.detail ||
+          body?.message ||
+          (typeof raw === 'string' && raw.trim() ? raw.trim() : null) ||
+          `HTTP ${res.status}`
+        const msg = typeof detail === 'string' ? detail : `HTTP ${res.status}`
+        throw new Error(msg)
+      }
+
+      setKillResult({ type: 'ok', message: body?.message || 'Kill switch requested.' })
+      setConfirmKill(false)
+    } catch (e: any) {
+      setKillResult({
+        type: 'error',
+        message: String(e?.message || e || 'Kill switch request failed.'),
+      })
+    } finally {
+      setKillBusy(false)
+    }
+  }
+
   return (
     <DataPanel title="System Status" icon="🎯" variant="status">
       <div className="system-status-panel">
@@ -111,29 +159,29 @@ export default function SystemStatusPanel({
           )}
         </div>
 
-        {/* Status Grid */}
-        <div className="status-grid">
-          {/* Execution State */}
-          <div className="status-item">
-            <span className="status-item-label">Execution</span>
-            <div className="status-item-value">
+        {/* TradingView-style Status Rows */}
+        <div className="tv-status-list">
+          <div className="tv-status-row">
+            <span className="tv-status-key">Execution</span>
+            <span className="tv-status-value">
               {executionState ? (
-                <span className={`status-chip ${executionState.armed ? 'armed' : 'disarmed'}`}>
-                  {executionState.armed ? '✓ Armed' : '⚠ Disarmed'}
-                </span>
+                <>
+                  <span className={`status-chip ${executionState.armed ? 'armed' : 'disarmed'}`}>
+                    {executionState.armed ? '✓ Armed' : '⚠ Disarmed'}
+                  </span>
+                  {executionState?.disarm_reason && (
+                    <InfoTooltip text={executionState.disarm_reason} />
+                  )}
+                </>
               ) : (
                 <span className="status-chip neutral">—</span>
               )}
-              {executionState?.disarm_reason && (
-                <InfoTooltip text={executionState.disarm_reason} />
-              )}
-            </div>
+            </span>
           </div>
 
-          {/* Circuit Breaker */}
-          <div className="status-item">
-            <span className="status-item-label">Circuit Breaker</span>
-            <div className="status-item-value">
+          <div className="tv-status-row">
+            <span className="tv-status-key">Circuit Breaker</span>
+            <span className="tv-status-value">
               {circuitBreaker ? (
                 <>
                   {circuitBreaker.in_cooldown ? (
@@ -157,13 +205,12 @@ export default function SystemStatusPanel({
               ) : (
                 <span className="status-chip neutral">—</span>
               )}
-            </div>
+            </span>
           </div>
 
-          {/* Direction Restriction */}
-          <div className="status-item">
-            <span className="status-item-label">Direction</span>
-            <div className="status-item-value">
+          <div className="tv-status-row">
+            <span className="tv-status-key">Direction</span>
+            <span className="tv-status-value">
               {directionInfo ? (
                 <span
                   className="status-chip direction"
@@ -174,54 +221,94 @@ export default function SystemStatusPanel({
               ) : (
                 <span className="status-chip neutral">—</span>
               )}
-            </div>
+            </span>
           </div>
 
-          {/* Session Window */}
-          <div className="status-item">
-            <span className="status-item-label">Session</span>
-            <div className="status-item-value">
+          <div className="tv-status-row">
+            <span className="tv-status-key">Session</span>
+            <span className="tv-status-value">
               {sessionLabel ? (
                 <>
                   <span className="status-chip session">{sessionLabel}</span>
-                  {sessionContext?.time_until_next_session_seconds && sessionContext.time_until_next_session_seconds > 0 && (
-                    <span className="session-countdown">
-                      Next: {formatTimeRemaining(sessionContext.time_until_next_session_seconds)}
-                    </span>
-                  )}
+                  {sessionContext?.time_until_next_session_seconds &&
+                    sessionContext.time_until_next_session_seconds > 0 && (
+                      <span className="session-countdown">
+                        Next: {formatTimeRemaining(sessionContext.time_until_next_session_seconds)}
+                      </span>
+                    )}
                 </>
               ) : (
                 <span className="status-chip neutral">—</span>
               )}
-            </div>
+            </span>
           </div>
 
-          {/* Error Rate */}
-          <div className="status-item">
-            <span className="status-item-label">Errors</span>
-            <div className="status-item-value">
+          <div className="tv-status-row">
+            <span className="tv-status-key">Errors</span>
+            <span className="tv-status-value">
               {errorTrend ? (
-                <span
-                  className="status-chip errors"
-                  style={{ color: errorTrend.color }}
-                >
+                <span className="status-chip errors" style={{ color: errorTrend.color }}>
                   {errorTrend.icon} {errorTrend.label}
                 </span>
               ) : (
                 <span className="status-chip neutral">✓ None</span>
               )}
+            </span>
+          </div>
+        </div>
+
+        {/* Kill Switch */}
+        <div className="kill-switch-panel">
+          <div className="kill-switch-head">
+            <div className="kill-switch-title-row">
+              <span className="kill-switch-title">Kill Switch</span>
+              <InfoTooltip text="Disarms execution, cancels open orders, flattens broker positions, and closes virtual trades." />
             </div>
+            <span className="kill-switch-subtitle">Close all trades + cancel orders</span>
           </div>
 
-          {/* Rolling Win Rate (if circuit breaker tracks it) */}
-          {circuitBreaker?.rolling_win_rate !== undefined && (
-            <div className="status-item">
-              <span className="status-item-label">Win Rate</span>
-              <div className="status-item-value">
-                <span className={`status-chip ${circuitBreaker.rolling_win_rate >= 0.5 ? 'positive' : 'negative'}`}>
-                  {(circuitBreaker.rolling_win_rate * 100).toFixed(0)}%
-                </span>
-              </div>
+          {!confirmKill ? (
+            <button
+              type="button"
+              className="kill-switch-btn"
+              onClick={() => setConfirmKill(true)}
+              disabled={!canUseKillSwitch || killBusy}
+              aria-disabled={!canUseKillSwitch || killBusy}
+              title={!canUseKillSwitch ? 'API key required for kill switch' : undefined}
+            >
+              🛑 Kill Switch
+            </button>
+          ) : (
+            <div className="kill-switch-confirm">
+              <button
+                type="button"
+                className="kill-switch-btn kill-switch-confirm-btn"
+                onClick={requestKillSwitch}
+                disabled={!canUseKillSwitch || killBusy}
+                aria-disabled={!canUseKillSwitch || killBusy}
+              >
+                {killBusy ? 'Sending…' : 'Confirm Kill'}
+              </button>
+              <button
+                type="button"
+                className="kill-switch-cancel-btn"
+                onClick={() => setConfirmKill(false)}
+                disabled={killBusy}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {!canUseKillSwitch && (
+            <div className="kill-switch-note">
+              API key required (set <code>NEXT_PUBLIC_API_KEY</code>).
+            </div>
+          )}
+
+          {killResult && (
+            <div className={`kill-switch-result kill-switch-result-${killResult.type}`}>
+              {killResult.message}
             </div>
           )}
         </div>

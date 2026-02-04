@@ -77,6 +77,10 @@ export interface Position {
   entry_time?: string
   stop_loss?: number
   take_profit?: number
+  /** Optional symbol (if provided by API) */
+  symbol?: string
+  /** Optional quantity/size (if provided by API) */
+  position_size?: number
 }
 
 // Position line for chart visualization
