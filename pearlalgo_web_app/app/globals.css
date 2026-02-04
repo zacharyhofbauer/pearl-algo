@@ -3700,6 +3700,15 @@ body {
   transition: all var(--duration-fast) var(--ease-default);
 }
 
+.pearl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pearl-btn:disabled:hover {
+  transform: none;
+  filter: none;
+}
+
 .pearl-btn-accept {
   background: var(--accent-cyan);
   color: var(--bg-primary);
@@ -11829,6 +11838,101 @@ body {
 .pearl-chat-hint {
   font-size: 11px;
   color: var(--text-tertiary);
+}
+
+/* Pearl operator lock (read-only public link) */
+.pearl-operator-strip {
+  margin-top: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(42, 42, 58, 0.28);
+}
+
+.pearl-operator-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pearl-operator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.pearl-operator-dot.on {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(var(--accent-green-rgb), 0.45);
+}
+.pearl-operator-dot.off {
+  background: var(--text-tertiary);
+}
+
+.pearl-operator-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pearl-operator-ttl {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.pearl-operator-unlock {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.pearl-operator-input {
+  border-radius: 10px;
+  border: 1px solid rgba(42, 42, 58, 0.55);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  width: 180px;
+}
+
+.pearl-operator-go,
+.pearl-operator-cancel {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pearl-feedback-result {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(42, 42, 58, 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-secondary);
+}
+.pearl-feedback-result.ok {
+  color: var(--text-primary);
+  background: rgba(var(--accent-green-rgb), 0.06);
+  border-color: rgba(var(--accent-green-rgb), 0.25);
+}
+.pearl-feedback-result.error {
+  color: rgba(255, 180, 180, 0.95);
+  background: rgba(var(--accent-red-rgb), 0.08);
+  border-color: rgba(var(--accent-red-rgb), 0.22);
 }
 
 @media (max-width: 480px) {

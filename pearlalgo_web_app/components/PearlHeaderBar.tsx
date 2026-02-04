@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import PearlInsightsPanel from './PearlInsightsPanel'
-import { apiFetch } from '@/lib/api'
-import { useAgentStore } from '@/stores'
+import { useAgentStore, useOperatorStore } from '@/stores'
 
 export default function PearlHeaderBar() {
   const agentState = useAgentStore((s) => s.agentState)
+  const tickOperator = useOperatorStore((s) => s.tick)
 
   const [expanded, setExpanded] = useState(false)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -58,37 +58,11 @@ export default function PearlHeaderBar() {
     return () => document.removeEventListener('keydown', handleEscape)
   }, [expanded])
 
-  const handleAcceptSuggestion = async () => {
-    try {
-      const action =
-        agentState?.pearl_suggestion?.accept_action ||
-        agentState?.pearl_insights?.shadow_metrics?.active_suggestion?.action
-      if (action) {
-        await apiFetch('/api/pearl-suggestion/accept', {
-          method: 'POST',
-          body: JSON.stringify({ action }),
-        })
-      }
-    } catch (e) {
-      console.error('Failed to accept Pearl insight:', e)
-    }
-  }
-
-  const handleDismissSuggestion = async () => {
-    try {
-      const key =
-        agentState?.pearl_suggestion?.cooldown_key ||
-        agentState?.pearl_insights?.shadow_metrics?.active_suggestion?.id
-      if (key) {
-        await apiFetch('/api/pearl-suggestion/dismiss', {
-          method: 'POST',
-          body: JSON.stringify({ cooldown_key: key }),
-        })
-      }
-    } catch (e) {
-      console.error('Failed to dismiss Pearl insight:', e)
-    }
-  }
+  // Operator unlock is time-limited; tick periodically to auto-lock.
+  useEffect(() => {
+    const id = window.setInterval(() => tickOperator(), 2000)
+    return () => window.clearInterval(id)
+  }, [tickOperator])
 
   return (
     <div
@@ -118,9 +92,9 @@ export default function PearlHeaderBar() {
             aiStatus={agentState?.ai_status ?? null}
             shadowCounters={agentState?.shadow_counters ?? null}
             mlFilterPerformance={agentState?.ml_filter_performance ?? null}
-            onAccept={handleAcceptSuggestion}
-            onDismiss={handleDismissSuggestion}
-            initialChatOpen={true}
+            chatAvailable={Boolean(agentState?.pearl_ai_available)}
+            operatorLockEnabled={agentState?.operator_lock_enabled ?? null}
+            initialChatOpen={false}
           />
         </div>
       </div>

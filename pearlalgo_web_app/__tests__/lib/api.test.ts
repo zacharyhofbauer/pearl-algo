@@ -108,6 +108,7 @@ describe('API utility', () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: false,
         status: 403,
+        text: () => Promise.resolve(JSON.stringify({ detail: 'Invalid API key.' })),
       })
 
       await expect(apiFetchJson('/api/state')).rejects.toThrow('Invalid API key')

@@ -390,6 +390,10 @@ export interface AgentState {
   analytics: AnalyticsData | null
   pearl_suggestion: PearlSuggestion | null
   pearl_insights: PearlInsights | null
+  /** Whether `/api/pearl/*` LLM endpoints are mounted on the API server */
+  pearl_ai_available?: boolean
+  /** Whether operator passphrase locking is configured on the API server */
+  operator_lock_enabled?: boolean
   // New fields for enhanced transparency
   execution_state: ExecutionState | null
   circuit_breaker: CircuitBreakerStatus | null
@@ -444,6 +448,8 @@ const initialAgentState: AgentState = {
   analytics: null,
   pearl_suggestion: null,
   pearl_insights: null,
+  pearl_ai_available: false,
+  operator_lock_enabled: false,
   // New fields for enhanced transparency
   execution_state: null,
   circuit_breaker: null,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import type {
@@ -10,7 +10,8 @@ import type {
   SessionContext,
   ErrorSummary,
 } from '@/stores'
-import { apiFetch, isAuthConfigured } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
+import { useOperatorStore } from '@/stores'
 
 interface SystemStatusPanelProps {
   executionState: ExecutionState | null
@@ -100,11 +101,7 @@ export default function SystemStatusPanel({
 
   const errorTrend = getErrorTrend()
 
-  const canUseKillSwitch = useMemo(() => {
-    // We intentionally require API auth to be configured for web kill-switch.
-    // The backend endpoint also enforces this.
-    return isAuthConfigured()
-  }, [])
+  const canUseKillSwitch = useOperatorStore((s) => s.isUnlocked)
 
   const requestKillSwitch = async () => {
     setKillBusy(true)
@@ -274,7 +271,7 @@ export default function SystemStatusPanel({
               onClick={() => setConfirmKill(true)}
               disabled={!canUseKillSwitch || killBusy}
               aria-disabled={!canUseKillSwitch || killBusy}
-              title={!canUseKillSwitch ? 'API key required for kill switch' : undefined}
+              title={!canUseKillSwitch ? 'Read-only (operator locked)' : undefined}
             >
               🛑 Kill Switch
             </button>
@@ -302,7 +299,7 @@ export default function SystemStatusPanel({
 
           {!canUseKillSwitch && (
             <div className="kill-switch-note">
-              API key required (set <code>NEXT_PUBLIC_API_KEY</code>).
+              Read-only mode. Unlock operator access in the Pearl AI panel to use the kill switch.
             </div>
           )}
 

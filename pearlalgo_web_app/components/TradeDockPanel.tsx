@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import type { DirectionBreakdown, Position, StatusBreakdown } from '@/stores'
-import { apiFetch, isAuthConfigured } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
+import { useOperatorStore } from '@/stores'
 
 export interface RecentTradeRow {
   signal_id?: string
@@ -240,7 +241,7 @@ export default function TradeDockPanel({
     return (currentPrice - p.entry_price) * dir * qty * usdPerPoint
   }
 
-  const authConfigured = useMemo(() => isAuthConfigured(), [])
+  const operatorUnlocked = useOperatorStore((s) => s.isUnlocked)
 
   const requestCloseAll = async () => {
     if (closeBusy) return
@@ -451,8 +452,8 @@ export default function TradeDockPanel({
                             setConfirmCloseId(null)
                             setCloseResult(null)
                           }}
-                          disabled={closeBusy}
-                          title={!authConfigured ? 'If API auth is enabled, set NEXT_PUBLIC_API_KEY' : undefined}
+                          disabled={closeBusy || !operatorUnlocked}
+                          title={!operatorUnlocked ? 'Read-only (operator locked)' : undefined}
                         >
                           Close All
                         </button>
@@ -462,7 +463,7 @@ export default function TradeDockPanel({
                             type="button"
                             className="trade-action-btn trade-action-btn-danger"
                             onClick={requestCloseAll}
-                            disabled={closeBusy}
+                            disabled={closeBusy || !operatorUnlocked}
                           >
                             {closeBusy ? 'Sending…' : 'Confirm'}
                           </button>
@@ -573,8 +574,8 @@ export default function TradeDockPanel({
                                       setConfirmCloseAll(false)
                                       setCloseResult(null)
                                     }}
-                                    disabled={closeBusy}
-                                    title={!authConfigured ? 'If API auth is enabled, set NEXT_PUBLIC_API_KEY' : undefined}
+                                    disabled={closeBusy || !operatorUnlocked}
+                                    title={!operatorUnlocked ? 'Read-only (operator locked)' : undefined}
                                   >
                                     Close Trade
                                   </button>
@@ -587,7 +588,7 @@ export default function TradeDockPanel({
                                         e.stopPropagation()
                                         requestCloseTrade(id)
                                       }}
-                                      disabled={closeBusy}
+                                      disabled={closeBusy || !operatorUnlocked}
                                     >
                                       {closeBusy ? 'Sending…' : 'Confirm'}
                                     </button>

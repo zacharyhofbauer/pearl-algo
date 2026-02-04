@@ -771,6 +771,8 @@ export default function PearlAlgoWebApp() {
                   aiStatus={agentState.ai_status}
                   shadowCounters={agentState.shadow_counters}
                   mlFilterPerformance={agentState.ml_filter_performance}
+                  chatAvailable={Boolean(agentState.pearl_ai_available)}
+                  operatorLockEnabled={agentState.operator_lock_enabled ?? null}
                 />
               }
               systemStatusSection={

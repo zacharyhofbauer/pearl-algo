@@ -9,8 +9,23 @@
  * When not set, requests are made without authentication (for local development).
  */
 
+import { useOperatorStore } from '@/stores'
+
 // Get API key from environment (client-side accessible)
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || ''
+
+function shouldAttachOperatorHeader(path: string): boolean {
+  if (!path) return false
+  // Interactive/operator-only endpoints
+  if (path.startsWith('/api/pearl/')) return true
+  if (path === '/api/kill-switch') return true
+  if (path === '/api/close-all-trades') return true
+  if (path === '/api/close-trade') return true
+  if (path === '/api/pearl-suggestion/accept') return true
+  if (path === '/api/pearl-suggestion/dismiss') return true
+  if (path.startsWith('/api/operator/')) return true
+  return false
+}
 
 /**
  * Determine the API base URL based on environment and context.
@@ -68,6 +83,19 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     ...(options.headers || {}),
   }
 
+  // Operator unlock header (in-memory only; never persisted). Only attach to operator endpoints.
+  if (shouldAttachOperatorHeader(path) && !('X-PEARL-OPERATOR' in (headers as any))) {
+    try {
+      const op = useOperatorStore.getState()
+      op.tick()
+      if (op.isUnlocked && op.passphrase) {
+        ;(headers as any)['X-PEARL-OPERATOR'] = op.passphrase
+      }
+    } catch {
+      // ignore (SSR / store init)
+    }
+  }
+
   return fetch(url, {
     ...options,
     headers,
@@ -85,14 +113,33 @@ export async function apiFetchJson<T>(path: string, options: RequestInit = {}): 
   const response = await apiFetch(path, options)
 
   if (!response.ok) {
+    let raw = ''
+    try {
+      raw = await response.text()
+    } catch {
+      raw = ''
+    }
+    let detail: string | null = null
+    try {
+      const body = raw ? JSON.parse(raw) : null
+      detail =
+        (typeof body?.detail === 'string' ? body.detail : null) ||
+        (typeof body?.message === 'string' ? body.message : null)
+    } catch {
+      detail = raw || null
+    }
+
     // Handle auth errors specifically
     if (response.status === 401) {
-      throw new Error('Authentication required. Set NEXT_PUBLIC_API_KEY.')
+      throw new Error(detail || 'Authentication required.')
     }
     if (response.status === 403) {
-      throw new Error('Invalid API key.')
+      if (detail && detail.toLowerCase().includes('operator')) {
+        throw new Error('Operator access required.')
+      }
+      throw new Error(detail || 'Forbidden.')
     }
-    throw new Error(`API Error: ${response.status}`)
+    throw new Error(detail || `API Error: ${response.status}`)
   }
 
   return response.json()

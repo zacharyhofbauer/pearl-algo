@@ -20,6 +20,7 @@ import json
 import os
 import statistics
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -38,7 +39,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body
+    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -76,6 +77,113 @@ _api_key_file: Optional[Path] = None
 # Security schemes
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+# ---------------------------------------------------------------------------
+# Operator Passphrase (public read-only, operator-only interactivity)
+# ---------------------------------------------------------------------------
+#
+# If PEARL_OPERATOR_PASSPHRASE is set, interactive endpoints require the caller
+# to present it via the X-PEARL-OPERATOR header (in addition to any API key).
+#
+# This enables a shareable, read-only dashboard link while keeping actions + chat
+# operator-only, without exposing secrets in the public frontend bundle.
+#
+# Environment variables:
+# - PEARL_OPERATOR_PASSPHRASE=<secret phrase>  (recommended)
+# - PEARL_OPERATOR_PHRASE=<secret phrase>      (alias)
+# - PEARL_OPERATOR_MAX_ATTEMPTS_PER_MINUTE=20  (basic brute-force throttling)
+#
+_operator_passphrase: str = (
+    os.getenv("PEARL_OPERATOR_PASSPHRASE") or os.getenv("PEARL_OPERATOR_PHRASE") or ""
+).strip()
+_operator_enabled: bool = bool(_operator_passphrase)
+
+operator_header = APIKeyHeader(name="X-PEARL-OPERATOR", auto_error=False)
+_operator_failures: Dict[str, List[float]] = {}
+_operator_max_attempts_per_minute: int = int(os.getenv("PEARL_OPERATOR_MAX_ATTEMPTS_PER_MINUTE", "20") or "20")
+
+
+def _get_client_id(request: Request) -> str:
+    """Best-effort client identifier for basic throttling."""
+    try:
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            return (fwd.split(",")[0] or "").strip() or "unknown"
+    except Exception:
+        pass
+    try:
+        return request.client.host if request.client else "unknown"
+    except Exception:
+        return "unknown"
+
+
+async def verify_operator(
+    request: Request,
+    operator: Optional[str] = Security(operator_header),
+) -> Optional[str]:
+    """
+    Verify operator passphrase if configured.
+
+    Returns operator token if valid, None if operator mode is disabled.
+    Raises HTTPException on invalid/missing operator token when enabled.
+    """
+    if not _operator_enabled:
+        return None
+
+    client_id = _get_client_id(request)
+    now = time.time()
+    bucket = _operator_failures.get(client_id, [])
+    # Keep only last 60 seconds
+    bucket = [t for t in bucket if now - t < 60.0]
+    _operator_failures[client_id] = bucket
+
+    if _operator_max_attempts_per_minute > 0 and len(bucket) >= _operator_max_attempts_per_minute:
+        raise HTTPException(status_code=429, detail="Too many attempts.")
+
+    if not operator:
+        bucket.append(now)
+        _operator_failures[client_id] = bucket
+        raise HTTPException(status_code=403, detail="Operator access required.")
+
+    # Constant-time compare
+    if secrets.compare_digest(operator.strip(), _operator_passphrase):
+        return operator
+
+    bucket.append(now)
+    _operator_failures[client_id] = bucket
+    raise HTTPException(status_code=403, detail="Operator access required.")
+
+
+async def require_operator_or_api_key(
+    request: Request,
+    operator: Optional[str] = Security(operator_header),
+    api_key_from_header: Optional[str] = Security(api_key_header),
+    api_key_from_query: Optional[str] = Security(api_key_query),
+) -> str:
+    """
+    Require either operator passphrase (if configured) or API key (if auth enabled).
+
+    This is used for interactive endpoints: kill switch, close trades, and LLM chat.
+    """
+    if _operator_enabled:
+        # Enforce operator passphrase when configured (public link can remain read-only).
+        await verify_operator(request=request, operator=operator)
+        return "operator"
+
+    # Fall back to API-key auth when operator mode is not configured.
+    if not _auth_enabled:
+        raise HTTPException(status_code=403, detail="Operator access required.")
+
+    api_key = (api_key_from_header or api_key_from_query or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
+        )
+    if api_key not in _api_keys:
+        raise HTTPException(status_code=403, detail="Invalid API key.")
+
+    return "api_key"
 
 
 def _load_api_keys() -> set:
@@ -845,6 +953,12 @@ class ConnectionManager:
                                     "error_summary": _get_error_summary(_state_dir, state),
                                     "config": _get_config(state),
                                     "data_quality": _get_data_quality(state),
+                                    # Pearl AI (read-only) insights from agent state (shadow mode)
+                                    "pearl_insights": state.get("pearl_insights"),
+                                    # Whether LLM chat endpoints are mounted/available on this API server
+                                    "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                                    # Whether operator locking is configured on this API server
+                                    "operator_lock_enabled": bool(_operator_enabled),
                                 }
                             }
                             await self.broadcast(broadcast_data)
@@ -905,7 +1019,7 @@ def _init_pearl_ai() -> None:
         )
 
         app.include_router(
-            create_pearl_router(_pearl_brain, auth_dependency=verify_api_key),
+            create_pearl_router(_pearl_brain, auth_dependency=require_operator_or_api_key),
             prefix="/api/pearl",
         )
 
@@ -983,6 +1097,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "error_summary": _get_error_summary(_state_dir, state),
                         "config": _get_config(state),
                         "data_quality": _get_data_quality(state),
+                        "pearl_insights": state.get("pearl_insights"),
+                        "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                        "operator_lock_enabled": bool(_operator_enabled),
                     }
                 }
                 await websocket.send_json(initial_data)
@@ -1034,6 +1151,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "error_summary": _get_error_summary(_state_dir, state),
                                     "config": _get_config(state),
                                     "data_quality": _get_data_quality(state),
+                                    "pearl_insights": state.get("pearl_insights"),
+                                    "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                                    "operator_lock_enabled": bool(_operator_enabled),
                                 }
                             }
                             await websocket.send_json(refresh_data)
@@ -2015,6 +2135,15 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         # NEW: Pearl suggestion
         "pearl_suggestion": _get_pearl_suggestion(),
 
+        # NEW: Pearl insights (shadow mode metrics + active suggestion) from agent state.json
+        "pearl_insights": state.get("pearl_insights"),
+
+        # NEW: Whether LLM chat endpoints are available on this server
+        "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+
+        # NEW: Whether operator passphrase locking is configured on this server
+        "operator_lock_enabled": bool(_operator_enabled),
+
         # NEW: Equity curve for mini chart
         "equity_curve": _get_equity_curve(_state_dir, hours=72),
 
@@ -2056,23 +2185,28 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     }
 
 
+@app.get("/api/operator/ping")
+async def operator_ping(_: str = Depends(require_operator_or_api_key)):
+    """
+    Operator-only: verify that operator access is working.
+
+    Used by the web UI to validate the passphrase and avoid confusing “unlock”
+    states when the server is misconfigured.
+    """
+    return {"ok": True}
+
+
 @app.post("/api/kill-switch")
-async def kill_switch(api_key: Optional[str] = Depends(verify_api_key)):
+async def kill_switch(_: str = Depends(require_operator_or_api_key)):
     """
     Trigger the kill switch (operator action).
 
     Writes `kill_request.flag` into the active market state directory.
 
     Safety policy:
-    - Always requires API authentication to be enabled (PEARL_API_AUTH_ENABLED=true)
-    - Always requires a valid API key
+    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
+    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
-    if not _auth_enabled:
-        raise HTTPException(
-            status_code=403,
-            detail="Kill switch requires API authentication (set PEARL_API_AUTH_ENABLED=true).",
-        )
-
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
@@ -2090,7 +2224,7 @@ async def kill_switch(api_key: Optional[str] = Depends(verify_api_key)):
 
 
 @app.post("/api/close-all-trades")
-async def close_all_trades(api_key: Optional[str] = Depends(verify_api_key)):
+async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     """
     Request the agent to close ALL virtual trades (status=entered).
 
@@ -2098,7 +2232,8 @@ async def close_all_trades(api_key: Optional[str] = Depends(verify_api_key)):
     will process this within its next cycle.
 
     Safety policy:
-    - If API authentication is enabled (PEARL_API_AUTH_ENABLED=true), requires a valid API key
+    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
+    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
@@ -2125,7 +2260,7 @@ async def close_all_trades(api_key: Optional[str] = Depends(verify_api_key)):
 @app.post("/api/close-trade")
 async def close_trade(
     payload: Dict[str, Any] = Body(default={}),
-    api_key: Optional[str] = Depends(verify_api_key),
+    _: str = Depends(require_operator_or_api_key),
 ):
     """
     Request the agent to close a specific virtual trade by signal_id.
@@ -2133,7 +2268,8 @@ async def close_trade(
     Implementation: appends to `close_signals_requested` array in state.json.
 
     Safety policy:
-    - If API authentication is enabled (PEARL_API_AUTH_ENABLED=true), requires a valid API key
+    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
+    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
     signal_id = str((payload or {}).get("signal_id") or "").strip()
     if not signal_id:
@@ -2165,6 +2301,130 @@ async def close_trade(
         return {"ok": True, "message": "Close requested.", "signal_id": signal_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to request close: {str(e)[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# Pearl suggestion feedback (operator-only, shadow-mode training)
+# ---------------------------------------------------------------------------
+
+def _resolve_active_suggestion_id(state: Dict[str, Any]) -> Optional[str]:
+    """Best-effort: extract the currently active suggestion id from agent state."""
+    try:
+        insights = state.get("pearl_insights") or {}
+        if isinstance(insights, dict):
+            cur = insights.get("current_suggestion") or {}
+            if isinstance(cur, dict):
+                sid = str(cur.get("id") or "").strip()
+                if sid:
+                    return sid
+            metrics = insights.get("shadow_metrics") or {}
+            if isinstance(metrics, dict):
+                active = metrics.get("active_suggestion") or {}
+                if isinstance(active, dict):
+                    sid = str(active.get("id") or "").strip()
+                    if sid:
+                        return sid
+    except Exception:
+        return None
+    return None
+
+
+def _write_operator_request(state_dir: Path, prefix: str, payload: Dict[str, Any]) -> Path:
+    """
+    Write an operator request file into the state directory (atomic best-effort).
+
+    This avoids editing state.json directly (reduces race risk with agent writes).
+    """
+    req_dir = state_dir / "operator_requests"
+    req_dir.mkdir(parents=True, exist_ok=True)
+
+    ts_ms = int(time.time() * 1000)
+    out_path = req_dir / f"{prefix}_{ts_ms}.json"
+    tmp_path = req_dir / f".{prefix}_{ts_ms}.tmp"
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp_path.replace(out_path)
+    return out_path
+
+
+@app.post("/api/pearl-suggestion/accept")
+async def pearl_suggestion_accept(
+    payload: Dict[str, Any] = Body(default={}),
+    _: str = Depends(require_operator_or_api_key),
+):
+    """
+    Operator action: accept the current Pearl suggestion (shadow mode feedback).
+
+    Writes an operator request file for the agent to consume and apply to the
+    shadow tracker (mark_followed).
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    state_file = _state_dir / "state.json"
+    state = _load_json_file(state_file)
+
+    suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
+    if not suggestion_id:
+        suggestion_id = _resolve_active_suggestion_id(state or {}) or ""
+
+    if not suggestion_id:
+        raise HTTPException(status_code=409, detail="No active suggestion to accept.")
+
+    req_payload = {
+        "type": "pearl_suggestion_feedback",
+        "action": "accept",
+        "suggestion_id": suggestion_id,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "source": "web",
+    }
+    try:
+        _write_operator_request(_state_dir, "pearl_suggestion_feedback", req_payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write feedback request: {str(e)[:200]}")
+
+    return {"ok": True, "message": "Suggestion accepted (queued).", "suggestion_id": suggestion_id}
+
+
+@app.post("/api/pearl-suggestion/dismiss")
+async def pearl_suggestion_dismiss(
+    payload: Dict[str, Any] = Body(default={}),
+    _: str = Depends(require_operator_or_api_key),
+):
+    """
+    Operator action: dismiss the current Pearl suggestion (shadow mode feedback).
+
+    Writes an operator request file for the agent to consume and apply to the
+    shadow tracker (mark_dismissed).
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    state_file = _state_dir / "state.json"
+    state = _load_json_file(state_file)
+
+    suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
+    if not suggestion_id:
+        suggestion_id = _resolve_active_suggestion_id(state or {}) or ""
+
+    if not suggestion_id:
+        raise HTTPException(status_code=409, detail="No active suggestion to dismiss.")
+
+    dismiss_reason = str((payload or {}).get("dismiss_reason") or "").strip() or None
+
+    req_payload = {
+        "type": "pearl_suggestion_feedback",
+        "action": "dismiss",
+        "suggestion_id": suggestion_id,
+        "dismiss_reason": dismiss_reason,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "source": "web",
+    }
+    try:
+        _write_operator_request(_state_dir, "pearl_suggestion_feedback", req_payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write feedback request: {str(e)[:200]}")
+
+    return {"ok": True, "message": "Suggestion dismissed (queued).", "suggestion_id": suggestion_id}
 
 
 def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime, end: datetime = None) -> Dict[str, Any]:

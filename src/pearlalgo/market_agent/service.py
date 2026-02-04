@@ -3944,6 +3944,14 @@ class MarketAgentService:
         
         try:
             state_dir = self.state_manager.state_dir
+
+            # ==========================================================================
+            # Process operator requests (web UI feedback, shadow-only)
+            # ==========================================================================
+            try:
+                await self._process_operator_requests(state_dir)
+            except Exception as e:
+                logger.debug(f"Operator requests processing failed (non-fatal): {e}")
             
             # Define flag files
             kill_file = state_dir / "kill_request.flag"
@@ -4268,6 +4276,75 @@ class MarketAgentService:
         finally:
             # Always clean up the request file
             grade_file.unlink(missing_ok=True)
+
+    async def _process_operator_requests(self, state_dir: Path) -> None:
+        """
+        Process operator request files written by the web API server.
+
+        This is intentionally **shadow-only** feedback collection and MUST NOT
+        affect live trading decisions.
+
+        Currently supported request types:
+        - pearl_suggestion_feedback_*.json: Accept/dismiss the active Pearl suggestion
+          (updates `PearlShadowTracker` metrics).
+        """
+        req_dir = Path(state_dir) / "operator_requests"
+        if not req_dir.exists():
+            return
+
+        try:
+            files = sorted([p for p in req_dir.glob("pearl_suggestion_feedback_*.json") if p.is_file()])
+        except Exception:
+            return
+
+        if not files:
+            return
+
+        # Build a lightweight context snapshot for resolution metrics.
+        snap = {}
+        try:
+            snap = self._get_status_snapshot() or {}
+        except Exception:
+            snap = {}
+
+        shadow_context = {
+            "daily_pnl": snap.get("daily_pnl", 0),
+            "wins_today": snap.get("wins_today", 0),
+            "losses_today": snap.get("losses_today", 0),
+            "active_positions": snap.get("active_trades_count", 0) or 0,
+        }
+
+        for fp in files[:50]:
+            try:
+                raw = fp.read_text(encoding="utf-8")
+                rec = json.loads(raw) if raw else {}
+                if not isinstance(rec, dict):
+                    continue
+
+                if str(rec.get("type") or "") != "pearl_suggestion_feedback":
+                    continue
+
+                action = str(rec.get("action") or "").strip().lower()
+                suggestion_id = str(rec.get("suggestion_id") or "").strip()
+                if not action or not suggestion_id:
+                    continue
+
+                if action == "accept":
+                    self.shadow_tracker.mark_followed(suggestion_id, shadow_context)
+                    logger.info(f"[Pearl] Suggestion accepted (shadow): {suggestion_id}")
+                elif action == "dismiss":
+                    self.shadow_tracker.mark_dismissed(suggestion_id, shadow_context)
+                    logger.info(f"[Pearl] Suggestion dismissed (shadow): {suggestion_id}")
+                else:
+                    logger.warning(f"[Pearl] Unknown suggestion feedback action: {action}")
+            except Exception as e:
+                logger.warning(f"[Pearl] Failed to process operator request {fp.name}: {e}")
+            finally:
+                # Always remove requests (prevents double-processing on restart).
+                try:
+                    fp.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def get_status(self) -> Dict:
         """Get current service status."""

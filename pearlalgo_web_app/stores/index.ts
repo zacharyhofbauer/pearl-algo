@@ -1,5 +1,6 @@
 // Export all stores
 export { useAgentStore, type AgentState } from './agentStore'
+export { useOperatorStore } from './operatorStore'
 export type {
   AIStatus,
   ChallengeStatus,

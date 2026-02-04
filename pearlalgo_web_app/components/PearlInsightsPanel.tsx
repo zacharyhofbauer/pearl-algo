@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
-import { apiFetchJson } from '@/lib/api'
+import { apiFetch, apiFetchJson } from '@/lib/api'
+import { useOperatorStore } from '@/stores'
 import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
 
 interface PearlInsightsPanelProps {
@@ -12,8 +13,10 @@ interface PearlInsightsPanelProps {
   aiStatus?: AIStatus | null
   shadowCounters?: ShadowCounters | null
   mlFilterPerformance?: MLFilterPerformance | null
-  onAccept?: () => void
-  onDismiss?: () => void
+  /** Whether the LLM chat endpoint is mounted/available on the API server */
+  chatAvailable?: boolean
+  /** Whether operator passphrase locking is configured on the API server (null = unknown) */
+  operatorLockEnabled?: boolean | null
   initialChatOpen?: boolean
 }
 
@@ -73,8 +76,8 @@ export default function PearlInsightsPanel({
   aiStatus,
   shadowCounters,
   mlFilterPerformance,
-  onAccept,
-  onDismiss,
+  chatAvailable = false,
+  operatorLockEnabled = null,
   initialChatOpen = false,
 }: PearlInsightsPanelProps) {
   const [showHistory, setShowHistory] = useState(false)
@@ -84,6 +87,20 @@ export default function PearlInsightsPanel({
   const [chatBusy, setChatBusy] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  const operatorUnlocked = useOperatorStore((s) => s.isUnlocked)
+  const operatorUnlockedUntil = useOperatorStore((s) => s.unlockedUntil)
+  const operatorUnlock = useOperatorStore((s) => s.unlock)
+  const operatorLock = useOperatorStore((s) => s.lock)
+
+  const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [feedbackResult, setFeedbackResult] = useState<{ type: 'ok' | 'error'; message: string } | null>(null)
+
+  const [unlockOpen, setUnlockOpen] = useState(false)
+  const [unlockValue, setUnlockValue] = useState('')
+  const [unlockBusy, setUnlockBusy] = useState(false)
+  const [unlockError, setUnlockError] = useState<string | null>(null)
 
   const metrics = insights?.shadow_metrics
   const activeSuggestion = suggestion || metrics?.active_suggestion
@@ -118,9 +135,98 @@ export default function PearlInsightsPanel({
   // Format percentage
   const formatPct = (val: number) => `${val.toFixed(0)}%`
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const attemptUnlock = async () => {
+    const phrase = unlockValue.trim()
+    if (!phrase || unlockBusy) return
+
+    setUnlockBusy(true)
+    setUnlockError(null)
+    setFeedbackResult(null)
+    setChatError(null)
+
+    // Optimistically unlock locally, then validate against server.
+    operatorUnlock(phrase)
+    try {
+      const res = await apiFetch('/api/operator/ping', { method: 'GET' })
+      const raw = await res.text().catch(() => '')
+      if (!res.ok) {
+        let detail = raw
+        try {
+          const body = raw ? JSON.parse(raw) : null
+          detail = (typeof body?.detail === 'string' ? body.detail : raw) || raw
+        } catch {
+          // ignore
+        }
+        throw new Error(detail || `HTTP ${res.status}`)
+      }
+      setUnlockOpen(false)
+      setUnlockValue('')
+    } catch (e) {
+      operatorLock()
+      setUnlockError(e instanceof Error ? e.message : 'Unlock failed')
+    } finally {
+      setUnlockBusy(false)
+    }
+  }
+
+  const formatRemaining = () => {
+    if (!operatorUnlocked || !operatorUnlockedUntil) return null
+    const ms = Math.max(0, operatorUnlockedUntil - nowMs)
+    const mins = Math.floor(ms / 60000)
+    const secs = Math.floor((ms % 60000) / 1000)
+    if (mins <= 0) return `${secs}s`
+    return `${mins}m ${secs}s`
+  }
+
+  const resolveSuggestionId = (): string | null => {
+    const id = (activeSuggestion as any)?.id
+    return typeof id === 'string' && id.trim() ? id.trim() : null
+  }
+
+  const sendSuggestionFeedback = async (action: 'accept' | 'dismiss') => {
+    const suggestionId = resolveSuggestionId()
+    if (!suggestionId || feedbackBusy) return
+    if (!operatorUnlocked) return
+
+    setFeedbackBusy(true)
+    setFeedbackResult(null)
+    try {
+      const res = await apiFetch(`/api/pearl-suggestion/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ suggestion_id: suggestionId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.detail || `Request failed (${res.status})`)
+      }
+      setFeedbackResult({ type: 'ok', message: data?.message || `Suggestion ${action}ed.` })
+    } catch (e) {
+      setFeedbackResult({
+        type: 'error',
+        message: e instanceof Error ? e.message : 'Request failed',
+      })
+    } finally {
+      setFeedbackBusy(false)
+    }
+  }
+
   const sendChat = async () => {
     const message = chatInput.trim()
     if (!message || chatBusy) return
+
+    if (!chatAvailable) {
+      setChatError('LLM chat is disabled on this server.')
+      return
+    }
+    if (!operatorUnlocked) {
+      setChatError('Operator access required.')
+      return
+    }
 
     setChatError(null)
     setChatBusy(true)
@@ -203,6 +309,94 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
+        {/* Operator lock (public link is read-only by default) */}
+        <div className="pearl-operator-strip">
+          <div className="pearl-operator-left">
+            <span className={`pearl-operator-dot ${operatorUnlocked ? 'on' : 'off'}`} />
+            <span className="pearl-operator-label">{operatorUnlocked ? 'Operator unlocked' : 'Read-only'}</span>
+            {operatorUnlocked && (
+              <span className="pearl-operator-ttl">
+                {formatRemaining() ? `Auto-lock: ${formatRemaining()}` : ''}
+              </span>
+            )}
+          </div>
+          <div className="pearl-operator-right">
+            {!operatorUnlocked ? (
+              !unlockOpen ? (
+                <button
+                  type="button"
+                  className="pearl-btn pearl-btn-neutral"
+                  onClick={() => {
+                    setUnlockOpen(true)
+                    setUnlockError(null)
+                  }}
+                >
+                  Unlock
+                </button>
+              ) : (
+                <div className="pearl-operator-unlock">
+                  <input
+                    className="pearl-operator-input"
+                    type="password"
+                    value={unlockValue}
+                    placeholder="Passphrase"
+                    onChange={(e) => setUnlockValue(e.target.value)}
+                    disabled={unlockBusy || operatorLockEnabled === false}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        void attemptUnlock()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="pearl-btn pearl-btn-neutral pearl-operator-go"
+                    onClick={() => void attemptUnlock()}
+                    disabled={unlockBusy || !unlockValue.trim() || operatorLockEnabled === false}
+                  >
+                    {unlockBusy ? '…' : 'Go'}
+                  </button>
+                  <button
+                    type="button"
+                    className="pearl-btn pearl-btn-neutral pearl-operator-cancel"
+                    onClick={() => {
+                      setUnlockOpen(false)
+                      setUnlockValue('')
+                      setUnlockError(null)
+                    }}
+                    disabled={unlockBusy}
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            ) : (
+              <button type="button" className="pearl-btn pearl-btn-neutral" onClick={operatorLock}>
+                Lock
+              </button>
+            )}
+          </div>
+        </div>
+
+        {operatorLockEnabled === false && (
+          <div className="pearl-feedback-result error">
+            Operator lock is not configured on the API server. Set <code>PEARL_OPERATOR_PASSPHRASE</code>.
+          </div>
+        )}
+
+        {unlockError && (
+          <div className="pearl-feedback-result error">
+            Unlock failed: {unlockError}
+          </div>
+        )}
+
+        {feedbackResult && (
+          <div className={`pearl-feedback-result ${feedbackResult.type}`}>
+            {feedbackResult.message}
+          </div>
+        )}
+
         {/* LLM Chat (Pearl AI 3.0) */}
         <div className="pearl-chat">
           <button
@@ -247,9 +441,13 @@ export default function PearlInsightsPanel({
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Ask Pearl…"
-                  disabled={chatBusy}
+                  disabled={chatBusy || !operatorUnlocked || !chatAvailable}
                 />
-                <button className="pearl-chat-send" type="submit" disabled={chatBusy || !chatInput.trim()}>
+                <button
+                  className="pearl-chat-send"
+                  type="submit"
+                  disabled={chatBusy || !chatInput.trim() || !operatorUnlocked || !chatAvailable}
+                >
                   {chatBusy ? '…' : 'Send'}
                 </button>
                 <button
@@ -264,7 +462,11 @@ export default function PearlInsightsPanel({
 
               {chatError && <div className="pearl-chat-error">{chatError}</div>}
               <div className="pearl-chat-hint">
-                Requires API server Pearl AI endpoints (<code>/api/pearl</code>) and API auth if enabled.
+                {!operatorUnlocked
+                  ? 'Read-only mode. Unlock operator access to chat.'
+                  : !chatAvailable
+                    ? 'LLM chat is disabled on this server.'
+                    : 'Operator-only. Requires Pearl AI endpoints on the API server.'}
               </div>
             </div>
           )}
@@ -278,7 +480,7 @@ export default function PearlInsightsPanel({
               {mlFilterPerformance.lift_ok && (
                 <span className="ml-lift-badge positive">
                   +{((mlFilterPerformance.win_rate_pass || 0) - (mlFilterPerformance.win_rate_fail || 0)) * 100 > 0
-                    ? ((mlFilterPerformance.win_rate_pass || 0) - (mlFilterPerformance.win_rate_fail || 0) * 100).toFixed(0)
+                    ? (((mlFilterPerformance.win_rate_pass || 0) - (mlFilterPerformance.win_rate_fail || 0)) * 100).toFixed(0)
                     : '0'}% lift
                 </span>
               )}
@@ -344,18 +546,36 @@ export default function PearlInsightsPanel({
               </div>
             )}
             <div className="insight-buttons">
-              <button
-                className="pearl-btn pearl-btn-accept"
-                onClick={onAccept}
-              >
-                Accept
-              </button>
-              <button
-                className="pearl-btn pearl-btn-dismiss"
-                onClick={onDismiss}
-              >
-                Dismiss
-              </button>
+              {/*
+                Some suggestion sources may not provide a stable id; the server will
+                best-effort resolve the active suggestion id, but we still disable
+                buttons if we have nothing to reference client-side.
+              */}
+              {(() => {
+                const sid = resolveSuggestionId()
+                const disabled = !operatorUnlocked || feedbackBusy || !sid
+                const title = !operatorUnlocked ? 'Read-only (operator locked)' : !sid ? 'No suggestion id available' : undefined
+                return (
+                  <>
+                    <button
+                      className="pearl-btn pearl-btn-accept"
+                      onClick={() => void sendSuggestionFeedback('accept')}
+                      disabled={disabled}
+                      title={title}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      className="pearl-btn pearl-btn-dismiss"
+                      onClick={() => void sendSuggestionFeedback('dismiss')}
+                      disabled={disabled}
+                      title={title}
+                    >
+                      Dismiss
+                    </button>
+                  </>
+                )
+              })()}
             </div>
           </div>
         )}
