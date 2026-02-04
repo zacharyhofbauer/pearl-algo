@@ -239,7 +239,7 @@ virtual_pnl:
   notify_entry: true
   notify_exit: true
 auto_flat:
-  enabled: true
+  enabled: false
   daily_enabled: true
   daily_time: '15:55'
   friday_enabled: true
