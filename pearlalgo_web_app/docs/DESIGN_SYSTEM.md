@@ -177,12 +177,17 @@ The DataPanel component now supports padding and variant props.
 import { DataPanel } from '@/components/DataPanelsContainer'
 
 // Basic usage
-<DataPanel title="Performance" icon="📊">
+<DataPanel title="Performance">
   {content}
 </DataPanel>
 
 // With padding variant
 <DataPanel title="Config" padding="compact">
+  {content}
+</DataPanel>
+
+// Optional icon (image only)
+<DataPanel title="Pearl AI" iconSrc="/pearl-emoji.png">
   {content}
 </DataPanel>
 

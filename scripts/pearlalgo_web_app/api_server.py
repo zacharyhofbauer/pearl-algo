@@ -864,6 +864,11 @@ app.add_middleware(
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
 
+# Pearl AI observability for UI heartbeat (updated by broadcast loop)
+_pearl_last_state_seen_time: Optional[str] = None
+_pearl_last_state_sync_time: Optional[str] = None
+_pearl_last_state_sync_error: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # WebSocket Connection Manager
@@ -880,8 +885,7 @@ class ConnectionManager:
         self._last_raw_state_hash: str = ""
 
     async def connect(self, websocket: WebSocket):
-        """Accept and register a new WebSocket connection."""
-        await websocket.accept()
+        """Register a new WebSocket connection (assumes accepted)."""
         self.active_connections.append(websocket)
         print(f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}")
 
@@ -911,12 +915,17 @@ class ConnectionManager:
         """Start broadcasting state updates at regular intervals."""
         while True:
             try:
-                if self.active_connections and _state_dir:
+                global _pearl_last_state_seen_time, _pearl_last_state_sync_time, _pearl_last_state_sync_error
+
+                if _state_dir:
                     # Get current state
                     state_file = _state_dir / "state.json"
                     state = _load_json_file(state_file)
 
                     if state:
+                        # Heartbeat: the API server can see agent state
+                        _pearl_last_state_seen_time = datetime.now(timezone.utc).isoformat()
+
                         # Detect raw agent state.json changes
                         raw_state_hash = str(hash(json.dumps(state, sort_keys=True, default=str)))
 
@@ -925,8 +934,50 @@ class ConnectionManager:
                             self._last_raw_state_hash = raw_state_hash
                             if _pearl_brain is not None:
                                 try:
-                                    _pearl_brain.update_state(state)
+                                    # Enrich state with computed fields so Pearl has the same
+                                    # context the UI sees (daily stats, recent exits, regime, etc).
+                                    enriched = dict(state)
+                                    try:
+                                        daily_stats = _compute_daily_stats(_state_dir)
+                                        enriched.update({
+                                            "daily_pnl": daily_stats.get("daily_pnl"),
+                                            "daily_trades": daily_stats.get("daily_trades"),
+                                            "daily_wins": daily_stats.get("daily_wins"),
+                                            "daily_losses": daily_stats.get("daily_losses"),
+                                        })
+                                    except Exception:
+                                        pass
+
+                                    try:
+                                        enriched["recent_exits"] = _get_recent_exits(_state_dir, limit=3)
+                                    except Exception:
+                                        pass
+
+                                    try:
+                                        enriched["market_regime"] = _get_market_regime(state)
+                                    except Exception:
+                                        pass
+
+                                    try:
+                                        enriched["signal_rejections_24h"] = _get_signal_rejections_24h(state)
+                                    except Exception:
+                                        pass
+
+                                    try:
+                                        enriched["last_signal_decision"] = _get_last_signal_decision(state)
+                                    except Exception:
+                                        pass
+
+                                    try:
+                                        enriched["risk_metrics"] = _get_risk_metrics(_state_dir)
+                                    except Exception:
+                                        pass
+
+                                    _pearl_brain.update_state(enriched)
+                                    _pearl_last_state_sync_time = datetime.now(timezone.utc).isoformat()
+                                    _pearl_last_state_sync_error = None
                                 except Exception as e:
+                                    _pearl_last_state_sync_error = str(e)
                                     print(f"[Pearl AI] State update failed: {e}")
 
                         # Include Pearl AI feed/chat changes in the broadcast hash so the UI can
@@ -952,7 +1003,7 @@ class ConnectionManager:
                         )))
 
                         # Only broadcast if state OR Pearl feed/chat changed
-                        if combined_hash != self._last_state_hash:
+                        if self.active_connections and combined_hash != self._last_state_hash:
                             self._last_state_hash = combined_hash
 
                             # Build the same response as /api/state
@@ -984,7 +1035,7 @@ class ConnectionManager:
                                     # Whether LLM chat endpoints are mounted/available on this API server
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
                                     # Pearl AI transparency (feed + heartbeat + last debug snapshot)
-                                    "pearl_feed": _get_pearl_feed(limit=10),
+                                    "pearl_feed": _get_pearl_feed(limit=40),
                                     "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
                                     "pearl_ai_debug": _get_pearl_ai_debug(),
                                     # Whether operator locking is configured on this API server
@@ -1080,14 +1131,51 @@ async def startup_event():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
     """WebSocket endpoint for real-time state updates."""
-    # Verify API key if authentication is enabled
+    # Verify API key if authentication is enabled.
+    #
+    # Supports two modes:
+    # - Legacy: api_key query param (?api_key=...)
+    # - Preferred (client): first WS message: {"type":"auth","api_key":"..."}
+    accepted = False
     if _auth_enabled:
-        if not api_key:
-            await websocket.close(code=1008, reason="Missing API key")
-            return
-        if api_key not in _api_keys:
-            await websocket.close(code=1008, reason="Invalid API key")
-            return
+        key = (api_key or "").strip()
+        if key:
+            if key not in _api_keys:
+                await websocket.close(code=1008, reason="Invalid API key")
+                return
+            await websocket.accept()
+            accepted = True
+        else:
+            # Accept first so we can receive the auth message
+            await websocket.accept()
+            accepted = True
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            except asyncio.TimeoutError:
+                await websocket.close(code=1008, reason="Missing API key")
+                return
+
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = None
+
+            msg_key = ""
+            if isinstance(payload, dict) and payload.get("type") == "auth":
+                msg_key = str(payload.get("api_key") or "").strip()
+
+            if not msg_key:
+                await websocket.close(code=1008, reason="Missing API key")
+                return
+            if msg_key not in _api_keys:
+                await websocket.close(code=1008, reason="Invalid API key")
+                return
+    else:
+        await websocket.accept()
+        accepted = True
+
+    if not accepted:
+        await websocket.accept()
 
     await ws_manager.connect(websocket)
     try:
@@ -1129,7 +1217,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "data_quality": _get_data_quality(state),
                         "pearl_insights": state.get("pearl_insights"),
                         "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                        "pearl_feed": _get_pearl_feed(limit=10),
+                        "pearl_feed": _get_pearl_feed(limit=40),
                         "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
                         "pearl_ai_debug": _get_pearl_ai_debug(),
                         "operator_lock_enabled": bool(_operator_enabled),
@@ -1142,6 +1230,16 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
             try:
                 # Wait for any message (ping/pong or requests)
                 data = await websocket.receive_text()
+
+                # Ignore auth payloads (client sends on connect)
+                if data and data.startswith("{"):
+                    try:
+                        payload = json.loads(data)
+                        if isinstance(payload, dict) and payload.get("type") == "auth":
+                            await websocket.send_json({"type": "auth_ok"})
+                            continue
+                    except Exception:
+                        pass
 
                 # Handle ping
                 if data == "ping":
@@ -1186,7 +1284,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "data_quality": _get_data_quality(state),
                                     "pearl_insights": state.get("pearl_insights"),
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                                    "pearl_feed": _get_pearl_feed(limit=10),
+                                    "pearl_feed": _get_pearl_feed(limit=40),
                                     "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
                                     "pearl_ai_debug": _get_pearl_ai_debug(),
                                     "operator_lock_enabled": bool(_operator_enabled),
@@ -1716,6 +1814,9 @@ def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
             "feed_total": len(msgs),
             "last_message_time": last_ts,
             "last_message_type": last_type,
+            "last_state_seen_time": _pearl_last_state_seen_time,
+            "last_state_sync_time": _pearl_last_state_sync_time,
+            "last_state_sync_error": _pearl_last_state_sync_error,
         }
     except Exception:
         return {
@@ -2276,7 +2377,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
 
         # NEW: Pearl AI transparency (feed + heartbeat + last debug snapshot)
-        "pearl_feed": _get_pearl_feed(limit=10),
+        "pearl_feed": _get_pearl_feed(limit=40),
         "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
         "pearl_ai_debug": _get_pearl_ai_debug(),
 

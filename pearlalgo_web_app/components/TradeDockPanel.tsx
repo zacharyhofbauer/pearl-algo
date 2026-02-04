@@ -327,7 +327,6 @@ export default function TradeDockPanel({
     <div className="trade-dock-wrapper">
       <DataPanel
         title="Trades"
-        icon="📓"
         padding="none"
         className="trade-dock-panel"
         headerRight={headerStats}

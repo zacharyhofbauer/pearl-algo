@@ -1,9 +1,31 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import PearlInsightsPanel from './PearlInsightsPanel'
 import { useAgentStore, useOperatorStore } from '@/stores'
+
+/** Chevron icon component for consistent rendering */
+function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      className={`pearl-header-chevron ${direction}`}
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d={direction === 'up' ? 'M2 8L6 4L10 8' : 'M2 4L6 8L10 4'}
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
 
 export default function PearlHeaderBar() {
   const agentState = useAgentStore((s) => s.agentState)
@@ -14,6 +36,20 @@ export default function PearlHeaderBar() {
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const hasAI = Boolean(agentState?.pearl_ai_available || agentState?.ai_status)
+  const isConnected = Boolean(agentState?.running)
+
+  // Determine AI mode for status indicator
+  const aiMode = useMemo(() => {
+    const ai = agentState?.ai_status
+    if (!ai) return null
+    const hasLive = ai.bandit_mode === 'live' || ai.contextual_mode === 'live' ||
+                    (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'live')
+    const hasShadow = ai.bandit_mode === 'shadow' || ai.contextual_mode === 'shadow' ||
+                      (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'shadow')
+    if (hasLive) return 'live'
+    if (hasShadow) return 'shadow'
+    return 'off'
+  }, [agentState?.ai_status])
 
   const previewText = useMemo(() => {
     const feed = agentState?.pearl_feed
@@ -28,8 +64,21 @@ export default function PearlHeaderBar() {
 
     const base = feedText || suggestion || 'Pearl AI ready'
     const maxLength = 60
-    return base.length <= maxLength ? base : `${base.slice(0, maxLength)}...`
+    return base.length <= maxLength ? base : `${base.slice(0, maxLength)}…`
   }, [agentState?.pearl_feed, agentState?.pearl_insights, agentState?.pearl_suggestion])
+
+  // Toggle handler with keyboard support
+  const handleToggle = useCallback(() => {
+    setExpanded((v) => !v)
+  }, [])
+
+  // Keyboard handler for accessibility
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleToggle()
+    }
+  }, [handleToggle])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -56,6 +105,8 @@ export default function PearlHeaderBar() {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && expanded) {
         setExpanded(false)
+        // Return focus to the header bar
+        headerRef.current?.focus()
       }
     }
     document.addEventListener('keydown', handleEscape)
@@ -68,31 +119,59 @@ export default function PearlHeaderBar() {
     return () => window.clearInterval(id)
   }, [tickOperator])
 
+  // Status dot class based on connection and AI state
+  const statusDotClass = useMemo(() => {
+    if (!hasAI && !isConnected) return ''
+    if (aiMode === 'live') return 'connected live'
+    if (aiMode === 'shadow') return 'connected shadow'
+    if (hasAI) return 'connected'
+    return ''
+  }, [hasAI, isConnected, aiMode])
+
   return (
     <div
       ref={headerRef}
       className={`pearl-header-bar ${expanded ? 'expanded' : ''}`}
-      onClick={() => setExpanded((v) => !v)}
+      onClick={handleToggle}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-controls="pearl-dropdown"
+      aria-label={`Pearl AI panel, ${expanded ? 'expanded' : 'collapsed'}. ${previewText}`}
     >
-      <div className="pearl-header-icon">
-        <Image src="/pearl-emoji.png" alt="Pearl AI" width={20} height={20} priority />
+      <div className="pearl-header-icon" aria-hidden="true">
+        <Image src="/pearl-emoji.png" alt="" width={20} height={20} priority />
       </div>
 
-      <span className={`pearl-header-status-dot ${hasAI ? 'connected' : ''}`} />
+      <span
+        className={`pearl-header-status-dot ${statusDotClass}`}
+        role="status"
+        aria-label={hasAI ? `Pearl AI ${aiMode || 'connected'}` : 'Pearl AI disconnected'}
+      />
 
-      <div className="pearl-header-preview">{previewText}</div>
+      <div className="pearl-header-preview" aria-hidden="true">
+        {previewText}
+      </div>
 
-      <span className="pearl-header-arrow">{expanded ? '▲' : '▼'}</span>
+      <span className="pearl-header-arrow" aria-hidden="true">
+        <ChevronIcon direction={expanded ? 'up' : 'down'} />
+      </span>
 
       <div
         ref={dropdownRef}
+        id="pearl-dropdown"
         className="pearl-header-dropdown"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        role="region"
+        aria-label="Pearl AI Controls"
       >
         <div className="pearl-dropdown-panel">
           <PearlInsightsPanel
             insights={agentState?.pearl_insights ?? null}
             suggestion={agentState?.pearl_suggestion ?? null}
+            agentState={agentState ?? null}
             aiStatus={agentState?.ai_status ?? null}
             shadowCounters={agentState?.shadow_counters ?? null}
             mlFilterPerformance={agentState?.ml_filter_performance ?? null}
@@ -101,6 +180,8 @@ export default function PearlHeaderBar() {
             pearlFeed={agentState?.pearl_feed ?? []}
             pearlAIHeartbeat={agentState?.pearl_ai_heartbeat ?? null}
             pearlAIDebug={agentState?.pearl_ai_debug ?? null}
+            layout="dropdown"
+            dropdownActive={expanded}
             initialChatOpen={false}
           />
         </div>

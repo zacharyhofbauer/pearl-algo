@@ -754,6 +754,7 @@ export default function PearlAlgoWebApp() {
                 <PearlInsightsPanel
                   insights={agentState.pearl_insights}
                   suggestion={agentState.pearl_suggestion}
+                  agentState={agentState}
                   aiStatus={agentState.ai_status}
                   shadowCounters={agentState.shadow_counters}
                   mlFilterPerformance={agentState.ml_filter_performance}

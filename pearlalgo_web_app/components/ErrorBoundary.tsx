@@ -98,17 +98,15 @@ export function withErrorBoundary<P extends object>(
 interface PanelErrorBoundaryProps {
   children: ReactNode
   title: string
-  icon?: string
 }
 
-export function PanelErrorBoundary({ children, title, icon }: PanelErrorBoundaryProps): JSX.Element {
+export function PanelErrorBoundary({ children, title }: PanelErrorBoundaryProps): JSX.Element {
   return (
     <ErrorBoundary
       panelName={title}
       fallback={
         <div className="data-panel error-panel">
           <div className="panel-header">
-            {icon && <span className="panel-icon">{icon}</span>}
             <span className="panel-title">{title}</span>
           </div>
           <div className="panel-content">

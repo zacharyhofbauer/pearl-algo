@@ -20,8 +20,7 @@ export default function DataPanelsContainer({ children }: DataPanelsContainerPro
 
 interface DataPanelProps {
   title: string
-  icon?: string
-  /** Image path for icon (used instead of emoji icon) */
+  /** Optional image path for a small header icon */
   iconSrc?: string
   children: ReactNode
   className?: string
@@ -41,7 +40,6 @@ interface DataPanelProps {
 
 export function DataPanel({
   title,
-  icon,
   iconSrc,
   children,
   className = '',
@@ -59,13 +57,10 @@ export function DataPanel({
     className
   ].filter(Boolean).join(' ')
 
-  // Render icon - either image or emoji
+  // Render icon (image only; no emoji in panel titles)
   const renderIcon = () => {
     if (iconSrc) {
       return <Image src={iconSrc} alt="" width={18} height={18} className="data-panel-icon-img" />
-    }
-    if (icon) {
-      return <span className="data-panel-icon">{icon}</span>
     }
     return null
   }

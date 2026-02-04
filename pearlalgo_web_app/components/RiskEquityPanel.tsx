@@ -296,7 +296,7 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
   const showTabs = (riskMetrics !== null) && (equityCurve.length > 0)
 
   return (
-    <DataPanel title="Risk & Equity" icon="🧮">
+    <DataPanel title="Risk & Equity">
       {showTabs && (
         <div className="perf-tabs" role="tablist" aria-label="Risk and equity tabs">
           <button

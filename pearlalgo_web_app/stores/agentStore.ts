@@ -387,6 +387,9 @@ export interface PearlAIHeartbeat {
   feed_total?: number
   last_message_time?: string | null
   last_message_type?: string | null
+  last_state_seen_time?: string | null
+  last_state_sync_time?: string | null
+  last_state_sync_error?: string | null
 }
 
 export interface AgentState {

@@ -87,7 +87,7 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
   const rejectionBars = buildRejectionBars()
 
   return (
-    <DataPanel title="Signal Decisions" icon="🎯">
+    <DataPanel title="Signal Decisions">
       <div className="signal-decisions-content">
         {/* Last Signal Info */}
         {lastDecision && (

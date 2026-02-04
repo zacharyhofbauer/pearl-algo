@@ -47,7 +47,7 @@ export default function ConfigPanel({ config }: ConfigPanelProps) {
   }
 
   return (
-    <DataPanel title="Config" icon="⚙️">
+    <DataPanel title="Config">
       <div className="config-panel-content">
         {/* Market/Symbol */}
         <div className="config-row">

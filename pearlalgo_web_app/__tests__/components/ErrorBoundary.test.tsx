@@ -101,7 +101,7 @@ describe('ErrorBoundary', () => {
 describe('PanelErrorBoundary', () => {
   it('should render children when no error', () => {
     render(
-      <PanelErrorBoundary title="Performance" icon="📊">
+      <PanelErrorBoundary title="Performance">
         <div>Panel content</div>
       </PanelErrorBoundary>
     )
@@ -111,23 +111,13 @@ describe('PanelErrorBoundary', () => {
 
   it('should show error state when error occurs', () => {
     render(
-      <PanelErrorBoundary title="Analytics" icon="📈">
+      <PanelErrorBoundary title="Analytics">
         <ThrowError shouldThrow={true} />
       </PanelErrorBoundary>
     )
 
     expect(screen.getByText('Analytics')).toBeInTheDocument()
     expect(screen.getByText('Failed to load')).toBeInTheDocument()
-  })
-
-  it('should render panel with icon when provided', () => {
-    render(
-      <PanelErrorBoundary title="Test Panel" icon="🎯">
-        <ThrowError shouldThrow={true} />
-      </PanelErrorBoundary>
-    )
-
-    expect(screen.getByText('🎯')).toBeInTheDocument()
   })
 })
 

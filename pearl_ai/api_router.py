@@ -568,6 +568,21 @@ def create_pearl_router(
         """
         return brain.metrics.get_error_summary(hours)
 
+    @router.get("/metrics/sources")
+    async def get_response_sources(hours: Optional[int] = 24, _: Optional[str] = Depends(auth_dep)):
+        """
+        Get response source distribution.
+
+        Returns counts and percentages for each response source
+        (cache, local/Ollama, Claude, template).
+
+        Args:
+            hours: Number of hours to look back. If None, returns all-time stats.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.metrics.get_response_source_distribution(hours)
+
     @router.post("/cache/clear")
     async def clear_cache(_: Optional[str] = Depends(auth_dep)):
         """

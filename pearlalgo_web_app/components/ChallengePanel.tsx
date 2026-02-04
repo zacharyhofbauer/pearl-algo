@@ -122,7 +122,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
   const gapFromPeak = peakBalance - challenge.current_balance
 
   return (
-    <DataPanel title="Challenge" icon="🎯" className="challenge-panel" variant="feature">
+    <DataPanel title="Challenge" className="challenge-panel" variant="feature">
       <div className="challenge-header">
         <div className="challenge-balance">
           <div className="challenge-balance-row">

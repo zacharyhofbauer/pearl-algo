@@ -230,7 +230,7 @@ export default function MarketContextPanel({ regime, pressure }: MarketContextPa
   }
 
   return (
-    <DataPanel title="Market Context" icon="🌐">
+    <DataPanel title="Market Context">
       {showTabs && (
         <div className="perf-tabs" role="tablist" aria-label="Market context tabs">
           {availableTabs.includes('regime') && (

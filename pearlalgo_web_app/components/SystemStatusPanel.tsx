@@ -140,7 +140,7 @@ export default function SystemStatusPanel({
   }
 
   return (
-    <DataPanel title="System Status" icon="🎯" variant="status">
+    <DataPanel title="System Status" variant="status">
       <div className="system-status-panel">
         {/* Main Readiness Indicator */}
         <div className="status-readiness">

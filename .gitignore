@@ -52,6 +52,7 @@ node_modules/
 .next/
 live-chart/.next/
 live-chart/node_modules/
+*.tsbuildinfo
 
 # Editors/OS
 .DS_Store

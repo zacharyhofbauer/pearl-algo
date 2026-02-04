@@ -72,14 +72,14 @@ export default function SystemHealthPanel({
   // Show loading state if no data at all
   if (!cadenceMetrics && !gatewayStatus && !connectionHealth && !errorSummary && !dataQuality) {
     return (
-      <DataPanel title="System Health" icon="🔧" variant="status">
+      <DataPanel title="System Health" variant="status">
         <div className="no-data-message">No system data available</div>
       </DataPanel>
     )
   }
 
   return (
-    <DataPanel title="System Health" icon="🔧" variant="status">
+    <DataPanel title="System Health" variant="status">
       <div className="health-panel-content">
         {/* Gateway Status Section */}
         {gatewayStatus && (

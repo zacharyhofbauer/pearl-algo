@@ -310,7 +310,7 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
   }
 
   return (
-    <DataPanel title="Analytics" icon="📈">
+    <DataPanel title="Analytics">
       {/* Tab Navigation */}
       <div className="analytics-tabs">
         {(['sessions', 'hours', 'duration', 'calendar'] as TabType[]).map((tab) => (
