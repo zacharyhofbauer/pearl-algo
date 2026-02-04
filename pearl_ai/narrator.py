@@ -112,17 +112,12 @@ class PearlNarrator:
             elif win_rate < 0.4:
                 correlation_note = f"Recent {direction.upper()} trades have struggled ({same_dir_wins}/{len(recent_same_dir)} wins)."
 
-        return f"""Generate a brief narration for this trade entry (1-2 sentences):
-- Direction: {direction.upper()} at {entry_price}
-- Market Regime: {regime}
-- Order Flow: {pressure}
-- ML Confidence: {ml_prob * 100:.0f}%
-- Session: {session}
-{f'- Note: {correlation_note}' if correlation_note else ''}
+        return f"""Narrate this trade entry in EXACTLY 1 sentence (max 25 words):
+{direction.upper()} at {entry_price}, {regime} market, {pressure}, ML {ml_prob * 100:.0f}%.
 
-Include context about why this setup looks good or concerning.
-Example: "Entered LONG at 25530 in a ranging market with building buyer pressure. ML confidence 72%. Morning session typically favors LONG."
-Keep it natural and under 2 sentences."""
+Output format: "Entered [DIRECTION] at [PRICE] — [one key observation]."
+Example: "Entered LONG at 25530 — trending market with 72% ML confidence."
+DO NOT exceed 1 sentence."""
 
     def _trade_exited_prompt(self, ctx: Dict, state: Dict) -> str:
         pnl = ctx.get("pnl", 0)
@@ -146,18 +141,13 @@ Keep it natural and under 2 sentences."""
         daily_wins = state.get("daily_wins", 0)
         win_rate_pct = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
 
-        return f"""Narrate this trade exit in 1-2 sentences:
-- Direction: {direction.upper()}
-- P&L: ${pnl:+.2f}
-- Exit Reason: {reason}
-- Market State: {regime} with {pressure}
-- Daily P&L Now: ${daily_pnl:+.2f}
-- Today's Win Rate: {win_rate_pct:.0f}% ({daily_wins}/{daily_trades})
-{f'- {streak_note}' if streak_note else ''}
+        return f"""Narrate this trade exit in EXACTLY 1 sentence (max 25 words):
+{direction.upper()} closed: ${pnl:+.2f} ({reason}). Daily P&L: ${daily_pnl:+.2f}.
+{f'{streak_note}' if streak_note else ''}
 
-{'Acknowledge the win constructively.' if pnl > 0 else 'Acknowledge the loss constructively - no blame.'}
-Mention the exit reason and any relevant market context.
-Keep it natural and under 2 sentences."""
+Output format: "Closed [DIRECTION]: $[P&L] ([reason]) — [brief context]."
+Example: "Closed LONG: +$45.50 (take profit) — day now at +$150."
+DO NOT exceed 1 sentence. Must mention the P&L amount."""
 
     def _signal_generated_prompt(self, ctx: Dict, state: Dict) -> str:
         signal_type = ctx.get("signal_type", "unknown")
@@ -198,26 +188,23 @@ Keep it brief."""
             if blocked_dir:
                 gating_stats = f"Currently blocking {blocked_dir.upper()} due to {regime} conditions."
 
-        return f"""Briefly explain this signal rejection (1-2 sentences):
-- Reason: {reason.replace('_', ' ')}
-- Total Rejections Today: {total}
-- Market: {regime}
-{f'- {ml_stats}' if ml_stats else ''}
-{f'- {gating_stats}' if gating_stats else ''}
+        return f"""Explain this signal rejection in EXACTLY 1 sentence (max 20 words):
+Reason: {reason.replace('_', ' ')}. Rejections today: {total}.
 
-Explain why we passed on this signal - be specific about the filter reason.
-Example: "Passed on SHORT signal - ML confidence only 28%, below our 50% threshold."
-Keep it informative but brief."""
+Output: "Skipped [signal] — [specific reason]."
+Example: "Skipped LONG signal — ML confidence 28%, below threshold."
+DO NOT exceed 1 sentence."""
 
     def _circuit_breaker_prompt(self, ctx: Dict, state: Dict) -> str:
         reason = ctx.get("reason", "protective stop")
         cooldown = ctx.get("cooldown_seconds", 0)
 
-        return f"""Alert about circuit breaker activation:
-- Trigger Reason: {reason}
-- Cooldown Duration: {cooldown // 60} minutes
+        return f"""Circuit breaker alert in EXACTLY 1 sentence (max 20 words):
+Reason: {reason}. Cooldown: {cooldown // 60} minutes.
 
-Explain briefly and reassure this is protective."""
+Output: "Circuit breaker triggered — [reason]. Pausing [X] minutes."
+Example: "Circuit breaker triggered — daily loss limit. Pausing 30 minutes."
+DO NOT exceed 1 sentence."""
 
     def _direction_blocked_prompt(self, ctx: Dict, state: Dict) -> str:
         blocked = ctx.get("blocked_direction", "unknown")

@@ -29,17 +29,36 @@ class TradeDataAccess:
         Initialize data access layer.
 
         Args:
-            db_path: Path to SQLite database. If None, uses default location.
+            db_path: Path to SQLite database. If None, searches default locations.
         """
         if db_path:
             self.db_path = Path(db_path)
         else:
-            # Default to state directory
-            from pathlib import Path
-            state_dir = Path.home() / ".pearl" / "state"
-            self.db_path = state_dir / "trades.db"
+            self.db_path = self._find_database()
 
         self._verify_database()
+
+    def _find_database(self) -> Path:
+        """Find trade database in default locations."""
+        # Search paths in priority order
+        search_paths = [
+            # Project data directory (most common for dev)
+            Path(__file__).parent.parent / "data" / "agent_state" / "NQ" / "trades.db",
+            # Home state directory
+            Path.home() / ".pearl" / "state" / "trades.db",
+            # Alternative project locations
+            Path.cwd() / "data" / "agent_state" / "NQ" / "trades.db",
+            Path.cwd() / "data" / "trades.db",
+        ]
+
+        for path in search_paths:
+            if path.exists():
+                logger.info(f"Found trade database at: {path}")
+                return path
+
+        # Default fallback (will fail verification)
+        logger.warning("Trade database not found in any default location")
+        return Path.home() / ".pearl" / "state" / "trades.db"
 
     def _verify_database(self) -> bool:
         """Verify database exists and is accessible."""

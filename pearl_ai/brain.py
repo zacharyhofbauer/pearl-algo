@@ -153,6 +153,17 @@ class PearlBrain:
         # Response source tracking (P5.1)
         self._last_response_source: Optional["ResponseSource"] = None
 
+        # Eval instrumentation - tracks details of last response for debugging/testing
+        self._last_routing: str = "unknown"
+        self._last_model: str = "unknown"
+        self._last_tool_calls: List[Dict[str, Any]] = []
+        self._last_tool_results: List[Dict[str, Any]] = []
+        self._last_input_tokens: int = 0
+        self._last_output_tokens: int = 0
+        self._last_latency_ms: float = 0.0
+        self._last_cache_hit: bool = False
+        self._last_fallback_used: bool = False
+
         # Cooldowns for proactive messages
         self.insight_cooldown = timedelta(minutes=30)
         self.ml_warning_cooldown = timedelta(hours=2)
@@ -342,16 +353,36 @@ class PearlBrain:
             try:
                 response = await self.local_llm.generate(
                     prompt,
-                    system="You are Pearl, an AI trading assistant. Speak naturally and concisely. "
-                           "Explain trading decisions clearly. Be direct but friendly.",
-                    max_tokens=150,
+                    system="You are Pearl, an AI trading assistant. "
+                           "CRITICAL: Keep responses to 1-2 SHORT sentences only. "
+                           "Never exceed 40 words total. Be extremely concise. "
+                           "State facts directly without elaboration.",
+                    max_tokens=80,  # Reduced to enforce brevity
                 )
+                # Strip quotes if LLM wrapped the response
+                response = response.strip().strip('"').strip("'")
                 return response
             except Exception as e:
                 logger.error(f"Local LLM error: {e}")
 
         # Fallback to template-based narration
         return self.narrator.template_narration(event_type, context)
+
+    async def narrate(self, event_type: str, context: Dict[str, Any]) -> str:
+        """
+        Generate a narration for an event (eval-friendly wrapper).
+
+        This is a simplified interface for the eval framework that returns
+        just the narration text without emitting messages.
+
+        Args:
+            event_type: Type of event (trade_entered, trade_exited, etc.)
+            context: Event context dict
+
+        Returns:
+            Generated narration text
+        """
+        return await self._generate_narration(event_type, context)
 
     async def chat(
         self,
@@ -377,22 +408,35 @@ class PearlBrain:
         # Track response source for transparency (P5.1)
         response_source = ResponseSource.TEMPLATE
 
+        # Reset eval instrumentation for this request
+        self._last_tool_calls = []
+        self._last_tool_results = []
+
         # Check cache first (3.0)
         if self.cache:
             cached = self.cache.get(sanitized_message, self._current_state)
             if cached:
+                cache_latency = (time.time() - start_time) * 1000
                 self.metrics.record(LLMRequest(
                     timestamp=datetime.now(),
                     endpoint="chat",
                     model="cache",
                     input_tokens=0,
                     output_tokens=0,
-                    latency_ms=(time.time() - start_time) * 1000,
+                    latency_ms=cache_latency,
                     cache_hit=True,
                     success=True,
                 ))
                 self.memory.add_assistant_message(cached)
                 self._last_response_source = ResponseSource.CACHE
+                # Update eval instrumentation for cache hit
+                self._last_routing = "cache"
+                self._last_model = "cache"
+                self._last_input_tokens = 0
+                self._last_output_tokens = 0
+                self._last_latency_ms = cache_latency
+                self._last_cache_hit = True
+                self._last_fallback_used = False
                 return cached
 
         # Determine complexity if auto
@@ -440,6 +484,15 @@ class PearlBrain:
         # Store last response source for API (P5.1)
         self._last_response_source = response_source
 
+        # Update eval instrumentation
+        self._last_routing = complexity.value if complexity != QueryComplexity.AUTO else "auto"
+        self._last_model = model_used
+        self._last_input_tokens = input_tokens
+        self._last_output_tokens = output_tokens
+        self._last_latency_ms = latency_ms
+        self._last_cache_hit = False
+        self._last_fallback_used = fallback_used
+
         # Record metrics (3.0)
         self.metrics.record(LLMRequest(
             timestamp=datetime.now(),
@@ -468,6 +521,58 @@ class PearlBrain:
         ))
 
         return response
+
+    def get_last_debug_info(self) -> Dict[str, Any]:
+        """
+        Get debug information from the last chat/narration call.
+
+        Used by eval framework to inspect what happened during response generation.
+
+        Returns:
+            Dict with routing, model, tool calls, tokens, latency, etc.
+        """
+        return {
+            "routing": self._last_routing,
+            "model_used": self._last_model,
+            "tool_calls": self._last_tool_calls.copy(),
+            "tool_results": self._last_tool_results.copy(),
+            "input_tokens": self._last_input_tokens,
+            "output_tokens": self._last_output_tokens,
+            "latency_ms": self._last_latency_ms,
+            "cache_hit": self._last_cache_hit,
+            "fallback_used": self._last_fallback_used,
+            "response_source": self._last_response_source.value if self._last_response_source else None,
+        }
+
+    async def chat_with_debug(
+        self,
+        user_message: str,
+        complexity: QueryComplexity = QueryComplexity.AUTO,
+        state: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, Dict[str, Any]]:
+        """
+        Chat with debug info returned.
+
+        Convenience method for eval framework that returns both response
+        and debug info in a single call.
+
+        Args:
+            user_message: The user's message
+            complexity: Query complexity hint
+            state: Optional state to use (overrides current state)
+
+        Returns:
+            Tuple of (response, debug_info)
+        """
+        # Optionally set state for this request
+        if state is not None:
+            self._current_state = state
+
+        # Get response
+        response = await self.chat(user_message, complexity)
+
+        # Return with debug info
+        return response, self.get_last_debug_info()
 
     def _get_rag_context(self, query: str) -> str:
         """Get relevant trade data for RAG based on query."""
@@ -566,9 +671,22 @@ Respond naturally and concisely:"""
             # Get tool definitions
             tools = self.tool_executor.get_tool_definitions()
 
-            # Define tool executor wrapper
+            # Define tool executor wrapper that tracks calls for eval instrumentation
             def execute_tool(name: str, args: Dict) -> str:
+                # Track the tool call
+                self._last_tool_calls.append({
+                    "name": name,
+                    "input": args,
+                })
+                # Execute the tool
                 result = self.tool_executor.execute(name, args)
+                # Track the result
+                self._last_tool_results.append({
+                    "name": name,
+                    "success": result.success,
+                    "data": result.data if result.success else None,
+                    "error": result.error,
+                })
                 return format_tool_result_for_llm(name, result)
 
             # Generate with tools
