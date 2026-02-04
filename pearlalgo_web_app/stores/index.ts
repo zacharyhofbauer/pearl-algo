@@ -30,6 +30,9 @@ export type {
   PearlSuggestion,
   PearlShadowMetrics,
   PearlInsights,
+  PearlFeedMessage,
+  PearlAIDebugInfo,
+  PearlAIHeartbeat,
   // New types for enhanced transparency
   ExecutionState,
   CircuitBreakerStatus,

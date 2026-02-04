@@ -773,6 +773,9 @@ export default function PearlAlgoWebApp() {
                   mlFilterPerformance={agentState.ml_filter_performance}
                   chatAvailable={Boolean(agentState.pearl_ai_available)}
                   operatorLockEnabled={agentState.operator_lock_enabled ?? null}
+                  pearlFeed={agentState.pearl_feed ?? []}
+                  pearlAIHeartbeat={agentState.pearl_ai_heartbeat ?? null}
+                  pearlAIDebug={agentState.pearl_ai_debug ?? null}
                 />
               }
               systemStatusSection={

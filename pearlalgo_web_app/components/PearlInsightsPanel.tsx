@@ -5,7 +5,16 @@ import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import { apiFetch, apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
-import type { PearlInsights, PearlSuggestion, AIStatus, ShadowCounters, MLFilterPerformance } from '@/stores'
+import type {
+  PearlInsights,
+  PearlSuggestion,
+  AIStatus,
+  ShadowCounters,
+  MLFilterPerformance,
+  PearlFeedMessage,
+  PearlAIHeartbeat,
+  PearlAIDebugInfo,
+} from '@/stores'
 
 interface PearlInsightsPanelProps {
   insights: PearlInsights | null
@@ -17,6 +26,12 @@ interface PearlInsightsPanelProps {
   chatAvailable?: boolean
   /** Whether operator passphrase locking is configured on the API server (null = unknown) */
   operatorLockEnabled?: boolean | null
+  /** Recent Pearl AI messages (narrations, insights, alerts, chat responses) */
+  pearlFeed?: PearlFeedMessage[]
+  /** Lightweight 'heartbeat' snapshot for Pearl AI */
+  pearlAIHeartbeat?: PearlAIHeartbeat | null
+  /** Last Pearl AI debug snapshot (routing/model/tools/latency/cache) */
+  pearlAIDebug?: PearlAIDebugInfo | null
   initialChatOpen?: boolean
 }
 
@@ -78,10 +93,14 @@ export default function PearlInsightsPanel({
   mlFilterPerformance,
   chatAvailable = false,
   operatorLockEnabled = null,
+  pearlFeed = [],
+  pearlAIHeartbeat = null,
+  pearlAIDebug = null,
   initialChatOpen = false,
 }: PearlInsightsPanelProps) {
   const [showHistory, setShowHistory] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+  const [showTransparency, setShowTransparency] = useState(false)
   const [chatOpen, setChatOpen] = useState(initialChatOpen)
   const [chatInput, setChatInput] = useState('')
   const [chatBusy, setChatBusy] = useState(false)
@@ -104,6 +123,49 @@ export default function PearlInsightsPanel({
 
   const metrics = insights?.shadow_metrics
   const activeSuggestion = suggestion || metrics?.active_suggestion
+
+  const getMs = (iso?: string | null): number | null => {
+    if (!iso) return null
+    const t = Date.parse(iso)
+    return Number.isFinite(t) ? t : null
+  }
+
+  const formatAgo = (iso?: string | null): string => {
+    const t = getMs(iso)
+    if (!t) return '—'
+    const s = Math.max(0, Math.floor((nowMs - t) / 1000))
+    if (s < 60) return `${s}s ago`
+    const m = Math.floor(s / 60)
+    if (m < 60) return `${m}m ago`
+    const h = Math.floor(m / 60)
+    if (h < 48) return `${h}h ago`
+    const d = Math.floor(h / 24)
+    return `${d}d ago`
+  }
+
+  const lastPearlTs =
+    pearlAIHeartbeat?.last_message_time ||
+    (pearlFeed.length > 0 ? (pearlFeed[pearlFeed.length - 1]?.timestamp ?? null) : null)
+
+  const heartbeatRecent = (() => {
+    const t = getMs(lastPearlTs)
+    if (!t) return false
+    return nowMs - t < 15000
+  })()
+
+  const routingLabel = (() => {
+    const r: any = (pearlAIDebug as any)?.routing
+    if (!r) return '—'
+    if (typeof r === 'string') return r
+    if (typeof r === 'object') {
+      const v = r.route || r.decision || r.complexity || r.kind
+      if (typeof v === 'string') return v
+      return 'routing'
+    }
+    return String(r)
+  })()
+
+  const toolCount = Array.isArray(pearlAIDebug?.tool_calls) ? pearlAIDebug!.tool_calls!.length : 0
 
   // Calculate display values
   const totalWouldHaveSaved = metrics?.total_would_have_saved || 0
@@ -394,6 +456,113 @@ export default function PearlInsightsPanel({
         {feedbackResult && (
           <div className={`pearl-feedback-result ${feedbackResult.type}`}>
             {feedbackResult.message}
+          </div>
+        )}
+
+        {/* Transparency / Heartbeat */}
+        {(pearlFeed.length > 0 || pearlAIHeartbeat || pearlAIDebug) && (
+          <div className="pearl-transparency">
+            <div className="transparency-header">
+              <div className="transparency-left">
+                <span className={`pearl-heartbeat-dot ${heartbeatRecent ? 'on' : 'off'}`} />
+                <span className="transparency-title">Transparency</span>
+                <span className="transparency-sub">{formatAgo(lastPearlTs)}</span>
+              </div>
+              <button
+                className="details-toggle"
+                onClick={() => setShowTransparency(!showTransparency)}
+                type="button"
+              >
+                {showTransparency ? '−' : '+'}
+              </button>
+            </div>
+
+            {showTransparency && (
+              <div className="transparency-body">
+                <div className="pearl-heartbeat-grid">
+                  <div className="hb-item">
+                    <span className="hb-k">Mounted</span>
+                    <span className="hb-v">{pearlAIHeartbeat?.mounted ? 'yes' : 'no'}</span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Feed</span>
+                    <span className="hb-v">
+                      {typeof pearlAIHeartbeat?.feed_total === 'number' ? pearlAIHeartbeat.feed_total : pearlFeed.length}
+                    </span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Route</span>
+                    <span className="hb-v">{routingLabel}</span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Source</span>
+                    <span className="hb-v">{pearlAIDebug?.response_source || '—'}</span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Model</span>
+                    <span className="hb-v">{pearlAIDebug?.model_used || '—'}</span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Latency</span>
+                    <span className="hb-v">
+                      {typeof pearlAIDebug?.latency_ms === 'number' ? `${Math.round(pearlAIDebug.latency_ms)}ms` : '—'}
+                    </span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Cache</span>
+                    <span className="hb-v">
+                      {pearlAIDebug?.cache_hit === true ? 'hit' : pearlAIDebug?.cache_hit === false ? 'miss' : '—'}
+                    </span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Fallback</span>
+                    <span className="hb-v">
+                      {pearlAIDebug?.fallback_used === true ? 'yes' : pearlAIDebug?.fallback_used === false ? 'no' : '—'}
+                    </span>
+                  </div>
+                  <div className="hb-item">
+                    <span className="hb-k">Tools</span>
+                    <span className="hb-v">{toolCount > 0 ? toolCount : '—'}</span>
+                  </div>
+                </div>
+
+                <div className="pearl-feed">
+                  <div className="pearl-feed-title">Recent Pearl messages</div>
+                  {pearlFeed.length === 0 ? (
+                    <div className="pearl-feed-empty">No Pearl feed messages yet.</div>
+                  ) : (
+                    <div className="pearl-feed-list">
+                      {[...pearlFeed].slice(-10).reverse().map((m) => (
+                        <details key={m.id} className={`pearl-feed-item type-${m.type || 'message'}`}>
+                          <summary className="pearl-feed-summary">
+                            <span className="pearl-feed-icon">{getFeedIcon(m.type)}</span>
+                            <span className="pearl-feed-type">{(m.type || 'message').toUpperCase()}</span>
+                            <span className="pearl-feed-time">{formatAgo(m.timestamp)}</span>
+                            <span className="pearl-feed-text">{m.content}</span>
+                          </summary>
+
+                          <div className="pearl-feed-body">
+                            {m.metadata?.details && (
+                              <div className="pearl-feed-details">
+                                {renderNarrationDetails(m.metadata.details)}
+                              </div>
+                            )}
+                            {!m.metadata?.details && (
+                              <div className="pearl-feed-raw">
+                                <div className="pearl-feed-raw-title">Metadata</div>
+                                <pre className="pearl-feed-raw-pre">
+                                  {JSON.stringify(m.metadata || {}, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -717,4 +886,93 @@ function getTypeIcon(type: string): string {
     session_advice: '🕐',
   }
   return icons[type] || '💡'
+}
+
+function getFeedIcon(type?: string): string {
+  switch ((type || '').toLowerCase()) {
+    case 'narration':
+      return '🗣️'
+    case 'insight':
+      return '💡'
+    case 'alert':
+      return '⚠️'
+    case 'response':
+      return '🧠'
+    default:
+      return '🦪'
+  }
+}
+
+function renderNarrationDetails(details: any) {
+  if (!details || typeof details !== 'object') return null
+
+  const title = typeof details.title === 'string' ? details.title : null
+  const text = typeof details.text === 'string' ? details.text : null
+  const lines = Array.isArray(details.lines) ? details.lines.filter((l: any) => typeof l === 'string') : []
+  const kv =
+    details.kv && typeof details.kv === 'object' && !Array.isArray(details.kv)
+      ? (details.kv as Record<string, any>)
+      : null
+  const sections = Array.isArray(details.sections) ? details.sections : []
+  const truncated = Boolean(details.truncated)
+
+  const renderKv = (obj: Record<string, any>) => {
+    const entries = Object.entries(obj).slice(0, 30)
+    if (entries.length === 0) return null
+    return (
+      <div className="pearl-kv-grid">
+        {entries.map(([k, v]) => (
+          <div key={k} className="pearl-kv-row">
+            <span className="pearl-kv-k">{k}</span>
+            <span className="pearl-kv-v">{typeof v === 'string' ? v : JSON.stringify(v)}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="pearl-narration-details">
+      {title && <div className="pearl-details-title">{title}</div>}
+      {text && <div className="pearl-details-text">{text}</div>}
+      {lines.length > 0 && (
+        <ul className="pearl-details-lines">
+          {lines.slice(0, 20).map((l: string, i: number) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      )}
+      {kv && renderKv(kv)}
+
+      {sections.length > 0 && (
+        <div className="pearl-details-sections">
+          {sections.slice(0, 8).map((s: any, idx: number) => {
+            const st = typeof s?.title === 'string' ? s.title : null
+            const slines = Array.isArray(s?.lines) ? s.lines.filter((l: any) => typeof l === 'string') : []
+            const skv =
+              s?.kv && typeof s.kv === 'object' && !Array.isArray(s.kv)
+                ? (s.kv as Record<string, any>)
+                : null
+            const stext = typeof s?.text === 'string' ? s.text : null
+            return (
+              <div key={idx} className="pearl-details-section">
+                {st && <div className="pearl-details-section-title">{st}</div>}
+                {stext && <div className="pearl-details-text">{stext}</div>}
+                {slines.length > 0 && (
+                  <ul className="pearl-details-lines">
+                    {slines.slice(0, 12).map((l: string, i: number) => (
+                      <li key={i}>{l}</li>
+                    ))}
+                  </ul>
+                )}
+                {skv && renderKv(skv)}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {truncated && <div className="pearl-details-truncated">…truncated</div>}
+    </div>
+  )
 }

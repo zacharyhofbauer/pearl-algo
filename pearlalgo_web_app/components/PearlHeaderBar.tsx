@@ -13,19 +13,23 @@ export default function PearlHeaderBar() {
   const headerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const hasAI = Boolean(agentState?.ai_status)
+  const hasAI = Boolean(agentState?.pearl_ai_available || agentState?.ai_status)
 
   const previewText = useMemo(() => {
+    const feed = agentState?.pearl_feed
+    const latestFeed = feed && feed.length > 0 ? feed[feed.length - 1] : null
+    const feedText = latestFeed?.content || null
+
     const suggestion =
       agentState?.pearl_suggestion?.message ||
       agentState?.pearl_insights?.current_suggestion?.message ||
       agentState?.pearl_insights?.shadow_metrics?.active_suggestion?.message ||
       null
 
-    const base = suggestion || 'Pearl AI ready'
+    const base = feedText || suggestion || 'Pearl AI ready'
     const maxLength = 60
     return base.length <= maxLength ? base : `${base.slice(0, maxLength)}...`
-  }, [agentState?.pearl_insights, agentState?.pearl_suggestion])
+  }, [agentState?.pearl_feed, agentState?.pearl_insights, agentState?.pearl_suggestion])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -94,6 +98,9 @@ export default function PearlHeaderBar() {
             mlFilterPerformance={agentState?.ml_filter_performance ?? null}
             chatAvailable={Boolean(agentState?.pearl_ai_available)}
             operatorLockEnabled={agentState?.operator_lock_enabled ?? null}
+            pearlFeed={agentState?.pearl_feed ?? []}
+            pearlAIHeartbeat={agentState?.pearl_ai_heartbeat ?? null}
+            pearlAIDebug={agentState?.pearl_ai_debug ?? null}
             initialChatOpen={false}
           />
         </div>

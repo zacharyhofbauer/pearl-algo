@@ -876,6 +876,8 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self._broadcast_task: Optional[asyncio.Task] = None
         self._last_state_hash: str = ""
+        # Track raw agent state changes separately from Pearl AI feed/chat changes.
+        self._last_raw_state_hash: str = ""
 
     async def connect(self, websocket: WebSocket):
         """Accept and register a new WebSocket connection."""
@@ -915,19 +917,43 @@ class ConnectionManager:
                     state = _load_json_file(state_file)
 
                     if state:
-                        # Create a hash to detect changes
-                        state_hash = str(hash(json.dumps(state, sort_keys=True, default=str)))
+                        # Detect raw agent state.json changes
+                        raw_state_hash = str(hash(json.dumps(state, sort_keys=True, default=str)))
 
-                        # Only broadcast if state changed
-                        if state_hash != self._last_state_hash:
-                            self._last_state_hash = state_hash
-
-                            # Keep Pearl AI brain in sync (optional)
+                        # Keep Pearl AI brain in sync ONLY when raw state changes.
+                        if raw_state_hash != self._last_raw_state_hash:
+                            self._last_raw_state_hash = raw_state_hash
                             if _pearl_brain is not None:
                                 try:
                                     _pearl_brain.update_state(state)
                                 except Exception as e:
                                     print(f"[Pearl AI] State update failed: {e}")
+
+                        # Include Pearl AI feed/chat changes in the broadcast hash so the UI can
+                        # update even when trading state.json hasn't changed (e.g. user chat).
+                        pearl_fingerprint = ""
+                        if _pearl_brain is not None:
+                            try:
+                                msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
+                                last_ts = ""
+                                if msgs:
+                                    try:
+                                        last_ts = msgs[-1].timestamp.isoformat() if msgs[-1].timestamp else ""
+                                    except Exception:
+                                        last_ts = str(getattr(msgs[-1], "timestamp", "")) or ""
+                                pearl_fingerprint = f"{len(msgs)}:{last_ts}"
+                            except Exception:
+                                pearl_fingerprint = "error"
+
+                        combined_hash = str(hash(json.dumps(
+                            {"state": state, "pearl": pearl_fingerprint},
+                            sort_keys=True,
+                            default=str
+                        )))
+
+                        # Only broadcast if state OR Pearl feed/chat changed
+                        if combined_hash != self._last_state_hash:
+                            self._last_state_hash = combined_hash
 
                             # Build the same response as /api/state
                             daily_stats = _compute_daily_stats(_state_dir)
@@ -957,6 +983,10 @@ class ConnectionManager:
                                     "pearl_insights": state.get("pearl_insights"),
                                     # Whether LLM chat endpoints are mounted/available on this API server
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                                    # Pearl AI transparency (feed + heartbeat + last debug snapshot)
+                                    "pearl_feed": _get_pearl_feed(limit=10),
+                                    "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
+                                    "pearl_ai_debug": _get_pearl_ai_debug(),
                                     # Whether operator locking is configured on this API server
                                     "operator_lock_enabled": bool(_operator_enabled),
                                 }
@@ -1099,6 +1129,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "data_quality": _get_data_quality(state),
                         "pearl_insights": state.get("pearl_insights"),
                         "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                        "pearl_feed": _get_pearl_feed(limit=10),
+                        "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
+                        "pearl_ai_debug": _get_pearl_ai_debug(),
                         "operator_lock_enabled": bool(_operator_enabled),
                     }
                 }
@@ -1153,6 +1186,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "data_quality": _get_data_quality(state),
                                     "pearl_insights": state.get("pearl_insights"),
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                                    "pearl_feed": _get_pearl_feed(limit=10),
+                                    "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
+                                    "pearl_ai_debug": _get_pearl_ai_debug(),
                                     "operator_lock_enabled": bool(_operator_enabled),
                                 }
                             }
@@ -1588,6 +1624,104 @@ def _get_pearl_suggestion() -> Optional[Dict[str, Any]]:
     # Pearl suggestions are generated dynamically - return None for now
     # In future, this could read from a suggestion queue or state file
     return None
+
+
+def _json_sanitize(obj: Any) -> Any:
+    """
+    Best-effort conversion to a JSON-serializable structure.
+
+    We intentionally avoid leaking non-serializable objects through WebSockets.
+    """
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except Exception:
+        return str(obj)
+
+
+def _get_pearl_feed(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Recent Pearl AI feed messages for UI display.
+
+    This is separate from the shadow-mode "pearl_insights" block in state.json; it
+    reflects PearlBrain's narrations / insights / alerts / chat responses.
+    """
+    if _pearl_brain is None:
+        return []
+
+    try:
+        msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
+    except Exception:
+        msgs = []
+
+    if not msgs:
+        return []
+
+    try:
+        n = max(1, int(limit))
+    except Exception:
+        n = 10
+
+    start = max(0, len(msgs) - n)
+    out: List[Dict[str, Any]] = []
+    for idx, msg in enumerate(msgs[start:], start=start):
+        try:
+            ts = msg.timestamp.isoformat() if getattr(msg, "timestamp", None) else None
+        except Exception:
+            ts = str(getattr(msg, "timestamp", None))
+
+        out.append({
+            "id": f"pearl-{idx}",
+            "content": getattr(msg, "content", "") or "",
+            "type": getattr(msg, "message_type", None) or getattr(msg, "type", None) or "message",
+            "priority": getattr(msg, "priority", None),
+            "timestamp": ts,
+            "trade_id": getattr(msg, "related_trade_id", None),
+            "metadata": _json_sanitize(getattr(msg, "metadata", None) or {}),
+        })
+
+    return out
+
+
+def _get_pearl_ai_debug() -> Optional[Dict[str, Any]]:
+    """Last Pearl AI debug info (routing/model/tools/latency/cache), sanitized for JSON."""
+    if _pearl_brain is None:
+        return None
+    try:
+        info = _pearl_brain.get_last_debug_info()
+        return _json_sanitize(info)
+    except Exception:
+        return None
+
+
+def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
+    """Lightweight 'heartbeat' snapshot for the dropdown UI."""
+    if _pearl_brain is None:
+        return None
+
+    try:
+        msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
+        last = msgs[-1] if msgs else None
+        last_ts = None
+        last_type = None
+        if last is not None:
+            try:
+                last_ts = last.timestamp.isoformat() if getattr(last, "timestamp", None) else None
+            except Exception:
+                last_ts = str(getattr(last, "timestamp", None))
+            last_type = getattr(last, "message_type", None)
+
+        return {
+            "enabled": True,
+            "mounted": bool(_pearl_ai_mounted and _pearl_brain is not None),
+            "feed_total": len(msgs),
+            "last_message_time": last_ts,
+            "last_message_type": last_type,
+        }
+    except Exception:
+        return {
+            "enabled": True,
+            "mounted": bool(_pearl_ai_mounted and _pearl_brain is not None),
+        }
 
 
 def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
@@ -2140,6 +2274,11 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 
         # NEW: Whether LLM chat endpoints are available on this server
         "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+
+        # NEW: Pearl AI transparency (feed + heartbeat + last debug snapshot)
+        "pearl_feed": _get_pearl_feed(limit=10),
+        "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
+        "pearl_ai_debug": _get_pearl_ai_debug(),
 
         # NEW: Whether operator passphrase locking is configured on this server
         "operator_lock_enabled": bool(_operator_enabled),

@@ -358,6 +358,37 @@ export interface PearlInsights {
   accuracy_7d: number
 }
 
+export interface PearlFeedMessage {
+  id: string
+  content: string
+  type: string
+  priority?: string | null
+  timestamp?: string | null
+  trade_id?: string | null
+  metadata?: any
+}
+
+export interface PearlAIDebugInfo {
+  routing?: any
+  model_used?: string | null
+  tool_calls?: any[]
+  tool_results?: any[]
+  input_tokens?: number | null
+  output_tokens?: number | null
+  latency_ms?: number | null
+  cache_hit?: boolean | null
+  fallback_used?: boolean | null
+  response_source?: string | null
+}
+
+export interface PearlAIHeartbeat {
+  enabled: boolean
+  mounted?: boolean
+  feed_total?: number
+  last_message_time?: string | null
+  last_message_type?: string | null
+}
+
 export interface AgentState {
   running: boolean
   paused: boolean
@@ -392,6 +423,12 @@ export interface AgentState {
   pearl_insights: PearlInsights | null
   /** Whether `/api/pearl/*` LLM endpoints are mounted on the API server */
   pearl_ai_available?: boolean
+  /** Recent Pearl AI feed messages (narrations, insights, alerts, chat responses) */
+  pearl_feed?: PearlFeedMessage[]
+  /** Lightweight 'heartbeat' snapshot (last activity, feed size) */
+  pearl_ai_heartbeat?: PearlAIHeartbeat | null
+  /** Last Pearl AI debug snapshot (routing/model/tools/latency/cache) */
+  pearl_ai_debug?: PearlAIDebugInfo | null
   /** Whether operator passphrase locking is configured on the API server */
   operator_lock_enabled?: boolean
   // New fields for enhanced transparency
@@ -449,6 +486,9 @@ const initialAgentState: AgentState = {
   pearl_suggestion: null,
   pearl_insights: null,
   pearl_ai_available: false,
+  pearl_feed: [],
+  pearl_ai_heartbeat: null,
+  pearl_ai_debug: null,
   operator_lock_enabled: false,
   // New fields for enhanced transparency
   execution_state: null,
