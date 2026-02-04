@@ -11,18 +11,12 @@ interface UltrawideLayoutProps {
   // Right Area (70%): All data panels
   pearlAISection?: ReactNode         // Pearl AI (includes ML filter performance)
   systemStatusSection?: ReactNode    // System readiness dashboard
-  signalActivitySection?: ReactNode  // Signal generation dashboard
-  performanceSection?: ReactNode
-  activePositionsSection?: ReactNode
   challengeSection?: ReactNode
-  regimeSection?: ReactNode
-  riskMetricsSection?: ReactNode
-  equityCurveSection?: ReactNode
-  recentTradesSection?: ReactNode
+  marketContextSection?: ReactNode
+  riskEquitySection?: ReactNode
   analyticsSection?: ReactNode
   systemHealthSection?: ReactNode
   signalDecisionsSection?: ReactNode
-  marketPressureSection?: ReactNode
   configSection?: ReactNode
 }
 
@@ -31,12 +25,10 @@ interface UltrawideLayoutProps {
  *
  * Layout:
  * ┌──────────────┬─────────────────────────────────────────────────────────────┐
- * │   HEADER     │  PEARL AI  │  PERFORMANCE  │  POSITIONS  │  CHALLENGE      │
- * │  (compact)   ├─────────────┴───────────────┴─────────────┴─────────────────┤
- * ├──────────────┤  REGIME   │  RISK METRICS │  EQUITY CURVE │  TRADES        │
- * │              ├─────────────┴───────────────┴───────────────┴───────────────┤
- * │    CHART     │  ANALYTICS  │  HEALTH  │  SIGNALS  │  PRESSURE  │  CONFIG  │
- * │              │                                                             │
+ * │   HEADER     │  PEARL AI  │  STATUS  │  CHALLENGE  │  CONTEXT             │
+ * │  (compact)   ├─────────────┴──────────┴─────────────┴──────────────────────┤
+ * ├──────────────┤  RISK+EQ   │  ANALYTICS  │  HEALTH  │  SIGNALS            │
+ * │    CHART     │                                                             │
  * ├──────────────┤                                                             │
  * └──────────────┴─────────────────────────────────────────────────────────────┘
  *      30%                                    70%
@@ -47,18 +39,12 @@ export default function UltrawideLayout({
   belowChartSection,
   pearlAISection,
   systemStatusSection,
-  signalActivitySection,
-  performanceSection,
-  activePositionsSection,
   challengeSection,
-  regimeSection,
-  riskMetricsSection,
-  equityCurveSection,
-  recentTradesSection,
+  marketContextSection,
+  riskEquitySection,
   analyticsSection,
   systemHealthSection,
   signalDecisionsSection,
-  marketPressureSection,
   configSection,
 }: UltrawideLayoutProps) {
   return (
@@ -83,27 +69,17 @@ export default function UltrawideLayout({
       {/* Right Area: All Panels Grid (70%) */}
       <div className="ultrawide-right">
         <div className="ultrawide-panels-grid">
-          {/* Row 1: Pearl AI & System Status (High Priority) */}
+          {/* Row 1: Core context */}
           {pearlAISection && <div className="panel-cell pearl-ai-cell">{pearlAISection}</div>}
           {systemStatusSection && <div className="panel-cell system-status-cell">{systemStatusSection}</div>}
-          {signalActivitySection && <div className="panel-cell">{signalActivitySection}</div>}
-
-          {/* Row 2: Performance & Positions */}
-          {performanceSection && <div className="panel-cell">{performanceSection}</div>}
-          {activePositionsSection && <div className="panel-cell">{activePositionsSection}</div>}
           {challengeSection && <div className="panel-cell">{challengeSection}</div>}
-          {regimeSection && <div className="panel-cell">{regimeSection}</div>}
+          {marketContextSection && <div className="panel-cell">{marketContextSection}</div>}
 
-          {/* Row 3: Risk & Trading */}
-          {riskMetricsSection && <div className="panel-cell">{riskMetricsSection}</div>}
-          {equityCurveSection && <div className="panel-cell">{equityCurveSection}</div>}
-          {recentTradesSection && <div className="panel-cell">{recentTradesSection}</div>}
+          {/* Row 2: Ops & analytics */}
+          {riskEquitySection && <div className="panel-cell">{riskEquitySection}</div>}
           {analyticsSection && <div className="panel-cell">{analyticsSection}</div>}
-
-          {/* Row 4: System & Config */}
           {systemHealthSection && <div className="panel-cell">{systemHealthSection}</div>}
           {signalDecisionsSection && <div className="panel-cell">{signalDecisionsSection}</div>}
-          {marketPressureSection && <div className="panel-cell">{marketPressureSection}</div>}
           {configSection && <div className="panel-cell">{configSection}</div>}
         </div>
       </div>

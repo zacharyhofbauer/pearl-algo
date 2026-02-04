@@ -5,14 +5,10 @@ import type { AgentState } from '@/stores'
 
 import DataPanelsContainer from './DataPanelsContainer'
 import SystemStatusPanel from './SystemStatusPanel'
-import SignalActivityPanel from './SignalActivityPanel'
 import SignalDecisionsPanel from './SignalDecisionsPanel'
-import PerformancePanel from './PerformancePanel'
-import RiskMetricsPanel from './RiskMetricsPanel'
-import EquityCurvePanel from './EquityCurvePanel'
+import RiskEquityPanel from './RiskEquityPanel'
 import ChallengePanel from './ChallengePanel'
-import MarketPressurePanel from './MarketPressurePanel'
-import MarketRegimePanel from './MarketRegimePanel'
+import MarketContextPanel from './MarketContextPanel'
 import SystemHealthPanel from './SystemHealthPanel'
 import AnalyticsPanel from './AnalyticsPanel'
 import ConfigPanel from './ConfigPanel'
@@ -48,17 +44,6 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
     <div className="post-trades-panels">
       {/* Core panels (signals + readiness) */}
       <DataPanelsContainer>
-        <SignalActivityPanel
-          signalActivity={agentState.signal_activity}
-        />
-
-        {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
-          <SignalDecisionsPanel
-            rejections={agentState.signal_rejections_24h || null}
-            lastDecision={agentState.last_signal_decision || null}
-          />
-        )}
-
         <div className="panel-span-all">
           <SystemStatusPanel
             executionState={agentState.execution_state}
@@ -77,13 +62,11 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
           </div>
         )}
 
-        {agentState.performance && (
-          <div className="panel-span-all">
-            <PerformancePanel
-              performance={agentState.performance}
-              expectancy={agentState.risk_metrics?.expectancy}
-            />
-          </div>
+        {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
+          <SignalDecisionsPanel
+            rejections={agentState.signal_rejections_24h || null}
+            lastDecision={agentState.last_signal_decision || null}
+          />
         )}
       </DataPanelsContainer>
 
@@ -95,26 +78,24 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
           onClick={() => setShowAdvanced((v) => !v)}
         >
           <span className="post-trades-advanced-label">More panels</span>
-          <span className="post-trades-advanced-sub">risk • equity • config</span>
+          <span className="post-trades-advanced-sub">risk • market • health • config</span>
           <span className="post-trades-advanced-icon">{showAdvanced ? '▲' : '▼'}</span>
         </button>
       </div>
 
       {showAdvanced && (
         <DataPanelsContainer>
-          {agentState.risk_metrics && <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />}
-
-          {agentState.equity_curve && agentState.equity_curve.length > 0 && (
-            <EquityCurvePanel equityCurve={agentState.equity_curve} />
+          {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
+            <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
           )}
 
           {agentState.challenge && (
             <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />
           )}
 
-          {agentState.buy_sell_pressure && <MarketPressurePanel pressure={agentState.buy_sell_pressure} />}
-
-          {agentState.market_regime && <MarketRegimePanel regime={agentState.market_regime} />}
+          {(agentState.market_regime || agentState.buy_sell_pressure) && (
+            <MarketContextPanel regime={agentState.market_regime} pressure={agentState.buy_sell_pressure} />
+          )}
 
           {(agentState.cadence_metrics ||
             agentState.gateway_status ||

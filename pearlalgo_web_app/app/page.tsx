@@ -3,19 +3,15 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
-import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
 import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
-import EquityCurvePanel from '@/components/EquityCurvePanel'
-import RiskMetricsPanel from '@/components/RiskMetricsPanel'
-import MarketPressurePanel from '@/components/MarketPressurePanel'
+import RiskEquityPanel from '@/components/RiskEquityPanel'
+import MarketContextPanel from '@/components/MarketContextPanel'
 import SystemHealthPanel from '@/components/SystemHealthPanel'
-import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
-import SignalActivityPanel from '@/components/SignalActivityPanel'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import PostTradesPanels from '@/components/PostTradesPanels'
 import UltrawideLayout from '@/components/UltrawideLayout'
@@ -788,19 +784,6 @@ export default function PearlAlgoWebApp() {
                   isPaused={agentState.paused}
                 />
               }
-              signalActivitySection={
-                <SignalActivityPanel
-                  signalActivity={agentState.signal_activity}
-                />
-              }
-              performanceSection={
-                agentState.performance && (
-                  <PerformancePanel
-                    performance={agentState.performance}
-                    expectancy={agentState.risk_metrics?.expectancy}
-                  />
-                )
-              }
               challengeSection={
                 agentState.challenge && (
                   <ChallengePanel
@@ -809,19 +792,20 @@ export default function PearlAlgoWebApp() {
                   />
                 )
               }
-              regimeSection={
-                agentState.market_regime && (
-                  <MarketRegimePanel regime={agentState.market_regime} />
+              marketContextSection={
+                (agentState.market_regime || agentState.buy_sell_pressure) && (
+                  <MarketContextPanel
+                    regime={agentState.market_regime}
+                    pressure={agentState.buy_sell_pressure}
+                  />
                 )
               }
-              riskMetricsSection={
-                agentState.risk_metrics && (
-                  <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
-                )
-              }
-              equityCurveSection={
-                agentState.equity_curve && agentState.equity_curve.length > 0 && (
-                  <EquityCurvePanel equityCurve={agentState.equity_curve} />
+              riskEquitySection={
+                (agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
+                  <RiskEquityPanel
+                    riskMetrics={agentState.risk_metrics}
+                    equityCurve={agentState.equity_curve || []}
+                  />
                 )
               }
               analyticsSection={
@@ -850,11 +834,6 @@ export default function PearlAlgoWebApp() {
                     rejections={agentState.signal_rejections_24h || null}
                     lastDecision={agentState.last_signal_decision || null}
                   />
-                )
-              }
-              marketPressureSection={
-                agentState.buy_sell_pressure && (
-                  <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
                 )
               }
             />

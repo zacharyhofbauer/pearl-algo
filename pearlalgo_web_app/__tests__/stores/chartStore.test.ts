@@ -53,12 +53,13 @@ describe('chartStore', () => {
   })
 
   describe('setTimeframe', () => {
-    it('should update timeframe and reset chart state', () => {
+    it('should update timeframe and trigger reload (without clearing existing data)', () => {
       // First set some candles
+      const initialCandles = [
+        { time: 1000, open: 100, high: 105, low: 98, close: 103 },
+      ]
       act(() => {
-        useChartStore.getState().setCandles([
-          { time: 1000, open: 100, high: 105, low: 98, close: 103 },
-        ])
+        useChartStore.getState().setCandles(initialCandles)
       })
 
       // Change timeframe
@@ -68,7 +69,8 @@ describe('chartStore', () => {
 
       const state = useChartStore.getState()
       expect(state.timeframe).toBe('15m')
-      expect(state.candles).toEqual([])
+      // Keep existing data visible while loading a new timeframe
+      expect(state.candles).toEqual(initialCandles)
       expect(state.indicators).toEqual({})
       expect(state.isLoading).toBe(true)
       expect(state.lastDataHash).toBe('')
