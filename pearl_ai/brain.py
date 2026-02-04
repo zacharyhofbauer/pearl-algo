@@ -9,6 +9,7 @@ Pearl AI 3.0: Integrated metrics, RAG, caching, and tool support.
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Callable, Literal
@@ -517,10 +518,12 @@ class PearlBrain:
     async def _quick_response(self, query: str, context: Dict[str, Any]) -> str:
         """Generate quick response using local LLM"""
 
-        system_prompt = """You are Pearl, an AI trading assistant for algorithmic trading.
+        system_prompt = f"""You are Pearl, an AI trading assistant for algorithmic trading.
 You have access to real-time trading data. Be concise, direct, and helpful.
 Answer questions about current trades, positions, and market state.
-Use the provided context to give accurate information."""
+Use the provided context to give accurate information.
+
+{self._voice_style_instructions()}"""
 
         user_prompt = f"""Current Trading State:
 - Daily P&L: ${context['current_state'].get('daily_pnl', 0):.2f}
@@ -639,7 +642,18 @@ Your capabilities:
 - Identify psychological patterns (overtrading, revenge trading, etc.)
 
 Be insightful, specific, and actionable. Use data to support your observations.
-Speak naturally, like a knowledgeable trading mentor."""
+Speak naturally, like a calm, capable operator and trading mentor.
+
+Response structure:
+- Start with a 1-line Status.
+- Then 3-6 bullets (Observations).
+- Then Next steps (1-3 bullets).
+- If you are uncertain, say what’s missing and what you’d check next.
+"""
+
+        voice = self._voice_style_instructions()
+        if voice:
+            base_prompt += f"\n\n{voice}"
 
         # Add personality context if available
         personality = self.memory.get_personality_context()
@@ -647,6 +661,33 @@ Speak naturally, like a knowledgeable trading mentor."""
             base_prompt += f"\n\nUser Context: {personality}"
 
         return base_prompt
+
+    def _voice_style_instructions(self) -> str:
+        """
+        Voice/style guidance for LLM outputs.
+
+        Jarvis-inspired = crisp, composed, lightly witty, but always accurate.
+        """
+        voice = (os.getenv("PEARL_AI_VOICE") or "jarvis").strip().lower()
+        if voice in ("neutral", "default", "none"):
+            return ""
+
+        if voice in ("jarvis", "ops", "steward"):
+            return (
+                "Voice & tone:\n"
+                "- Crisp, composed, quietly confident.\n"
+                "- Understated wit is allowed, but never at the expense of clarity.\n"
+                "- Do NOT reference Iron Man, JARVIS, Tony Stark, or movies.\n"
+                "- You may address the operator as \"sir\" sparingly; avoid other pet names.\n"
+                "- Prefer short paragraphs and bullet lists.\n"
+                "- Never claim you executed trades or controls. You only observe and advise.\n"
+                "- If you can’t verify something from data, say so plainly.\n"
+            )
+
+        custom = (os.getenv("PEARL_AI_VOICE_INSTRUCTIONS") or "").strip()
+        if custom:
+            return f"Voice & tone:\n{custom}"
+        return ""
 
     def _build_deep_user_prompt(self, query: str, context: Dict[str, Any]) -> str:
         """Build user prompt for deep responses"""

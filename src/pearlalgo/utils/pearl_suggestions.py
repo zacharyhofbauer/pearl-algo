@@ -230,8 +230,8 @@ class PearlSuggestionEngine:
             key = "problem_gateway_down"
             if not self._is_on_cooldown(key, self.PROBLEM_COOLDOWN_MINUTES):
                 return PearlSuggestion(
-                    message="Heads up - the gateway is disconnected. Want me to try reconnecting?",
-                    accept_label="Yes, reconnect",
+                    message="Status: gateway disconnected. Want me to try reconnecting?",
+                    accept_label="Reconnect",
                     accept_action="pearl:reconnect_gateway",
                     priority=SuggestionPriority.CRITICAL,
                     cooldown_key=key,
@@ -244,8 +244,8 @@ class PearlSuggestionEngine:
             if not self._is_on_cooldown(key, self.PROBLEM_COOLDOWN_MINUTES):
                 age_str = f"{int(data_age)}m" if data_age < 60 else f"{data_age/60:.1f}h"
                 return PearlSuggestion(
-                    message=f"Data hasn't updated in {age_str}. Want me to check the connection?",
-                    accept_label="Yes, check it",
+                    message=f"Status: data stale for {age_str}. Want me to check the connection?",
+                    accept_label="Check it",
                     accept_action="pearl:check_data",
                     priority=SuggestionPriority.CRITICAL,
                     cooldown_key=key,
@@ -258,8 +258,8 @@ class PearlSuggestionEngine:
             key = "problem_agent_stopped"
             if not self._is_on_cooldown(key, self.PROBLEM_COOLDOWN_MINUTES):
                 return PearlSuggestion(
-                    message="Agent is stopped but markets are open. Want me to start it?",
-                    accept_label="Yes, start",
+                    message="Status: agent stopped while markets are open. Want me to start it?",
+                    accept_label="Start",
                     accept_action="pearl:start_agent",
                     priority=SuggestionPriority.CRITICAL,
                     cooldown_key=key,
@@ -282,7 +282,7 @@ class PearlSuggestionEngine:
             key = f"milestone_profit_{int(daily_pnl // 100) * 100}"
             if not self._is_on_cooldown(key, cooldown_minutes):
                 return PearlSuggestion(
-                    message=f"Nice! You're up ${daily_pnl:.0f} today. Want to see what's working?",
+                    message=f"Strong work. You're up ${daily_pnl:.0f} today. Want to see what's working?",
                     accept_label="Show me",
                     accept_action="pearl:show_performance",
                     priority=SuggestionPriority.IMPORTANT,
@@ -295,7 +295,7 @@ class PearlSuggestionEngine:
             key = f"milestone_streak_{win_streak}"
             if not self._is_on_cooldown(key, cooldown_minutes):
                 return PearlSuggestion(
-                    message=f"You're on a {win_streak}-win streak! Want the breakdown?",
+                    message=f"Excellent: {win_streak}-win streak. Want the breakdown?",
                     accept_label="Show me",
                     accept_action="pearl:show_performance",
                     priority=SuggestionPriority.IMPORTANT,
@@ -319,7 +319,7 @@ class PearlSuggestionEngine:
                 pnl_val = daily_pnl if daily_pnl != 0 else session_pnl
                 sign = "-" if pnl_val < 0 else "+"
                 return PearlSuggestion(
-                    message=f"You’re down {sign}${abs(pnl_val):.0f}. Want the incident report?",
+                    message=f"Not ideal. You’re down {sign}${abs(pnl_val):.0f}. Want the incident report?",
                     accept_label="Show report",
                     accept_action="pearl:show_risk_report",
                     priority=SuggestionPriority.IMPORTANT,
