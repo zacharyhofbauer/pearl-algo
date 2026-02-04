@@ -89,7 +89,7 @@ function ContextBar({ context, formatAgo }: { context: TradingContext; formatAgo
         <div className="context-item regime">
           <span className="context-value">
             {context.regime?.replace(/_/g, ' ')}
-            {context.allowedDirection ? ` • ${context.allowedDirection}` : ''}
+            {context.allowedDirection ? ` • ${context.allowedDirection.replace(/_/g, ' ')}` : ''}
           </span>
         </div>
       )}

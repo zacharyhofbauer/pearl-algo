@@ -231,14 +231,27 @@ export function deriveTradingContext(agentState: AgentState | null): TradingCont
   }
   
   const lastDecision = agentState.last_signal_decision
+  const regimeRaw = agentState.market_regime?.regime
+  const regimeTrimmed = typeof regimeRaw === 'string' ? regimeRaw.trim() : ''
+  const regimeNorm = regimeTrimmed.toLowerCase()
+  const regime =
+    regimeTrimmed && !['unknown', 'n/a', 'na', 'none'].includes(regimeNorm) ? regimeTrimmed : null
+
+  const allowedDirectionRaw = agentState.market_regime?.allowed_direction
+  const allowedDirectionTrimmed = typeof allowedDirectionRaw === 'string' ? allowedDirectionRaw.trim() : ''
+  const allowedDirectionNorm = allowedDirectionTrimmed.toLowerCase()
+  const allowedDirection =
+    regime && allowedDirectionTrimmed && !['unknown', 'n/a', 'na', 'none'].includes(allowedDirectionNorm)
+      ? allowedDirectionTrimmed
+      : null
   
   return {
     pnl: typeof agentState.daily_pnl === 'number' ? agentState.daily_pnl : null,
     wins: typeof agentState.daily_wins === 'number' ? agentState.daily_wins : null,
     losses: typeof agentState.daily_losses === 'number' ? agentState.daily_losses : null,
     positions: typeof agentState.active_trades_count === 'number' ? agentState.active_trades_count : null,
-    regime: agentState.market_regime?.regime || null,
-    allowedDirection: agentState.market_regime?.allowed_direction || null,
+    regime,
+    allowedDirection,
     marketOpen: typeof agentState.futures_market_open === 'boolean' ? agentState.futures_market_open : null,
     dataFresh: typeof agentState.data_fresh === 'boolean' ? agentState.data_fresh : null,
     lastDecision: lastDecision?.action
