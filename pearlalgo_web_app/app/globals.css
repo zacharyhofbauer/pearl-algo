@@ -11859,7 +11859,7 @@ body {
 
 .pearl-dropdown-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -11900,6 +11900,25 @@ body {
   border-radius: 12px;
   border: 1px solid rgba(171, 71, 188, 0.28);
   background: linear-gradient(135deg, rgba(171, 71, 188, 0.12), rgba(0, 212, 255, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* New: headline row layout - mode + text on same line */
+.pearl-dropdown-headline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pearl-dropdown-headline-row .pearl-heartbeat-dot {
+  flex-shrink: 0;
+}
+
+.pearl-dropdown-headline-row .pearl-dropdown-mode {
+  flex-shrink: 0;
 }
 
 .pearl-dropdown-headline-text {
@@ -11907,6 +11926,11 @@ body {
   font-weight: 800;
   color: var(--text-primary);
   line-height: 1.35;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pearl-dropdown-headline-meta {
@@ -11918,6 +11942,163 @@ body {
   color: var(--text-tertiary);
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+
+/* Pearl Context Bar - Compact trading context display */
+.pearl-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(42, 42, 58, 0.25);
+  margin-bottom: 8px;
+}
+
+.pearl-context-bar .context-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(42, 42, 58, 0.35);
+}
+
+.pearl-context-bar .context-item.pnl.positive {
+  border-color: rgba(var(--accent-green-rgb), 0.28);
+  background: rgba(var(--accent-green-rgb), 0.08);
+}
+
+.pearl-context-bar .context-item.pnl.positive .context-value {
+  color: var(--accent-green);
+}
+
+.pearl-context-bar .context-item.pnl.negative {
+  border-color: rgba(var(--accent-red-rgb), 0.28);
+  background: rgba(var(--accent-red-rgb), 0.08);
+}
+
+.pearl-context-bar .context-item.pnl.negative .context-value {
+  color: var(--accent-red);
+}
+
+.pearl-context-bar .context-item.wl .win {
+  color: var(--accent-green);
+}
+
+.pearl-context-bar .context-item.wl .loss {
+  color: var(--accent-red);
+}
+
+.pearl-context-bar .context-item.wl .sep {
+  color: var(--text-tertiary);
+  margin: 0 1px;
+}
+
+.pearl-context-bar .context-item.regime .context-value {
+  text-transform: capitalize;
+}
+
+/* Pearl Suggestion Card - Clean card for active suggestions */
+.pearl-suggestion-card {
+  border: 1px solid rgba(255, 193, 7, 0.25);
+  background: rgba(255, 193, 7, 0.06);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pearl-suggestion-card .suggestion-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.pearl-suggestion-card .suggestion-icon {
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pearl-suggestion-card .suggestion-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.pearl-suggestion-card .suggestion-action {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 24px;
+}
+
+.pearl-suggestion-card .action-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.pearl-suggestion-card .action-value {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffc107;
+}
+
+.pearl-suggestion-card .suggestion-buttons {
+  display: flex;
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.pearl-suggestion-card .suggestion-buttons .pearl-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+/* Pearl Quick Actions - Collapsible layout */
+.pearl-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pearl-quick-actions .quick-actions-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pearl-quick-actions .quick-actions-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(42, 42, 58, 0.25);
+}
+
+.pearl-quick-actions .pearl-btn-more {
+  margin-left: auto;
+}
+
+/* Pearl Dropdown Overview Section */
+.pearl-dropdown-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .pearl-dropdown-mode {
@@ -11947,6 +12128,10 @@ body {
 
 .pearl-dropdown-ago {
   white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-weight: 700;
 }
 
 .pearl-dropdown-cta {
@@ -12215,6 +12400,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Legacy: .pearl-dropdown-quick-actions kept for backwards compat */
 .pearl-dropdown-quick-actions {
   display: flex;
   flex-wrap: wrap;

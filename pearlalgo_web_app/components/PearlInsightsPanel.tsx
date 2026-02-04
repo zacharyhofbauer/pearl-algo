@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
-import { apiFetch, apiFetchJson } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
+import { usePearlPanel } from '@/hooks/usePearlPanel'
 import type {
   PearlInsights,
   PearlSuggestion,
@@ -16,6 +17,7 @@ import type {
   PearlAIHeartbeat,
   PearlAIDebugInfo,
 } from '@/stores'
+import type { PearlMode, TradingContext, ChatMessage } from '@/types/pearl'
 
 interface PearlInsightsPanelProps {
   insights: PearlInsights | null
@@ -24,86 +26,23 @@ interface PearlInsightsPanelProps {
   aiStatus?: AIStatus | null
   shadowCounters?: ShadowCounters | null
   mlFilterPerformance?: MLFilterPerformance | null
-  /** Whether the LLM chat endpoint is mounted/available on the API server */
   chatAvailable?: boolean
-  /** Whether operator passphrase locking is configured on the API server (null = unknown) */
   operatorLockEnabled?: boolean | null
-  /** Recent Pearl AI messages (narrations, insights, alerts, chat responses) */
   pearlFeed?: PearlFeedMessage[]
-  /** Lightweight 'heartbeat' snapshot for Pearl AI */
   pearlAIHeartbeat?: PearlAIHeartbeat | null
-  /** Last Pearl AI debug snapshot (routing/model/tools/latency/cache) */
   pearlAIDebug?: PearlAIDebugInfo | null
-  /** Layout mode (full panel vs header dropdown) */
   layout?: 'panel' | 'dropdown'
-  /** Dropdown is currently expanded/visible (prevents background polling when collapsed) */
   dropdownActive?: boolean
   initialChatOpen?: boolean
 }
 
-type Mode = 'off' | 'shadow' | 'live'
 type DropdownTab = 'overview' | 'feed' | 'chat' | 'costs'
 
-type PearlChatResponse = {
-  response: string
-  timestamp: string
-  complexity: string
-  source?: string
-}
+// ============================================================================
+// Sub-components
+// ============================================================================
 
-type ChatMessage = {
-  role: 'user' | 'pearl'
-  text: string
-  meta?: {
-    complexity?: string
-    source?: string
-  }
-}
-
-type ModelMetrics = {
-  count: number
-  tokens: number
-  cost_usd: number
-  avg_latency_ms: number
-  error_rate: number
-}
-
-type MetricsSummary = {
-  period_hours: number
-  total_requests: number
-  total_tokens: number
-  total_cost_usd: number
-  avg_latency_ms: number
-  p50_latency_ms: number
-  p95_latency_ms: number
-  p99_latency_ms: number
-  cache_hit_rate: number
-  error_rate: number
-  fallback_rate: number
-  by_endpoint: Record<string, ModelMetrics>
-  by_model: Record<string, ModelMetrics>
-}
-
-type ResponseSourceDist = {
-  counts: Record<string, number>
-  percentages: Record<string, number>
-  total: number
-  period_hours?: number
-  period?: string
-}
-
-type CostSummary = {
-  today_usd: number
-  month_usd: number
-  limit_usd: number | null
-}
-
-type GenerateMessageResponse =
-  | { generated: true; content: string; timestamp: string }
-  | { generated: false; reason: string }
-
-/** Mode indicator pill with tooltip for shadow mode */
-function ModePill({ label, mode }: { label: string; mode: Mode }) {
+function ModePill({ label, mode }: { label: string; mode: PearlMode }) {
   const modeClass = mode === 'live' ? 'ai-pill-live' : mode === 'shadow' ? 'ai-pill-shadow' : 'ai-pill-off'
   const modeLabel = mode.toUpperCase()
 
@@ -119,6 +58,191 @@ function ModePill({ label, mode }: { label: string; mode: Mode }) {
     </div>
   )
 }
+
+/** Compact context bar showing key trading metrics */
+function ContextBar({ context, formatAgo }: { context: TradingContext; formatAgo: (ts: string | null) => string }) {
+  const hasPnl = context.pnl !== null
+  const hasWL = context.wins !== null || context.losses !== null
+  const hasRegime = context.regime !== null
+
+  if (!hasPnl && !hasWL && !hasRegime) return null
+
+  return (
+    <div className="pearl-context-bar" role="group" aria-label="Trading context">
+      {hasPnl && (
+        <div className={`context-item pnl ${(context.pnl ?? 0) >= 0 ? 'positive' : 'negative'}`}>
+          <span className="context-value">
+            {(context.pnl ?? 0) >= 0 ? '+' : ''}${(context.pnl ?? 0).toFixed(0)}
+          </span>
+        </div>
+      )}
+      {hasWL && (
+        <div className="context-item wl">
+          <span className="context-value">
+            <span className="win">{context.wins ?? 0}W</span>
+            <span className="sep">/</span>
+            <span className="loss">{context.losses ?? 0}L</span>
+          </span>
+        </div>
+      )}
+      {hasRegime && (
+        <div className="context-item regime">
+          <span className="context-value">
+            {context.regime?.replace(/_/g, ' ')}
+            {context.allowedDirection ? ` • ${context.allowedDirection}` : ''}
+          </span>
+        </div>
+      )}
+      {context.positions !== null && context.positions > 0 && (
+        <div className="context-item pos">
+          <span className="context-value">{context.positions} pos</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Suggestion card with action buttons */
+function SuggestionCard({
+  suggestion,
+  onAccept,
+  onDismiss,
+  onAsk,
+  disabled,
+  busy,
+}: {
+  suggestion: PearlSuggestion | null
+  onAccept: () => void
+  onDismiss: () => void
+  onAsk: () => void
+  disabled: boolean
+  busy: boolean
+}) {
+  if (!suggestion) return null
+
+  return (
+    <div className="pearl-suggestion-card">
+      <div className="suggestion-content">
+        <span className="suggestion-icon">💡</span>
+        <span className="suggestion-text">{suggestion.message}</span>
+      </div>
+      {suggestion.action && (
+        <div className="suggestion-action">
+          <span className="action-label">Suggestion:</span>
+          <span className="action-value">{suggestion.action}</span>
+        </div>
+      )}
+      <div className="suggestion-buttons">
+        <button
+          className="pearl-btn pearl-btn-accept"
+          onClick={onAccept}
+          disabled={disabled || busy}
+          type="button"
+        >
+          Accept
+        </button>
+        <button
+          className="pearl-btn pearl-btn-dismiss"
+          onClick={onDismiss}
+          disabled={disabled || busy}
+          type="button"
+        >
+          Dismiss
+        </button>
+        <button
+          className="pearl-btn pearl-btn-neutral"
+          onClick={onAsk}
+          type="button"
+        >
+          Ask
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Quick actions row - now with collapsible "More" section */
+function QuickActionsRow({
+  onAction,
+  busy,
+  disabled,
+  expanded,
+  onToggleExpand,
+}: {
+  onAction: (id: string) => void
+  busy: string | null
+  disabled: boolean
+  expanded: boolean
+  onToggleExpand: () => void
+}) {
+  return (
+    <div className="pearl-quick-actions" role="group" aria-label="Quick actions">
+      <div className="quick-actions-primary">
+        <button
+          type="button"
+          className={`pearl-btn pearl-btn-neutral ${busy === 'plan' ? 'busy' : ''}`}
+          onClick={() => onAction('plan')}
+          disabled={disabled || Boolean(busy)}
+          aria-busy={busy === 'plan'}
+        >
+          {busy === 'plan' ? '…' : 'Session plan'}
+        </button>
+        <button
+          type="button"
+          className={`pearl-btn pearl-btn-neutral ${busy === 'quiet' ? 'busy' : ''}`}
+          onClick={() => onAction('quiet')}
+          disabled={disabled || Boolean(busy)}
+          aria-busy={busy === 'quiet'}
+        >
+          {busy === 'quiet' ? '…' : 'Quiet check'}
+        </button>
+        <button
+          type="button"
+          className="pearl-btn pearl-btn-neutral pearl-btn-more"
+          onClick={onToggleExpand}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'Less ▴' : 'More ▾'}
+        </button>
+      </div>
+      {expanded && (
+        <div className="quick-actions-secondary">
+          <button
+            type="button"
+            className={`pearl-btn pearl-btn-neutral ${busy === 'rejections' ? 'busy' : ''}`}
+            onClick={() => onAction('rejections')}
+            disabled={disabled || Boolean(busy)}
+            aria-busy={busy === 'rejections'}
+          >
+            {busy === 'rejections' ? '…' : 'Rejections'}
+          </button>
+          <button
+            type="button"
+            className={`pearl-btn pearl-btn-neutral ${busy === 'insight' ? 'busy' : ''}`}
+            onClick={() => onAction('insight')}
+            disabled={disabled || Boolean(busy)}
+            aria-busy={busy === 'insight'}
+          >
+            {busy === 'insight' ? '…' : 'Insight'}
+          </button>
+          <button
+            type="button"
+            className={`pearl-btn pearl-btn-neutral ${busy === 'daily_review' ? 'busy' : ''}`}
+            onClick={() => onAction('daily_review')}
+            disabled={disabled || Boolean(busy)}
+            aria-busy={busy === 'daily_review'}
+          >
+            {busy === 'daily_review' ? '…' : 'Daily review'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 export default function PearlInsightsPanel({
   insights,
@@ -136,171 +260,64 @@ export default function PearlInsightsPanel({
   dropdownActive = false,
   initialChatOpen = false,
 }: PearlInsightsPanelProps) {
+  const isDropdown = layout === 'dropdown'
+  
+  // Use the unified hook for panel data and operations
+  const {
+    data,
+    nowMs,
+    formatAgo,
+    activeTab,
+    setActiveTab,
+    chat,
+    metricsData,
+    refreshMetrics,
+    quickActions,
+    feedQuery,
+    setFeedQuery,
+    feedType,
+    setFeedType,
+    filteredFeed,
+  } = usePearlPanel({
+    agentState,
+    dropdownActive,
+    initialTab: initialChatOpen ? 'chat' : 'overview',
+  })
+
+  // Local UI state
   const [showHistory, setShowHistory] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [showTransparency, setShowTransparency] = useState(false)
   const [chatOpen, setChatOpen] = useState(initialChatOpen)
-  const isDropdown = layout === 'dropdown'
-  const [dropdownTab, setDropdownTab] = useState<DropdownTab>(() => (initialChatOpen ? 'chat' : 'overview'))
-  const [chatInput, setChatInput] = useState('')
-  const [chatBusy, setChatBusy] = useState(false)
-  const [chatError, setChatError] = useState<string | null>(null)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [quickActionsExpanded, setQuickActionsExpanded] = useState(false)
 
-  const [feedQuery, setFeedQuery] = useState('')
-  const [feedType, setFeedType] = useState<
-    'all' | 'narration' | 'insight' | 'coaching' | 'alert' | 'response' | 'message'
-  >('all')
-
-  const [metricsSummary, setMetricsSummary] = useState<MetricsSummary | null>(null)
-  const [costSummary, setCostSummary] = useState<CostSummary | null>(null)
-  const [sourceDist, setSourceDist] = useState<ResponseSourceDist | null>(null)
-  const [metricsBusy, setMetricsBusy] = useState(false)
-  const [metricsError, setMetricsError] = useState<string | null>(null)
-  const [metricsAsOfMs, setMetricsAsOfMs] = useState<number | null>(null)
-
-  const [quickBusy, setQuickBusy] = useState<string | null>(null)
-  const [quickResult, setQuickResult] = useState<{ type: 'ok' | 'error'; message: string } | null>(null)
-
+  // Operator state
   const operatorUnlocked = useOperatorStore((s) => s.isUnlocked)
   const operatorUnlockedUntil = useOperatorStore((s) => s.unlockedUntil)
   const operatorUnlock = useOperatorStore((s) => s.unlock)
   const operatorLock = useOperatorStore((s) => s.lock)
 
-  const [feedbackBusy, setFeedbackBusy] = useState(false)
-  const [feedbackResult, setFeedbackResult] = useState<{ type: 'ok' | 'error'; message: string } | null>(null)
-
+  // Unlock UI state
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockValue, setUnlockValue] = useState('')
   const [unlockBusy, setUnlockBusy] = useState(false)
   const [unlockError, setUnlockError] = useState<string | null>(null)
 
+  // Feedback state
+  const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [feedbackResult, setFeedbackResult] = useState<{ type: 'ok' | 'error'; message: string } | null>(null)
+
   // Refs for auto-scroll
   const chatMessagesRef = useRef<HTMLDivElement>(null)
   const feedListRef = useRef<HTMLDivElement>(null)
 
+  // Derived values from data
   const metrics = insights?.shadow_metrics
-  const activeSuggestion = suggestion || metrics?.active_suggestion
-  const latestFeed = pearlFeed.length > 0 ? pearlFeed[pearlFeed.length - 1] : null
-  const dropdownHeadline = latestFeed?.content || activeSuggestion?.message || 'Watching for opportunities…'
-
-  const filteredFeed = useMemo(() => {
-    const rows = [...(pearlFeed || [])].slice(-60).reverse()
-    const q = feedQuery.trim().toLowerCase()
-
-    return rows.filter((m) => {
-      const mt = (m?.type || 'message').toLowerCase()
-      if (feedType !== 'all' && mt !== feedType) return false
-
-      if (!q) return true
-
-      const details = (m as any)?.metadata?.details
-      const detailsText =
-        typeof details?.text === 'string' ? details.text : ''
-      const detailsTitle =
-        typeof details?.title === 'string' ? details.title : ''
-      const detailsLines = Array.isArray(details?.lines) ? details.lines.join(' ') : ''
-
-      const hay = `${m?.content || ''} ${m?.type || ''} ${m?.priority || ''} ${detailsTitle} ${detailsText} ${detailsLines}`.toLowerCase()
-      return hay.includes(q)
-    })
-  }, [pearlFeed, feedQuery, feedType])
-
-  const getMs = (iso?: string | null): number | null => {
-    if (!iso) return null
-    const t = Date.parse(iso)
-    return Number.isFinite(t) ? t : null
-  }
-
-  const formatAgo = (iso?: string | null): string => {
-    const t = getMs(iso)
-    if (!t) return '—'
-    const s = Math.max(0, Math.floor((nowMs - t) / 1000))
-    if (s < 60) return `${s}s ago`
-    const m = Math.floor(s / 60)
-    if (m < 60) return `${m}m ago`
-    const h = Math.floor(m / 60)
-    if (h < 48) return `${h}h ago`
-    const d = Math.floor(h / 24)
-    return `${d}d ago`
-  }
-
-  const lastMessageTs =
-    pearlAIHeartbeat?.last_message_time ||
-    (pearlFeed.length > 0 ? (pearlFeed[pearlFeed.length - 1]?.timestamp ?? null) : null)
-
-  const lastStateTs =
-    pearlAIHeartbeat?.last_state_sync_time ||
-    pearlAIHeartbeat?.last_state_seen_time ||
-    null
-
-  const lastActivityTs = lastMessageTs || lastStateTs
-
-  const heartbeatRecent = (() => {
-    const t = getMs(lastActivityTs)
-    if (!t) return false
-    return nowMs - t < 15000
-  })()
-
-  const routingLabel = useMemo((): string => {
-    const routing = pearlAIDebug?.routing
-    if (!routing) return '—'
-    if (typeof routing === 'string') return routing
-    if (typeof routing === 'object' && routing !== null) {
-      const r = routing as Record<string, unknown>
-      const v = r.route || r.decision || r.complexity || r.kind
-      if (typeof v === 'string') return v
-      return 'routing'
-    }
-    return String(routing)
-  }, [pearlAIDebug?.routing])
-
-  const toolCount = Array.isArray(pearlAIDebug?.tool_calls) ? pearlAIDebug!.tool_calls!.length : 0
-
-  // Calculate display values
-  const totalWouldHaveSaved = metrics?.total_would_have_saved || 0
-  const totalWouldHaveMade = metrics?.total_would_have_made || 0
-  const netImpact = metrics?.net_shadow_impact || 0
-  const accuracyRate = metrics?.accuracy_rate || 0
-  const totalSuggestions = metrics?.total_suggestions || 0
-  const suggestionsFollowed = metrics?.suggestions_followed || 0
-  const suggestionsDismissed = metrics?.suggestions_dismissed || 0
-
-  // AI Status values
+  const activeSuggestion = data.suggestion
   const mlMode = aiStatus?.ml_filter.enabled
     ? (aiStatus.ml_filter.mode === 'live' ? 'live' : 'shadow')
     : 'off'
-
-  // Check if any component is in shadow mode
-  const hasShadowMode = Boolean(aiStatus && (
-    aiStatus.bandit_mode === 'shadow' ||
-    aiStatus.contextual_mode === 'shadow' ||
-    mlMode === 'shadow'
-  ))
-
-  const overallMode: Mode = (() => {
-    if (hasShadowMode || metrics?.mode === 'shadow') return 'shadow'
-    if (
-      aiStatus &&
-      (aiStatus.bandit_mode === 'live' || aiStatus.contextual_mode === 'live' || mlMode === 'live')
-    ) {
-      return 'live'
-    }
-    return 'off'
-  })()
-
-  const statusPnL = typeof agentState?.daily_pnl === 'number' ? agentState!.daily_pnl : null
-  const statusWins = typeof agentState?.daily_wins === 'number' ? agentState!.daily_wins : null
-  const statusLosses = typeof agentState?.daily_losses === 'number' ? agentState!.daily_losses : null
-  const statusPos = typeof agentState?.active_trades_count === 'number' ? agentState!.active_trades_count : null
-  const statusRegime = agentState?.market_regime?.regime || null
-  const statusAllowedDir = agentState?.market_regime?.allowed_direction || null
-  const statusDataFresh = typeof agentState?.data_fresh === 'boolean' ? agentState!.data_fresh : null
-  const statusMarketOpen = typeof agentState?.futures_market_open === 'boolean' ? agentState!.futures_market_open : null
-  const lastDecision = agentState?.last_signal_decision || null
-  const decisionLabel = lastDecision?.action ? lastDecision.action.toUpperCase() : null
-  const decisionAgo = lastDecision?.timestamp ? formatAgo(lastDecision.timestamp) : null
+  const hasShadowMode = data.status.mode === 'shadow'
 
   // Format currency
   const formatCurrency = (val: number) => {
@@ -308,24 +325,19 @@ export default function PearlInsightsPanel({
     return `$${val.toFixed(0)}`
   }
 
-  // Format percentage
   const formatPct = (val: number) => `${val.toFixed(0)}%`
 
+  // Auto-scroll chat messages
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
-  // Auto-scroll chat messages to bottom when new messages arrive
-  useEffect(() => {
-    if (chatMessagesRef.current && chatMessages.length > 0) {
+    if (chatMessagesRef.current && chat.messages.length > 0) {
       chatMessagesRef.current.scrollTo({
         top: chatMessagesRef.current.scrollHeight,
         behavior: 'smooth',
       })
     }
-  }, [chatMessages.length])
+  }, [chat.messages.length])
 
+  // Operator unlock handler
   const attemptUnlock = async () => {
     const phrase = unlockValue.trim()
     if (!phrase || unlockBusy) return
@@ -333,9 +345,7 @@ export default function PearlInsightsPanel({
     setUnlockBusy(true)
     setUnlockError(null)
     setFeedbackResult(null)
-    setChatError(null)
 
-    // Optimistically unlock locally, then validate against server.
     operatorUnlock(phrase)
     try {
       const res = await apiFetch('/api/operator/ping', { method: 'GET' })
@@ -369,8 +379,8 @@ export default function PearlInsightsPanel({
     return `${mins}m ${secs}s`
   }
 
+  // Suggestion feedback
   const resolveSuggestionId = useCallback((): string | null => {
-    // Check activeSuggestion for id (may come from shadow_metrics or direct suggestion)
     const id = activeSuggestion && 'id' in activeSuggestion
       ? (activeSuggestion as { id?: string }).id
       : undefined
@@ -389,11 +399,11 @@ export default function PearlInsightsPanel({
         method: 'POST',
         body: JSON.stringify({ suggestion_id: suggestionId }),
       })
-      const data = await res.json().catch(() => ({}))
+      const resData = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(data?.detail || `Request failed (${res.status})`)
+        throw new Error(resData?.detail || `Request failed (${res.status})`)
       }
-      setFeedbackResult({ type: 'ok', message: data?.message || `Suggestion ${action}ed.` })
+      setFeedbackResult({ type: 'ok', message: resData?.message || `Suggestion ${action}ed.` })
     } catch (e) {
       setFeedbackResult({
         type: 'error',
@@ -404,165 +414,33 @@ export default function PearlInsightsPanel({
     }
   }
 
-  const sendChatText = useCallback(async (message: string) => {
-    const m = (message || '').trim()
-    if (!m || chatBusy) return
-
-    if (!chatAvailable) {
-      setChatError('LLM chat is disabled on this server.')
-      return
-    }
-    if (!operatorUnlocked) {
-      setChatError('Operator access required.')
-      return
-    }
-
-    setChatError(null)
-    setChatBusy(true)
-    setChatInput('')
-
-    setChatMessages((prev) => [...prev, { role: 'user' as const, text: m }].slice(-12))
-
-    try {
-      const res = await apiFetchJson<PearlChatResponse>('/api/pearl/chat', {
-        method: 'POST',
-        body: JSON.stringify({ message: m }),
-      })
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'pearl' as const, text: res.response, meta: { complexity: res.complexity, source: res.source } },
-      ].slice(-12))
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Pearl AI request failed'
-      setChatError(msg)
-      setChatMessages((prev) => [...prev, { role: 'pearl' as const, text: `Error: ${msg}` }].slice(-12))
-    } finally {
-      setChatBusy(false)
-    }
-  }, [chatBusy, chatAvailable, operatorUnlocked])
-
-  const sendChat = async () => {
-    const message = chatInput.trim()
-    if (!message || chatBusy) return
-    await sendChatText(message)
-  }
-
-  const refreshMetrics = useCallback(async (force: boolean = false) => {
-    if (metricsBusy) return
-
-    if (!chatAvailable) {
-      setMetricsError('Pearl AI endpoints are disabled on this server.')
-      return
-    }
-    if (!operatorUnlocked) {
-      setMetricsError('Operator access required.')
-      return
-    }
-
-    if (!force && metricsAsOfMs && Date.now() - metricsAsOfMs < 15000) {
-      return
-    }
-
-    setMetricsBusy(true)
-    setMetricsError(null)
-    try {
-      const [m, c, s] = await Promise.all([
-        apiFetchJson<MetricsSummary>('/api/pearl/metrics?hours=24', { method: 'GET' }),
-        apiFetchJson<CostSummary>('/api/pearl/metrics/cost', { method: 'GET' }),
-        apiFetchJson<ResponseSourceDist>('/api/pearl/metrics/sources?hours=24', { method: 'GET' }).catch(() => null),
-      ])
-      setMetricsSummary(m)
-      setCostSummary(c)
-      if (s) setSourceDist(s)
-      setMetricsAsOfMs(Date.now())
-    } catch (e) {
-      setMetricsError(e instanceof Error ? e.message : 'Metrics fetch failed')
-    } finally {
-      setMetricsBusy(false)
-    }
-  }, [metricsBusy, chatAvailable, operatorUnlocked, metricsAsOfMs])
-
-  useEffect(() => {
-    if (!isDropdown || !dropdownActive) return
-    if (dropdownTab !== 'overview' && dropdownTab !== 'costs') return
-    if (!operatorUnlocked || !chatAvailable) return
-
-    void refreshMetrics(false)
-  }, [isDropdown, dropdownActive, dropdownTab, operatorUnlocked, chatAvailable, refreshMetrics])
-
-  const runQuickChat = useCallback(async (id: string, message: string) => {
-    if (quickBusy) return
-
-    setQuickBusy(id)
-    setQuickResult(null)
-    setChatError(null)
-
-    if (isDropdown) {
-      setDropdownTab('chat')
-    } else {
-      setChatOpen(true)
-    }
-
-    try {
-      await sendChatText(message)
-    } finally {
-      setQuickBusy(null)
-    }
-  }, [quickBusy, isDropdown, sendChatText, setChatOpen])
-
-  const triggerInsight = useCallback(async () => {
-    if (quickBusy) return
-    setQuickBusy('insight')
-    setQuickResult(null)
-    try {
-      const res = await apiFetchJson<GenerateMessageResponse>('/api/pearl/insight', { method: 'POST' })
-      if ((res as any)?.generated) {
-        setQuickResult({ type: 'ok', message: 'Insight generated.' })
-      } else {
-        const reason = (res as any)?.reason || 'No insight generated.'
-        // Fallback: ask via chat so local LLM can still help.
-        if (isDropdown) {
-          setDropdownTab('chat')
-        } else {
-          setChatOpen(true)
-        }
-        await sendChatText('Give me ONE brief, actionable insight for this session based on current state.')
-        setQuickResult({ type: 'ok', message: reason })
-      }
-    } catch (e) {
-      setQuickResult({ type: 'error', message: e instanceof Error ? e.message : 'Insight failed' })
-    } finally {
-      setQuickBusy(null)
-    }
-  }, [quickBusy, isDropdown, sendChatText, setChatOpen])
-
-  const triggerDailyReview = useCallback(async () => {
-    if (quickBusy) return
-    setQuickBusy('daily_review')
-    setQuickResult(null)
-    try {
-      const res = await apiFetchJson<GenerateMessageResponse>('/api/pearl/daily-review', { method: 'POST' })
-      if ((res as any)?.generated) {
-        setQuickResult({ type: 'ok', message: 'Daily review generated.' })
-      } else {
-        const reason = (res as any)?.reason || 'No review generated.'
-        if (isDropdown) {
-          setDropdownTab('chat')
-        } else {
-          setChatOpen(true)
-        }
-        await sendChatText('Give me a concise end-of-day review: what went well, what to improve, and one rule for tomorrow.')
-        setQuickResult({ type: 'ok', message: reason })
-      }
-    } catch (e) {
-      setQuickResult({ type: 'error', message: e instanceof Error ? e.message : 'Daily review failed' })
-    } finally {
-      setQuickBusy(null)
-    }
-  }, [quickBusy, isDropdown, sendChatText, setChatOpen])
-
   const transparencyExpanded = isDropdown ? true : showTransparency
   const chatExpanded = isDropdown ? true : chatOpen
+
+  // Routing label for debug info
+  const routingLabel = (() => {
+    const routing = pearlAIDebug?.routing
+    if (!routing) return '—'
+    if (typeof routing === 'string') return routing
+    if (typeof routing === 'object' && routing !== null) {
+      const r = routing as Record<string, unknown>
+      const v = r.route || r.decision || r.complexity || r.kind
+      if (typeof v === 'string') return v
+      return 'routing'
+    }
+    return String(routing)
+  })()
+
+  const toolCount = Array.isArray(pearlAIDebug?.tool_calls) ? pearlAIDebug!.tool_calls!.length : 0
+
+  // Shadow metrics values
+  const totalWouldHaveSaved = metrics?.total_would_have_saved || 0
+  const totalWouldHaveMade = metrics?.total_would_have_made || 0
+  const netImpact = metrics?.net_shadow_impact || 0
+  const accuracyRate = metrics?.accuracy_rate || 0
+  const totalSuggestions = metrics?.total_suggestions || 0
+  const suggestionsFollowed = metrics?.suggestions_followed || 0
+  const suggestionsDismissed = metrics?.suggestions_dismissed || 0
 
   return (
     <DataPanel
@@ -570,310 +448,122 @@ export default function PearlInsightsPanel({
       iconSrc="/pearl-emoji.png"
       className={`pearl-insights-panel${isDropdown ? ' pearl-insights-dropdown' : ''}`}
       padding={isDropdown ? 'compact' : 'default'}
-      badge={!isDropdown && (hasShadowMode || metrics?.mode === 'shadow') ? 'SHADOW' : undefined}
+      badge={!isDropdown && hasShadowMode ? 'SHADOW' : undefined}
       badgeColor="var(--color-warning)"
     >
       <div className={`pearl-insights${isDropdown ? ' pearl-insights-dropdown-body' : ''}`}>
+        {/* ============================================================ */}
+        {/* DROPDOWN MODE - Simplified Layout */}
+        {/* ============================================================ */}
         {isDropdown && (
           <div className="pearl-dropdown-top">
+            {/* Tab Bar */}
             <div className="pearl-dropdown-tabs" role="tablist" aria-label="Pearl AI">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={dropdownTab === 'overview'}
-                className={`pearl-dropdown-tab ${dropdownTab === 'overview' ? 'active' : ''}`}
-                onClick={() => setDropdownTab('overview')}
-              >
-                Overview
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={dropdownTab === 'feed'}
-                className={`pearl-dropdown-tab ${dropdownTab === 'feed' ? 'active' : ''}`}
-                onClick={() => setDropdownTab('feed')}
-              >
-                Feed
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={dropdownTab === 'chat'}
-                className={`pearl-dropdown-tab ${dropdownTab === 'chat' ? 'active' : ''}`}
-                onClick={() => setDropdownTab('chat')}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={dropdownTab === 'costs'}
-                className={`pearl-dropdown-tab ${dropdownTab === 'costs' ? 'active' : ''}`}
-                onClick={() => setDropdownTab('costs')}
-              >
-                Costs
-              </button>
+              {(['overview', 'feed', 'chat', 'costs'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  className={`pearl-dropdown-tab ${activeTab === tab ? 'active' : ''}`}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
             </div>
 
+            {/* Unified Headline - Only shown once */}
             <div className="pearl-dropdown-headline">
-              <div className="pearl-dropdown-headline-text">{dropdownHeadline}</div>
-              <div className="pearl-dropdown-headline-meta">
-                <span className={`pearl-heartbeat-dot ${heartbeatRecent ? 'on' : 'off'}`} />
-                <span className={`pearl-dropdown-mode ${overallMode}`}>{overallMode.toUpperCase()}</span>
-                <span className="pearl-dropdown-ago">{formatAgo(lastActivityTs)}</span>
+              <div className="pearl-dropdown-headline-row">
+                <span className={`pearl-heartbeat-dot ${data.status.heartbeatRecent ? 'on' : 'off'}`} />
+                <span className={`pearl-dropdown-mode ${data.status.mode}`}>{data.status.mode.toUpperCase()}</span>
+                <span className="pearl-dropdown-headline-text">{data.headline.text}</span>
               </div>
+              <span className="pearl-dropdown-ago">{formatAgo(data.status.lastActivityTs)}</span>
+            </div>
 
-              {dropdownTab === 'overview' && (
-                <div className="pearl-dropdown-cta">
-                  <div className="pearl-dropdown-status-grid" aria-label="Status">
-                    {statusPnL !== null && (
-                      <div className={`pearl-status-pill pnl ${statusPnL >= 0 ? 'positive' : 'negative'}`}>
-                        <span className="k">P&amp;L</span>
-                        <span className="v">{statusPnL >= 0 ? '+' : ''}${statusPnL.toFixed(0)}</span>
-                      </div>
-                    )}
-                    {(statusWins !== null || statusLosses !== null) && (
-                      <div className="pearl-status-pill wl">
-                        <span className="k">W/L</span>
-                        <span className="v">
-                          <span className="win">{statusWins ?? 0}</span>/<span className="loss">{statusLosses ?? 0}</span>
-                        </span>
-                      </div>
-                    )}
-                    {statusPos !== null && (
-                      <div className="pearl-status-pill pos">
-                        <span className="k">Pos</span>
-                        <span className="v">{statusPos}</span>
-                      </div>
-                    )}
-                    {statusRegime && (
-                      <div className="pearl-status-pill regime">
-                        <span className="k">Regime</span>
-                        <span className="v">
-                          {statusRegime.replace(/_/g, ' ')}
-                          {statusAllowedDir ? ` • ${statusAllowedDir}` : ''}
-                        </span>
-                      </div>
-                    )}
-                    {decisionLabel && (
-                      <div className="pearl-status-pill decision">
-                        <span className="k">Last</span>
-                        <span className="v">
-                          {decisionLabel}
-                          {decisionAgo ? ` • ${decisionAgo}` : ''}
-                        </span>
-                      </div>
-                    )}
-                    {statusDataFresh !== null && (
-                      <div className={`pearl-status-pill data ${statusDataFresh ? 'ok' : 'stale'}`}>
-                        <span className="k">Data</span>
-                        <span className="v">{statusDataFresh ? 'Fresh' : 'Stale'}</span>
-                      </div>
-                    )}
-                    {statusMarketOpen !== null && (
-                      <div className={`pearl-status-pill market ${statusMarketOpen ? 'open' : 'closed'}`}>
-                        <span className="k">Mkt</span>
-                        <span className="v">{statusMarketOpen ? 'Open' : 'Closed'}</span>
-                      </div>
-                    )}
-                  </div>
+            {/* Overview Tab Content */}
+            {activeTab === 'overview' && (
+              <div className="pearl-dropdown-overview">
+                {/* Compact Context Bar */}
+                <ContextBar context={data.tradingContext} formatAgo={formatAgo} />
 
-                  {activeSuggestion?.action && (
-                    <div className="pearl-dropdown-action-line">
-                      <span className="pearl-dropdown-action-k">Suggestion</span>
-                      <span className="pearl-dropdown-action-v">{activeSuggestion.action}</span>
-                    </div>
-                  )}
+                {/* Suggestion Card (only if active) */}
+                <SuggestionCard
+                  suggestion={activeSuggestion}
+                  onAccept={() => void sendSuggestionFeedback('accept')}
+                  onDismiss={() => void sendSuggestionFeedback('dismiss')}
+                  onAsk={() => setActiveTab('chat')}
+                  disabled={!operatorUnlocked || !resolveSuggestionId()}
+                  busy={feedbackBusy}
+                />
 
-                  {activeSuggestion ? (
-                    <div className="pearl-dropdown-cta-buttons">
-                      {(() => {
-                        const sid = resolveSuggestionId()
-                        const disabled = !operatorUnlocked || feedbackBusy || !sid
-                        const title =
-                          !operatorUnlocked ? 'Read-only (operator locked)' : !sid ? 'No suggestion id available' : undefined
-                        return (
-                          <>
-                            <button
-                              className="pearl-btn pearl-btn-accept"
-                              onClick={() => void sendSuggestionFeedback('accept')}
-                              disabled={disabled}
-                              title={title}
-                              type="button"
-                            >
-                              Accept
-                            </button>
-                            <button
-                              className="pearl-btn pearl-btn-dismiss"
-                              onClick={() => void sendSuggestionFeedback('dismiss')}
-                              disabled={disabled}
-                              title={title}
-                              type="button"
-                            >
-                              Dismiss
-                            </button>
-                            <button
-                              className="pearl-btn pearl-btn-neutral"
-                              onClick={() => setDropdownTab('chat')}
-                              type="button"
-                            >
-                              Ask
-                            </button>
-                          </>
-                        )
-                      })()}
-                    </div>
-                  ) : (
-                    <div className="pearl-dropdown-tip">
-                      Tap <strong>Chat</strong> to ask for a plan, or <strong>Feed</strong> for transparency.
-                    </div>
-                  )}
-
-                  <div className="pearl-dropdown-latest">
-                    <div className="pearl-dropdown-latest-header">
-                      <span className="pearl-dropdown-latest-title">Latest</span>
+                {/* Metrics Row */}
+                <div className="pearl-dropdown-metrics">
+                  {!operatorUnlocked ? (
+                    <div className="pearl-dropdown-metrics-muted">Unlock to view metrics.</div>
+                  ) : metricsData.loading && !metricsData.summary ? (
+                    <div className="pearl-dropdown-metrics-muted">Loading metrics…</div>
+                  ) : metricsData.summary ? (
+                    <div className="pearl-dropdown-metrics-row">
+                      <span className="pearl-metric-pill">p95 {Math.round(metricsData.summary.p95_latency_ms)}ms</span>
+                      <span className="pearl-metric-pill">cache {Math.round(metricsData.summary.cache_hit_rate * 100)}%</span>
+                      <span className="pearl-metric-pill">
+                        cost ${typeof metricsData.cost?.today_usd === 'number' ? metricsData.cost.today_usd.toFixed(3) : '—'}
+                      </span>
                       <button
                         type="button"
-                        className="pearl-dropdown-latest-link"
-                        onClick={() => setDropdownTab('feed')}
-                      >
-                        Feed →
-                      </button>
-                    </div>
-
-                    {pearlFeed.length > 0 ? (
-                      <div className="pearl-dropdown-latest-list">
-                        {pearlFeed
-                          .slice(-2)
-                          .reverse()
-                          .map((m) => (
-                            <div key={m.id} className={`pearl-dropdown-latest-item ${m.type || 'message'}`}>
-                              <div className="pearl-dropdown-latest-meta">
-                                <span className="pearl-dropdown-latest-type">{(m.type || 'message').toUpperCase()}</span>
-                                <span className="pearl-dropdown-latest-ago">{formatAgo(m.timestamp)}</span>
-                              </div>
-                              <div className="pearl-dropdown-latest-text">{m.content}</div>
-                            </div>
-                          ))}
-                      </div>
-                    ) : (
-                      <div className="pearl-dropdown-latest-empty">
-                        No Pearl messages yet — you’ll see narration on trades, rejections, circuit breakers, or quiet
-                        periods. Use <strong>Session plan</strong> or <strong>Quiet check</strong> to start.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pearl-dropdown-metrics">
-                    {!operatorUnlocked ? (
-                      <div className="pearl-dropdown-metrics-muted">Unlock to run actions and view metrics.</div>
-                    ) : metricsBusy ? (
-                      <div className="pearl-dropdown-metrics-muted">Loading metrics…</div>
-                    ) : metricsSummary ? (
-                      <div className="pearl-dropdown-metrics-row">
-                        <span className="pearl-metric-pill">p95 {Math.round(metricsSummary.p95_latency_ms)}ms</span>
-                        <span className="pearl-metric-pill">cache {Math.round(metricsSummary.cache_hit_rate * 100)}%</span>
-                        <span className="pearl-metric-pill">
-                          cost ${typeof costSummary?.today_usd === 'number' ? costSummary.today_usd.toFixed(3) : '—'}
-                        </span>
-                        <button
-                          type="button"
-                          className="pearl-metric-refresh"
-                          onClick={() => void refreshMetrics(true)}
-                          disabled={metricsBusy || !chatAvailable}
-                          title="Refresh metrics"
-                        >
-                          ↻
-                        </button>
-                      </div>
-                    ) : metricsError ? (
-                      <div className="pearl-dropdown-metrics-muted">Metrics: {metricsError}</div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="pearl-btn pearl-btn-neutral"
+                        className="pearl-metric-refresh"
                         onClick={() => void refreshMetrics(true)}
-                        disabled={!chatAvailable}
+                        disabled={metricsData.loading || !data.status.chatAvailable}
+                        title="Refresh metrics"
                       >
-                        Load metrics
+                        ↻
                       </button>
-                    )}
-                  </div>
-
-                  <div className="pearl-dropdown-quick-actions" role="group" aria-label="Quick actions">
-                    <button
-                      type="button"
-                      className={`pearl-btn pearl-btn-neutral ${quickBusy === 'plan' ? 'busy' : ''}`}
-                      onClick={() => void runQuickChat('plan', 'Create a session plan for the next 60 minutes: bias, key levels, triggers, invalidation, and risk rules. Use bullets.')}
-                      disabled={!operatorUnlocked || !chatAvailable || chatBusy || Boolean(quickBusy)}
-                      title={!operatorUnlocked ? 'Operator access required' : 'Create a trading session plan'}
-                      aria-busy={quickBusy === 'plan'}
-                    >
-                      {quickBusy === 'plan' ? '…' : 'Session plan'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pearl-btn pearl-btn-neutral ${quickBusy === 'quiet' ? 'busy' : ''}`}
-                      onClick={() => void runQuickChat('quiet', 'If signals are quiet, explain why and what I should watch next; include 3 concrete triggers and one rule to avoid overtrading.')}
-                      disabled={!operatorUnlocked || !chatAvailable || chatBusy || Boolean(quickBusy)}
-                      title={!operatorUnlocked ? 'Operator access required' : 'Check why signals are quiet'}
-                      aria-busy={quickBusy === 'quiet'}
-                    >
-                      {quickBusy === 'quiet' ? '…' : 'Quiet check'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pearl-btn pearl-btn-neutral ${quickBusy === 'rejections' ? 'busy' : ''}`}
-                      onClick={() => void runQuickChat('rejections', "Summarize today's signal rejections (top reasons) and what to adjust to reduce missed good setups.")}
-                      disabled={!operatorUnlocked || !chatAvailable || chatBusy || Boolean(quickBusy)}
-                      title={!operatorUnlocked ? 'Operator access required' : 'Review signal rejections'}
-                      aria-busy={quickBusy === 'rejections'}
-                    >
-                      {quickBusy === 'rejections' ? '…' : 'Rejections'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pearl-btn pearl-btn-neutral ${quickBusy === 'insight' ? 'busy' : ''}`}
-                      onClick={() => void triggerInsight()}
-                      disabled={!operatorUnlocked || !chatAvailable || chatBusy || Boolean(quickBusy)}
-                      title={!operatorUnlocked ? 'Operator access required' : 'Get a quick trading insight'}
-                      aria-busy={quickBusy === 'insight'}
-                    >
-                      {quickBusy === 'insight' ? '…' : 'Insight'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pearl-btn pearl-btn-neutral ${quickBusy === 'daily_review' ? 'busy' : ''}`}
-                      onClick={() => void triggerDailyReview()}
-                      disabled={!operatorUnlocked || !chatAvailable || chatBusy || Boolean(quickBusy)}
-                      title={!operatorUnlocked ? 'Operator access required' : 'Get end-of-day review'}
-                      aria-busy={quickBusy === 'daily_review'}
-                    >
-                      {quickBusy === 'daily_review' ? '…' : 'Daily review'}
-                    </button>
-                  </div>
-
-                  {quickResult && (
-                    <div className={`pearl-dropdown-result ${quickResult.type}`}>
-                      {quickResult.message}
                     </div>
+                  ) : metricsData.error ? (
+                    <div className="pearl-dropdown-metrics-muted">Metrics: {metricsData.error}</div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="pearl-btn pearl-btn-neutral"
+                      onClick={() => void refreshMetrics(true)}
+                      disabled={!data.status.chatAvailable}
+                    >
+                      Load metrics
+                    </button>
                   )}
                 </div>
-              )}
-            </div>
+
+                {/* Quick Actions (with collapsible More) */}
+                <QuickActionsRow
+                  onAction={(id) => void quickActions.runAction(id as any)}
+                  busy={quickActions.busy}
+                  disabled={!operatorUnlocked || !data.status.chatAvailable || chat.busy}
+                  expanded={quickActionsExpanded}
+                  onToggleExpand={() => setQuickActionsExpanded(!quickActionsExpanded)}
+                />
+
+                {quickActions.result && (
+                  <div className={`pearl-dropdown-result ${quickActions.result.type}`}>
+                    {quickActions.result.message}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {/* AI Component Status Pills */}
-        {(!isDropdown || dropdownTab === 'overview') && aiStatus && (
+        {(!isDropdown || activeTab === 'overview') && aiStatus && (
           <div className="pearl-ai-status">
             <div className="ai-pills">
-              <ModePill label="Bandit" mode={aiStatus.bandit_mode as Mode} />
-              <ModePill label="Contextual" mode={aiStatus.contextual_mode as Mode} />
-              <ModePill label="ML" mode={mlMode as Mode} />
+              <ModePill label="Bandit" mode={aiStatus.bandit_mode as PearlMode} />
+              <ModePill label="Contextual" mode={aiStatus.contextual_mode as PearlMode} />
+              <ModePill label="ML" mode={mlMode as PearlMode} />
             </div>
 
-            {/* ML Lift Status (compact) */}
             {aiStatus.ml_filter.enabled && aiStatus.ml_filter.lift && (
               <div className="ai-lift-compact">
                 <span className={`lift-indicator ${aiStatus.ml_filter.lift.lift_ok ? 'lift-ok' : 'lift-fail'}`}>
@@ -892,7 +582,6 @@ export default function PearlInsightsPanel({
               </div>
             )}
 
-            {/* Direction Gating (compact) */}
             {aiStatus.direction_gating.enabled && aiStatus.direction_gating.blocks > 0 && (
               <div className="ai-gating-compact">
                 <span className="gating-label">Gating:</span>
@@ -902,8 +591,8 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* PEARL AI Banner (Shadow Mode) */}
-        {(!isDropdown || dropdownTab === 'overview') && hasShadowMode && (
+        {/* Shadow Mode Banner */}
+        {(!isDropdown || activeTab === 'overview') && hasShadowMode && (
           <div className="shadow-mode-banner">
             <span className="shadow-mode-icon">🦪</span>
             <span className="shadow-mode-text">
@@ -912,7 +601,7 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* Operator lock (public link is read-only by default) */}
+        {/* Operator Lock Strip */}
         <div className="pearl-operator-strip" role="group" aria-label="Operator access control">
           <div className="pearl-operator-left">
             <span
@@ -1019,14 +708,14 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* Transparency / Heartbeat */}
-        {(!isDropdown || dropdownTab === 'feed') && (pearlFeed.length > 0 || pearlAIHeartbeat || pearlAIDebug) && (
+        {/* Feed Tab - Transparency & Feed */}
+        {(!isDropdown || activeTab === 'feed') && (pearlFeed.length > 0 || pearlAIHeartbeat || pearlAIDebug) && (
           <div className="pearl-transparency">
             <div className="transparency-header">
               <div className="transparency-left">
-                <span className={`pearl-heartbeat-dot ${heartbeatRecent ? 'on' : 'off'}`} />
+                <span className={`pearl-heartbeat-dot ${data.status.heartbeatRecent ? 'on' : 'off'}`} />
                 <span className="transparency-title">Transparency</span>
-                <span className="transparency-sub">{formatAgo(lastActivityTs)}</span>
+                <span className="transparency-sub">{formatAgo(data.status.lastActivityTs)}</span>
               </div>
               {!isDropdown && (
                 <button
@@ -1179,8 +868,8 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* LLM Chat (Pearl AI 3.0) */}
-        {(!isDropdown || dropdownTab === 'chat') && (
+        {/* Chat Tab */}
+        {(!isDropdown || activeTab === 'chat') && (
           <div className={`pearl-chat ${isDropdown ? 'pearl-chat-dropdown' : ''}`}>
             {!isDropdown && (
               <button
@@ -1202,12 +891,12 @@ export default function PearlInsightsPanel({
                   aria-live="polite"
                   aria-label="Chat messages"
                 >
-                  {chatMessages.length === 0 ? (
+                  {chat.messages.length === 0 ? (
                     <div className="pearl-chat-empty">
                       Ask about today&apos;s setup, why signals are quiet, or what to watch next.
                     </div>
                   ) : (
-                    chatMessages.map((m, idx) => (
+                    chat.messages.map((m, idx) => (
                       <div
                         key={`chat-${idx}-${m.role}`}
                         className={`pearl-chat-msg ${m.role}`}
@@ -1231,43 +920,43 @@ export default function PearlInsightsPanel({
                   className="pearl-chat-form"
                   onSubmit={(e) => {
                     e.preventDefault()
-                    void sendChat()
+                    void chat.sendMessage()
                   }}
                   aria-label="Chat with Pearl AI"
                 >
                   <input
                     className="pearl-chat-input"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
+                    value={chat.input}
+                    onChange={(e) => chat.setInput(e.target.value)}
                     placeholder="Ask Pearl…"
-                    disabled={chatBusy || !operatorUnlocked || !chatAvailable}
+                    disabled={chat.busy || !operatorUnlocked || !data.status.chatAvailable}
                     aria-label="Message input"
                     autoComplete="off"
                   />
                   <button
                     className="pearl-chat-send"
                     type="submit"
-                    disabled={chatBusy || !chatInput.trim() || !operatorUnlocked || !chatAvailable}
-                    aria-label={chatBusy ? 'Sending message' : 'Send message'}
+                    disabled={chat.busy || !chat.input.trim() || !operatorUnlocked || !data.status.chatAvailable}
+                    aria-label={chat.busy ? 'Sending message' : 'Send message'}
                   >
-                    {chatBusy ? '…' : 'Send'}
+                    {chat.busy ? '…' : 'Send'}
                   </button>
                   <button
                     className="pearl-chat-clear"
                     type="button"
-                    onClick={() => setChatMessages([])}
-                    disabled={chatBusy || chatMessages.length === 0}
+                    onClick={chat.clearMessages}
+                    disabled={chat.busy || chat.messages.length === 0}
                     aria-label="Clear chat history"
                   >
                     Clear
                   </button>
                 </form>
 
-                {chatError && <div className="pearl-chat-error">{chatError}</div>}
+                {chat.error && <div className="pearl-chat-error">{chat.error}</div>}
                 <div className="pearl-chat-hint">
                   {!operatorUnlocked
                     ? 'Read-only mode. Unlock operator access to chat.'
-                    : !chatAvailable
+                    : !data.status.chatAvailable
                       ? 'LLM chat is disabled on this server.'
                       : 'Operator-only. Requires Pearl AI endpoints on the API server.'}
                 </div>
@@ -1276,18 +965,18 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* AI Cost Transparency Dashboard */}
-        {dropdownTab === 'costs' && isDropdown && (
+        {/* Costs Tab */}
+        {activeTab === 'costs' && isDropdown && (
           <div className="pearl-costs-dashboard" role="region" aria-label="AI Cost Transparency">
             <div className="pearl-costs-header">
               <span className="pearl-costs-title">AI Cost Transparency</span>
               <button
                 type="button"
-                className={`pearl-metric-refresh ${metricsBusy ? 'spinning' : ''}`}
+                className={`pearl-metric-refresh ${metricsData.loading ? 'spinning' : ''}`}
                 onClick={() => void refreshMetrics(true)}
-                disabled={metricsBusy || !chatAvailable || !operatorUnlocked}
+                disabled={metricsData.loading || !data.status.chatAvailable || !operatorUnlocked}
                 title="Refresh metrics"
-                aria-label={metricsBusy ? 'Loading metrics' : 'Refresh metrics'}
+                aria-label={metricsData.loading ? 'Loading metrics' : 'Refresh metrics'}
               >
                 ↻
               </button>
@@ -1298,33 +987,33 @@ export default function PearlInsightsPanel({
                 <span className="lock-icon">🔒</span>
                 <span>Unlock operator access to view cost data</span>
               </div>
-            ) : metricsError ? (
-              <div className="pearl-costs-error">{metricsError}</div>
-            ) : metricsBusy && !metricsSummary ? (
+            ) : metricsData.error ? (
+              <div className="pearl-costs-error">{metricsData.error}</div>
+            ) : metricsData.loading && !metricsData.summary ? (
               <div className="pearl-costs-loading">Loading cost data...</div>
-            ) : metricsSummary && costSummary ? (
+            ) : metricsData.summary && metricsData.cost ? (
               <>
                 {/* Cost Summary Cards */}
                 <div className="pearl-costs-cards">
                   <div className="pearl-cost-card today">
-                    <div className="cost-card-value">${costSummary.today_usd.toFixed(3)}</div>
+                    <div className="cost-card-value">${metricsData.cost.today_usd.toFixed(3)}</div>
                     <div className="cost-card-label">Today</div>
-                    {costSummary.limit_usd && (
+                    {metricsData.cost.limit_usd && (
                       <div className="cost-card-limit">
-                        {Math.round((costSummary.today_usd / costSummary.limit_usd) * 100)}% of ${costSummary.limit_usd} limit
+                        {Math.round((metricsData.cost.today_usd / metricsData.cost.limit_usd) * 100)}% of ${metricsData.cost.limit_usd} limit
                       </div>
                     )}
                   </div>
                   <div className="pearl-cost-card month">
-                    <div className="cost-card-value">${costSummary.month_usd.toFixed(2)}</div>
+                    <div className="cost-card-value">${metricsData.cost.month_usd.toFixed(2)}</div>
                     <div className="cost-card-label">This Month</div>
                   </div>
                   <div className="pearl-cost-card tokens">
-                    <div className="cost-card-value">{(metricsSummary.total_tokens / 1000).toFixed(1)}k</div>
+                    <div className="cost-card-value">{(metricsData.summary.total_tokens / 1000).toFixed(1)}k</div>
                     <div className="cost-card-label">Tokens (24h)</div>
                   </div>
                   <div className="pearl-cost-card requests">
-                    <div className="cost-card-value">{metricsSummary.total_requests}</div>
+                    <div className="cost-card-value">{metricsData.summary.total_requests}</div>
                     <div className="cost-card-label">Requests (24h)</div>
                   </div>
                 </div>
@@ -1334,7 +1023,7 @@ export default function PearlInsightsPanel({
                   <div className="pearl-costs-section-title">Response Sources (24h)</div>
                   <div className="pearl-source-bars">
                     {(() => {
-                      const sources = sourceDist?.counts || {
+                      const sources = metricsData.sources?.counts || {
                         cache: 0,
                         local: 0,
                         claude: 0,
@@ -1374,7 +1063,7 @@ export default function PearlInsightsPanel({
                 </div>
 
                 {/* Model Usage Breakdown */}
-                {metricsSummary.by_model && Object.keys(metricsSummary.by_model).length > 0 && (
+                {metricsData.summary.by_model && Object.keys(metricsData.summary.by_model).length > 0 && (
                   <div className="pearl-costs-section">
                     <div className="pearl-costs-section-title">Model Usage (24h)</div>
                     <div className="pearl-model-table">
@@ -1385,7 +1074,7 @@ export default function PearlInsightsPanel({
                         <span className="model-col cost">Cost</span>
                         <span className="model-col latency">Avg Latency</span>
                       </div>
-                      {Object.entries(metricsSummary.by_model).map(([model, stats]) => {
+                      {Object.entries(metricsData.summary.by_model).map(([model, stats]) => {
                         const shortModel = model
                           .replace('claude-', '')
                           .replace('-20250514', '')
@@ -1406,11 +1095,11 @@ export default function PearlInsightsPanel({
                 )}
 
                 {/* Endpoint Breakdown */}
-                {metricsSummary.by_endpoint && Object.keys(metricsSummary.by_endpoint).length > 0 && (
+                {metricsData.summary.by_endpoint && Object.keys(metricsData.summary.by_endpoint).length > 0 && (
                   <div className="pearl-costs-section">
                     <div className="pearl-costs-section-title">Endpoint Usage (24h)</div>
                     <div className="pearl-endpoint-grid">
-                      {Object.entries(metricsSummary.by_endpoint).map(([endpoint, stats]) => (
+                      {Object.entries(metricsData.summary.by_endpoint).map(([endpoint, stats]) => (
                         <div key={endpoint} className="pearl-endpoint-card">
                           <div className="endpoint-name">{endpoint}</div>
                           <div className="endpoint-stats">
@@ -1430,33 +1119,33 @@ export default function PearlInsightsPanel({
                   <div className="pearl-perf-grid">
                     <div className="pearl-perf-item">
                       <span className="perf-label">Cache Hit Rate</span>
-                      <span className={`perf-value ${metricsSummary.cache_hit_rate > 0.3 ? 'good' : ''}`}>
-                        {(metricsSummary.cache_hit_rate * 100).toFixed(0)}%
+                      <span className={`perf-value ${metricsData.summary.cache_hit_rate > 0.3 ? 'good' : ''}`}>
+                        {(metricsData.summary.cache_hit_rate * 100).toFixed(0)}%
                       </span>
                     </div>
                     <div className="pearl-perf-item">
                       <span className="perf-label">Error Rate</span>
-                      <span className={`perf-value ${metricsSummary.error_rate > 0.05 ? 'bad' : 'good'}`}>
-                        {(metricsSummary.error_rate * 100).toFixed(1)}%
+                      <span className={`perf-value ${metricsData.summary.error_rate > 0.05 ? 'bad' : 'good'}`}>
+                        {(metricsData.summary.error_rate * 100).toFixed(1)}%
                       </span>
                     </div>
                     <div className="pearl-perf-item">
                       <span className="perf-label">Fallback Rate</span>
                       <span className="perf-value">
-                        {(metricsSummary.fallback_rate * 100).toFixed(1)}%
+                        {(metricsData.summary.fallback_rate * 100).toFixed(1)}%
                       </span>
                     </div>
                     <div className="pearl-perf-item">
                       <span className="perf-label">p50 Latency</span>
-                      <span className="perf-value">{Math.round(metricsSummary.p50_latency_ms || 0)}ms</span>
+                      <span className="perf-value">{Math.round(metricsData.summary.p50_latency_ms || 0)}ms</span>
                     </div>
                     <div className="pearl-perf-item">
                       <span className="perf-label">p95 Latency</span>
-                      <span className="perf-value">{Math.round(metricsSummary.p95_latency_ms)}ms</span>
+                      <span className="perf-value">{Math.round(metricsData.summary.p95_latency_ms)}ms</span>
                     </div>
                     <div className="pearl-perf-item">
                       <span className="perf-label">p99 Latency</span>
-                      <span className="perf-value">{Math.round(metricsSummary.p99_latency_ms || 0)}ms</span>
+                      <span className="perf-value">{Math.round(metricsData.summary.p99_latency_ms || 0)}ms</span>
                     </div>
                   </div>
                 </div>
@@ -1465,28 +1154,28 @@ export default function PearlInsightsPanel({
                 <div className="pearl-costs-tips">
                   <div className="pearl-costs-tips-title">Cost Optimization</div>
                   <ul className="pearl-tips-list">
-                    {metricsSummary.cache_hit_rate < 0.2 && (
-                      <li className="tip">Low cache hit rate ({(metricsSummary.cache_hit_rate * 100).toFixed(0)}%). Similar queries could benefit from caching.</li>
+                    {metricsData.summary.cache_hit_rate < 0.2 && (
+                      <li className="tip">Low cache hit rate ({(metricsData.summary.cache_hit_rate * 100).toFixed(0)}%). Similar queries could benefit from caching.</li>
                     )}
-                    {sourceDist && sourceDist.counts.claude > (sourceDist.counts.local || 0) * 2 && (
+                    {metricsData.sources && metricsData.sources.counts.claude > (metricsData.sources.counts.local || 0) * 2 && (
                       <li className="tip">Heavy Claude usage. Consider routing simpler queries to local Ollama.</li>
                     )}
-                    {metricsSummary.by_model?.['claude-sonnet-4-20250514']?.count > 50 && (
+                    {metricsData.summary.by_model?.['claude-sonnet-4-20250514']?.count > 50 && (
                       <li className="tip">High Sonnet usage. Route simple queries to Haiku for 3x savings.</li>
                     )}
-                    {costSummary.limit_usd && costSummary.today_usd > costSummary.limit_usd * 0.5 && (
+                    {metricsData.cost.limit_usd && metricsData.cost.today_usd > metricsData.cost.limit_usd * 0.5 && (
                       <li className="tip warning">Over 50% of daily budget used.</li>
                     )}
-                    {metricsSummary.cache_hit_rate >= 0.3 && sourceDist && sourceDist.counts.local >= sourceDist.counts.claude && (
+                    {metricsData.summary.cache_hit_rate >= 0.3 && metricsData.sources && metricsData.sources.counts.local >= metricsData.sources.counts.claude && (
                       <li className="tip success">Good cost efficiency. Cache and local LLM handling most queries.</li>
                     )}
                   </ul>
                 </div>
 
                 {/* Last Updated */}
-                {metricsAsOfMs && (
+                {metricsData.asOfMs && (
                   <div className="pearl-costs-footer">
-                    Updated {formatAgo(new Date(metricsAsOfMs).toISOString())}
+                    Updated {formatAgo(new Date(metricsData.asOfMs).toISOString())}
                   </div>
                 )}
               </>
@@ -1496,7 +1185,7 @@ export default function PearlInsightsPanel({
                   type="button"
                   className="pearl-btn pearl-btn-neutral"
                   onClick={() => void refreshMetrics(true)}
-                  disabled={!chatAvailable || !operatorUnlocked}
+                  disabled={!data.status.chatAvailable || !operatorUnlocked}
                 >
                   Load Cost Data
                 </button>
@@ -1566,7 +1255,7 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* Current Insight / Suggestion */}
+        {/* Current Insight / Suggestion (Panel Mode) */}
         {!isDropdown && activeSuggestion && (
           <div className="pearl-current-insight">
             <div className="insight-header">
@@ -1581,11 +1270,6 @@ export default function PearlInsightsPanel({
               </div>
             )}
             <div className="insight-buttons">
-              {/*
-                Some suggestion sources may not provide a stable id; the server will
-                best-effort resolve the active suggestion id, but we still disable
-                buttons if we have nothing to reference client-side.
-              */}
               {(() => {
                 const sid = resolveSuggestionId()
                 const disabled = !operatorUnlocked || feedbackBusy || !sid
@@ -1615,7 +1299,7 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* No Active Suggestion State */}
+        {/* No Active Suggestion State (Panel Mode) */}
         {!isDropdown && !activeSuggestion && (
           <div className="pearl-no-insight">
             <span className="no-insight-icon">✨</span>
@@ -1623,8 +1307,8 @@ export default function PearlInsightsPanel({
           </div>
         )}
 
-        {/* Shadow Tracking Impact Summary (compact 2x2 grid) */}
-        {(!isDropdown || dropdownTab === 'overview') && metrics && totalSuggestions > 0 && (
+        {/* Shadow Tracking Impact Summary */}
+        {(!isDropdown || activeTab === 'overview') && metrics && totalSuggestions > 0 && (
           <div className="pearl-shadow-metrics">
             <div className="shadow-header">
               <span className="shadow-title">Shadow Impact</span>
@@ -1636,7 +1320,6 @@ export default function PearlInsightsPanel({
               </button>
             </div>
 
-            {/* Compact Impact Row */}
             <div className="shadow-impact-row">
               <div className="impact-item positive">
                 <span className="impact-value">{formatCurrency(totalWouldHaveSaved)}</span>
@@ -1656,10 +1339,8 @@ export default function PearlInsightsPanel({
               </div>
             </div>
 
-            {/* Expanded Details */}
             {showDetails && (
               <div className="shadow-details">
-                {/* Shadow Counters from AI Status */}
                 {shadowCounters && shadowCounters.would_block_total > 0 && (
                   <div className="shadow-blocks">
                     <span className="blocks-text">
@@ -1673,14 +1354,12 @@ export default function PearlInsightsPanel({
                   </div>
                 )}
 
-                {/* Suggestion Stats */}
                 <div className="shadow-stats-compact">
                   <span className="stat">✓ {suggestionsFollowed} followed</span>
                   <span className="stat">✗ {suggestionsDismissed} dismissed</span>
                   <span className="stat">⏱ {metrics.suggestions_expired} expired</span>
                 </div>
 
-                {/* History Toggle */}
                 {metrics.recent_suggestions && metrics.recent_suggestions.length > 0 && (
                   <button
                     className="history-toggle-btn"
@@ -1690,7 +1369,6 @@ export default function PearlInsightsPanel({
                   </button>
                 )}
 
-                {/* Recent Suggestions History */}
                 {showHistory && metrics.recent_suggestions && (
                   <div className="shadow-history">
                     <div className="history-list">
@@ -1726,7 +1404,7 @@ export default function PearlInsightsPanel({
         )}
 
         {/* Empty State - No Metrics Yet */}
-        {(!isDropdown || dropdownTab === 'overview') && (!metrics || totalSuggestions === 0) && !activeSuggestion && !aiStatus && (
+        {(!isDropdown || activeTab === 'overview') && (!metrics || totalSuggestions === 0) && !activeSuggestion && !aiStatus && (
           <div className="pearl-empty-state">
             <div className="empty-icon">🔮</div>
             <div className="empty-title">Shadow Mode Active</div>
@@ -1740,7 +1418,10 @@ export default function PearlInsightsPanel({
   )
 }
 
-// Helper function to get icon for suggestion type
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
 function getTypeIcon(type: string): string {
   const icons: Record<string, string> = {
     risk_alert: '⚠️',

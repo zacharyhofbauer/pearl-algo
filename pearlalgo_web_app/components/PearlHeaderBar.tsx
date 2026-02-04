@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import PearlInsightsPanel from './PearlInsightsPanel'
 import { useAgentStore, useOperatorStore } from '@/stores'
+import { derivePearlMode, deriveHeadline } from '@/types/pearl'
 
 /** Chevron icon component for consistent rendering */
 function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
@@ -38,31 +39,19 @@ export default function PearlHeaderBar() {
   const hasAI = Boolean(agentState?.pearl_ai_available || agentState?.ai_status)
   const isConnected = Boolean(agentState?.running)
 
-  // Determine AI mode for status indicator
+  // Use centralized helper to derive AI mode
   const aiMode = useMemo(() => {
-    const ai = agentState?.ai_status
-    if (!ai) return null
-    const hasLive = ai.bandit_mode === 'live' || ai.contextual_mode === 'live' ||
-                    (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'live')
-    const hasShadow = ai.bandit_mode === 'shadow' || ai.contextual_mode === 'shadow' ||
-                      (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'shadow')
-    if (hasLive) return 'live'
-    if (hasShadow) return 'shadow'
-    return 'off'
-  }, [agentState?.ai_status])
+    return derivePearlMode(agentState?.ai_status || null, agentState?.pearl_insights || null)
+  }, [agentState?.ai_status, agentState?.pearl_insights])
 
+  // Use centralized helper to derive headline/preview text
   const previewText = useMemo(() => {
-    const feed = agentState?.pearl_feed
-    const latestFeed = feed && feed.length > 0 ? feed[feed.length - 1] : null
-    const feedText = latestFeed?.content || null
-
-    const suggestion =
-      agentState?.pearl_suggestion?.message ||
-      agentState?.pearl_insights?.current_suggestion?.message ||
-      agentState?.pearl_insights?.shadow_metrics?.active_suggestion?.message ||
-      null
-
-    const base = feedText || suggestion || 'Pearl AI ready'
+    const headline = deriveHeadline(
+      agentState?.pearl_feed || [],
+      agentState?.pearl_suggestion || null,
+      agentState?.pearl_insights || null
+    )
+    const base = headline.text
     const maxLength = 60
     return base.length <= maxLength ? base : `${base.slice(0, maxLength)}…`
   }, [agentState?.pearl_feed, agentState?.pearl_insights, agentState?.pearl_suggestion])
@@ -124,7 +113,7 @@ export default function PearlHeaderBar() {
     if (!hasAI && !isConnected) return ''
     if (aiMode === 'live') return 'connected live'
     if (aiMode === 'shadow') return 'connected shadow'
-    if (hasAI) return 'connected'
+    if (aiMode !== 'off' || hasAI) return 'connected'
     return ''
   }, [hasAI, isConnected, aiMode])
 
@@ -147,7 +136,7 @@ export default function PearlHeaderBar() {
       <span
         className={`pearl-header-status-dot ${statusDotClass}`}
         role="status"
-        aria-label={hasAI ? `Pearl AI ${aiMode || 'connected'}` : 'Pearl AI disconnected'}
+        aria-label={hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
       />
 
       <div className="pearl-header-preview" aria-hidden="true">
