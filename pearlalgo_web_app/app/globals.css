@@ -472,6 +472,8 @@ body {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .header-badges .agent-badge {
@@ -2682,6 +2684,18 @@ body {
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--border-color);
+}
+
+.data-panel-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.data-panel-header-right .data-panel-badge {
+  margin-left: 0;
 }
 
 .data-panel-badge {
@@ -11957,6 +11971,60 @@ body {
 
 .trade-dock-content {
   padding: var(--space-6);
+}
+
+.trade-dock-header-stats {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trade-dock-header-stats .dock-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.trade-dock-header-stats .dock-stat-k {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+}
+
+.trade-dock-header-stats .dock-stat-v {
+  font-family: var(--font-mono);
+  font-weight: 900;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.trade-dock-header-stats .dock-stat.pnl.positive .dock-stat-v { color: var(--accent-green); }
+.trade-dock-header-stats .dock-stat.pnl.negative .dock-stat-v { color: var(--accent-red); }
+
+.trade-dock-header-stats .dock-stat.wl .dock-stat-v .win { color: var(--accent-green); }
+.trade-dock-header-stats .dock-stat.wl .dock-stat-v .loss { color: var(--accent-red); }
+
+.trade-dock-header-stats .dock-stat.pos .dock-stat-v {
+  color: var(--accent-cyan);
+  background: rgba(var(--accent-cyan-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-cyan-rgb), 0.25);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+@media (max-width: 480px) {
+  .trade-dock-header-stats {
+    gap: 8px;
+  }
+  .trade-dock-header-stats .dock-stat-k {
+    display: none;
+  }
 }
 
 /* Performance pills (TD/7D/30D/WTD/MTD/YTD) */

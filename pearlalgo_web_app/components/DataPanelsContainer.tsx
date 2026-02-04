@@ -35,6 +35,8 @@ interface DataPanelProps {
   badge?: string
   /** Badge background color (CSS value) */
   badgeColor?: string
+  /** Optional right-side header content (e.g., summary chips) */
+  headerRight?: ReactNode
 }
 
 export function DataPanel({
@@ -47,7 +49,8 @@ export function DataPanel({
   variant = 'default',
   noErrorBoundary = false,
   badge,
-  badgeColor
+  badgeColor,
+  headerRight
 }: DataPanelProps) {
   const panelClasses = [
     'data-panel',
@@ -72,13 +75,18 @@ export function DataPanel({
       <div className="data-panel-header">
         {renderIcon()}
         <span className="data-panel-title">{title}</span>
-        {badge && (
-          <span
-            className="data-panel-badge"
-            style={badgeColor ? { backgroundColor: badgeColor } : undefined}
-          >
-            {badge}
-          </span>
+        {(headerRight || badge) && (
+          <div className="data-panel-header-right">
+            {headerRight}
+            {badge && (
+              <span
+                className="data-panel-badge"
+                style={badgeColor ? { backgroundColor: badgeColor } : undefined}
+              >
+                {badge}
+              </span>
+            )}
+          </div>
         )}
       </div>
       <div className="data-panel-content">

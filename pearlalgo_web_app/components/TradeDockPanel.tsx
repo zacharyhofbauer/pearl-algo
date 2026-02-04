@@ -54,6 +54,14 @@ interface TradeDockPanelProps {
   /** Default max rows before “Show all” toggle */
   maxOpenRows?: number
   maxRecentRows?: number
+  /** Daily realized P&L (USD) for header summary */
+  dailyPnL?: number
+  /** Daily win count for header summary */
+  dailyWins?: number
+  /** Daily loss count for header summary */
+  dailyLosses?: number
+  /** Active positions count (if provided by agent state) */
+  activeTradesCount?: number
 }
 
 type Tab = 'open' | 'recent'
@@ -149,6 +157,10 @@ export default function TradeDockPanel({
   statusBreakdown,
   maxOpenRows,
   maxRecentRows,
+  dailyPnL,
+  dailyWins,
+  dailyLosses,
+  activeTradesCount,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('open')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -195,6 +207,32 @@ export default function TradeDockPanel({
 
   const openCount = openRows.length
   const recentCount = recentRows.length
+
+  const headerPosCount = typeof activeTradesCount === 'number' ? activeTradesCount : openCount
+
+  const headerStats = (
+    <div className="trade-dock-header-stats" aria-label="Daily summary">
+      {typeof dailyPnL === 'number' && (
+        <div className={`dock-stat pnl ${dailyPnL >= 0 ? 'positive' : 'negative'}`}>
+          <span className="dock-stat-k">P&amp;L</span>
+          <span className="dock-stat-v">{formatPnL(dailyPnL)}</span>
+        </div>
+      )}
+      {(typeof dailyWins === 'number' || typeof dailyLosses === 'number') && (
+        <div className="dock-stat wl">
+          <span className="dock-stat-k">W/L</span>
+          <span className="dock-stat-v">
+            <span className="win">{typeof dailyWins === 'number' ? dailyWins : 0}</span>/
+            <span className="loss">{typeof dailyLosses === 'number' ? dailyLosses : 0}</span>
+          </span>
+        </div>
+      )}
+      <div className="dock-stat pos">
+        <span className="dock-stat-k">Pos</span>
+        <span className="dock-stat-v">{headerPosCount} pos</span>
+      </div>
+    </div>
+  )
 
   const displayOpen = showAllOpen ? openRows : openRows.slice(0, openLimit)
   const displayRecent = showAllRecent ? recentRows : recentRows.slice(0, recentLimit)
@@ -287,7 +325,13 @@ export default function TradeDockPanel({
 
   return (
     <div className="trade-dock-wrapper">
-      <DataPanel title="Trades" icon="📓" padding="none" className="trade-dock-panel">
+      <DataPanel
+        title="Trades"
+        icon="📓"
+        padding="none"
+        className="trade-dock-panel"
+        headerRight={headerStats}
+      >
         <div className="trade-dock">
           <div className="trade-dock-tabs" role="tablist" aria-label="Trades">
             <button

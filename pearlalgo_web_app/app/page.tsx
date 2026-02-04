@@ -517,25 +517,7 @@ export default function PearlAlgoWebApp() {
           </div>
 
           {/* Stats */}
-          {agentState && (
-            <div className="header-stats-row">
-              <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                <span className="stat-label">P&L</span>
-                <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
-              </div>
-              <div className="stat-item trades">
-                <span className="stat-label">W/L</span>
-                <span className="stat-value">
-                  <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
-                </span>
-              </div>
-              {agentState.active_trades_count > 0 && (
-                <div className="stat-item positions">
-                  <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Moved daily P&L / W-L / positions into the Trades dock header for better visibility */}
 
           {/* Timeframe */}
           <div className="header-timeframe">
@@ -762,6 +744,10 @@ export default function PearlAlgoWebApp() {
                   statusBreakdown={agentState.analytics?.status_breakdown || null}
                   maxOpenRows={4}
                   maxRecentRows={6}
+                  dailyPnL={agentState?.daily_pnl}
+                  dailyWins={agentState?.daily_wins}
+                  dailyLosses={agentState?.daily_losses}
+                  activeTradesCount={agentState?.active_trades_count}
                 />
               }
               pearlAISection={
@@ -883,6 +869,10 @@ export default function PearlAlgoWebApp() {
             statusBreakdown={agentState?.analytics?.status_breakdown || null}
             maxOpenRows={6}
             maxRecentRows={10}
+            dailyPnL={agentState?.daily_pnl}
+            dailyWins={agentState?.daily_wins}
+            dailyLosses={agentState?.daily_losses}
+            activeTradesCount={agentState?.active_trades_count}
           />
 
           {/* Post-trade panels (signals / ops / advanced analytics) */}
