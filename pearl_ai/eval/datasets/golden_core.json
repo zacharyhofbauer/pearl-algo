@@ -1,0 +1,375 @@
+{
+  "name": "Pearl AI Core Golden Dataset",
+  "version": "1.0.0",
+  "description": "Core evaluation cases for regression testing Pearl AI responses",
+  "created": "2024-01-01",
+  "cases": [
+    {
+      "id": "quick_001",
+      "category": "quick",
+      "input_query": "What's my P&L?",
+      "input_state": {
+        "daily_pnl": 150.50,
+        "daily_trades": 5,
+        "daily_wins": 3,
+        "daily_losses": 2,
+        "active_trades_count": 0,
+        "running": true
+      },
+      "expected_routing": "quick",
+      "quality_criteria": [
+        "Must mention $150",
+        "Should mention wins or trades"
+      ],
+      "failure_modes": [
+        "I executed",
+        "I placed"
+      ],
+      "tags": ["pnl", "status"]
+    },
+    {
+      "id": "quick_002",
+      "category": "quick",
+      "input_query": "How many positions do I have open?",
+      "input_state": {
+        "daily_pnl": 75.00,
+        "daily_trades": 3,
+        "active_trades_count": 2,
+        "running": true
+      },
+      "expected_routing": "quick",
+      "quality_criteria": [
+        "Must mention 2 positions"
+      ],
+      "tags": ["positions", "status"]
+    },
+    {
+      "id": "quick_003",
+      "category": "quick",
+      "input_query": "Is the agent running?",
+      "input_state": {
+        "running": true,
+        "daily_pnl": 0,
+        "daily_trades": 0
+      },
+      "expected_routing": "quick",
+      "quality_criteria": [
+        "Should indicate running status"
+      ],
+      "tags": ["status"]
+    },
+    {
+      "id": "quick_004",
+      "category": "quick",
+      "input_query": "Current price?",
+      "input_state": {
+        "running": true,
+        "daily_pnl": 50.00
+      },
+      "expected_routing": "quick",
+      "tags": ["price", "status"]
+    },
+    {
+      "id": "quick_005",
+      "category": "quick",
+      "input_query": "Win rate today?",
+      "input_state": {
+        "daily_pnl": 200.00,
+        "daily_trades": 8,
+        "daily_wins": 6,
+        "daily_losses": 2
+      },
+      "expected_routing": "quick",
+      "quality_criteria": [
+        "Should mention 75% or 6 wins"
+      ],
+      "tags": ["performance", "status"]
+    },
+    {
+      "id": "deep_001",
+      "category": "deep",
+      "input_query": "Why am I losing more in the afternoons?",
+      "input_state": {
+        "daily_pnl": -50.00,
+        "daily_trades": 6,
+        "daily_wins": 2,
+        "daily_losses": 4
+      },
+      "expected_routing": "deep",
+      "expected_tool": "get_hourly_performance",
+      "quality_criteria": [
+        "Should reference hourly data",
+        "Should provide actionable insight"
+      ],
+      "tags": ["analysis", "hourly"]
+    },
+    {
+      "id": "deep_002",
+      "category": "deep",
+      "input_query": "Explain why the last signal was rejected",
+      "input_state": {
+        "daily_pnl": 100.00,
+        "signal_rejections_24h": {
+          "ml_filter": 3,
+          "direction_gating": 2
+        }
+      },
+      "expected_routing": "deep",
+      "expected_tool": "explain_rejection",
+      "quality_criteria": [
+        "Should explain rejection reason"
+      ],
+      "tags": ["analysis", "rejections"]
+    },
+    {
+      "id": "deep_003",
+      "category": "deep",
+      "input_query": "How do I perform in trending markets?",
+      "input_state": {
+        "daily_pnl": 75.00,
+        "market_regime": {
+          "regime": "trending_up",
+          "confidence": 0.8
+        }
+      },
+      "expected_routing": "deep",
+      "expected_tool": "get_regime_performance",
+      "expected_tool_args": {
+        "regime": "trending"
+      },
+      "quality_criteria": [
+        "Should call regime performance tool",
+        "Should reference trending market data"
+      ],
+      "tags": ["analysis", "regime"]
+    },
+    {
+      "id": "deep_004",
+      "category": "deep",
+      "input_query": "Analyze my long vs short performance",
+      "input_state": {
+        "daily_pnl": 125.00,
+        "daily_trades": 10
+      },
+      "expected_routing": "deep",
+      "expected_tool": "get_direction_performance",
+      "quality_criteria": [
+        "Should compare long and short"
+      ],
+      "tags": ["analysis", "direction"]
+    },
+    {
+      "id": "deep_005",
+      "category": "deep",
+      "input_query": "What patterns am I seeing in losing trades?",
+      "input_state": {
+        "daily_pnl": -25.00,
+        "daily_losses": 3,
+        "consecutive_losses": 2
+      },
+      "expected_routing": "deep",
+      "quality_criteria": [
+        "Should provide pattern analysis",
+        "Should be constructive not blame"
+      ],
+      "failure_modes": [
+        "your fault",
+        "you failed"
+      ],
+      "tags": ["analysis", "coaching"]
+    },
+    {
+      "id": "narration_001",
+      "category": "narration",
+      "input_query": "",
+      "event_type": "trade_entered",
+      "event_context": {
+        "direction": "long",
+        "entry_price": 25530,
+        "count": 1
+      },
+      "input_state": {
+        "market_regime": {
+          "regime": "trending_up",
+          "confidence": 0.75
+        },
+        "last_signal_decision": {
+          "ml_probability": 0.72
+        }
+      },
+      "quality_criteria": [
+        "Must mention LONG",
+        "Must mention 25530",
+        "Should be 2 sentences or less"
+      ],
+      "tags": ["narration", "entry"]
+    },
+    {
+      "id": "narration_002",
+      "category": "narration",
+      "input_query": "",
+      "event_type": "trade_exited",
+      "event_context": {
+        "direction": "long",
+        "pnl": 45.50,
+        "exit_reason": "take_profit"
+      },
+      "input_state": {
+        "daily_pnl": 150.00,
+        "daily_trades": 5,
+        "daily_wins": 4
+      },
+      "quality_criteria": [
+        "Must mention P&L",
+        "Should mention exit reason",
+        "Should be 2 sentences or less"
+      ],
+      "tags": ["narration", "exit"]
+    },
+    {
+      "id": "narration_003",
+      "category": "narration",
+      "input_query": "",
+      "event_type": "trade_exited",
+      "event_context": {
+        "direction": "short",
+        "pnl": -30.00,
+        "exit_reason": "stop_loss"
+      },
+      "input_state": {
+        "daily_pnl": -30.00,
+        "daily_trades": 1,
+        "daily_losses": 1,
+        "consecutive_losses": 1
+      },
+      "quality_criteria": [
+        "Should acknowledge loss constructively",
+        "Should not blame user"
+      ],
+      "failure_modes": [
+        "your fault",
+        "you should have",
+        "mistake"
+      ],
+      "tags": ["narration", "exit", "loss"]
+    },
+    {
+      "id": "narration_004",
+      "category": "narration",
+      "input_query": "",
+      "event_type": "signal_rejected",
+      "event_context": {
+        "reason": "ml_filter_below_threshold",
+        "total_today": 5
+      },
+      "input_state": {
+        "ai_status": {
+          "ml_filter": {
+            "enabled": true,
+            "passed": 3,
+            "skipped": 5
+          }
+        }
+      },
+      "quality_criteria": [
+        "Should explain ML filter rejection",
+        "Should be 2 sentences or less"
+      ],
+      "tags": ["narration", "rejection"]
+    },
+    {
+      "id": "narration_005",
+      "category": "narration",
+      "input_query": "",
+      "event_type": "circuit_breaker_triggered",
+      "event_context": {
+        "reason": "max_daily_loss",
+        "cooldown_seconds": 1800
+      },
+      "input_state": {
+        "daily_pnl": -200.00
+      },
+      "quality_criteria": [
+        "Should explain circuit breaker",
+        "Should mention cooldown duration",
+        "Should be reassuring"
+      ],
+      "failure_modes": [
+        "panic",
+        "disaster"
+      ],
+      "tags": ["narration", "circuit_breaker"]
+    },
+    {
+      "id": "tool_001",
+      "category": "tool_selection",
+      "input_query": "Show me similar trades to this setup",
+      "input_state": {
+        "market_regime": {
+          "regime": "ranging"
+        }
+      },
+      "expected_tool": "get_similar_trades",
+      "tags": ["tool", "similar_trades"]
+    },
+    {
+      "id": "tool_002",
+      "category": "tool_selection",
+      "input_query": "What time of day am I most profitable?",
+      "input_state": {},
+      "expected_tool": "get_hourly_performance",
+      "tags": ["tool", "hourly"]
+    },
+    {
+      "id": "tool_003",
+      "category": "tool_selection",
+      "input_query": "Give me my overall stats for the week",
+      "input_state": {},
+      "expected_tool": "get_performance_summary",
+      "expected_tool_args": {
+        "days": 7
+      },
+      "tags": ["tool", "summary"]
+    },
+    {
+      "id": "tool_004",
+      "category": "tool_selection",
+      "input_query": "What's my longest winning streak?",
+      "input_state": {},
+      "expected_tool": "get_streak_stats",
+      "tags": ["tool", "streaks"]
+    },
+    {
+      "id": "classification_001",
+      "category": "classification",
+      "input_query": "status",
+      "input_state": {},
+      "expected_routing": "quick",
+      "tags": ["classification"]
+    },
+    {
+      "id": "classification_002",
+      "category": "classification",
+      "input_query": "Why did that trade fail?",
+      "input_state": {},
+      "expected_routing": "deep",
+      "tags": ["classification"]
+    },
+    {
+      "id": "classification_003",
+      "category": "classification",
+      "input_query": "Explain my performance pattern over the last month",
+      "input_state": {},
+      "expected_routing": "deep",
+      "tags": ["classification"]
+    },
+    {
+      "id": "classification_004",
+      "category": "classification",
+      "input_query": "pnl?",
+      "input_state": {},
+      "expected_routing": "quick",
+      "tags": ["classification"]
+    }
+  ]
+}

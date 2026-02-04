@@ -1,0 +1,171 @@
+# Pearl AI Evaluation Workflow
+#
+# Runs automated evaluation on prompt changes to catch regressions.
+# Triggers on PRs that modify prompt-related files.
+
+name: Pearl AI Eval
+
+on:
+  pull_request:
+    paths:
+      - 'pearl_ai/brain.py'
+      - 'pearl_ai/narrator.py'
+      - 'pearl_ai/tools.py'
+      - 'pearl_ai/config.py'
+      - 'pearl_ai/eval/**'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'pearl_ai/brain.py'
+      - 'pearl_ai/narrator.py'
+      - 'pearl_ai/tools.py'
+      - 'pearl_ai/config.py'
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 'Dataset to run (golden_core.json or golden_expanded.json)'
+        required: false
+        default: 'golden_core.json'
+      threshold:
+        description: 'Pass rate threshold (0.0-1.0)'
+        required: false
+        default: '0.85'
+
+jobs:
+  eval:
+    name: Run Evaluation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp pydantic
+          # Install minimal deps for eval (avoid full requirements.txt)
+          pip install -e . || true
+
+      - name: Run evaluation (mock mode)
+        id: eval
+        run: |
+          python -m pearl_ai.eval.ci \
+            --dataset ${{ github.event.inputs.dataset || 'golden_core.json' }} \
+            --threshold ${{ github.event.inputs.threshold || '0.85' }} \
+            --mock \
+            --output-dir eval-reports
+        continue-on-error: true
+
+      - name: Upload eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-reports/
+          retention-days: 30
+
+      - name: Post eval summary to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reports = fs.readdirSync('eval-reports');
+            if (reports.length === 0) return;
+
+            const reportPath = `eval-reports/${reports[reports.length - 1]}`;
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+
+            const passRate = (report.pass_rate * 100).toFixed(1);
+            const threshold = ${{ github.event.inputs.threshold || '0.85' }} * 100;
+            const status = report.pass_rate >= ${{ github.event.inputs.threshold || '0.85' }} ? '✅' : '❌';
+
+            let body = `## Pearl AI Evaluation ${status}\n\n`;
+            body += `| Metric | Value |\n|--------|-------|\n`;
+            body += `| Pass Rate | ${passRate}% (threshold: ${threshold}%) |\n`;
+            body += `| Cases | ${report.passed_cases}/${report.total_cases} passed |\n`;
+            body += `| Duration | ${report.duration_seconds.toFixed(1)}s |\n\n`;
+
+            body += `### By Category\n`;
+            for (const [cat, data] of Object.entries(report.by_category)) {
+              const rate = (data.passed / data.total * 100).toFixed(0);
+              body += `- ${cat}: ${data.passed}/${data.total} (${rate}%)\n`;
+            }
+
+            if (report.failed_cases > 0) {
+              body += `\n### Failed Cases (${report.failed_cases})\n`;
+              body += `<details><summary>Show failures</summary>\n\n`;
+              for (const result of report.results.filter(r => !r.passed).slice(0, 10)) {
+                body += `- **${result.case_id}**: ${result.query.substring(0, 50)}...\n`;
+              }
+              body += `\n</details>\n`;
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Check eval result
+        if: steps.eval.outcome == 'failure'
+        run: |
+          echo "Evaluation failed to meet threshold"
+          exit 1
+
+  eval-with-ollama:
+    name: Run Evaluation (with Ollama)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    services:
+      ollama:
+        image: ollama/ollama
+        ports:
+          - 11434:11434
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp pydantic
+          pip install -e . || true
+
+      - name: Pull Ollama model
+        run: |
+          curl -X POST http://localhost:11434/api/pull \
+            -d '{"name": "llama3.1:8b"}' \
+            --max-time 600
+
+      - name: Run evaluation (real LLM)
+        run: |
+          python -m pearl_ai.eval.ci \
+            --dataset ${{ github.event.inputs.dataset || 'golden_core.json' }} \
+            --threshold ${{ github.event.inputs.threshold || '0.85' }} \
+            --llm-graders \
+            --output-dir eval-reports
+
+      - name: Upload eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-ollama
+          path: eval-reports/
+          retention-days: 30
