@@ -512,7 +512,7 @@ export default function PearlAlgoWebApp() {
             <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
             <div className="header-titles">
               <span className="header-symbol">MNQ</span>
-              <span className="header-app-name">Pearl Algo Web App</span>
+              <h1 className="header-app-name">Pearl Algo Web App</h1>
             </div>
           </div>
 
@@ -715,8 +715,10 @@ export default function PearlAlgoWebApp() {
   if (viewport.isUltrawide && agentState) {
     return (
       <>
+        {/* Skip navigation link for accessibility */}
+        <a href="#main-content" className="skip-link">Skip to main content</a>
         <PearlHeaderBar />
-        <div className="main-content">
+        <main className="main-content" id="main-content">
           <div className={`dashboard ultrawide-mode`} data-chart-ready={isChartReady ? 'true' : 'false'}>
             {/* Market Closed Banner */}
             {marketStatus && !marketStatus.is_open && (
@@ -830,7 +832,7 @@ export default function PearlAlgoWebApp() {
               }
             />
           </div>
-        </div>
+        </main>
       </>
     )
   }
@@ -838,8 +840,10 @@ export default function PearlAlgoWebApp() {
   // Standard layout (mobile, tablet, desktop)
   return (
     <>
+      {/* Skip navigation link for accessibility */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <PearlHeaderBar />
-      <div className="main-content">
+      <main className="main-content" id="main-content">
         <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
           {/* Market Closed Banner */}
           {marketStatus && !marketStatus.is_open && (
@@ -879,7 +883,7 @@ export default function PearlAlgoWebApp() {
           {/* Post-trade panels (signals / ops / advanced analytics) */}
           {agentState && <PostTradesPanels agentState={agentState} />}
         </div>
-      </div>
+      </main>
     </>
   )
 }

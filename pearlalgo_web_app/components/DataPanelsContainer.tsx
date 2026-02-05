@@ -36,6 +36,8 @@ interface DataPanelProps {
   badgeColor?: string
   /** Optional right-side header content (e.g., summary chips) */
   headerRight?: ReactNode
+  /** Semantic heading level for accessibility (default: 2) */
+  headingLevel?: 2 | 3 | 4
 }
 
 export function DataPanel({
@@ -48,7 +50,8 @@ export function DataPanel({
   noErrorBoundary = false,
   badge,
   badgeColor,
-  headerRight
+  headerRight,
+  headingLevel = 2
 }: DataPanelProps) {
   const panelClasses = [
     'data-panel',
@@ -65,11 +68,14 @@ export function DataPanel({
     return null
   }
 
+  // Semantic heading element for accessibility
+  const HeadingTag = `h${headingLevel}` as keyof JSX.IntrinsicElements
+
   const panelContent = (
-    <div className={panelClasses}>
+    <section className={panelClasses} aria-labelledby={`panel-${title.toLowerCase().replace(/\s+/g, '-')}`}>
       <div className="data-panel-header">
         {renderIcon()}
-        <span className="data-panel-title">{title}</span>
+        <HeadingTag id={`panel-${title.toLowerCase().replace(/\s+/g, '-')}`} className="data-panel-title">{title}</HeadingTag>
         {(headerRight || badge) && (
           <div className="data-panel-header-right">
             {headerRight}
@@ -87,7 +93,7 @@ export function DataPanel({
       <div className="data-panel-content">
         {children}
       </div>
-    </div>
+    </section>
   )
 
   // Wrap with error boundary unless disabled
@@ -99,10 +105,10 @@ export function DataPanel({
     <ErrorBoundary
       panelName={title}
       fallback={
-        <div className={`data-panel error-panel ${className}`}>
+        <section className={`data-panel error-panel ${className}`} aria-labelledby={`panel-${title.toLowerCase().replace(/\s+/g, '-')}-error`}>
           <div className="data-panel-header">
             {renderIcon()}
-            <span className="data-panel-title">{title}</span>
+            <HeadingTag id={`panel-${title.toLowerCase().replace(/\s+/g, '-')}-error`} className="data-panel-title">{title}</HeadingTag>
           </div>
           <div className="data-panel-content">
             <div className="error-boundary-fallback compact">
@@ -110,7 +116,7 @@ export function DataPanel({
               <span className="error-boundary-message">Failed to load panel</span>
             </div>
           </div>
-        </div>
+        </section>
       }
     >
       {panelContent}

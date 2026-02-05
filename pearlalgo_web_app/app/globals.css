@@ -246,6 +246,29 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
+/* Skip navigation link for accessibility */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 12px 24px;
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  border-radius: 0 0 8px 8px;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
 /* Main container */
 .dashboard {
   width: 100%;
@@ -331,11 +354,16 @@ body {
   line-height: 1;
 }
 
+/* App name as h1 for accessibility — reset heading defaults */
 .header-app-name {
   font-size: clamp(9px, 2vw, 11px);
+  font-weight: normal;
   color: var(--text-secondary);
   opacity: 0.7;
   letter-spacing: 0.3px;
+  margin: 0;
+  padding: 0;
+  line-height: inherit;
 }
 
 /* Stats Row */
@@ -2722,12 +2750,17 @@ body {
   border-radius: 4px;
 }
 
+/* Data panel titles — reset heading styles for h2/h3/h4 */
 .data-panel-title {
   font-size: var(--font-size-md);
   font-weight: 700;
   color: var(--text-primary);
   text-transform: uppercase;
   letter-spacing: 0.75px;
+  /* Reset heading defaults */
+  margin: 0;
+  padding: 0;
+  line-height: inherit;
 }
 
 .data-panel-content {
@@ -11707,23 +11740,25 @@ body {
   outline: none;
 }
 
-/* Mode-specific header tinting */
+/* Mode-specific header tinting — solid backgrounds */
 .pearl-header-bar.mode-shadow {
-  background: linear-gradient(90deg, rgba(255, 193, 7, 0.08) 0%, rgba(255, 193, 7, 0.04) 50%, var(--bg-card) 100%);
-  border-bottom-color: rgba(255, 193, 7, 0.25);
+  background: var(--bg-card);
+  border-bottom-color: rgba(255, 193, 7, 0.35);
+  border-left: 3px solid rgba(255, 193, 7, 0.6);
 }
 
 .pearl-header-bar.mode-shadow:hover {
-  background: linear-gradient(90deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 193, 7, 0.06) 50%, var(--bg-elevated) 100%);
+  background: var(--bg-elevated);
 }
 
 .pearl-header-bar.mode-live {
-  background: linear-gradient(90deg, rgba(var(--accent-green-rgb), 0.08) 0%, rgba(var(--accent-green-rgb), 0.04) 50%, var(--bg-card) 100%);
-  border-bottom-color: rgba(var(--accent-green-rgb), 0.25);
+  background: var(--bg-card);
+  border-bottom-color: rgba(var(--accent-green-rgb), 0.35);
+  border-left: 3px solid rgba(var(--accent-green-rgb), 0.6);
 }
 
 .pearl-header-bar.mode-live:hover {
-  background: linear-gradient(90deg, rgba(var(--accent-green-rgb), 0.12) 0%, rgba(var(--accent-green-rgb), 0.06) 50%, var(--bg-elevated) 100%);
+  background: var(--bg-elevated);
 }
 
 .pearl-header-bar:hover {
@@ -11764,13 +11799,13 @@ body {
 }
 
 .pearl-header-bar.expanded.mode-shadow {
-  background: linear-gradient(90deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 193, 7, 0.06) 40%, var(--bg-elevated) 100%);
-  border-bottom-color: rgba(255, 193, 7, 0.4);
+  background: var(--bg-elevated);
+  border-bottom-color: rgba(255, 193, 7, 0.5);
 }
 
 .pearl-header-bar.expanded.mode-live {
-  background: linear-gradient(90deg, rgba(var(--accent-green-rgb), 0.12) 0%, rgba(var(--accent-green-rgb), 0.06) 40%, var(--bg-elevated) 100%);
-  border-bottom-color: rgba(var(--accent-green-rgb), 0.4);
+  background: var(--bg-elevated);
+  border-bottom-color: rgba(var(--accent-green-rgb), 0.5);
 }
 
 .pearl-header-icon {
@@ -12932,15 +12967,15 @@ body {
    PEARL AI PANEL — MOBILE VIEW REFINEMENTS
    ============================================ */
 @media (max-width: 768px) {
-  /* Banner header — subtle shadow glow matching AI status */
+  /* Banner header — subtle accent glow for shadow mode */
   .pearl-header-bar.mode-shadow {
-    box-shadow: 0 1px 6px rgba(255, 193, 7, 0.12);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   }
 
   /* Main dropdown panel — tighter padding & gaps */
   .pearl-dropdown-panel {
     padding: 8px;
-    gap: 4px;
+    gap: 8px;
   }
 
   /* Top section (tabs + headline + overview) */
@@ -12948,13 +12983,14 @@ body {
     padding: 6px 8px 8px;
   }
 
-  /* Tab bar */
+  /* Tab bar — WCAG touch targets (44px min height) */
   .pearl-dropdown-tabs {
-    gap: 2px;
+    gap: 8px;
   }
   .pearl-dropdown-tab {
     font-size: 10px;
-    padding: 4px 8px;
+    padding: 12px 10px;
+    min-height: 44px;
   }
 
   /* Headline area (status badge + message) */
@@ -12966,13 +13002,15 @@ body {
   .pearl-dropdown-headline-text {
     font-size: 11px;
   }
+  /* Timestamp contrast fix — was ~3.8:1, now ~5.5:1 */
   .pearl-dropdown-ago {
     font-size: 9px;
+    color: rgba(180, 188, 200, 1);
   }
 
   /* Context bar (P&L, W/L, positions) */
   .pearl-context-bar {
-    gap: 4px;
+    gap: 8px;
     font-size: 10px;
     padding: 4px 0;
     margin-bottom: 3px;
@@ -12983,52 +13021,135 @@ body {
     font-size: 10px;
   }
 
-  /* Quick action buttons (Session plan, Quiet check, etc.) */
+  /* Quick action buttons — WCAG touch targets (44px min) */
   .pearl-quick-actions {
-    gap: 4px;
-    margin-top: 3px;
+    gap: 8px;
+    margin-top: 6px;
   }
   .pearl-btn {
     font-size: 10px;
-    padding: 4px 8px;
-    min-height: unset;
+    padding: 12px 12px;
+    min-height: 44px;
   }
 
   /* AI status pills row (Bandit / Contextual / ML) */
   .pearl-ai-status {
     padding: 0 0 5px;
     margin: 0 0 3px;
-    gap: 4px;
+    gap: 8px;
     font-size: 9px;
   }
 
   /* Shadow mode CTA banner */
   .shadow-mode-banner {
-    padding: 6px 8px;
-    margin-bottom: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
     font-size: 11px;
   }
 
-  /* Operator strip (READ-ONLY / Unlock) */
+  /* Operator strip (READ-ONLY / Unlock) — touch target */
   .pearl-operator-strip {
-    padding: 5px 8px;
-    margin: 3px 0 0;
+    padding: 10px 12px;
+    margin: 6px 0 0;
     font-size: 11px;
+    min-height: 44px;
   }
 
   /* Shadow metrics section header + grid */
   .pearl-shadow-metrics {
     padding: 8px 10px;
-    gap: 4px;
+    gap: 8px;
   }
 
   /* Shadow impact row ($0 SAVED / MADE / NET / ACCURACY) */
   .shadow-impact-row {
-    gap: 4px;
+    gap: 8px;
     font-size: 10px;
   }
+  /* Shadow impact label contrast fix */
   .shadow-impact-label {
     font-size: 10px;
+    color: rgba(160, 168, 180, 1);
+  }
+}
+
+/* ============================================
+   MOBILE ACCESSIBILITY — FOCUS INDICATORS
+   ============================================ */
+@media (max-width: 768px) {
+  /* Restore visible focus indicators for keyboard/switch users */
+  .pearl-btn:focus-visible,
+  .pearl-dropdown-tab:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+
+  /* High contrast focus for destructive buttons */
+  .pearl-btn.destructive:focus-visible,
+  .kill-switch-btn:focus-visible {
+    outline-color: var(--accent-red);
+  }
+}
+
+/* ============================================
+   MOBILE ACCESSIBILITY — COLOR CONTRAST FIXES
+   ============================================ */
+@media (max-width: 768px) {
+  /* SHADOW badge — improve yellow on dark contrast */
+  .pearl-dropdown-mode.shadow,
+  .mode-badge.shadow {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffd54f;
+    border-color: rgba(255, 193, 7, 0.4);
+  }
+
+  /* Status text contrast improvements */
+  .pearl-header-status-text,
+  .status-text-muted {
+    color: rgba(180, 188, 200, 1);
+  }
+
+  /* P&L colors — brighter for dark backgrounds */
+  .pnl-positive,
+  .profit-text,
+  .context-item.pnl.positive .context-value {
+    color: #4ade80;
+  }
+  .pnl-negative,
+  .loss-text,
+  .context-item.pnl.negative .context-value {
+    color: #f87171;
+  }
+}
+
+/* ============================================
+   MOBILE — READ-ONLY STATE VISUAL FEEDBACK
+   ============================================ */
+@media (max-width: 768px) {
+  /* Disabled/read-only controls — clearly non-interactive */
+  .pearl-btn:disabled,
+  .pearl-btn.disabled,
+  [aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Read-only mode banner */
+  .pearl-operator-strip.read-only {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+  }
+
+  /* Chat input in read-only mode */
+  .pearl-chat-input:disabled {
+    opacity: 0.4;
+    background: rgba(0, 0, 0, 0.2);
   }
 }
 
