@@ -11861,6 +11861,37 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.3s ease;
+}
+
+.pearl-header-preview.fading {
+  opacity: 0;
+}
+
+/* Carousel indicator dots — subtle and minimal */
+.pearl-header-carousel-dots {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.pearl-header-carousel-dots .carousel-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  opacity: 0.4;
+  transition: opacity 0.3s ease, background 0.3s ease;
+}
+
+.pearl-header-carousel-dots .carousel-dot.active {
+  opacity: 1;
+  background: var(--text-secondary);
 }
 
 .pearl-header-arrow {

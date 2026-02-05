@@ -28,11 +28,18 @@ function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
   )
 }
 
+/** Truncate text with ellipsis */
+function truncateText(text: string, maxLength: number): string {
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`
+}
+
 export default function PearlHeaderBar() {
   const agentState = useAgentStore((s) => s.agentState)
   const tickOperator = useOperatorStore((s) => s.tick)
 
   const [expanded, setExpanded] = useState(false)
+  const [carouselIndex, setCarouselIndex] = useState(0)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const headerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -44,17 +51,55 @@ export default function PearlHeaderBar() {
     return derivePearlMode(agentState?.ai_status || null, agentState?.pearl_insights || null)
   }, [agentState?.ai_status, agentState?.pearl_insights])
 
-  // Use centralized helper to derive headline/preview text
-  const previewText = useMemo(() => {
+  // Build carousel items from feed messages (last 5, most recent first)
+  const carouselItems = useMemo(() => {
+    const items: string[] = []
+    const maxLength = 55
+    
+    // Add the primary headline first
     const headline = deriveHeadline(
       agentState?.pearl_feed || [],
       agentState?.pearl_suggestion || null,
       agentState?.pearl_insights || null
     )
-    const base = headline.text
-    const maxLength = 60
-    return base.length <= maxLength ? base : `${base.slice(0, maxLength)}…`
+    items.push(truncateText(headline.text, maxLength))
+    
+    // Add recent feed messages (skip if same as headline)
+    const feed = agentState?.pearl_feed || []
+    for (let i = 0; i < Math.min(feed.length, 4); i++) {
+      const msg = feed[i]
+      if (msg?.content && msg.content !== headline.text) {
+        items.push(truncateText(msg.content, maxLength))
+      }
+    }
+    
+    return items.length > 0 ? items : ['Watching for opportunities…']
   }, [agentState?.pearl_feed, agentState?.pearl_insights, agentState?.pearl_suggestion])
+
+  // Carousel rotation (every 6 seconds, subtle)
+  useEffect(() => {
+    if (carouselItems.length <= 1 || expanded) return
+    
+    const interval = setInterval(() => {
+      setIsTransitioning(true)
+      setTimeout(() => {
+        setCarouselIndex((prev) => (prev + 1) % carouselItems.length)
+        setIsTransitioning(false)
+      }, 300) // Fade out duration
+    }, 6000) // Rotate every 6 seconds
+    
+    return () => clearInterval(interval)
+  }, [carouselItems.length, expanded])
+
+  // Reset carousel index when items change significantly
+  useEffect(() => {
+    if (carouselIndex >= carouselItems.length) {
+      setCarouselIndex(0)
+    }
+  }, [carouselItems.length, carouselIndex])
+
+  // Current preview text for display
+  const previewText = carouselItems[carouselIndex] || carouselItems[0]
 
   // Toggle handler with keyboard support
   const handleToggle = useCallback(() => {
@@ -139,8 +184,15 @@ export default function PearlHeaderBar() {
         aria-label={hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
       />
 
-      <div className="pearl-header-preview" aria-hidden="true">
+      <div className={`pearl-header-preview ${isTransitioning ? 'fading' : ''}`} aria-hidden="true">
         {previewText}
+        {carouselItems.length > 1 && !expanded && (
+          <span className="pearl-header-carousel-dots">
+            {carouselItems.map((_, i) => (
+              <span key={i} className={`carousel-dot ${i === carouselIndex ? 'active' : ''}`} />
+            ))}
+          </span>
+        )}
       </div>
 
       <span className="pearl-header-arrow" aria-hidden="true">
