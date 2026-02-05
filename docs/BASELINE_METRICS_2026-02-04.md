@@ -24,4 +24,4 @@ Captured from live `/api/pearl/metrics` and `/api/pearl/metrics/sources` on
 ## Eval and test baseline
 
 - `python3 -m pearl_ai.eval.ci --mock`: PASS (25/25)
-- `pytest tests/test_pearl_*.py`: not executed (pytest not installed)
+- `pytest tests/test_pearl_*.py` (venv): 126 passed, coverage gate failed (2.25% < 40%)

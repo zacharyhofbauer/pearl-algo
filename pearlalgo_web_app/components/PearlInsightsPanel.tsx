@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Image from 'next/image'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import { apiFetch } from '@/lib/api'
@@ -616,7 +617,9 @@ export default function PearlInsightsPanel({
         {/* Shadow Mode Banner */}
         {(!isDropdown || activeTab === 'overview') && hasShadowMode && (
           <div className="shadow-mode-banner">
-            <span className="shadow-mode-icon">🦪</span>
+            <span className="shadow-mode-icon" aria-hidden="true">
+              <Image src="/pearl-emoji.png" alt="" width={16} height={16} />
+            </span>
             <span className="shadow-mode-text">
               <em>PEARL AI</em> is in <em>SHADOW</em> mode — observing trades but not affecting decisions.
             </span>

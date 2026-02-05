@@ -259,6 +259,45 @@ class TestCacheEviction:
         assert cache.get("first unique query", {}) is None
         assert cache.get("fourth unique query", {}) is not None
 
+
+class TestCacheMissReasons:
+    """Tests for cache miss reason tracking."""
+
+    def test_state_changed_miss(self):
+        """Should classify miss as state_changed when query seen with different context."""
+        cache = ResponseCache(max_size=10)
+        query = "Show my performance summary"
+        response = "This is a long enough response for caching behavior."
+
+        state_one = {
+            "market_regime": {"regime": "trending"},
+            "daily_pnl": 100,
+            "daily_wins": 3,
+            "daily_trades": 5,
+            "active_trades_count": 0,
+        }
+        state_two = {
+            "market_regime": {"regime": "ranging"},
+            "daily_pnl": 100,
+            "daily_wins": 3,
+            "daily_trades": 5,
+            "active_trades_count": 0,
+        }
+
+        cache.set(query, state_one, response)
+        assert cache.get(query, state_two) is None
+
+        stats = cache.get_stats()
+        assert stats["misses_by_reason"]["state_changed"] == 1
+
+    def test_never_seen_miss(self):
+        """Should classify miss as never_seen when query not in cache."""
+        cache = ResponseCache(max_size=10)
+        cache.get("completely new query", {})
+
+        stats = cache.get_stats()
+        assert stats["misses_by_reason"]["never_seen"] == 1
+
     def test_eviction_increments_counter(self):
         """Should track eviction count."""
         cache = ResponseCache(max_size=2)

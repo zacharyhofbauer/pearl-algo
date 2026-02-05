@@ -157,16 +157,22 @@ class ToolDefinition:
     name: str
     description: str
     parameters: Dict[str, Any]  # JSON Schema for parameters
+    required: Optional[List[str]] = None
 
     def to_claude_format(self) -> Dict[str, Any]:
         """Convert to Claude API tool format."""
+        required_fields = (
+            self.required
+            if self.required is not None
+            else [name for name, schema in self.parameters.items() if "default" not in schema]
+        )
         return {
             "name": self.name,
             "description": self.description,
             "input_schema": {
                 "type": "object",
                 "properties": self.parameters,
-                "required": list(self.parameters.keys()),
+                "required": required_fields,
             }
         }
 
@@ -226,6 +232,7 @@ PEARL_TOOLS: List[ToolDefinition] = [
                 "default": 5,
             },
         },
+        required=["direction"],
     ),
 
     ToolDefinition(

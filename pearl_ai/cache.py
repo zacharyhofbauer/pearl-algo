@@ -16,6 +16,8 @@ import logging
 import asyncio
 from collections import OrderedDict
 
+from .config import get_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +45,7 @@ class CacheEntry:
     ttl_seconds: int
     hit_count: int = 0
     context_hash: str = ""  # Store context hash for state change detection
+    normalized_query: str = ""  # Store normalized query for miss reason tracking
 
     @property
     def is_expired(self) -> bool:
@@ -77,8 +80,8 @@ class RequestDeduplicator:
     async def dedupe(
         self,
         key: str,
-        generator: Callable[[], Awaitable[str]],
-    ) -> str:
+        generator: Callable[[], Awaitable[Any]],
+    ) -> tuple[bool, Any]:
         """
         Deduplicate a request.
 
@@ -91,13 +94,13 @@ class RequestDeduplicator:
             generator: Async function that generates the response
 
         Returns:
-            The response string (either freshly generated or shared from pending)
+            Tuple of (shared, result) where shared=True indicates a dedupe hit.
         """
         # Check if there's already a pending request for this key
         if key in self._pending:
             logger.debug(f"Dedup hit: waiting for pending request {key[:16]}...")
             try:
-                return await self._pending[key]
+                return True, await self._pending[key]
             except Exception:
                 # If the pending request failed, we'll try again
                 pass
@@ -110,7 +113,7 @@ class RequestDeduplicator:
             # Execute the generator
             result = await generator()
             future.set_result(result)
-            return result
+            return False, result
         except Exception as e:
             future.set_exception(e)
             raise
@@ -149,32 +152,16 @@ class ResponseCache:
     - Skip cache for personalized content
     """
 
-    # Default TTL values (seconds)
-    TTL_SHORT = 300      # 5 minutes - state-dependent queries
-    TTL_MEDIUM = 1800    # 30 minutes - general questions
-    TTL_LONG = 3600      # 1 hour - static content
-
-    # Queries that should skip cache (personalized/dynamic content)
-    NO_CACHE_PATTERNS = [
-        "coaching",
-        "advice",
-        "suggest",
-        "should i",
-        "what should",
-        "help me",
-        "streak",
-        "consecutive",
-    ]
-
-    def __init__(self, max_size: int = 100):
+    def __init__(self, max_size: Optional[int] = None):
         """
         Initialize response cache.
 
         Args:
             max_size: Maximum number of entries to keep
         """
+        self._config = get_config()
         self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
-        self.max_size = max_size
+        self.max_size = max_size if max_size is not None else self._config.cache.MAX_SIZE
 
         # Stats
         self._hits = 0
@@ -239,13 +226,23 @@ class ResponseCache:
     def _make_key(self, query: str, context_hash: str) -> str:
         """Create cache key from query and context. Uses SHA256 (P1.3)."""
         normalized = self._normalize_query(query)
+        return self._make_key_from_normalized(normalized, context_hash)
+
+    def _make_key_from_normalized(self, normalized: str, context_hash: str) -> str:
+        """Create cache key from normalized query and context hash."""
         key_input = f"{normalized}:{context_hash}"
         return hashlib.sha256(key_input.encode()).hexdigest()
+
+    def build_key(self, query: str, state: Dict[str, Any]) -> str:
+        """Build a cache/dedupe key from query and state."""
+        context_hash = self._context_hash(state)
+        normalized = self._normalize_query(query)
+        return self._make_key_from_normalized(normalized, context_hash)
 
     def _should_skip_cache(self, query: str) -> bool:
         """Check if query should skip cache."""
         query_lower = query.lower()
-        return any(pattern in query_lower for pattern in self.NO_CACHE_PATTERNS)
+        return any(pattern in query_lower for pattern in self._config.cache.NO_CACHE_PATTERNS)
 
     def _determine_ttl(self, query: str) -> int:
         """Determine TTL based on query type."""
@@ -253,14 +250,14 @@ class ResponseCache:
 
         # Static/general questions - longer TTL
         if any(word in query_lower for word in ["what is", "how does", "explain", "define"]):
-            return self.TTL_LONG
+            return self._config.cache.TTL_LONG
 
         # Time-sensitive questions - shorter TTL
         if any(word in query_lower for word in ["today", "now", "current", "active"]):
-            return self.TTL_SHORT
+            return self._config.cache.TTL_SHORT
 
         # Default to medium TTL
-        return self.TTL_MEDIUM
+        return self._config.cache.TTL_MEDIUM
 
     def get(self, query: str, state: Dict[str, Any]) -> Optional[str]:
         """
@@ -280,7 +277,8 @@ class ResponseCache:
             return None
 
         context_hash = self._context_hash(state)
-        key = self._make_key(query, context_hash)
+        normalized = self._normalize_query(query)
+        key = self._make_key_from_normalized(normalized, context_hash)
 
         entry = self.cache.get(key)
 
@@ -288,10 +286,9 @@ class ResponseCache:
             self._misses += 1
             # Determine if it's a state change or never seen
             # Check if we have any entry for this normalized query with different context
-            normalized = self._normalize_query(query)
             query_seen_before = any(
-                self._normalize_query_from_key_partial(k, normalized)
-                for k in self.cache.keys()
+                entry.normalized_query == normalized
+                for entry in self.cache.values()
             )
             if query_seen_before:
                 self._misses_by_reason[CacheMissReason.STATE_CHANGED.value] += 1
@@ -317,13 +314,6 @@ class ResponseCache:
         logger.debug(f"Cache hit for query (age: {entry.age_seconds:.0f}s)")
         return entry.response
 
-    def _normalize_query_from_key_partial(self, key: str, normalized_query: str) -> bool:
-        """Check if a cache key might match a normalized query (heuristic)."""
-        # Since keys are hashes, we can't reverse them, but we track this
-        # by storing normalized queries. For now, return False as we'd need
-        # a reverse index for accurate detection.
-        return False
-
     def set(
         self,
         query: str,
@@ -345,11 +335,12 @@ class ResponseCache:
             return
 
         # Don't cache very short responses (likely errors)
-        if len(response) < 20:
+        if len(response) < self._config.cache.MIN_RESPONSE_LENGTH:
             return
 
         context_hash = self._context_hash(state)
-        key = self._make_key(query, context_hash)
+        normalized = self._normalize_query(query)
+        key = self._make_key_from_normalized(normalized, context_hash)
 
         # Determine TTL
         ttl = ttl_seconds or self._determine_ttl(query)
@@ -360,6 +351,7 @@ class ResponseCache:
             created_at=datetime.now(),
             ttl_seconds=ttl,
             context_hash=context_hash,
+            normalized_query=normalized,
         )
 
         # Add to cache (will be at end = most recently used)

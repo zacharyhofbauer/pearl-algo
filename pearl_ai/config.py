@@ -36,6 +36,10 @@ class CacheConfig:
         "consecutive",
     )
 
+    # Request deduplication (milliseconds)
+    DEDUP_ENABLED: bool = True
+    DEDUP_WINDOW_MS: int = 2000
+
 
 @dataclass(frozen=True)
 class NarrationConfig:
@@ -73,7 +77,7 @@ class LLMConfig:
     DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
 
     # Token limits
-    MAX_NARRATION_TOKENS: int = 150
+    MAX_NARRATION_TOKENS: int = 60
     MAX_QUICK_RESPONSE_TOKENS: int = 300
     MAX_DEEP_RESPONSE_TOKENS: int = 1000
     MAX_INSIGHT_TOKENS: int = 100

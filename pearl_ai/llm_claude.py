@@ -191,12 +191,14 @@ class ClaudeLLM:
 
     def _parse_response(self, data: Dict[str, Any]) -> LLMResponse:
         """Parse API response into LLMResponse."""
-        content = ""
+        content_parts: List[str] = []
         tool_calls = []
 
         for block in data.get("content", []):
             if block.get("type") == "text":
-                content = block.get("text", "").strip()
+                text = block.get("text", "")
+                if text:
+                    content_parts.append(text)
             elif block.get("type") == "tool_use":
                 tool_calls.append({
                     "id": block.get("id"),
@@ -208,7 +210,7 @@ class ClaudeLLM:
         usage = data.get("usage", {})
 
         return LLMResponse(
-            content=content,
+            content="".join(content_parts).strip(),
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
             stop_reason=data.get("stop_reason"),

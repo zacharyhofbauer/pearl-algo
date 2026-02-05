@@ -31,6 +31,7 @@ class TestToolDefinition:
             description="A test tool",
             parameters={
                 "param1": {"type": "string", "description": "A param"},
+                "param2": {"type": "string", "description": "Optional param", "default": "value"},
             }
         )
 
@@ -42,6 +43,22 @@ class TestToolDefinition:
         assert result["input_schema"]["type"] == "object"
         assert "param1" in result["input_schema"]["properties"]
         assert result["input_schema"]["required"] == ["param1"]
+
+    def test_to_claude_format_respects_required_override(self):
+        """Explicit required list should be honored."""
+        tool = ToolDefinition(
+            name="test_tool",
+            description="A test tool",
+            parameters={
+                "param1": {"type": "string", "description": "A param"},
+                "param2": {"type": "string", "description": "Another param"},
+            },
+            required=["param2"],
+        )
+
+        result = tool.to_claude_format()
+
+        assert result["input_schema"]["required"] == ["param2"]
 
 
 class TestToolResult:
@@ -97,6 +114,12 @@ class TestPearlToolsDefinitions:
         }
 
         assert expected.issubset(tool_names)
+
+    def test_tool_required_fields(self):
+        """Required fields should match tool definitions."""
+        by_name = {tool.name: tool.to_claude_format() for tool in PEARL_TOOLS}
+        assert by_name["get_regime_performance"]["input_schema"]["required"] == ["regime"]
+        assert by_name["get_similar_trades"]["input_schema"]["required"] == ["direction"]
 
 
 class TestToolExecutor:

@@ -21,9 +21,9 @@ from .memory import PearlMemory
 from .narrator import PearlNarrator
 from .llm_local import LocalLLM
 from .llm_claude import ClaudeLLM, LLMResponse
-from .metrics import MetricsCollector, LLMRequest
+from .metrics import MetricsCollector, LLMRequest, ToolCall, redact_tool_arguments
 from .data_access import TradeDataAccess
-from .cache import ResponseCache
+from .cache import ResponseCache, RequestDeduplicator
 from .tools import ToolExecutor, format_tool_result_for_llm, PEARL_TOOLS
 from .config import get_config, PearlConfig
 from .types import SanitizationResult, TradingContextSummary, ChatResponseDict, NarrationOutputDict
@@ -85,8 +85,8 @@ class PearlBrain:
     def __init__(
         self,
         claude_api_key: Optional[str] = None,
-        ollama_model: str = "llama3.1:8b",
-        ollama_host: str = "http://localhost:11434",
+        ollama_model: Optional[str] = None,
+        ollama_host: Optional[str] = None,
         enable_local: bool = True,
         enable_claude: bool = True,
         trade_db_path: Optional[str] = None,
@@ -94,6 +94,9 @@ class PearlBrain:
         enable_caching: bool = True,
         daily_cost_limit: Optional[float] = None,
     ):
+        # Load configuration
+        self._config = get_config()
+
         self.memory = PearlMemory()
         self.narrator = PearlNarrator()
 
@@ -101,8 +104,11 @@ class PearlBrain:
         self.local_llm: Optional[LocalLLM] = None
         self.claude_llm: Optional[ClaudeLLM] = None
 
+        resolved_ollama_model = ollama_model or self._config.llm.DEFAULT_LOCAL_MODEL
+        resolved_ollama_host = ollama_host or self._config.llm.DEFAULT_OLLAMA_HOST
+
         if enable_local:
-            self.local_llm = LocalLLM(model=ollama_model, host=ollama_host)
+            self.local_llm = LocalLLM(model=resolved_ollama_model, host=resolved_ollama_host)
 
         if enable_claude and claude_api_key:
             self.claude_llm = ClaudeLLM(api_key=claude_api_key)
@@ -110,13 +116,15 @@ class PearlBrain:
         # Pearl AI 3.0: Metrics, RAG, Caching, Tools
         metrics_path = Path.home() / ".pearl" / "metrics"
         self.metrics = MetricsCollector(
-            max_history=1000,
+            max_history=self._config.metrics.MAX_HISTORY,
             storage_path=metrics_path,
             daily_cost_limit=daily_cost_limit,
+            persistence_frequency=self._config.metrics.PERSISTENCE_FREQUENCY,
+            cost_warning_threshold=self._config.metrics.COST_WARNING_THRESHOLD,
         )
 
         self.data_access = TradeDataAccess(db_path=trade_db_path)
-        self.cache = ResponseCache(max_size=100) if enable_caching else None
+        self.cache = ResponseCache(max_size=self._config.cache.MAX_SIZE) if enable_caching else None
 
         # Tool executor
         self.enable_tools = enable_tools
@@ -134,14 +142,8 @@ class PearlBrain:
         self._last_narration_time: Optional[datetime] = None
 
         # Configuration
-        self.narration_cooldown = timedelta(seconds=5)  # Min time between narrations
-        self.always_narrate_events = {
-            "signal_generated",
-            "trade_entered",
-            "trade_exited",
-            "circuit_breaker_triggered",
-            "direction_blocked",
-        }
+        self.narration_cooldown = timedelta(seconds=self._config.narration.NARRATION_COOLDOWN)
+        self.always_narrate_events = set(self._config.narration.ALWAYS_NARRATE_EVENTS)
 
         # Proactive engagement tracking
         self._last_insight_time: Optional[datetime] = None
@@ -165,13 +167,21 @@ class PearlBrain:
         self._last_fallback_used: bool = False
 
         # Cooldowns for proactive messages
-        self.insight_cooldown = timedelta(minutes=30)
-        self.ml_warning_cooldown = timedelta(hours=2)
-        self.coaching_cooldown = timedelta(minutes=15)
-        self.quiet_engagement_threshold = timedelta(minutes=15)
+        self.insight_cooldown = timedelta(seconds=self._config.narration.INSIGHT_COOLDOWN)
+        self.ml_warning_cooldown = timedelta(seconds=self._config.narration.ML_WARNING_COOLDOWN)
+        self.coaching_cooldown = timedelta(seconds=self._config.narration.COACHING_COOLDOWN)
+        self.quiet_engagement_threshold = timedelta(seconds=self._config.narration.QUIET_ENGAGEMENT_THRESHOLD)
 
-        # Load configuration
-        self._config = get_config()
+        # Request deduplication (P3.1)
+        self.request_deduplicator: Optional[RequestDeduplicator] = None
+        self._dedupe_key_builder: Optional[ResponseCache] = None
+        if self._config.cache.DEDUP_ENABLED:
+            self.request_deduplicator = RequestDeduplicator(
+                window_ms=self._config.cache.DEDUP_WINDOW_MS
+            )
+            self._dedupe_key_builder = self.cache or ResponseCache(
+                max_size=self._config.cache.MAX_SIZE
+            )
 
         logger.info(f"Pearl Brain 3.0 initialized - Local: {enable_local}, Claude: {enable_claude}, "
                    f"Tools: {enable_tools}, Caching: {enable_caching}")
@@ -363,7 +373,7 @@ class PearlBrain:
                            "CRITICAL: Output EXACTLY 1 sentence only. "
                            "Never exceed 25 words total. Be extremely concise. "
                            "State facts directly without elaboration.",
-                    max_tokens=60,  # Reduced to enforce brevity
+                    max_tokens=self._config.llm.MAX_NARRATION_TOKENS,
                 )
                 # Strip quotes if LLM wrapped the response
                 response = response.strip().strip('"').strip("'")
@@ -525,11 +535,20 @@ class PearlBrain:
             model_used = self.local_llm.model
             response_source = ResponseSource.LOCAL
         elif self.claude_llm:
-            # Try with tools if enabled (3.0)
-            if self.enable_tools:
-                response, input_tokens, output_tokens = await self._deep_response_with_tools(sanitized_message, context)
+            async def generate_deep_response() -> tuple[str, int, int]:
+                # Try with tools if enabled (3.0)
+                if self.enable_tools:
+                    return await self._deep_response_with_tools(sanitized_message, context)
+                return await self._deep_response_with_metadata(sanitized_message, context)
+
+            if self.request_deduplicator and self._dedupe_key_builder:
+                dedupe_key = self._dedupe_key_builder.build_key(sanitized_message, self._current_state)
+                shared, result = await self.request_deduplicator.dedupe(dedupe_key, generate_deep_response)
+                response, input_tokens, output_tokens = result
+                if shared:
+                    self.metrics.record_dedupe_hit(self.claude_llm.model, input_tokens, output_tokens)
             else:
-                response, input_tokens, output_tokens = await self._deep_response_with_metadata(sanitized_message, context)
+                response, input_tokens, output_tokens = await generate_deep_response()
             model_used = self.claude_llm.model
             response_source = ResponseSource.CLAUDE
         elif self.local_llm:
@@ -555,6 +574,8 @@ class PearlBrain:
         self._last_cache_hit = False
         self._last_fallback_used = fallback_used
 
+        tool_call_metrics = self._build_tool_call_metrics()
+
         # Record metrics (3.0)
         self.metrics.record(LLMRequest(
             timestamp=datetime.now(),
@@ -566,6 +587,7 @@ class PearlBrain:
             cache_hit=False,
             success=bool(response),
             fallback_used=fallback_used,
+            tool_calls=tool_call_metrics,
         ))
 
         # Cache response (3.0)
@@ -606,6 +628,30 @@ class PearlBrain:
             "response_source": self._last_response_source.value if self._last_response_source else None,
         }
 
+    def _build_tool_call_metrics(self) -> Optional[List[ToolCall]]:
+        """Build redacted tool call metrics from the last tool run."""
+        if not self._last_tool_calls:
+            return None
+
+        tool_calls: List[ToolCall] = []
+        for index, call in enumerate(self._last_tool_calls):
+            result = self._last_tool_results[index] if index < len(self._last_tool_results) else {}
+            success = bool(result.get("success", False))
+            error = result.get("error")
+            latency_ms = float(result.get("latency_ms", 0.0))
+
+            tool_calls.append(
+                ToolCall(
+                    name=call.get("name", "unknown"),
+                    arguments=redact_tool_arguments(call.get("input", {})),
+                    success=success,
+                    latency_ms=latency_ms,
+                    error=error,
+                )
+            )
+
+        return tool_calls
+
     async def chat_with_debug(
         self,
         user_message: str,
@@ -645,33 +691,21 @@ class PearlBrain:
 
     def _classify_query(self, query: str) -> QueryComplexity:
         """Determine if query needs local (quick) or Claude (deep) response"""
-
-        # Keywords that indicate deep analysis needed
-        deep_keywords = [
-            "why", "explain", "analyze", "should i", "what if",
-            "strategy", "improve", "pattern", "trend", "review",
-            "coaching", "advice", "recommend", "optimize", "backtest",
-            "compare", "similar", "history", "regime", "performance",
-        ]
+        config = self._config.query_classification
 
         query_lower = query.lower()
 
-        for keyword in deep_keywords:
+        for keyword in config.DEEP_KEYWORDS:
             if keyword in query_lower:
                 return QueryComplexity.DEEP
 
         # Quick queries
-        quick_keywords = [
-            "what is", "current", "status", "how many", "last",
-            "price", "position", "pnl", "today",
-        ]
-
-        for keyword in quick_keywords:
+        for keyword in config.QUICK_KEYWORDS:
             if keyword in query_lower:
                 return QueryComplexity.QUICK
 
         # Default to quick for short queries, deep for longer
-        return QueryComplexity.QUICK if len(query.split()) < 10 else QueryComplexity.DEEP
+        return QueryComplexity.QUICK if len(query.split()) < config.WORD_COUNT_THRESHOLD else QueryComplexity.DEEP
 
     def _build_chat_context(self, query: str) -> Dict[str, Any]:
         """Build context for the chat response"""
@@ -708,7 +742,7 @@ Respond naturally and concisely:"""
                 return await self.local_llm.generate(
                     user_prompt,
                     system=system_prompt,
-                    max_tokens=300,
+                    max_tokens=self._config.llm.MAX_QUICK_RESPONSE_TOKENS,
                 )
             except Exception as e:
                 logger.error(f"Local LLM error: {e}")
@@ -740,14 +774,17 @@ Respond naturally and concisely:"""
                     "name": name,
                     "input": args,
                 })
-                # Execute the tool
+                # Execute the tool with latency tracking
+                start_tool = time.time()
                 result = self.tool_executor.execute(name, args)
+                latency_ms = (time.time() - start_tool) * 1000
                 # Track the result
                 self._last_tool_results.append({
                     "name": name,
                     "success": result.success,
                     "data": result.data if result.success else None,
                     "error": result.error,
+                    "latency_ms": latency_ms,
                 })
                 return format_tool_result_for_llm(name, result)
 
@@ -756,7 +793,7 @@ Respond naturally and concisely:"""
                 prompt=user_prompt,
                 tools=tools,
                 system=system_prompt,
-                max_tokens=1000,
+                max_tokens=self._config.llm.MAX_DEEP_RESPONSE_TOKENS,
                 tool_executor=execute_tool,
             )
 
@@ -796,7 +833,7 @@ Respond naturally and concisely:"""
             llm_response = await self.claude_llm.generate_with_metadata(
                 prompt=user_prompt,
                 system=system_prompt,
-                max_tokens=1000,
+                max_tokens=self._config.llm.MAX_DEEP_RESPONSE_TOKENS,
             )
             return llm_response.content, llm_response.input_tokens, llm_response.output_tokens
 
@@ -974,7 +1011,7 @@ Response structure:
         recent_insights = self.memory.get_messages_by_type("insight", limit=5)
         if recent_insights:
             last_insight_time = recent_insights[0].timestamp
-            if datetime.now() - last_insight_time < timedelta(minutes=30):
+            if datetime.now() - last_insight_time < self.insight_cooldown:
                 return None
 
         start_time = time.time()
@@ -996,7 +1033,7 @@ Give a brief (1-2 sentence) observation or suggestion. Be specific and actionabl
             llm_response = await self.claude_llm.generate_with_metadata(
                 prompt,
                 system="You are Pearl, a trading coach. Give brief, actionable insights.",
-                max_tokens=100,
+                max_tokens=self._config.llm.MAX_INSIGHT_TOKENS,
             )
             insight = llm_response.content
             latency_ms = (time.time() - start_time) * 1000
@@ -1061,7 +1098,7 @@ Keep it concise (4-5 sentences total)."""
             llm_response = await self.claude_llm.generate_with_metadata(
                 prompt,
                 system="You are Pearl, a trading coach. Provide constructive, balanced daily reviews.",
-                max_tokens=300,
+                max_tokens=self._config.llm.MAX_DAILY_REVIEW_TOKENS,
             )
             review = llm_response.content
             latency_ms = (time.time() - start_time) * 1000
@@ -1208,7 +1245,7 @@ Keep it concise (4-5 sentences total)."""
 
         consecutive_losses = state.get("consecutive_losses", 0)
 
-        if consecutive_losses < 2:
+        if consecutive_losses < self._config.narration.LOSING_STREAK_TRIGGER:
             return None
 
         self._last_coaching_time = datetime.now()
@@ -1251,7 +1288,7 @@ Example: "Two losses in a row, both LONG in seller pressure. The market might be
                 response = await self.claude_llm.generate(
                     prompt,
                     system="You are Pearl, a supportive trading coach. Be brief, constructive, and never blame the trader.",
-                    max_tokens=150,
+                    max_tokens=self._config.llm.MAX_COACHING_TOKENS,
                 )
                 if response:
                     return PearlMessage(
@@ -1300,7 +1337,8 @@ Example: "Two losses in a row, both LONG in seller pressure. The market might be
         else:
             # Use state's quiet period if available
             quiet_minutes = state.get("quiet_period_minutes", 0)
-            if quiet_minutes < 15:
+            threshold_minutes = int(self.quiet_engagement_threshold.total_seconds() / 60)
+            if quiet_minutes < threshold_minutes:
                 return None
             quiet_duration = timedelta(minutes=quiet_minutes)
 
@@ -1335,7 +1373,7 @@ Be conversational, not robotic. Under 2 sentences."""
                 response = await self.local_llm.generate(
                     prompt,
                     system="You are Pearl, a friendly trading assistant. Keep it brief and natural.",
-                    max_tokens=100,
+                    max_tokens=self._config.llm.MAX_INSIGHT_TOKENS,
                 )
                 if response:
                     return PearlMessage(

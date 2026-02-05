@@ -10,12 +10,48 @@ Collects and aggregates metrics for Pearl AI operations:
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 import json
 import logging
 from pathlib import Path
 
+from .config import get_config
 logger = logging.getLogger(__name__)
+
+# Tool argument redaction (P2.3)
+REDACTED_VALUE = "***redacted***"
+MAX_TOOL_ARG_STRING = 200
+SENSITIVE_ARG_KEYS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passphrase",
+    "authorization",
+)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    key_lower = key.lower()
+    return any(token in key_lower for token in SENSITIVE_ARG_KEYS)
+
+
+def redact_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact sensitive values from tool arguments."""
+    def _redact(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                k: (REDACTED_VALUE if _is_sensitive_key(k) else _redact(v))
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [_redact(v) for v in value]
+        if isinstance(value, str):
+            return value if len(value) <= MAX_TOOL_ARG_STRING else value[:MAX_TOOL_ARG_STRING] + "..."
+        return value
+
+    return _redact(arguments)
 
 
 # Model pricing (USD per 1M tokens) - Updated 2024
@@ -117,9 +153,11 @@ class MetricsCollector:
 
     def __init__(
         self,
-        max_history: int = 1000,
+        max_history: Optional[int] = None,
         storage_path: Optional[Path] = None,
         daily_cost_limit: Optional[float] = None,
+        persistence_frequency: Optional[int] = None,
+        cost_warning_threshold: Optional[float] = None,
     ):
         """
         Initialize metrics collector.
@@ -129,10 +167,18 @@ class MetricsCollector:
             storage_path: Optional path to persist metrics
             daily_cost_limit: Optional daily cost limit in USD (alerts if exceeded)
         """
+        config = get_config()
+
         self.requests: List[LLMRequest] = []
-        self.max_history = max_history
+        self.max_history = max_history if max_history is not None else config.metrics.MAX_HISTORY
         self.storage_path = storage_path
         self.daily_cost_limit = daily_cost_limit
+        self.persistence_frequency = (
+            persistence_frequency if persistence_frequency is not None else config.metrics.PERSISTENCE_FREQUENCY
+        )
+        self.cost_warning_threshold = (
+            cost_warning_threshold if cost_warning_threshold is not None else config.metrics.COST_WARNING_THRESHOLD
+        )
 
         # Counters for quick access
         self._total_requests = 0
@@ -141,6 +187,9 @@ class MetricsCollector:
         self._cache_hits = 0
         self._errors = 0
         self._fallbacks = 0
+        self._dedupe_hits = 0
+        self._dedupe_saved_tokens = 0
+        self._dedupe_saved_cost = 0.0
 
         # Response source distribution tracking (A2.2)
         self._response_sources: Dict[str, int] = {
@@ -207,12 +256,24 @@ class MetricsCollector:
         # Log if approaching cost limit
         if self.daily_cost_limit:
             today_cost = self.get_cost_today()
-            if today_cost > self.daily_cost_limit * 0.8:
+            if today_cost > self.daily_cost_limit * self.cost_warning_threshold:
                 logger.warning(f"Daily cost ${today_cost:.2f} approaching limit ${self.daily_cost_limit:.2f}")
 
         # Periodic save
-        if self._total_requests % 100 == 0 and self.storage_path:
+        if self._total_requests % self.persistence_frequency == 0 and self.storage_path:
             self._save_metrics()
+
+    def _estimate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        pricing = MODEL_PRICING.get(model, {"input": 0.0, "output": 0.0})
+        input_cost = (input_tokens / 1_000_000) * pricing["input"]
+        output_cost = (output_tokens / 1_000_000) * pricing["output"]
+        return input_cost + output_cost
+
+    def record_dedupe_hit(self, model: str, input_tokens: int, output_tokens: int) -> None:
+        """Record a dedupe hit and estimated cost savings."""
+        self._dedupe_hits += 1
+        self._dedupe_saved_tokens += input_tokens + output_tokens
+        self._dedupe_saved_cost += self._estimate_cost(model, input_tokens, output_tokens)
 
     def get_summary(self, hours: int = 24) -> Dict[str, Any]:
         """
@@ -242,6 +303,13 @@ class MetricsCollector:
                 "fallback_rate": 0.0,
                 "by_endpoint": {},
                 "by_model": {},
+                "tool_stats": {"total_calls": 0, "overall": {}, "by_tool": {}},
+                "dedupe": {
+                    "period": "all_time",
+                    "hits": self._dedupe_hits,
+                    "saved_tokens": self._dedupe_saved_tokens,
+                    "saved_cost_usd": round(self._dedupe_saved_cost, 4),
+                },
             }
 
         # Calculate latency percentiles
@@ -269,7 +337,65 @@ class MetricsCollector:
             "fallback_rate": round(sum(1 for r in recent if r.fallback_used) / len(recent), 3),
             "by_endpoint": self._group_by(recent, "endpoint"),
             "by_model": self._group_by(recent, "model"),
+            "tool_stats": self._summarize_tool_calls(recent, percentile),
+            "dedupe": {
+                "period": "all_time",
+                "hits": self._dedupe_hits,
+                "saved_tokens": self._dedupe_saved_tokens,
+                "saved_cost_usd": round(self._dedupe_saved_cost, 4),
+            },
         }
+
+    def _summarize_tool_calls(
+        self,
+        requests: List[LLMRequest],
+        percentile_fn: Callable[[List[float], float], float],
+    ) -> Dict[str, Any]:
+        """Aggregate tool call counts, error rates, and latency."""
+        tool_calls: List[ToolCall] = []
+        for r in requests:
+            if r.tool_calls:
+                tool_calls.extend(r.tool_calls)
+
+        if not tool_calls:
+            return {"total_calls": 0, "overall": {}, "by_tool": {}}
+
+        by_tool: Dict[str, Dict[str, Any]] = {}
+        all_latencies: List[float] = []
+        total_errors = 0
+
+        for call in tool_calls:
+            all_latencies.append(call.latency_ms)
+            if not call.success:
+                total_errors += 1
+
+            bucket = by_tool.setdefault(call.name, {"count": 0, "errors": 0, "latencies": []})
+            bucket["count"] += 1
+            if not call.success:
+                bucket["errors"] += 1
+            bucket["latencies"].append(call.latency_ms)
+
+        by_tool_summary = {}
+        for name, data in by_tool.items():
+            latencies = data["latencies"]
+            count = data["count"]
+            errors = data["errors"]
+            by_tool_summary[name] = {
+                "count": count,
+                "error_rate": round(errors / count, 3) if count else 0.0,
+                "avg_latency_ms": round(sum(latencies) / count, 1) if count else 0.0,
+                "p95_latency_ms": round(percentile_fn(sorted(latencies), 95), 1) if count else 0.0,
+            }
+
+        total_calls = len(tool_calls)
+        overall = {
+            "count": total_calls,
+            "error_rate": round(total_errors / total_calls, 3) if total_calls else 0.0,
+            "avg_latency_ms": round(sum(all_latencies) / total_calls, 1) if total_calls else 0.0,
+            "p95_latency_ms": round(percentile_fn(sorted(all_latencies), 95), 1) if total_calls else 0.0,
+        }
+
+        return {"total_calls": total_calls, "overall": overall, "by_tool": by_tool_summary}
 
     def _group_by(self, requests: List[LLMRequest], field: str) -> Dict[str, Dict[str, Any]]:
         """Group metrics by a field (endpoint or model)."""
@@ -411,6 +537,11 @@ class MetricsCollector:
                     "fallbacks": self._fallbacks,
                 }
             }
+            data["dedupe"] = {
+                "hits": self._dedupe_hits,
+                "saved_tokens": self._dedupe_saved_tokens,
+                "saved_cost": round(self._dedupe_saved_cost, 4),
+            }
 
             metrics_file.write_text(json.dumps(data, indent=2))
             logger.debug(f"Saved {len(recent)} metrics records")
@@ -433,6 +564,17 @@ class MetricsCollector:
             # Restore recent requests
             for req_data in data.get("requests", []):
                 try:
+                    tool_calls_data = req_data.get("tool_calls") or []
+                    tool_calls = [
+                        ToolCall(
+                            name=tc.get("name", "unknown"),
+                            arguments=tc.get("arguments", {}),
+                            success=tc.get("success", True),
+                            latency_ms=tc.get("latency_ms", 0.0),
+                            error=tc.get("error"),
+                        )
+                        for tc in tool_calls_data
+                    ] if tool_calls_data else None
                     self.requests.append(LLMRequest(
                         timestamp=datetime.fromisoformat(req_data["timestamp"]),
                         endpoint=req_data["endpoint"],
@@ -444,6 +586,7 @@ class MetricsCollector:
                         success=req_data.get("success", True),
                         error=req_data.get("error"),
                         fallback_used=req_data.get("fallback_used", False),
+                        tool_calls=tool_calls,
                     ))
                 except Exception:
                     pass  # Skip malformed entries
@@ -456,6 +599,11 @@ class MetricsCollector:
             self._cache_hits = totals.get("cache_hits", 0)
             self._errors = totals.get("errors", 0)
             self._fallbacks = totals.get("fallbacks", 0)
+
+            dedupe = data.get("dedupe", {})
+            self._dedupe_hits = dedupe.get("hits", 0)
+            self._dedupe_saved_tokens = dedupe.get("saved_tokens", 0)
+            self._dedupe_saved_cost = dedupe.get("saved_cost", 0.0)
 
             logger.info(f"Loaded {len(self.requests)} metrics records")
 

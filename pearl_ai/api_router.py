@@ -256,7 +256,7 @@ def create_pearl_router(
                         async for chunk in brain.claude_llm.generate_stream(
                             prompt=user_prompt,
                             system=system_prompt,
-                            max_tokens=1000,
+                            max_tokens=brain._config.llm.MAX_STREAM_TOKENS,
                         ):
                             full_response += chunk
                             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
@@ -615,26 +615,8 @@ def create_pearl_router(
         return {"enabled": False}
 
     # ================================================================
-    # Pearl AI Improvement Plan Endpoints (A2.2, A2.3)
+    # Pearl AI Improvement Plan Endpoints (A2.3)
     # ================================================================
-
-    @router.get("/metrics/sources")
-    async def get_response_sources(
-        hours: Optional[int] = Query(default=None, description="Time window in hours (omit for all-time)"),
-        _: Optional[str] = Depends(auth_dep)
-    ):
-        """
-        Get response source distribution (A2.2).
-
-        Returns breakdown of responses by source: cache, local, claude, template.
-        Shows both counts and percentages.
-
-        Args:
-            hours: Optional time window. Omit for all-time statistics.
-
-        Requires X-API-Key header when authentication is enabled.
-        """
-        return brain.get_response_source_distribution(hours)
 
     @router.get("/ml-status")
     async def get_ml_status(_: Optional[str] = Depends(auth_dep)):
