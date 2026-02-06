@@ -26,6 +26,10 @@ Pearl runs two isolated accounts simultaneously:
 | **Inception** | Since-inception data collection | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
 | **MFFU Eval** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/MFFU_EVAL/` | 8001 |
 
+**Signal flow**: Inception generates all signals via `strategy.analyze()`. MFFU reads signals from `data/shared_signals.jsonl` (written by inception) instead of running its own strategy. This guarantees both accounts trade the same signals. MFFU's circuit breaker eval gate still enforces prop firm rules (max contracts, trading hours, hedging, news blackout).
+
+**Isolation rule**: `config/config.yaml` changes affect inception only. `config/markets/mffu_eval.yaml` changes affect MFFU only. `service.py` code changes affect both (MFFU-specific paths are gated by `self._mffu_enabled`).
+
 ### Quick operational checklist
 
 ```bash

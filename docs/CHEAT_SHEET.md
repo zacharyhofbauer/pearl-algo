@@ -689,10 +689,40 @@ If PNL doesn't update when you tap the Refresh button:
 ### Overview
 
 Pearl runs two isolated accounts simultaneously:
-- **Inception** (port 8000): Since-inception data collection on IBKR
-- **MFFU Eval** (port 8001): MyFundedFutures 50K Rapid Plan on Tradovate paper
+- **Inception** (port 8000): Since-inception data collection on IBKR (virtual PnL, no real orders)
+- **MFFU Eval** (port 8001): MyFundedFutures 50K Rapid Plan on Tradovate paper (real orders on demo)
 
-Each has its own state directory, API server, and data. They share IBKR market data but execute independently.
+### Architecture: Signal Forwarding
+
+Inception generates ALL signals via the strategy. MFFU does NOT run its own strategy -- instead it reads signals from a shared file written by inception. This guarantees both accounts trade the same signals.
+
+```
+Inception Agent                    MFFU Agent
+  strategy.analyze()                 _read_shared_signals()
+       |                                  |
+  circuit breaker (warn_only)        circuit breaker (MFFU eval gate)
+       |                                  |
+  write -> data/shared_signals.jsonl -> read
+       |                                  |
+  virtual PnL tracking              Tradovate place_bracket()
+  signals.jsonl (NQ/)               signals.jsonl (MFFU_EVAL/)
+```
+
+### Isolation Model (what can/cannot affect each account)
+
+| Component | Inception | MFFU | Shared? |
+|-----------|-----------|------|---------|
+| Config file | `config/config.yaml` | `config/markets/mffu_eval.yaml` | No -- separate files |
+| State directory | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` | No -- separate dirs |
+| API server | Port 8000 | Port 8001 | No -- separate processes |
+| Signal generation | `strategy.analyze()` | Reads from shared file | One-way: inception writes, MFFU reads |
+| Circuit breaker | `warn_only` mode | `warn_only` + MFFU eval gate | Same class, different config |
+| Execution | Disabled (virtual only) | Tradovate paper (armed) | No -- different adapters |
+| Telegram | No prefix | `[MFFU]` prefix | Same bot, different labels |
+| IBKR client IDs | 10/11 (agent), 96 (chart) | 50/51 (agent), 97 (chart) | Same gateway, different IDs |
+| Code (`service.py`) | Shared | Shared | **Yes** -- MFFU paths gated by `_mffu_enabled` |
+
+**Rule: editing `config/config.yaml` only affects inception. Editing `config/markets/mffu_eval.yaml` only affects MFFU. Editing `service.py` affects both (check for `_mffu_enabled` gates).**
 
 ### Quick Commands
 
@@ -739,9 +769,27 @@ TRADOVATE_SEC=...
 
 ### Config Files
 
-- `config/markets/mffu_eval.yaml` -- MFFU-specific config (challenge rules, Tradovate adapter, circuit breaker)
-- `data/agent_state/MFFU_EVAL/` -- MFFU state directory (signals, trades, challenge state)
-- `data/t1_news_2026.json` -- T1 news calendar for blackout detection
+| File | Purpose | Affects |
+|------|---------|--------|
+| `config/config.yaml` | Base config (all settings) | Inception only |
+| `config/markets/mffu_eval.yaml` | MFFU overlay (challenge, execution, circuit breaker) | MFFU only |
+| `~/.config/pearlalgo/secrets.env` | Credentials (Telegram, Tradovate, API keys) | Both |
+| `.env` | Non-sensitive defaults (IBKR ports, data provider) | Both |
+| `data/t1_news_2026.json` | T1 news calendar for blackout detection | MFFU only |
+| `data/shared_signals.jsonl` | Signal forwarding file (inception writes, MFFU reads) | Both |
+
+### Key Files (code)
+
+| File | Purpose | Change affects |
+|------|---------|---------------|
+| `src/pearlalgo/market_agent/service.py` | Main agent orchestrator | **Both** (MFFU gated by `_mffu_enabled`) |
+| `src/pearlalgo/market_agent/mffu_eval_tracker.py` | MFFU challenge state tracking | MFFU only |
+| `src/pearlalgo/execution/tradovate/` | Tradovate REST/WS client + adapter | MFFU only |
+| `src/pearlalgo/market_agent/trading_circuit_breaker.py` | Risk management | **Both** (MFFU gate gated by `enable_mffu_eval_gate`) |
+| `src/pearlalgo/utils/news_calendar.py` | T1 news blackout service | MFFU only |
+| `scripts/lifecycle/mffu_eval.sh` | MFFU launch script | MFFU only |
+| `pearlalgo_web_app/components/AccountSwitcher.tsx` | Account dropdown | Web app only |
+| `pearlalgo_web_app/components/ChallengePanel.tsx` | MFFU challenge display | Web app only |
 
 ### Telegram Notifications
 
