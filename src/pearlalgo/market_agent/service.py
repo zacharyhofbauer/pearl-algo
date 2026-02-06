@@ -1754,16 +1754,28 @@ class MarketAgentService:
 
             # Write to shared signal file for MFFU agent to pick up
             try:
-                _shared_path = Path("data/shared_signals.jsonl")
+                _shared_path = Path("data") / "shared_signals.jsonl"
                 _shared_path.parent.mkdir(parents=True, exist_ok=True)
+                # Build a serializable copy (exclude internal objects that can't be JSON'd)
+                _safe_signal = {}
+                for _k, _v in signal.items():
+                    if _k.startswith("_"):
+                        continue
+                    try:
+                        json.dumps(_v)
+                        _safe_signal[_k] = _v
+                    except (TypeError, ValueError):
+                        _safe_signal[_k] = str(_v)
+                _payload = json.dumps({
+                    "signal_id": signal_id,
+                    "timestamp": get_utc_timestamp(),
+                    "signal": _safe_signal,
+                })
                 with open(_shared_path, "a") as _sf:
-                    _sf.write(json.dumps({
-                        "signal_id": signal_id,
-                        "timestamp": get_utc_timestamp(),
-                        "signal": {k: v for k, v in signal.items() if not k.startswith("_")},
-                    }) + "\n")
-            except Exception:
-                pass  # Non-critical: MFFU will miss this signal but system continues
+                    _sf.write(_payload + "\n")
+                logger.info(f"Shared signal written: {signal_id}")
+            except Exception as _shared_err:
+                logger.warning(f"Could not write shared signal: {_shared_err}")
 
             # Virtual entry: enter immediately at the signal's entry price.
             # This enables per-signal PnL tracking without requiring IBKR fills.
