@@ -489,6 +489,42 @@ body {
   border: 1px solid rgba(60, 60, 80, 0.25);
 }
 
+/* Badge tooltip explanation */
+.badge-tooltip {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(25, 25, 40, 0.95);
+  border: 1px solid rgba(80, 80, 120, 0.3);
+  border-radius: 8px;
+  animation: tooltip-in 0.15s ease;
+  cursor: pointer;
+}
+
+.badge-tooltip p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.badge-tooltip strong {
+  color: var(--text-primary);
+}
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Badges are tappable */
+.header-badges .badge {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.header-badges .badge:active {
+  opacity: 0.7;
+}
+
 /* Shadow count inside AI badge */
 .badge-shadow-count {
   display: inline-flex;
@@ -653,6 +689,31 @@ body {
   background: rgba(171, 71, 188, 0.10);
   color: #ce93d8;
   opacity: 0.8;
+}
+
+/* ML filter win rate badge */
+.header-badges .ml-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+}
+.header-badges .ml-badge.good {
+  background: rgba(0, 230, 118, 0.08);
+  color: #66bb6a;
+}
+
+/* Shadow net saved badge */
+.header-badges .saved-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.header-badges .saved-badge.positive {
+  background: rgba(0, 230, 118, 0.10);
+  color: #00e676;
+}
+.header-badges .saved-badge.negative {
+  background: rgba(255, 82, 82, 0.10);
+  color: #ff5252;
 }
 
 /* Health Indicators (legacy - kept for backward compat) */

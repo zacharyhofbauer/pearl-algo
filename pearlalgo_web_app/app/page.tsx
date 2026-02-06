@@ -97,6 +97,9 @@ export default function PearlAlgoWebApp() {
   // Local state for active positions (for chart price lines)
   const [positions, setPositions] = useState<Position[]>([])
   const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
+
+  // Badge tooltip state (which badge explanation is showing)
+  const [badgeTip, setBadgeTip] = useState<string | null>(null)
   const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
 
   // Convert positions to price lines for chart visualization (more visible than live price)
@@ -623,41 +626,113 @@ export default function PearlAlgoWebApp() {
           </div>
         </div>
 
-        {/* Secondary Row - System Status Badges */}
+        {/* Secondary Row - System Status + AI Metrics */}
         <div className="header-row-secondary">
           <div className="header-badges">
+            {/* System status badges - tap for explanation */}
             {agentState && (
-              <span className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}>
+              <span
+                className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'agent' ? null : 'agent') }}
+              >
                 <span className="badge-dot"></span>
                 {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
               </span>
             )}
             {agentState && (
-              <span className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}>
+              <span
+                className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'gw' ? null : 'gw') }}
+              >
                 <span className="badge-dot"></span>
                 GW
               </span>
             )}
             {aiMode && (
-              <span className={`badge ai-badge ${aiMode}`}>
+              <span
+                className={`badge ai-badge ${aiMode}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
+              >
                 🧠 {aiMode.toUpperCase()}
-                {aiMode === 'shadow' && agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
+                {agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
                   <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
                 )}
               </span>
             )}
             {marketStatus && (
-              <span className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
+              <span
+                className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
+              >
                 {marketStatus.is_open ? '🟢 OPEN' : '🔴 CLOSED'}
               </span>
             )}
             {agentState && (
-              <span className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}>
+              <span
+                className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
+              >
                 <span className="badge-dot"></span>
                 Data
               </span>
             )}
+            {agentState?.ml_filter_performance?.lift_ok && agentState.ml_filter_performance.win_rate_pass != null && (
+              <span
+                className={`badge ml-badge ${(agentState.ml_filter_performance.lift_win_rate || 0) > 0.1 ? 'good' : 'neutral'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ml' ? null : 'ml') }}
+              >
+                ML {Math.round((agentState.ml_filter_performance.win_rate_pass) * 100)}%
+              </span>
+            )}
+            {agentState?.shadow_counters && (agentState.shadow_counters.blocked_total > 0) && (
+              <span
+                className={`badge saved-badge ${(agentState.shadow_counters.net_saved || 0) >= 0 ? 'positive' : 'negative'}`}
+                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'saved' ? null : 'saved') }}
+              >
+                {(agentState.shadow_counters.net_saved || 0) >= 0 ? '↑' : '↓'}${Math.abs(agentState.shadow_counters.net_saved || 0).toFixed(0)}
+              </span>
+            )}
           </div>
+          {/* Badge explanation tooltip */}
+          {badgeTip && (
+            <div className="badge-tooltip" onClick={() => setBadgeTip(null)}>
+              {badgeTip === 'agent' && (
+                <p><strong>Agent</strong> — Trading scanner process. {agentState?.running ? 'Running and scanning for signals every cycle.' : 'Stopped. No signals are being generated.'}{agentState?.paused ? ' Currently paused due to circuit breaker or manual pause.' : ''}</p>
+              )}
+              {badgeTip === 'gw' && (
+                <p><strong>Gateway</strong> — IBKR Gateway connection. {agentState?.gateway_status?.status === 'online' ? `Online on port ${agentState.gateway_status.port}. Market data and execution available.` : 'Offline. No market data or execution. Check Gateway process.'}</p>
+              )}
+              {badgeTip === 'ai' && (() => {
+                const ai = agentState?.ai_status
+                const sc = agentState?.shadow_counters
+                return (
+                  <p><strong>AI/ML — {aiMode?.toUpperCase()}</strong> — {aiMode === 'shadow' ? 'Observing and scoring signals without blocking. ' : aiMode === 'live' ? 'Actively filtering signals. ' : 'AI systems disabled. '}
+                    {ai && <>Bandit: {ai.bandit_mode}, Ctx: {ai.contextual_mode}, Filter: {ai.ml_filter?.mode || 'off'}. </>}
+                    {sc && sc.would_block_total > 0 && <>{sc.would_block_total} signals would have been blocked if enforced.</>}
+                  </p>
+                )
+              })()}
+              {badgeTip === 'market' && (
+                <p><strong>Market</strong> — CME Futures session. {marketStatus?.is_open ? 'Market is open. Real-time data flowing.' : `Market closed${marketStatus?.close_reason ? ` (${marketStatus.close_reason})` : ''}. Historical data only.`}</p>
+              )}
+              {badgeTip === 'data' && (
+                <p><strong>Data Feed</strong> — {agentState?.data_fresh ? 'Fresh. Latest bar is recent and buffer has enough bars for indicators.' : 'Stale. Data may be delayed or unavailable. Check IBKR connection.'}</p>
+              )}
+              {badgeTip === 'ml' && (() => {
+                const ml = agentState?.ml_filter_performance
+                return (
+                  <p><strong>ML Filter</strong> — Win rate when ML says PASS: {ml?.win_rate_pass != null ? `${Math.round(ml.win_rate_pass * 100)}%` : 'N/A'} vs FAIL: {ml?.win_rate_fail != null ? `${Math.round(ml.win_rate_fail * 100)}%` : 'N/A'}. Lift: {ml?.lift_win_rate != null ? `+${Math.round(ml.lift_win_rate * 100)}%` : 'N/A'}. Based on {ml?.trades_passed || 0} PASS / {ml?.trades_blocked || 0} FAIL trades scored.</p>
+                )
+              })()}
+              {badgeTip === 'saved' && (() => {
+                const sc = agentState?.shadow_counters
+                const net = sc?.net_saved || 0
+                return (
+                  <p><strong>Shadow Savings</strong> — {net >= 0 ? `Would save $${net.toFixed(0)}` : `Would cost $${Math.abs(net).toFixed(0)}`} if circuit breaker was in enforce mode. Blocked signals: {sc?.blocked_total || 0} ({sc?.blocked_wins || 0}W / {sc?.blocked_losses || 0}L = ${(sc?.blocked_pnl || 0).toFixed(0)}). Allowed signals: {sc?.allowed_total || 0} ({sc?.allowed_wins || 0}W / {sc?.allowed_losses || 0}L = ${(sc?.allowed_pnl || 0).toFixed(0)}).</p>
+                )
+              })()}
+            </div>
+          )}
         </div>
       </header>
     )

@@ -51,83 +51,32 @@ export default function PearlHeaderBar() {
     return derivePearlMode(agentState?.ai_status || null, agentState?.pearl_insights || null)
   }, [agentState?.ai_status, agentState?.pearl_insights])
 
-  // Data summary (default view)
-  const dataSummary = useMemo(() => {
-    if (!agentState) return 'Connecting…'
+  // Strip quotes helper
+  const cleanText = (raw: string) => raw
+    .replace(/"/g, '')
+    .replace(/\u201c/g, '')
+    .replace(/\u201d/g, '')
+    .replace(/'/g, '')
+    .replace(/\u2018/g, '')
+    .replace(/\u2019/g, '')
+    .replace(/`/g, '')
+    .trim()
 
-    const parts: string[] = []
-
-    const pnl = agentState.daily_pnl || 0
-    const pnlSign = pnl >= 0 ? '+' : ''
-    parts.push(`${pnlSign}$${pnl.toFixed(0)}`)
-
-    const w = agentState.daily_wins || 0
-    const l = agentState.daily_losses || 0
-    if (w + l > 0) parts.push(`${w}W/${l}L`)
-
-    const active = agentState.active_trades_count || 0
-    if (active > 0) parts.push(`${active} active`)
-
-    const regime = agentState.market_regime
-    if (regime && regime.regime && regime.regime !== 'unknown') {
-      const label = regime.regime.replace('trending_', '').replace('_', ' ')
-      parts.push(label.charAt(0).toUpperCase() + label.slice(1))
+  // Show Pearl AI messages (latest from feed)
+  const previewText = useMemo(() => {
+    const feed = agentState?.pearl_feed || []
+    if (feed.length > 0 && feed[0]?.content) {
+      return truncateText(cleanText(feed[0].content), 55)
     }
 
-    return parts.join(' · ') || 'Watching…'
-  }, [agentState])
-
-  // Flash Pearl AI messages briefly (5s) then return to data summary
-  const [flashMessage, setFlashMessage] = useState<string | null>(null)
-  const lastSeenFeedId = useRef<string | null>(null)
-  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    const feed = agentState?.pearl_feed || []
-    if (feed.length === 0) return
-
-    const latest = feed[0] // Most recent message
-    if (!latest?.id || latest.id === lastSeenFeedId.current) return
-
-    // New message arrived
-    lastSeenFeedId.current = latest.id
-
-    // Strip all quotation marks from message text (straight, curly, backtick)
-    let text = (latest.content || '')
-      .replace(/"/g, '')
-      .replace(/\u201c/g, '')
-      .replace(/\u201d/g, '')
-      .replace(/'/g, '')
-      .replace(/\u2018/g, '')
-      .replace(/\u2019/g, '')
-      .replace(/`/g, '')
-      .trim()
-
-    // Show type indicator
-    const typeIcon = latest.type === 'narration' ? '💬' :
-                     latest.type === 'insight' ? '💡' :
-                     latest.type === 'alert' ? '⚠️' :
-                     latest.type === 'response' ? '🤖' : '💬'
-
-    setFlashMessage(`${typeIcon} ${truncateText(text, 50)}`)
-
-    // Clear previous timer
-    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
-
-    // Auto-dismiss after 5 seconds
-    flashTimerRef.current = setTimeout(() => {
-      setFlashMessage(null)
-    }, 5000)
-  }, [agentState?.pearl_feed])
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current) }
-  }, [])
-
-  // Show flash message if active, otherwise show data summary
-  const previewText = flashMessage || dataSummary
-  const isFlashing = Boolean(flashMessage)
+    // Fallback to suggestion or headline
+    const headline = deriveHeadline(
+      agentState?.pearl_feed || [],
+      agentState?.pearl_suggestion || null,
+      agentState?.pearl_insights || null
+    )
+    return truncateText(cleanText(headline.text), 55)
+  }, [agentState?.pearl_feed, agentState?.pearl_suggestion, agentState?.pearl_insights])
 
   // Toggle handler with keyboard support
   const handleToggle = useCallback(() => {
@@ -212,7 +161,7 @@ export default function PearlHeaderBar() {
         aria-label={hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
       />
 
-      <div className={`pearl-header-preview ${isFlashing ? 'flash' : ''}`} aria-hidden="true">
+      <div className="pearl-header-preview" aria-hidden="true">
         {previewText}
       </div>
 
