@@ -228,7 +228,7 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
   )
 
   const renderCalendarTab = () => {
-    const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
     // Calculate total P&L for the period
     const totalPnL = calendarData.reduce((sum, d) => sum + d.pnl, 0)
@@ -236,65 +236,84 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     const profitDays = calendarData.filter(d => d.pnl > 0).length
     const lossDays = calendarData.filter(d => d.pnl < 0).length
 
+    // Build proper month grid (pad start to align with day-of-week)
+    const firstDay = calendarData.length > 0 ? calendarData[0] : null
+    const startPadding = firstDay ? firstDay.dayOfWeek : 0
+
+    // Get month/year label
+    const now = new Date()
+    const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' })
+
     return (
-      <div className="analytics-calendar">
-        {/* Summary stats */}
-        <div className="calendar-summary">
-          <div className="calendar-stat">
-            <span className="calendar-stat-label">28d P&L</span>
-            <span className={`calendar-stat-value ${totalPnL >= 0 ? 'positive' : 'negative'}`}>
-              {formatPnL(totalPnL)}
+      <div className="axiom-calendar">
+        {/* Month header + summary */}
+        <div className="axiom-cal-header">
+          <span className="axiom-cal-month">{monthLabel}</span>
+          <div className="axiom-cal-stats">
+            <span className={`axiom-cal-pnl ${totalPnL >= 0 ? 'positive' : 'negative'}`}>
+              {totalPnL >= 0 ? '+' : ''}${Math.abs(totalPnL).toFixed(0)}
             </span>
-          </div>
-          <div className="calendar-stat">
-            <span className="calendar-stat-label">Days</span>
-            <span className="calendar-stat-value">
+            <span className="axiom-cal-record">
               <span className="positive">{profitDays}W</span>
-              <span className="divider">/</span>
+              <span style={{ opacity: 0.4 }}>/</span>
               <span className="negative">{lossDays}L</span>
             </span>
           </div>
-          <div className="calendar-stat">
-            <span className="calendar-stat-label">Trades</span>
-            <span className="calendar-stat-value">{totalTrades}</span>
-          </div>
         </div>
 
-        {/* Day labels */}
-        <div className="calendar-day-labels">
+        {/* Day-of-week headers */}
+        <div className="axiom-cal-grid axiom-cal-day-headers">
           {dayLabels.map((label, idx) => (
-            <span key={idx} className="calendar-day-label">{label}</span>
+            <div key={idx} className="axiom-cal-day-header">{label}</div>
           ))}
         </div>
 
-        {/* Heatmap grid */}
-        <div className="calendar-heatmap">
-          {calendarData.map((day, idx) => (
-            <div
-              key={day.date}
-              className={`calendar-cell ${day.isToday ? 'today' : ''} ${day.trades === 0 ? 'empty' : ''}`}
-              style={{ backgroundColor: getHeatmapColor(day.pnl, day.trades) }}
-              title={`${day.date}: ${day.trades > 0 ? formatPnL(day.pnl) : 'No trades'} (${day.trades} trades)`}
-            >
-              <span className="calendar-cell-date">{formatDateLabel(day.date)}</span>
-              {day.trades > 0 && (
-                <span className={`calendar-cell-pnl ${day.pnl >= 0 ? 'positive' : 'negative'}`}>
-                  {day.pnl >= 0 ? '+' : ''}{Math.round(day.pnl)}
-                </span>
-              )}
-            </div>
+        {/* Calendar grid */}
+        <div className="axiom-cal-grid">
+          {/* Empty cells for padding */}
+          {Array.from({ length: startPadding }).map((_, i) => (
+            <div key={`pad-${i}`} className="axiom-cal-cell axiom-cal-cell-empty" />
           ))}
+
+          {/* Day cells */}
+          {calendarData.map((day) => {
+            const dayNum = parseInt(day.date.split('-')[2], 10)
+            const hasTrades = day.trades > 0
+            const isProfit = day.pnl > 0
+            const isLoss = day.pnl < 0
+            const intensity = hasTrades ? Math.min(Math.abs(day.pnl) / maxCalendarPnL, 1) : 0
+            const alpha = hasTrades ? 0.15 + intensity * 0.55 : 0
+
+            let bgColor = 'transparent'
+            if (isProfit) bgColor = `rgba(0, 230, 118, ${alpha})`
+            else if (isLoss) bgColor = `rgba(255, 82, 82, ${alpha})`
+
+            return (
+              <div
+                key={day.date}
+                className={`axiom-cal-cell ${day.isToday ? 'axiom-cal-today' : ''} ${!hasTrades ? 'axiom-cal-no-trades' : ''}`}
+                style={{ backgroundColor: bgColor }}
+                title={`${day.date}: ${hasTrades ? `${formatPnL(day.pnl)} (${day.trades} trades)` : 'No trades'}`}
+              >
+                <span className="axiom-cal-date">{dayNum}</span>
+                {hasTrades ? (
+                  <span className={`axiom-cal-amount ${isProfit ? 'positive' : 'negative'}`}>
+                    {isProfit ? '+' : '-'}${Math.abs(Math.round(day.pnl))}
+                  </span>
+                ) : (
+                  <span className="axiom-cal-amount axiom-cal-dash">-</span>
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        {/* Legend */}
-        <div className="calendar-legend">
-          <span className="calendar-legend-label">Loss</span>
-          <div className="calendar-legend-gradient">
-            <div className="calendar-legend-stop loss" />
-            <div className="calendar-legend-stop neutral" />
-            <div className="calendar-legend-stop profit" />
-          </div>
-          <span className="calendar-legend-label">Profit</span>
+        {/* Weekly totals */}
+        <div className="axiom-cal-footer">
+          <span className="axiom-cal-footer-label">{totalTrades} trades</span>
+          <span className={`axiom-cal-footer-total ${totalPnL >= 0 ? 'positive' : 'negative'}`}>
+            {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
+          </span>
         </div>
       </div>
     )

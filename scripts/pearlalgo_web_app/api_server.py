@@ -3704,10 +3704,37 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Process signals.jsonl for status breakdown
+    # Process signals.jsonl for status breakdown AND hold duration
+    # (performance.json often lacks entry_time, signals.jsonl has both timestamps)
     if signals_file.exists():
         try:
             signals = _load_jsonl_file(signals_file, max_lines=2000)
+            # Compute hold duration from signals (which have entry_time + exit_time)
+            for s in signals:
+                if s.get("status") != "exited":
+                    continue
+                et_str = s.get("entry_time")
+                xt_str = s.get("exit_time")
+                pnl = s.get("pnl", 0) or 0
+                is_win = pnl > 0
+                if et_str and xt_str:
+                    try:
+                        et_dt = datetime.fromisoformat(str(et_str).replace("Z", "+00:00"))
+                        xt_dt = datetime.fromisoformat(str(xt_str).replace("Z", "+00:00"))
+                        dur_min = (xt_dt - et_dt).total_seconds() / 60
+                        if dur_min < 30:
+                            dk = "quick"
+                        elif dur_min < 60:
+                            dk = "medium"
+                        else:
+                            dk = "long"
+                        duration_stats[dk]["pnl"] += pnl
+                        if is_win:
+                            duration_stats[dk]["wins"] += 1
+                        else:
+                            duration_stats[dk]["losses"] += 1
+                    except (ValueError, TypeError):
+                        pass
             for s in signals:
                 status = s.get("status", "").lower()
                 if status in status_breakdown:

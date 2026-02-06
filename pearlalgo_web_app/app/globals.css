@@ -7945,6 +7945,154 @@ body {
 }
 
 /* ============================================
+   AXIOM-STYLE PNL CALENDAR
+   ============================================ */
+
+.axiom-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.axiom-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.axiom-cal-month {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+
+.axiom-cal-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.axiom-cal-pnl {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.axiom-cal-record {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  display: flex;
+  gap: 2px;
+}
+
+.axiom-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.axiom-cal-day-headers {
+  gap: 3px;
+  margin-bottom: 2px;
+}
+
+.axiom-cal-day-header {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 0;
+}
+
+.axiom-cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px;
+  border-radius: 4px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+  cursor: default;
+}
+
+.axiom-cal-cell:hover:not(.axiom-cal-cell-empty) {
+  border-color: var(--border-color);
+  transform: scale(1.03);
+}
+
+.axiom-cal-cell-empty {
+  min-height: 42px;
+}
+
+.axiom-cal-no-trades {
+  opacity: 0.35;
+}
+
+.axiom-cal-today {
+  border-color: var(--accent-cyan) !important;
+  box-shadow: 0 0 0 1px var(--accent-cyan);
+}
+
+.axiom-cal-date {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.axiom-cal-today .axiom-cal-date {
+  color: var(--accent-cyan);
+}
+
+.axiom-cal-amount {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  line-height: 1;
+  margin-top: 3px;
+}
+
+.axiom-cal-amount.positive {
+  color: var(--accent-green);
+}
+
+.axiom-cal-amount.negative {
+  color: var(--accent-red);
+}
+
+.axiom-cal-dash {
+  color: var(--text-tertiary);
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+.axiom-cal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.axiom-cal-footer-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.axiom-cal-footer-total {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* ============================================
    TOP LOSSES SECTION (RiskMetricsPanel)
    ============================================ */
 
