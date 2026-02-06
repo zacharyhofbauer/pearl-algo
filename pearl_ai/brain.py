@@ -26,6 +26,10 @@ from .data_access import TradeDataAccess
 from .cache import ResponseCache, RequestDeduplicator
 from .tools import ToolExecutor, format_tool_result_for_llm, PEARL_TOOLS
 from .config import get_config, PearlConfig
+from .prompts import get_prompt_registry
+from .prompts.builder import build_deep_user_prompt as _build_deep_user_prompt_helper
+from .prompts.builder import build_insight_prompt, build_daily_review_prompt, build_streak_coaching_prompt
+from .output_validator import get_output_validator
 from .types import SanitizationResult, TradingContextSummary, ChatResponseDict, NarrationOutputDict
 
 logger = logging.getLogger(__name__)
@@ -530,11 +534,19 @@ class PearlBrain:
         model_used = "template"
         fallback_used = False
 
-        if complexity == QueryComplexity.QUICK and self.local_llm:
+        # Cost enforcement: degrade to local LLM if daily budget exceeded
+        cost_limited = self.metrics.is_daily_limit_exceeded()
+        if cost_limited and complexity == QueryComplexity.DEEP and self.local_llm:
+            logger.warning("Daily cost limit reached - degrading to local LLM")
             response = await self._quick_response(sanitized_message, context)
             model_used = self.local_llm.model
             response_source = ResponseSource.LOCAL
-        elif self.claude_llm:
+            fallback_used = True
+        elif complexity == QueryComplexity.QUICK and self.local_llm:
+            response = await self._quick_response(sanitized_message, context)
+            model_used = self.local_llm.model
+            response_source = ResponseSource.LOCAL
+        elif self.claude_llm and not cost_limited:
             async def generate_deep_response() -> tuple[str, int, int]:
                 # Try with tools if enabled (3.0)
                 if self.enable_tools:
@@ -589,6 +601,18 @@ class PearlBrain:
             fallback_used=fallback_used,
             tool_calls=tool_call_metrics,
         ))
+
+        # Validate output before caching (3.1: output validation layer)
+        if response:
+            validator = get_output_validator()
+            validation = validator.validate(response, endpoint="chat")
+            if validation.violations:
+                self._last_validation_violations = [
+                    {"check": v.check, "severity": v.severity, "detail": v.detail}
+                    for v in validation.violations
+                ]
+            else:
+                self._last_validation_violations = []
 
         # Cache response (3.0)
         if self.cache and response:
@@ -690,22 +714,41 @@ class PearlBrain:
         return self.data_access.format_for_context(query, self._current_state)
 
     def _classify_query(self, query: str) -> QueryComplexity:
-        """Determine if query needs local (quick) or Claude (deep) response"""
+        """Determine if query needs local (quick) or Claude (deep) response.
+
+        Uses keyword matching as the production classifier, with an
+        embedding-based shadow classifier that logs disagreements for
+        analysis without affecting routing.
+        """
         config = self._config.query_classification
 
         query_lower = query.lower()
 
+        # --- Keyword classifier (production) ---
+        keyword_label = None
         for keyword in config.DEEP_KEYWORDS:
             if keyword in query_lower:
-                return QueryComplexity.DEEP
+                keyword_label = "deep"
+                break
 
-        # Quick queries
-        for keyword in config.QUICK_KEYWORDS:
-            if keyword in query_lower:
-                return QueryComplexity.QUICK
+        if keyword_label is None:
+            for keyword in config.QUICK_KEYWORDS:
+                if keyword in query_lower:
+                    keyword_label = "quick"
+                    break
 
-        # Default to quick for short queries, deep for longer
-        return QueryComplexity.QUICK if len(query.split()) < config.WORD_COUNT_THRESHOLD else QueryComplexity.DEEP
+        if keyword_label is None:
+            keyword_label = "quick" if len(query.split()) < config.WORD_COUNT_THRESHOLD else "deep"
+
+        # --- Shadow classifier (embedding-based, non-blocking) ---
+        try:
+            from .classifier import get_embedding_classifier, get_shadow_log
+            emb_result = get_embedding_classifier().classify(query)
+            get_shadow_log().record(query, keyword_label, emb_result)
+        except Exception:
+            pass  # Shadow classifier must never block production
+
+        return QueryComplexity.DEEP if keyword_label == "deep" else QueryComplexity.QUICK
 
     def _build_chat_context(self, query: str) -> Dict[str, Any]:
         """Build context for the chat response"""
@@ -719,12 +762,16 @@ class PearlBrain:
     async def _quick_response(self, query: str, context: Dict[str, Any]) -> str:
         """Generate quick response using local LLM"""
 
-        system_prompt = f"""You are Pearl, an AI trading assistant for algorithmic trading.
-You have access to real-time trading data. Be concise, direct, and helpful.
-Answer questions about current trades, positions, and market state.
-Use the provided context to give accurate information.
-
-{self._voice_style_instructions()}"""
+        _QUICK_FALLBACK = (
+            "You are Pearl, an AI trading assistant for algorithmic trading.\n"
+            "You have access to real-time trading data. Be concise, direct, and helpful.\n"
+            "Answer questions about current trades, positions, and market state.\n"
+            "Use the provided context to give accurate information."
+        )
+        registry = get_prompt_registry()
+        quick_base = registry.get("quick_system", fallback=_QUICK_FALLBACK)
+        voice = self._voice_style_instructions()
+        system_prompt = f"{quick_base}\n\n{voice}" if voice else quick_base
 
         user_prompt = f"""Current Trading State:
 - Daily P&L: ${context['current_state'].get('daily_pnl', 0):.2f}
@@ -848,25 +895,26 @@ Respond naturally and concisely:"""
 
     def _build_deep_system_prompt(self, context: Dict[str, Any]) -> str:
         """Build system prompt for deep responses"""
-        base_prompt = """You are Pearl, an advanced AI trading coach and analyst.
-You help traders understand their performance, identify patterns, and improve their strategy.
-
-Your capabilities:
-- Analyze trading patterns and performance
-- Explain why specific trades were taken or rejected
-- Provide coaching based on historical data
-- Suggest strategy improvements
-- Identify psychological patterns (overtrading, revenge trading, etc.)
-
-Be insightful, specific, and actionable. Use data to support your observations.
-Speak naturally, like a calm, capable operator and trading mentor.
-
-Response structure:
-- Start with a 1-line Status.
-- Then 3-6 bullets (Observations).
-- Then Next steps (1-3 bullets).
-- If you are uncertain, say what’s missing and what you’d check next.
-"""
+        _DEEP_FALLBACK = (
+            "You are Pearl, an advanced AI trading coach and analyst.\n"
+            "You help traders understand their performance, identify patterns, "
+            "and improve their strategy.\n\n"
+            "Your capabilities:\n"
+            "- Analyze trading patterns and performance\n"
+            "- Explain why specific trades were taken or rejected\n"
+            "- Provide coaching based on historical data\n"
+            "- Suggest strategy improvements\n"
+            "- Identify psychological patterns (overtrading, revenge trading, etc.)\n\n"
+            "Be insightful, specific, and actionable. Use data to support your observations.\n"
+            "Speak naturally, like a calm, capable operator and trading mentor.\n\n"
+            "Response structure:\n"
+            "- Start with a 1-line Status.\n"
+            "- Then 3-6 bullets (Observations).\n"
+            "- Then Next steps (1-3 bullets).\n"
+            "- If you are uncertain, say what's missing and what you'd check next.\n"
+        )
+        registry = get_prompt_registry()
+        base_prompt = registry.get("deep_system", fallback=_DEEP_FALLBACK)
 
         voice = self._voice_style_instructions()
         if voice:
@@ -890,7 +938,7 @@ Response structure:
             return ""
 
         if voice in ("jarvis", "ops", "steward"):
-            return (
+            _VOICE_FALLBACK = (
                 "Voice & tone:\n"
                 "- Crisp, composed, quietly confident.\n"
                 "- Understated wit is allowed, but never at the expense of clarity.\n"
@@ -898,8 +946,10 @@ Response structure:
                 "- You may address the operator as \"sir\" sparingly; avoid other pet names.\n"
                 "- Prefer short paragraphs and bullet lists.\n"
                 "- Never claim you executed trades or controls. You only observe and advise.\n"
-                "- If you can’t verify something from data, say so plainly.\n"
+                "- If you can't verify something from data, say so plainly.\n"
             )
+            registry = get_prompt_registry()
+            return registry.get("voice_jarvis", fallback=_VOICE_FALLBACK)
 
         custom = (os.getenv("PEARL_AI_VOICE_INSTRUCTIONS") or "").strip()
         if custom:
@@ -907,43 +957,17 @@ Response structure:
         return ""
 
     def _build_deep_user_prompt(self, query: str, context: Dict[str, Any]) -> str:
-        """Build user prompt for deep responses"""
-        state = context['current_state']
-        recent_trades = state.get('recent_exits', [])[:10]
+        """Build user prompt for deep responses.
 
-        prompt = f"""# Current Session
-- Daily P&L: ${state.get('daily_pnl', 0):.2f}
-- Trades: {state.get('daily_trades', 0)} ({state.get('daily_wins', 0)}W / {state.get('daily_losses', 0)}L)
-- Active Positions: {state.get('active_trades_count', 0)}
-- Win Rate: {state.get('daily_wins', 0) / max(state.get('daily_trades', 1), 1) * 100:.0f}%
-
-# Market Context
-- Regime: {state.get('market_regime', {}).get('regime', 'unknown')}
-- Direction Allowed: {state.get('market_regime', {}).get('allowed_direction', 'both')}
-
-# Risk Metrics
-- Expectancy: ${state.get('risk_metrics', {}).get('expectancy', 0):.2f}
-- Sharpe Ratio: {state.get('risk_metrics', {}).get('sharpe_ratio', 'N/A')}
-- Max Drawdown: ${state.get('risk_metrics', {}).get('max_drawdown', 0):.2f}
-
-# Recent Trades
-{self._format_recent_trades(recent_trades)}
-
-# AI Status
-- ML Filter: {state.get('ai_status', {}).get('ml_filter', {}).get('mode', 'off')}
-- Direction Gating Blocks: {state.get('ai_status', {}).get('direction_gating', {}).get('blocks', 0)}
-
-# Signal Rejections (24h)
-{self._format_rejections(state.get('signal_rejections_24h', {}))}"""
-
-        # Add RAG context if available
-        trade_history = context.get('trade_history', '')
-        if trade_history:
-            prompt += f"\n\n# Historical Trade Data\n{trade_history}"
-
-        prompt += f"\n\n---\n\nUser Question: {query}\n\nProvide a thoughtful, data-driven response:"
-
-        return prompt
+        Delegates to prompts.builder for the core assembly, passing
+        this instance's formatting helpers for trade/rejection display.
+        """
+        return _build_deep_user_prompt_helper(
+            query=query,
+            context=context,
+            format_recent_trades_fn=self._format_recent_trades,
+            format_rejections_fn=self._format_rejections,
+        )
 
     async def _deep_response(self, query: str, context: Dict[str, Any]) -> str:
         """Generate deep analytical response using Claude (legacy interface)"""

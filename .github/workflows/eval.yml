@@ -12,6 +12,7 @@ on:
       - 'pearl_ai/narrator.py'
       - 'pearl_ai/tools.py'
       - 'pearl_ai/config.py'
+      - 'pearl_ai/prompts/**'
       - 'pearl_ai/eval/**'
   push:
     branches:
@@ -22,6 +23,7 @@ on:
       - 'pearl_ai/narrator.py'
       - 'pearl_ai/tools.py'
       - 'pearl_ai/config.py'
+      - 'pearl_ai/prompts/**'
   workflow_dispatch:
     inputs:
       dataset:
@@ -55,11 +57,21 @@ jobs:
           # Install minimal deps for eval (avoid full requirements.txt)
           pip install -e . || true
 
-      - name: Run evaluation (mock mode)
+      - name: Run evaluation (mock mode - core)
         id: eval
         run: |
           python -m pearl_ai.eval.ci \
             --dataset ${{ github.event.inputs.dataset || 'golden_core.json' }} \
+            --threshold ${{ github.event.inputs.threshold || '0.85' }} \
+            --mock \
+            --output-dir eval-reports
+        continue-on-error: true
+
+      - name: Run evaluation (mock mode - adversarial)
+        id: eval_adversarial
+        run: |
+          python -m pearl_ai.eval.ci \
+            --dataset golden_adversarial.json \
             --threshold ${{ github.event.inputs.threshold || '0.85' }} \
             --mock \
             --output-dir eval-reports

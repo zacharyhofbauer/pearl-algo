@@ -49,6 +49,7 @@ PROMPT_FILES = [
     "pearl_ai/narrator.py",
     "pearl_ai/tools.py",
     "pearl_ai/config.py",
+    "pearl_ai/prompts/",
 ]
 
 

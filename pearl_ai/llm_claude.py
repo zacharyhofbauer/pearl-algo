@@ -53,24 +53,31 @@ class ClaudeLLM:
         model: str = CLAUDE_SONNET,
         timeout: int = 60,
         max_retries: int = 2,
+        enable_prompt_caching: bool = True,
     ):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
+        self.enable_prompt_caching = enable_prompt_caching
         self.base_url = "https://api.anthropic.com/v1"
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session with proper headers."""
         if self._session is None or self._session.closed:
+            headers = {
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            # Enable prompt caching beta for reduced input token costs
+            # on repeated system prompts (~90% savings on cached prefix).
+            if self.enable_prompt_caching:
+                headers["anthropic-beta"] = "prompt-caching-2024-07-31"
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                },
+                headers=headers,
             )
         return self._session
 
@@ -137,7 +144,19 @@ class ClaudeLLM:
         }
 
         if system:
-            payload["system"] = system
+            # When prompt caching is enabled, wrap the system prompt in
+            # a content block with cache_control so Anthropic can cache
+            # the static prefix across requests (saves ~90% input tokens).
+            if self.enable_prompt_caching:
+                payload["system"] = [
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                payload["system"] = system
 
         if stop_sequences:
             payload["stop_sequences"] = stop_sequences
@@ -206,8 +225,19 @@ class ClaudeLLM:
                     "input": block.get("input", {}),
                 })
 
-        # Extract usage
+        # Extract usage (includes prompt caching stats when enabled)
         usage = data.get("usage", {})
+
+        # Log prompt cache savings if present
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+        if cache_read > 0:
+            logger.debug(
+                f"Prompt cache hit: {cache_read} cached tokens, "
+                f"{usage.get('input_tokens', 0)} new tokens"
+            )
+        elif cache_creation > 0:
+            logger.debug(f"Prompt cache miss: {cache_creation} tokens cached for next request")
 
         return LLMResponse(
             content="".join(content_parts).strip(),
@@ -678,13 +708,17 @@ Provide ONE focused piece of coaching advice with a specific action step."""
             await self._session.close()
 
     def __del__(self):
-        """Cleanup on deletion."""
+        """Cleanup on deletion.
+
+        NOTE: Accessing the event loop in __del__ is inherently unsafe
+        because __del__ may run after the loop is closed or from a
+        different thread. We only attempt a best-effort cleanup here.
+        Prefer calling ``await close()`` explicitly.
+        """
         if self._session and not self._session.closed:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self._session.close())
-                else:
-                    loop.run_until_complete(self._session.close())
-            except Exception:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._session.close())
+            except RuntimeError:
+                # No running loop - session will be garbage collected
                 pass

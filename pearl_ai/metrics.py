@@ -425,6 +425,17 @@ class MetricsCollector:
         today_requests = [r for r in self.requests if r.timestamp >= today_start]
         return sum(r.cost_usd for r in today_requests)
 
+    def is_daily_limit_exceeded(self) -> bool:
+        """
+        Check if daily cost limit has been reached.
+
+        Returns True if a daily limit is set and today's cost meets or
+        exceeds it. Used by PearlBrain to degrade to local LLM only.
+        """
+        if not self.daily_cost_limit:
+            return False
+        return self.get_cost_today() >= self.daily_cost_limit
+
     def get_cost_this_month(self) -> float:
         """Get total cost for this month."""
         month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
