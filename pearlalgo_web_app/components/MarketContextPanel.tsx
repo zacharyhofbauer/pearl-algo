@@ -72,18 +72,18 @@ export default function MarketContextPanel({ regime, pressure }: MarketContextPa
     }
 
     const getRegimeIcon = () => {
-      if (regime.confidence === 0) return '⏳'
+      if (regime.confidence === 0) return '—'
       switch (regime.regime) {
         case 'trending_up':
-          return '📈'
+          return '▲'
         case 'trending_down':
-          return '📉'
+          return '▼'
         case 'ranging':
-          return '↔️'
+          return '◆'
         case 'volatile':
-          return '⚡'
+          return '⬥'
         default:
-          return '⏳'
+          return '—'
       }
     }
 

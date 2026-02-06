@@ -964,7 +964,7 @@ class ConnectionManager:
                                         pass
 
                                     try:
-                                        enriched["recent_exits"] = _get_recent_exits(_state_dir, limit=3)
+                                        enriched["recent_exits"] = _get_recent_exits(_state_dir, limit=100)
                                     except Exception:
                                         pass
 
@@ -1048,7 +1048,7 @@ class ConnectionManager:
                                     "data_quality": _get_data_quality(state),
                                     # Performance data (previously HTTP-only)
                                     "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                                    "recent_exits": _get_recent_exits(_state_dir, limit=100),
                                     "performance": _compute_performance_stats(_state_dir),
                                     "equity_curve": _get_equity_curve(_state_dir, hours=72),
                                     "risk_metrics": _get_risk_metrics(_state_dir),
@@ -1236,7 +1236,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
                         "challenge": _get_challenge_status(_state_dir),
-                        "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                        "recent_exits": _get_recent_exits(_state_dir, limit=100),
                         "performance": _compute_performance_stats(_state_dir),
                         "equity_curve": _get_equity_curve(_state_dir, hours=72),
                         "risk_metrics": _get_risk_metrics(_state_dir),
@@ -1303,7 +1303,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
                                     "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                                    "recent_exits": _get_recent_exits(_state_dir, limit=100),
                                     "performance": _compute_performance_stats(_state_dir),
                                     "equity_curve": _get_equity_curve(_state_dir, hours=72),
                                     "risk_metrics": _get_risk_metrics(_state_dir),
@@ -1488,16 +1488,19 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 except Exception:
                     pass
                 pnl = round(equity - start_balance, 2)
-                # Trade counts from performance.json (actual tracked trades)
+                # Trade counts from Tradovate fills (state.json -> persistent file -> fallback)
                 trades, wins, losses = 0, 0, 0
                 try:
-                    pf = state_dir / "performance.json"
-                    if pf.exists():
-                        _trades = json.loads(pf.read_text())
-                        if isinstance(_trades, list) and _trades:
-                            trades = len(_trades)
-                            wins = sum(1 for t in _trades if (t.get("pnl") or 0) > 0)
-                            losses = trades - wins
+                    tv_fills = state_data.get("tradovate_fills") or tv.get("fills") or []
+                    if not tv_fills:
+                        fills_file = state_dir / "tradovate_fills.json"
+                        if fills_file.exists():
+                            tv_fills = json.loads(fills_file.read_text()) or []
+                    if tv_fills:
+                        paired = _tradovate_fills_to_trades(tv_fills)
+                        trades = len(paired)
+                        wins = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
+                        losses = trades - wins
                 except Exception:
                     pass
                 return {
@@ -1810,27 +1813,42 @@ def _is_mffu_account(state_dir: Path) -> bool:
 
 
 def _get_tradovate_state(state_dir: Path) -> tuple:
-    """Load tradovate_account and tradovate_fills from state.json.
+    """Load tradovate_account and tradovate_fills.
+
+    Fills are read from state.json first, then from the persistent
+    tradovate_fills.json file (which survives session resets since
+    Tradovate's /fill/list clears at end of day).
 
     Returns (tradovate_account_dict, fills_list).
     """
+    tv: Dict[str, Any] = {}
+    fills: List[Dict[str, Any]] = []
     try:
         state_file = state_dir / "state.json"
         if state_file.exists():
             data = json.loads(state_file.read_text()) or {}
             tv = data.get("tradovate_account") or {}
             fills = data.get("tradovate_fills") or []
-            return tv, fills
     except Exception:
         pass
-    return {}, []
+
+    # Fallback: read from persistent fills file when state.json has none
+    if not fills:
+        try:
+            fills_file = state_dir / "tradovate_fills.json"
+            if fills_file.exists():
+                fills = json.loads(fills_file.read_text()) or []
+        except Exception:
+            pass
+
+    return tv, fills
 
 
 def _tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Convert raw Tradovate fills into paired trade records.
+    """Convert raw Tradovate fills into trade records using FIFO matching.
 
-    Pairs Buy fills with subsequent Sell fills (and vice versa) to produce
-    trade records with entry_price, exit_price, pnl, direction, etc.
+    Maintains a FIFO queue of open lots.  Each closing fill is matched
+    against the oldest open lot(s) to produce one trade per fill.
 
     MNQ point value = $2 per point per contract.
     """
@@ -1839,54 +1857,57 @@ def _tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, An
 
     POINT_VALUE = 2.0  # MNQ micro
 
-    # Sort fills by timestamp
     sorted_fills = sorted(fills, key=lambda f: f.get("timestamp") or "")
 
     trades: List[Dict[str, Any]] = []
-    pending_entries: List[Dict[str, Any]] = []  # fills waiting for a closing fill
+    # FIFO queue of open lots: [{"price": float, "qty": int, "time": str, "id": str, "side": "Buy"|"Sell"}]
+    open_lots: List[Dict[str, Any]] = []
 
     for fill in sorted_fills:
         action = fill.get("action", "")
-        net_pos_after = fill.get("net_pos", 0)
         price = float(fill.get("price", 0))
-        qty = int(fill.get("qty", 1))
+        remaining = int(fill.get("qty", 1))
         ts = fill.get("timestamp", "")
+        fill_id = fill.get("id", "")
 
-        if not pending_entries:
-            # This is an opening fill
-            pending_entries.append(fill)
-        elif (pending_entries[0].get("action") == "Buy" and action == "Sell") or \
-             (pending_entries[0].get("action") == "Sell" and action == "Buy"):
-            # This closes a pending entry
-            entry_fill = pending_entries.pop(0)
-            entry_price = float(entry_fill.get("price", 0))
-            entry_action = entry_fill.get("action", "Buy")
-            direction = "long" if entry_action == "Buy" else "short"
+        # Determine if this fill opens or closes
+        if not open_lots or open_lots[0]["side"] == action:
+            # Same side as existing lots (or no lots) -> opening fill
+            open_lots.append({"price": price, "qty": remaining, "time": ts, "id": fill_id, "side": action})
+            continue
 
+        # Opposite side -> closing fill.  Match FIFO against open lots.
+        while remaining > 0 and open_lots:
+            lot = open_lots[0]
+            match_qty = min(remaining, lot["qty"])
+
+            direction = "long" if lot["side"] == "Buy" else "short"
             if direction == "long":
-                pnl = round((price - entry_price) * qty * POINT_VALUE, 2)
+                pnl = round((price - lot["price"]) * match_qty * POINT_VALUE, 2)
             else:
-                pnl = round((entry_price - price) * qty * POINT_VALUE, 2)
+                pnl = round((lot["price"] - price) * match_qty * POINT_VALUE, 2)
 
             trades.append({
-                "signal_id": f"tv_{entry_fill.get('id', '')}_{fill.get('id', '')}",
+                "signal_id": f"tv_{lot['id']}_{fill_id}",
                 "symbol": "MNQ",
                 "direction": direction,
-                "position_size": qty,
-                "entry_time": entry_fill.get("timestamp"),
-                "entry_price": entry_price,
+                "position_size": match_qty,
+                "entry_time": lot["time"],
+                "entry_price": lot["price"],
                 "exit_time": ts,
                 "exit_price": price,
                 "pnl": pnl,
                 "exit_reason": "take_profit" if pnl > 0 else "stop_loss",
             })
 
-            # If net_pos is still non-zero, this fill might also open a new position
-            if net_pos_after != 0 and not pending_entries:
-                pending_entries.append(fill)
-        else:
-            # Same direction fill (adding to position)
-            pending_entries.append(fill)
+            remaining -= match_qty
+            lot["qty"] -= match_qty
+            if lot["qty"] <= 0:
+                open_lots.pop(0)
+
+        # If remaining > 0, this fill also opens a new position in the opposite direction
+        if remaining > 0:
+            open_lots.append({"price": price, "qty": remaining, "time": ts, "id": fill_id, "side": action})
 
     return trades
 
@@ -2300,11 +2321,71 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         "largest_win": 0.0,
         "largest_loss": 0.0,
         "expectancy": 0.0,
-        # NEW: Exposure metrics
         "max_concurrent_positions_peak": 0,
         "max_stop_risk_exposure": 0.0,
         "top_losses": [],
     }
+
+    # MFFU: compute risk metrics from Tradovate fills
+    if _is_mffu_account(state_dir):
+        try:
+            _, fills = _get_tradovate_state(state_dir)
+            trades = _tradovate_fills_to_trades(fills)
+            pnls = [t.get("pnl", 0) or 0 for t in trades]
+            if not pnls:
+                return default_metrics
+
+            wins = [p for p in pnls if p > 0]
+            losses = [p for p in pnls if p < 0]
+
+            # Max drawdown
+            cumulative = 0.0
+            peak = 0.0
+            max_dd = 0.0
+            for p in pnls:
+                cumulative += p
+                if cumulative > peak:
+                    peak = cumulative
+                dd = peak - cumulative
+                if dd > max_dd:
+                    max_dd = dd
+
+            # Profit factor
+            total_wins = sum(wins) if wins else 0
+            total_losses = abs(sum(losses)) if losses else 0
+            profit_factor = round(total_wins / total_losses, 2) if total_losses > 0 else None
+
+            avg_win = round(statistics.mean(wins), 2) if wins else 0.0
+            avg_loss = round(statistics.mean(losses), 2) if losses else 0.0
+            avg_rr = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else None
+
+            win_rate = len(wins) / len(pnls)
+            expectancy = round((win_rate * avg_win) + ((1 - win_rate) * avg_loss), 2)
+
+            sharpe = None
+            if len(pnls) >= 5:
+                mean_pnl = statistics.mean(pnls)
+                std_pnl = statistics.stdev(pnls) if len(pnls) > 1 else 0
+                if std_pnl > 0:
+                    sharpe = round((mean_pnl / std_pnl) * (252 ** 0.5), 2)
+
+            return {
+                "max_drawdown": round(max_dd, 2),
+                "max_drawdown_pct": round((max_dd / peak * 100), 1) if peak > 0 else 0.0,
+                "sharpe_ratio": sharpe,
+                "profit_factor": profit_factor,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss,
+                "avg_rr": avg_rr,
+                "largest_win": round(max(wins), 2) if wins else 0.0,
+                "largest_loss": round(min(losses), 2) if losses else 0.0,
+                "expectancy": expectancy,
+                "max_concurrent_positions_peak": 0,
+                "max_stop_risk_exposure": 0.0,
+                "top_losses": [{"pnl": round(p, 2)} for p in sorted(losses)[:3]] if losses else [],
+            }
+        except Exception:
+            return default_metrics
 
     if not performance_file.exists():
         return default_metrics
@@ -2773,7 +2854,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "ai_status": None,
             "challenge": _get_challenge_status(_state_dir),
-            "recent_exits": _get_recent_exits(_state_dir, limit=3),
+            "recent_exits": _get_recent_exits(_state_dir, limit=100),
             "performance": _compute_performance_stats(_state_dir),
             "equity_curve": _get_equity_curve(_state_dir, hours=72),
             "risk_metrics": _get_risk_metrics(_state_dir),
@@ -2806,7 +2887,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "challenge": _get_challenge_status(_state_dir),
 
         # NEW: Recent exits
-        "recent_exits": _get_recent_exits(_state_dir, limit=3),
+        "recent_exits": _get_recent_exits(_state_dir, limit=100),
 
         # NEW: Performance stats
         "performance": _compute_performance_stats(_state_dir),
@@ -3726,23 +3807,104 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    # MFFU: build analytics from Tradovate fills (include all fields the frontend expects)
+    # MFFU: build full analytics from Tradovate fills
     if _is_mffu_account(_state_dir):
-        _, fills = _get_tradovate_state(_state_dir)
+        tv, fills = _get_tradovate_state(_state_dir)
         trades = _tradovate_fills_to_trades(fills)
         long_trades = [t for t in trades if t.get("direction") == "long"]
         short_trades = [t for t in trades if t.get("direction") == "short"]
         long_pnl = sum(t.get("pnl", 0) for t in long_trades)
         short_pnl = sum(t.get("pnl", 0) for t in short_trades)
         total = len(trades)
-        tv, _ = _get_tradovate_state(_state_dir)
         open_count = len([p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0])
         entered = total + open_count
+
+        # Session performance (bucket trades by ET hour)
+        from zoneinfo import ZoneInfo as _ZI
+        _et = _ZI("America/New_York")
+        _sessions = {
+            "overnight": {"start": 18, "end": 4, "name": "Overnight", "pnl": 0.0, "wins": 0, "losses": 0},
+            "premarket": {"start": 4, "end": 6, "name": "Premarket", "pnl": 0.0, "wins": 0, "losses": 0},
+            "morning":   {"start": 6, "end": 10, "name": "Morning", "pnl": 0.0, "wins": 0, "losses": 0},
+            "midday":    {"start": 10, "end": 14, "name": "Midday", "pnl": 0.0, "wins": 0, "losses": 0},
+            "afternoon": {"start": 14, "end": 17, "name": "Afternoon", "pnl": 0.0, "wins": 0, "losses": 0},
+            "close":     {"start": 17, "end": 18, "name": "Close", "pnl": 0.0, "wins": 0, "losses": 0},
+        }
+        _hourly: Dict[int, Dict[str, Any]] = {h: {"pnl": 0.0, "trades": 0, "wins": 0} for h in range(24)}
+        _duration = {
+            "quick":  {"name": "Quick (<30m)", "pnl": 0.0, "wins": 0, "losses": 0},
+            "medium": {"name": "Medium (30-60m)", "pnl": 0.0, "wins": 0, "losses": 0},
+            "long":   {"name": "Long (60m+)", "pnl": 0.0, "wins": 0, "losses": 0},
+        }
+
+        for t in trades:
+            pnl = t.get("pnl", 0) or 0
+            is_win = pnl > 0
+            # Parse exit time to ET
+            try:
+                exit_ts = t.get("exit_time", "")
+                exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00")).astimezone(_et)
+                et_hour = exit_dt.hour
+            except Exception:
+                et_hour = 12  # fallback
+
+            # Session bucketing
+            for _sk, _sv in _sessions.items():
+                s, e = _sv["start"], _sv["end"]
+                in_sess = (et_hour >= s and et_hour < e) if s < e else (et_hour >= s or et_hour < e)
+                if in_sess:
+                    _sv["pnl"] += pnl
+                    if is_win: _sv["wins"] += 1
+                    else: _sv["losses"] += 1
+                    break
+
+            # Hourly
+            _hourly[et_hour]["pnl"] += pnl
+            _hourly[et_hour]["trades"] += 1
+            if is_win: _hourly[et_hour]["wins"] += 1
+
+            # Duration
+            try:
+                entry_ts = t.get("entry_time", "")
+                entry_dt = datetime.fromisoformat(entry_ts.replace("Z", "+00:00"))
+                dur_min = (exit_dt - entry_dt.astimezone(_et)).total_seconds() / 60
+                if dur_min < 30:
+                    dk = "quick"
+                elif dur_min < 60:
+                    dk = "medium"
+                else:
+                    dk = "long"
+                _duration[dk]["pnl"] += pnl
+                if is_win: _duration[dk]["wins"] += 1
+                else: _duration[dk]["losses"] += 1
+            except Exception:
+                pass
+
+        # Format session_performance
+        session_performance = []
+        for k, s in _sessions.items():
+            tot = s["wins"] + s["losses"]
+            wr = round(s["wins"] / tot * 100, 1) if tot > 0 else 0.0
+            session_performance.append({"id": k, "name": s["name"], "pnl": round(s["pnl"], 2), "wins": s["wins"], "losses": s["losses"], "win_rate": wr})
+
+        # Best/worst hours
+        qualified = [{"hour": h, **st} for h, st in _hourly.items() if st["trades"] >= 1]
+        sorted_h = sorted(qualified, key=lambda x: x["pnl"], reverse=True)
+        best_hours = [{"hour": h["hour"], "hour_label": f"{h['hour']:02d}:00 ET", "pnl": round(h["pnl"], 2), "trades": h["trades"], "win_rate": round(h["wins"]/h["trades"]*100, 1) if h["trades"] else 0} for h in sorted_h[:3]]
+        worst_hours = [{"hour": h["hour"], "hour_label": f"{h['hour']:02d}:00 ET", "pnl": round(h["pnl"], 2), "trades": h["trades"], "win_rate": round(h["wins"]/h["trades"]*100, 1) if h["trades"] else 0} for h in sorted_h[-3:][::-1] if h["pnl"] < 0]
+
+        # Hold duration
+        hold_duration = []
+        for k, d in _duration.items():
+            tot = d["wins"] + d["losses"]
+            wr = round(d["wins"] / tot * 100, 1) if tot > 0 else 0.0
+            hold_duration.append({"id": k, "name": d["name"], "pnl": round(d["pnl"], 2), "wins": d["wins"], "losses": d["losses"], "win_rate": wr})
+
         return {
-            "session_performance": [],
-            "best_hours": [],
-            "worst_hours": [],
-            "hold_duration": [],
+            "session_performance": session_performance,
+            "best_hours": best_hours,
+            "worst_hours": worst_hours,
+            "hold_duration": hold_duration,
             "direction_breakdown": {
                 "long": {"count": len(long_trades), "pnl": round(long_pnl, 2)},
                 "short": {"count": len(short_trades), "pnl": round(short_pnl, 2)},

@@ -98,14 +98,11 @@ telegram:
 # Auto-Flat: MFFU session close at 4:08 PM ET
 # ---------------------------------------------------------------------------
 auto_flat:
-  enabled: true
-  daily_enabled: true
-  daily_time: "16:08"        # 4:08 PM ET (2 min before MFFU 4:10 close)
-  friday_enabled: true
-  friday_time: "16:08"
-  weekend_enabled: true
-  notify: true
-  timezone: "America/New_York"
+  enabled: false              # Disabled -- Tradovate bracket orders handle exits
+  daily_enabled: false
+  friday_enabled: false
+  weekend_enabled: false
+  notify: false
 
 # ---------------------------------------------------------------------------
 # Signal Forwarding: MFFU reads signals from inception instead of running

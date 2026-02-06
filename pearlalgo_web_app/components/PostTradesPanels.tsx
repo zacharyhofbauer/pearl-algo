@@ -27,7 +27,38 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
         </DataPanelsContainer>
       )}
 
-      {/* Core panels (signals + readiness) */}
+      {/* Analytics + signals */}
+      {(agentState.analytics || agentState.signal_rejections_24h || agentState.last_signal_decision) && (
+        <DataPanelsContainer>
+          {agentState.analytics && (
+            <div className="panel-span-all">
+              <AnalyticsPanel analytics={agentState.analytics} recentExits={agentState.recent_exits} />
+            </div>
+          )}
+
+          {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
+            <SignalDecisionsPanel
+              rejections={agentState.signal_rejections_24h || null}
+              lastDecision={agentState.last_signal_decision || null}
+            />
+          )}
+        </DataPanelsContainer>
+      )}
+
+      {/* Risk + Market context */}
+      {(agentState.risk_metrics || agentState.equity_curve?.length || agentState.market_regime || agentState.buy_sell_pressure) && (
+        <DataPanelsContainer>
+          {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
+            <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
+          )}
+
+          {(agentState.market_regime || agentState.buy_sell_pressure) && (
+            <MarketContextPanel regime={agentState.market_regime} pressure={agentState.buy_sell_pressure} />
+          )}
+        </DataPanelsContainer>
+      )}
+
+      {/* System (combined: status + health + config) -- always last */}
       <DataPanelsContainer>
         <div className="panel-span-all">
           <SystemStatusPanel
@@ -40,30 +71,6 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
             isPaused={agentState.paused}
           />
         </div>
-
-        {agentState.analytics && (
-          <div className="panel-span-all">
-            <AnalyticsPanel analytics={agentState.analytics} recentExits={agentState.recent_exits} />
-          </div>
-        )}
-
-        {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
-          <SignalDecisionsPanel
-            rejections={agentState.signal_rejections_24h || null}
-            lastDecision={agentState.last_signal_decision || null}
-          />
-        )}
-      </DataPanelsContainer>
-
-      {/* All panels visible (no toggle) */}
-      <DataPanelsContainer>
-        {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
-          <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
-        )}
-
-        {(agentState.market_regime || agentState.buy_sell_pressure) && (
-          <MarketContextPanel regime={agentState.market_regime} pressure={agentState.buy_sell_pressure} />
-        )}
 
         {(agentState.cadence_metrics ||
           agentState.gateway_status ||

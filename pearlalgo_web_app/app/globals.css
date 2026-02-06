@@ -6030,7 +6030,8 @@ body {
 }
 
 .regime-icon {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-md);
+  font-style: normal;
 }
 
 .regime-badge.regime-trending-up {

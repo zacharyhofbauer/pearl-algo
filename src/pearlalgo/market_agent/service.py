@@ -271,6 +271,13 @@ class MarketAgentService:
                 f"shared_file={self._shared_signals_path} | "
                 f"strategy.analyze() will be SKIPPED -- reading from inception"
             )
+            # Clear stale signals on startup to prevent replaying old signals
+            try:
+                if self._shared_signals_path.exists():
+                    self._shared_signals_path.unlink()
+                    logger.info("Cleared stale shared_signals.jsonl on follower startup")
+            except Exception:
+                pass
         elif self._signal_writer_mode:
             logger.info(
                 f"Signal forwarding: WRITER mode | "
@@ -1306,7 +1313,13 @@ class MarketAgentService:
                     # Full analysis: new bar arrived
                     if self._signal_follower_mode:
                         # MFFU follower: read from shared file instead of strategy
-                        signals = self._read_shared_signals()
+                        # Guard: never process signals when market is closed
+                        _market_open_for_signals = True
+                        try:
+                            _market_open_for_signals = bool(get_market_hours().is_market_open())
+                        except Exception:
+                            pass
+                        signals = self._read_shared_signals() if _market_open_for_signals else []
                         if signals:
                             logger.info(
                                 f"MFFU: Read {len(signals)} forwarded signal(s) "
@@ -5607,6 +5620,12 @@ class MarketAgentService:
         """
         if not self._signal_follower_mode:
             return
+        # Never process signals when market is closed
+        try:
+            if not get_market_hours().is_market_open():
+                return
+        except Exception:
+            pass
         try:
             forwarded = self._read_shared_signals()
             if not forwarded:
@@ -5872,11 +5891,29 @@ class MarketAgentService:
         # Tradovate live account data (balance, positions, P&L, fills)
         if self._tradovate_account:
             # Separate fills from the summary to keep state.json cleaner
-            fills = self._tradovate_account.pop("fills", [])
+            new_fills = self._tradovate_account.pop("fills", [])
             state["tradovate_account"] = self._tradovate_account
-            state["tradovate_fills"] = fills
             # Put fills back on the cached dict so next poll overwrites cleanly
-            self._tradovate_account["fills"] = fills
+            self._tradovate_account["fills"] = new_fills
+
+            # Persist fills to a dedicated file (accumulates across sessions,
+            # because Tradovate's /fill/list clears at end of day).
+            fills_file = self.state_manager.state_dir / "tradovate_fills.json"
+            try:
+                existing_fills: list = []
+                if fills_file.exists():
+                    existing_fills = json.loads(fills_file.read_text()) or []
+                # Merge: add new fills not already in the file (by fill id)
+                existing_ids = {f.get("id") for f in existing_fills}
+                for nf in new_fills:
+                    if nf.get("id") and nf["id"] not in existing_ids:
+                        existing_fills.append(nf)
+                        existing_ids.add(nf["id"])
+                fills_file.write_text(json.dumps(existing_fills))
+                state["tradovate_fills"] = existing_fills
+            except Exception:
+                state["tradovate_fills"] = new_fills
+
             # Override virtual trade counts with real broker data
             state["active_trades_count"] = self._tradovate_account.get("position_count", 0)
             state["active_trades_unrealized_pnl"] = self._tradovate_account.get("open_pnl", 0.0)
