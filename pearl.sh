@@ -144,6 +144,24 @@ check_chart_status() {
     fi
 }
 
+check_mffu_status() {
+    local pidfile="$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid"
+    local api_ok=$(curl -s http://localhost:8001/health 2>/dev/null | grep -c "ok" || echo 0)
+    
+    if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        local pid=$(cat "$pidfile")
+        local uptime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
+        local api_label=""
+        [ "$api_ok" -gt 0 ] && api_label=" | API :8001" || api_label=" | API down"
+        echo -e "${GREEN}●${NC} MFFU Eval - PID $pid, uptime: $uptime$api_label"
+    elif [ "$api_ok" -gt 0 ]; then
+        echo -e "${YELLOW}●${NC} MFFU Eval - API only (agent stopped)"
+    else
+        echo -e "${RED}●${NC} MFFU Eval"
+        return 1
+    fi
+}
+
 check_tunnel_status() {
     # Check if cloudflared tunnel is running (either as service or process)
     if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
@@ -186,6 +204,7 @@ show_status() {
     echo -e "${CYAN}Services:${NC}"
     check_gateway_status || true
     check_agent_status || true
+    check_mffu_status || true
     check_telegram_status || true
     check_chart_status || true
     check_tunnel_status || true
@@ -205,10 +224,12 @@ show_quick_status() {
     local agent_status=$([ -f "$agent_pid_file" ] && kill -0 "$(cat "$agent_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
+    local mffu_pid_file="$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid"
+    local mffu_status=$([ -f "$mffu_pid_file" ] && kill -0 "$(cat "$mffu_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && pgrep -f "next" &>/dev/null && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
     
-    echo -e "PEARL: Gateway $gw_status | Agent $agent_status | Telegram $tg_status | Chart $chart_status | Tunnel $tunnel_status"
+    echo -e "PEARL: GW $gw_status | Agent $agent_status | MFFU $mffu_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
 }
 
 # ============================================================================
@@ -516,6 +537,41 @@ handle_chart() {
     esac
 }
 
+handle_mffu() {
+    local subcmd="${1:-status}"
+    activate_venv
+    load_env_files
+    case "$subcmd" in
+        start)
+            echo -e "${CYAN}▶ Starting MFFU Eval...${NC}"
+            ./scripts/lifecycle/mffu_eval.sh start --background
+            ;;
+        stop)
+            echo -e "${CYAN}■ Stopping MFFU Eval...${NC}"
+            ./scripts/lifecycle/mffu_eval.sh stop
+            ;;
+        status)
+            check_mffu_status || echo "   Not running"
+            ;;
+        restart)
+            echo -e "${CYAN}🔄 Restarting MFFU Eval...${NC}"
+            ./scripts/lifecycle/mffu_eval.sh stop 2>/dev/null || true
+            sleep 3
+            ./scripts/lifecycle/mffu_eval.sh start --background
+            ;;
+        api)
+            echo -e "${CYAN}▶ Starting MFFU API only...${NC}"
+            ./scripts/lifecycle/mffu_eval.sh api --background
+            ;;
+        logs)
+            tail -f "$SCRIPT_DIR/logs/agent_MFFU_EVAL.log"
+            ;;
+        *)
+            echo "Usage: ./pearl.sh mffu <start|stop|status|restart|api|logs>"
+            ;;
+    esac
+}
+
 handle_tunnel() {
     local subcmd="${1:-status}"
     case "$subcmd" in
@@ -578,7 +634,8 @@ show_help() {
     echo ""
     echo -e "${CYAN}Individual Services:${NC}"
     echo "  gateway <start|stop|status>    Control IB Gateway"
-    echo "  agent <start|stop|status>      Control Market Agent"
+    echo "  agent <start|stop|status>      Control Market Agent (Inception)"
+    echo "  mffu <start|stop|status|restart|api|logs>  Control MFFU Eval"
     echo "  telegram <start|stop|status>   Control Telegram Handler"
     echo "  chart <start|stop|status>      Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
@@ -638,6 +695,9 @@ case "$COMMAND" in
         ;;
     chart)
         handle_chart "${1:-status}"
+        ;;
+    mffu)
+        handle_mffu "${1:-status}"
         ;;
     tunnel)
         handle_tunnel "${1:-status}"

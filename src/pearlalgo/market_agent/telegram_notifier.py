@@ -87,6 +87,7 @@ class MarketAgentTelegramNotifier:
         chat_id: Optional[str] = None,
         state_dir: Optional[Path] = None,
         enabled: bool = True,
+        account_label: Optional[str] = None,
     ):
         """
         Initialize Telegram notifier.
@@ -95,10 +96,12 @@ class MarketAgentTelegramNotifier:
             bot_token: Telegram bot token (required if enabled)
             chat_id: Telegram chat ID (required if enabled)
             enabled: Whether Telegram notifications are enabled
+            account_label: Optional label prefix for multi-account setups (e.g. "MFFU")
         """
         self.enabled = enabled
         self.bot_token = bot_token
         self.chat_id = chat_id
+        self.account_label = account_label  # e.g. "MFFU" or None for inception
         self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
         
@@ -204,130 +207,29 @@ class MarketAgentTelegramNotifier:
             if risk > 0:
                 rr = reward / risk
 
-        # Build calm-minimal message: decision-first, action-cue-early
-        message = f"{test_label}🎯 *{symbol} {dir_emoji} {dir_label}* | {signal_type}\n\n"
+        # Build compact mobile-first push alert (4 lines max)
+        acct_prefix = f"[{self.account_label}] " if self.account_label else ""
 
-        # Trade Plan (always first, compact)
-        if entry_price:
-            message += f"*Entry:* ${entry_price:.2f}"
-            if rr > 0:
-                message += f"  •  R:R {rr:.1f}:1"
-            message += "\n"
-        if stop_loss:
-            stop_dist = abs(entry_price - stop_loss) if entry_price else 0
-            message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
-        if take_profit:
-            tp_dist = abs(take_profit - entry_price) if entry_price else 0
-            message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
-        
-        # Size + Risk (compact single line, only if available)
-        position_size = signal.get("position_size")
-        risk_amount = signal.get("risk_amount")
-        if position_size or risk_amount:
-            size_risk_parts = []
-            if position_size:
-                size_risk_parts.append(f"{position_size} MNQ")
-            if risk_amount:
-                size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
-            message += f"*Size:* {' • '.join(size_risk_parts)}\n"
+        # Line 1: Direction + symbol + entry price
+        message = f"{test_label}{acct_prefix}{dir_emoji} *{dir_label} {symbol}* ${entry_price:,.2f}\n"
 
-        # Action cue (immediately after plan - what to do next)
-        status = str(signal.get("status") or "generated")
-        direction = str(signal.get("direction") or "long")
-        action_cue = format_signal_action_cue(status, direction)
-        if action_cue:
-            message += f"\n{action_cue}\n"
+        # Line 2: SL / TP / R:R (all on one line)
+        if stop_loss > 0 and take_profit > 0:
+            message += f"SL ${stop_loss:,.2f} | TP ${take_profit:,.2f} | R:R {rr:.1f}\n"
 
-        # Confidence (single line)
-        message += f"\n{conf_emoji} {confidence:.0%} confidence ({conf_tier})\n"
+        # Line 3: Size + confidence + signal type
+        position_size = signal.get("position_size") or 1
+        message += f"Size {position_size} | {conf_emoji} {confidence:.0%} | {signal_type}\n"
 
-        # ML Confidence (if available)
-        ml_pred = signal.get("_ml_prediction")
-        if isinstance(ml_pred, dict):
-            try:
-                ml_prob = float(ml_pred.get("win_probability", 0.0) or 0.0)
-                bool(ml_pred.get("pass_filter", True))
-                
-                ml_emoji = "🧠"
-                if ml_prob >= 0.7:
-                    ml_emoji = "🔥"
-                elif ml_prob < 0.55:
-                    ml_emoji = "⚠️"
-                
-                ml_status = "High" if ml_prob >= 0.7 else "Med" if ml_prob >= 0.55 else "Low"
-                message += f"{ml_emoji} ML Confidence: {ml_prob:.0%} ({ml_status})\n"
-            except Exception:
-                pass
-
-        # Learning / policy (compact, always safe to omit)
-        policy = signal.get("_policy")
-        if isinstance(policy, dict) and policy.get("signal_type"):
-            try:
-                mode = str(policy.get("mode") or "shadow").lower()
-                mode_emoji = "👁️" if mode == "shadow" else "🔥"
-                exec_emoji = "✅" if bool(policy.get("execute")) else "⏭️"
-                sample_count = int(policy.get("sample_count") or 0)
-                obs_wr = policy.get("observed_win_rate")
-                score = policy.get("sampled_score")
-
-                parts = [f"{mode_emoji} {mode}", f"{exec_emoji}"]
-                if obs_wr is not None and sample_count > 0:
-                    parts.append(f"obs {float(obs_wr) * 100:.0f}% (n={sample_count})")
-                elif sample_count > 0:
-                    parts.append(f"n={sample_count}")
-                if score is not None:
-                    parts.append(f"score {float(score):.2f}")
-
-                message += f"🧠 Policy: {' • '.join(parts)}\n"
-            except Exception:
-                pass
-
-        # Opportunity tier (A-tier actionable vs B-tier explore)
-        opp_tier = str(signal.get("_opportunity_tier") or "").strip().upper()
-        if opp_tier in ("A", "B"):
-            try:
-                label = "Actionable" if opp_tier == "A" else "Explore"
-                tier_emoji = "✅" if opp_tier == "A" else "⚗️"
-                extra = ""
-                reason = str(signal.get("_opportunity_reason") or "").strip()
-                if opp_tier == "B" and reason:
-                    # Keep this short to preserve calm-minimal alerts
-                    extra = f" ({reason[:60]}{'…' if len(reason) > 60 else ''})"
-                message += f"{tier_emoji} Tier: `{opp_tier}` ({label}){extra}\n"
-            except Exception:
-                pass
-
-        # Context: condensed single line (regime + MTF) only if both informative
+        # Line 4: Session context (one line, only if informative)
         regime = signal.get("regime", {}) or {}
-        mtf = signal.get("mtf_analysis", {}) or {}
-        context_parts = []
-        
-        # Session (Asia/London/NY) - critical for 24h futures operators
+        ctx_parts = []
         if regime.get("session"):
-            r_session = str(regime.get("session", "")).replace("_", " ").title()
-            context_parts.append(r_session)
-
+            ctx_parts.append(str(regime["session"]).replace("_", " ").title())
         if regime.get("regime"):
-            r_regime = str(regime.get("regime", "")).replace("_", " ").title()
-            context_parts.append(r_regime)
-
-        # Volatility label when informative
-        vol = str(regime.get("volatility") or "").lower()
-        if vol and vol not in ("unknown", "normal"):
-            context_parts.append(f"{vol.title()} vol")
-        
-        alignment = mtf.get("alignment")
-        if alignment:
-            mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
-            context_parts.append(f"{mtf_emoji} MTF")
-        
-        if context_parts:
-            message += f"🧭 {' • '.join(context_parts)}\n"
-
-        # Signal ID for cross-referencing (compact footer)
-        # Keep this only when the command handler is NOT running (no buttons available).
-        if signal_id and not _is_command_handler_running():
-            message += f"\n`{signal_id[:12]}`"
+            ctx_parts.append(str(regime["regime"]).replace("_", " ").title())
+        if ctx_parts:
+            message += " | ".join(ctx_parts)
 
         return message
     
@@ -445,7 +347,8 @@ class MarketAgentTelegramNotifier:
             conf_emoji = "🔴"
 
         # Build message (mobile-friendly: no long separators)
-        message = f"🎯 *{symbol} {direction} | {signal_type}*\n\n"
+        acct_prefix = f"[{self.account_label}] " if self.account_label else ""
+        message = f"{acct_prefix}🎯 *{symbol} {direction} | {signal_type}*\n\n"
 
         # Regime and session context
         message += f"*REGIME:* {regime_str}\n"
@@ -754,35 +657,22 @@ class MarketAgentTelegramNotifier:
             }
             exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
             
-            # Exit notification (compact, P&L first)
-            message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT*\n\n"
-            
-            # P&L + duration
-            message += f"{pnl_emoji} {pnl_str}"
+            # Compact exit notification (3 lines max)
+            acct_prefix = f"[{self.account_label}] " if self.account_label else ""
+
+            # Line 1: account + EXIT + symbol + direction + P&L
+            message = f"{acct_prefix}{status_emoji} *EXIT {symbol} {dir_label}* {pnl_str}\n"
+
+            # Line 2: price movement + hold time + reason
+            hold_str = ""
             if hold_duration_minutes is not None:
                 hold_hours = int(hold_duration_minutes // 60)
                 hold_mins = int(hold_duration_minutes % 60)
-                if hold_hours > 0:
-                    message += f" • {hold_hours}h {hold_mins}m"
-                else:
-                    message += f" • {hold_mins}m"
-            message += "\n"
-            
-            # Price movement
-            price_change = exit_price - entry_price if entry_price else 0
-            pct_change = (price_change / entry_price * 100) if entry_price > 0 else 0
-            message += f"${entry_price:.2f} → ${exit_price:.2f} ({price_change:+.1f} / {pct_change:+.1f}%)\n"
-            
-            # Exit reason
-            exit_icons = {
-                "stop_loss": "🛑",
-                "take_profit": "🎯",
-                "manual": "👤",
-                "expired": "⏰",
-                "trailing_stop": "📉",
-            }
-            reason_icon = exit_icons.get(exit_reason.lower(), "ℹ️")
-            message += f"{reason_icon} {exit_reason_display}"
+                hold_str = f" | {hold_hours}h{hold_mins}m" if hold_hours > 0 else f" | {hold_mins}m"
+
+            exit_icons = {"stop_loss": "SL", "take_profit": "TP", "manual": "Manual", "expired": "Expired", "trailing_stop": "Trail"}
+            reason_short = exit_icons.get(exit_reason.lower(), exit_reason_display)
+            message += f"${entry_price:,.2f} -> ${exit_price:,.2f}{hold_str} | {reason_short}"
             
             # Send message - no inline buttons, all actions accessible via /start menu
             # Exit notifications are high-signal; never dedupe.
@@ -841,19 +731,13 @@ class MarketAgentTelegramNotifier:
         else:
             risk_reward = 0
 
-        message = f"""
-🔔 *NQ Intraday Signal*
-
-*Type:* {signal_type}
-*Direction:* {direction}
-*Entry:* ${entry_price:.2f}
-*Stop Loss:* ${stop_loss:.2f}
-*Take Profit:* ${take_profit:.2f}
-*R:R Ratio:* {risk_reward:.2f}
-*Confidence:* {confidence:.0%}
-
-*Reason:* {reason}
-"""
+        acct_tag = f"[{self.account_label}] " if self.account_label else ""
+        dir_short = direction if direction else "?"
+        message = (
+            f"{acct_tag}{dir_short} MNQ ${entry_price:.2f}\n"
+            f"SL ${stop_loss:.2f} | TP ${take_profit:.2f} | R:R {risk_reward:.1f}\n"
+            f"{confidence:.0%} | {signal_type} | {reason}"
+        )
         return message.strip()
 
     def _format_status_message(self, status: Dict) -> str:
@@ -917,7 +801,8 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            message = "📊 *NQ Agent Status*\n\n"
+            acct_tag = f"[{self.account_label}] " if self.account_label else ""
+            message = f"📊 *{acct_tag}Status*\n"
 
             # Service and market status
             status_emoji = "🟢" if status.get("running") else "🔴"

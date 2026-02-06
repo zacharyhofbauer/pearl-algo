@@ -4459,58 +4459,44 @@ class TelegramCommandHandler:
             except Exception:
                 agent_healthy = None
             
-            # Check for challenge mode and load challenge data if available
+            # Challenge tracker for inception is disabled (MFFU has its own tracker).
+            # Skip the 50k Challenge section entirely when challenge.enabled=false.
             challenge_status = None
             challenge_tracker_instance = None
-            
+            _skip_inception_challenge = True
             try:
-                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-                
-                # Always load/create challenge tracker (will create if doesn't exist)
                 challenge_state_file = self.state_dir / "challenge_state.json"
+                if challenge_state_file.exists():
+                    import json as _cjson
+                    _cdata = _cjson.loads(challenge_state_file.read_text())
+                    _cenabled = (_cdata.get("config") or {}).get("enabled", False)
+                    # Only show if explicitly enabled AND not an MFFU tracker
+                    _cstage = (_cdata.get("config") or {}).get("stage") or (_cdata.get("mffu") or {}).get("stage")
+                    if _cenabled and not _cstage:
+                        _skip_inception_challenge = False
+                else:
+                    _skip_inception_challenge = True
+            except Exception:
+                _skip_inception_challenge = True
+
+            if not _skip_inception_challenge:
                 try:
+                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
-                    challenge_tracker_instance.refresh()  # Reload from file
-                    
-                    # Get unrealized PNL from state if available
+                    challenge_tracker_instance.refresh()
                     unrealized_pnl = active_trades_unrealized_pnl
                     if unrealized_pnl is not None:
                         try:
                             unrealized_pnl = float(unrealized_pnl)
                         except (ValueError, TypeError):
                             unrealized_pnl = None
-                    
                     challenge_status = challenge_tracker_instance.get_status_summary(
-                        bot_label=trading_bot_label, 
-                        unrealized_pnl=unrealized_pnl
+                        bot_label=trading_bot_label,
+                        unrealized_pnl=unrealized_pnl,
                     )
-                    if not challenge_status:
-                        logger.warning("Challenge tracker returned empty status summary")
-                    else:
-                        logger.debug(f"Challenge status loaded: {challenge_status[:100]}")
                 except Exception as e:
-                    logger.error(f"Error loading challenge tracker: {e}", exc_info=True)
+                    logger.debug(f"Challenge tracker skipped: {e}")
                     challenge_tracker_instance = None
-                    challenge_status = None
-                
-                # Also check if performance should include attempt_id
-                if challenge_status and not performance.get("attempt_id"):
-                    # Use same unrealized_pnl for attempt performance
-                    unrealized_pnl = active_trades_unrealized_pnl
-                    if unrealized_pnl is not None:
-                        try:
-                            unrealized_pnl = float(unrealized_pnl)
-                        except (ValueError, TypeError):
-                            unrealized_pnl = None
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl)
-                    if attempt_perf:
-                        performance = dict(performance) if performance else {}
-                        performance["attempt_id"] = attempt_perf.get("attempt_id")
-                        
-            except Exception as e:
-                logger.error(f"Could not load challenge data: {e}", exc_info=True)
-                # Don't set challenge_status to None here - try to load it again below
-                challenge_tracker_instance = None
             
             # P&L shown on the "🎯 Active" line should reflect open positions when available.
             # Fall back to daily_pnl only when it's non-zero (avoid showing "+$0.00" as a false cue).
@@ -4530,6 +4516,19 @@ class TelegramCommandHandler:
             # AI readiness - always True (legacy field, AI features integrated)
             ai_ready = True
 
+            # Derive account label from challenge stage config
+            _acct_label = None
+            try:
+                _ch_state = self.state_dir / "challenge_state.json"
+                if _ch_state.exists():
+                    import json as _json
+                    _ch = _json.loads(_ch_state.read_text())
+                    _stage = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
+                    if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
+                        _acct_label = "MFFU"
+            except Exception:
+                pass
+
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
                 symbol=symbol,
@@ -4548,104 +4547,13 @@ class TelegramCommandHandler:
                 data_age_seconds=data_age_seconds,
                 agent_healthy=agent_healthy,
                 data_stale=data_stale,
+                account_label=_acct_label,
             )
             
-            # ------------------------------------------------------------------
-            # Transparent AI/ML status (one-liner; avoids confusion)
-            # ------------------------------------------------------------------
-            try:
-                bandit = state.get("learning") or {}
-                bandit_mode = str(bandit.get("mode") or "off").lower()
-
-                ctx = state.get("learning_contextual") or {}
-                ctx_mode = str(ctx.get("mode") or "").lower()
-                if not ctx_mode:
-                    ctx_mode = "off"
-
-                # Source of truth for ML filter "enabled" is config.yaml (service doesn't persist it).
-                ml_enabled = None
-                ml_mode = None
-                try:
-                    import yaml
-
-                    cfg_path = Path("config/config.yaml")
-                    if cfg_path.exists():
-                        with open(cfg_path, "r") as f:
-                            cfg = yaml.safe_load(f) or {}
-                        ml_cfg = cfg.get("ml_filter", {}) or {}
-                        ml_enabled = bool(ml_cfg.get("enabled", False))
-                        ml_mode = str(ml_cfg.get("mode") or "").lower()
-                except Exception:
-                    ml_enabled = None
-
-                if ml_enabled is True:
-                    if ml_mode in ("shadow", "live"):
-                        ml_label = ml_mode
-                    else:
-                        ml_label = "on"
-                elif ml_enabled is False:
-                    ml_label = "off"
-                else:
-                    ml_label = "?"
-                ai_label = "ON" if ai_ready else "OFF"
-
-                # Step 1 transparency: show ML shadow lift scoring progress (scored trades / min)
-                lift_progress = ""
-                try:
-                    ml_state = state.get("ml_filter") or {}
-                    lift = ml_state.get("lift") or {}
-                    scored = lift.get("scored_trades")
-                    min_trades = lift.get("min_trades")
-                    if scored is not None and min_trades:
-                        lift_progress = f" • Lift {int(scored)}/{int(min_trades)}"
-                        try:
-                            p = lift.get("pass_trades")
-                            f = lift.get("fail_trades")
-                            if p is not None and f is not None:
-                                lift_progress += f" ({int(p)}P/{int(f)}F)"
-                        except Exception:
-                            pass
-                except Exception:
-                    lift_progress = ""
-
-                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
-            except Exception:
-                pass
+            # AI/ML status and direction gating details are now behind the
+            # "Details" button to keep the main dashboard compact for mobile.
             
-            # ------------------------------------------------------------------
-            # Direction gating status (Phase 1 risk control)
-            # ------------------------------------------------------------------
-            try:
-                tcb = state.get("trading_circuit_breaker") or {}
-                dir_gating_enabled = tcb.get("direction_gating_enabled", False)
-                if dir_gating_enabled:
-                    # Show current session and direction gating status
-                    tcb.get("current_session", "")
-                    tcb.get("session_allowed", True)
-                    blocks = tcb.get("blocks_by_reason") or {}
-                    dir_blocks = blocks.get("direction_gating", 0)
-                    
-                    # Would-have-blocked counters (shadow measurement for Phases 2 & 3)
-                    whb_regime = tcb.get("would_have_blocked_regime", 0)
-                    whb_trigger = tcb.get("would_have_blocked_trigger", 0)
-                    
-                    # Build status line
-                    dir_status = "🛡️ Gate: Dir✓"
-                    if dir_blocks > 0:
-                        dir_status += f" ({dir_blocks}🚫)"
-                    
-                    # Shadow measurement counts (only show if non-zero)
-                    shadow_parts = []
-                    if whb_regime > 0:
-                        shadow_parts.append(f"regime:{whb_regime}")
-                    if whb_trigger > 0:
-                        shadow_parts.append(f"trigger:{whb_trigger}")
-                    if shadow_parts:
-                        dir_status += f" • Shadow({','.join(shadow_parts)})"
-                    
-                    message += f"\n{dir_status}"
-            except Exception:
-                pass
+            # Direction gating details moved behind Details button.
             
             # ==========================================================================
             # 24-HOUR PERFORMANCE (always shown - core daily metrics)
@@ -4859,137 +4767,10 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.debug(f"Could not load 30d performance: {e}")
             
-            # Add challenge metrics if available (after performance sections)
-            # Always show challenge - it should always exist (created automatically if missing)
-            if not challenge_status and challenge_tracker_instance:
-                try:
-                    challenge_tracker_instance.refresh()
-                    # Get unrealized PNL from state if available
-                    unrealized_pnl = active_trades_unrealized_pnl
-                    if unrealized_pnl is not None:
-                        try:
-                            unrealized_pnl = float(unrealized_pnl)
-                        except (ValueError, TypeError):
-                            unrealized_pnl = None
-                    challenge_status = challenge_tracker_instance.get_status_summary(
-                        bot_label=trading_bot_label, 
-                        unrealized_pnl=unrealized_pnl
-                    )
-                except Exception as e:
-                    logger.error(f"Could not reload challenge status: {e}", exc_info=True)
-            
-            # If still no challenge_status, try to create/load one more time
-            if not challenge_status:
-                try:
-                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-                    challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
-                    challenge_tracker_instance.refresh()
-                    # Get unrealized PNL from state if available
-                    unrealized_pnl = active_trades_unrealized_pnl
-                    if unrealized_pnl is not None:
-                        try:
-                            unrealized_pnl = float(unrealized_pnl)
-                        except (ValueError, TypeError):
-                            unrealized_pnl = None
-                    challenge_status = challenge_tracker_instance.get_status_summary(
-                        bot_label=trading_bot_label,
-                        unrealized_pnl=unrealized_pnl
-                    )
-                    logger.info(f"Challenge status loaded: {challenge_status[:50] if challenge_status else 'None'}...")
-                except Exception as e:
-                    logger.error(f"Could not load challenge at all: {e}", exc_info=True)
-            
-            # Always show challenge if we have it - with multiple fallbacks
-            challenge_displayed = False
-            
-            if challenge_status:
+            # Inception 50k Challenge section: only show if challenge.enabled=true
+            # (disabled now -- MFFU eval is shown via the MFFU API section below)
+            if not _skip_inception_challenge and challenge_status:
                 message += "\n\n" + challenge_status
-                challenge_displayed = True
-            elif challenge_tracker_instance:
-                # If we have tracker but no status, try to get it directly
-                try:
-                    # Get unrealized PNL from state if available
-                    unrealized_pnl = active_trades_unrealized_pnl
-                    if unrealized_pnl is not None:
-                        try:
-                            unrealized_pnl = float(unrealized_pnl)
-                        except (ValueError, TypeError):
-                            unrealized_pnl = None
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl)
-                    if attempt_perf:
-                        pnl = attempt_perf.get("total_pnl", 0.0)
-                        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-                        balance = attempt_perf.get("current_balance", 50000.0)
-                        trades = attempt_perf.get("exited_signals", 0)
-                        wr = attempt_perf.get("win_rate", 0.0) * 100
-                        # attempt_id intentionally not shown in UI (we label by bot instead)
-                        dd_risk = attempt_perf.get("drawdown_risk_pct", 0.0)
-                        bar_filled = min(10, int(dd_risk / 10))
-                        bar = "▓" * bar_filled + "░" * (10 - bar_filled)
-                        
-                        challenge_status = (
-                            f"🏆 *50k Challenge* ({trading_bot_label})\n"
-                            f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
-                            f"DD Risk: {bar} {dd_risk:.0f}%\n"
-                            f"Trades: {trades} | WR: {wr:.0f}%"
-                        )
-                        message += "\n\n" + challenge_status
-                        challenge_displayed = True
-                except Exception as e:
-                    logger.error(f"Error building challenge status manually: {e}", exc_info=True)
-            
-            # Final fallback: if challenge file exists, load it directly
-            if not challenge_displayed:
-                try:
-                    challenge_state_file = self.state_dir / "challenge_state.json"
-                    if challenge_state_file.exists():
-                        import json
-                        with open(challenge_state_file, 'r') as f:
-                            challenge_data = json.load(f)
-                        current_attempt = challenge_data.get("current_attempt", {})
-                        config = challenge_data.get("config", {})
-                        
-                        # attempt_id intentionally not shown in UI (we label by bot instead)
-                        # Include unrealized PNL if available
-                        realized_pnl = current_attempt.get("pnl", 0.0)
-                        unrealized_pnl_val = active_trades_unrealized_pnl
-                        if unrealized_pnl_val is not None:
-                            try:
-                                unrealized_pnl_val = float(unrealized_pnl_val)
-                            except (ValueError, TypeError):
-                                unrealized_pnl_val = 0.0
-                        else:
-                            unrealized_pnl_val = 0.0
-                        pnl = realized_pnl + unrealized_pnl_val
-                        balance = config.get("start_balance", 50000.0) + pnl
-                        trades = current_attempt.get("trades", 0)
-                        wins = current_attempt.get("wins", 0)
-                        current_attempt.get("losses", 0)
-                        wr = (wins / trades * 100) if trades > 0 else 0.0
-                        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-                        max_dd = config.get("max_drawdown", 2000.0)
-                        dd_risk = min(100.0, (abs(min(0.0, pnl)) / max_dd) * 100)
-                        bar_filled = min(10, int(dd_risk / 10))
-                        bar = "▓" * bar_filled + "░" * (10 - bar_filled)
-                        
-                        challenge_status = (
-                            f"🏆 *50k Challenge* ({trading_bot_label})\n"
-                            f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
-                            f"DD Risk: {bar} {dd_risk:.0f}%\n"
-                            f"Trades: {trades} | WR: {wr:.0f}%"
-                        )
-                        message += "\n\n" + challenge_status
-                        challenge_displayed = True
-                        logger.info("Challenge loaded directly from file as fallback")
-                except Exception as e:
-                    logger.error(f"Error loading challenge from file directly: {e}", exc_info=True)
-            
-            if not challenge_displayed:
-                logger.warning("Challenge status could not be displayed despite file existing")
-            
-            # 30d section moved above Challenge for better mobile layout
 
             # Recent exits (from state or fallback to signals.jsonl)
             recent_exits = state.get("recent_exits", [])
@@ -5049,7 +4830,53 @@ class TelegramCommandHandler:
             
             # "Current Position" section removed from main dashboard - available in Activity tab
             # The header already shows "X Active | $Y.YY" which provides quick visibility
-            
+
+            # ==========================================================================
+            # MFFU EVAL ACCOUNT (query from port 8001 if running)
+            # ==========================================================================
+            try:
+                import aiohttp as _aiohttp
+                async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=3)) as _sess:
+                    async with _sess.get("http://localhost:8001/api/state") as _resp:
+                        if _resp.status == 200:
+                            _mffu_data = await _resp.json()
+                            _mffu_ch = _mffu_data.get("challenge")
+                            if _mffu_ch and _mffu_ch.get("enabled"):
+                                _m = _mffu_ch.get("mffu", {}) or {}
+                                _balance = _mffu_ch.get("current_balance", 0)
+                                _pnl = _mffu_ch.get("pnl", 0)
+                                _target = _mffu_ch.get("profit_target", 3000)
+                                _floor = _m.get("current_drawdown_floor", 48000)
+                                _locked = _m.get("drawdown_locked", False)
+                                _days_done = (_m.get("min_days") or {}).get("days_traded", 0)
+                                _days_req = (_m.get("min_days") or {}).get("days_required", 2)
+                                _consist = (_m.get("consistency") or {}).get("met", True)
+                                _trades = _mffu_ch.get("trades", 0)
+                                _wins = _mffu_ch.get("wins", 0)
+                                _losses = _trades - _wins
+                                _wr = _mffu_ch.get("win_rate", 0)
+                                _outcome = _mffu_ch.get("outcome", "active")
+                                _pnl_emoji = "🟢" if _pnl >= 0 else "🔴"
+                                _pnl_sign = "+" if _pnl >= 0 else ""
+                                _progress = min(100, max(0, (_pnl / _target * 100))) if _target > 0 else 0
+
+                                message += "\n\n"
+                                message += "━━━━━━━━━━━━━━━━━━━━━\n"
+                                message += "🏆 *MFFU 50K Eval*\n"
+                                message += f"Balance: `${_balance:,.2f}` | {_pnl_emoji} {_pnl_sign}${_pnl:,.2f}\n"
+                                if _outcome == "active":
+                                    message += f"Target: {_progress:.0f}% (${_pnl:,.0f}/${_target:,.0f})\n"
+                                elif _outcome == "pass":
+                                    message += "🎉 *PASSED*\n"
+                                elif _outcome == "fail":
+                                    message += "❌ *FAILED*\n"
+                                message += f"Floor: ${_floor:,.0f}{'🔒' if _locked else ''} | Days: {_days_done}/{_days_req} | {'✅' if _consist else '⚠️'} Consistency\n"
+                                if _trades > 0:
+                                    message += f"{_wins}W/{_losses}L • {_wr:.0f}% WR"
+            except Exception as _mffu_err:
+                # MFFU API not available - silently skip
+                logger.debug(f"MFFU dashboard section skipped: {_mffu_err}")
+
             return message
             
         except Exception as e:

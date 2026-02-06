@@ -1739,6 +1739,7 @@ def format_glanceable_card(
     data_age_seconds: float | None = None,
     agent_healthy: bool | None = None,
     data_stale: bool | None = None,
+    account_label: str | None = None,
 ) -> str:
     """
     Build ultra-compact glanceable dashboard (5-7 lines max).
@@ -1779,8 +1780,9 @@ def format_glanceable_card(
     lines = []
     bot_display = format_bot_name(trading_bot or "scanner")
     
-    # PEARL branded header
-    lines.append("🐚 *PEARL* - pearlalgo.io")
+    # PEARL branded header (with account badge if multi-account)
+    acct_badge = f" [{account_label}]" if account_label else ""
+    lines.append(f"🐚 *PEARL*{acct_badge} - pearlalgo.io")
     lines.append(f"*{symbol}* • {time_str}")
     
     # Status line: Bot + Services

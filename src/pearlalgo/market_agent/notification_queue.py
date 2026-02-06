@@ -50,6 +50,39 @@ class Priority(IntEnum):
     LOW = 3       # Dashboard charts, metrics
 
 
+class NotificationTier(IntEnum):
+    """
+    Notification importance tiers for filtering.
+
+    Controls which messages actually get sent to Telegram.
+    Set `min_tier` on the queue to suppress lower tiers:
+      - CRITICAL: entries, exits, kill switch, breaches only
+      - IMPORTANT: + startup/shutdown, daily summary, session events
+      - DEBUG: + data quality, heartbeats, circuit breaker details, recovery
+    """
+    CRITICAL = 0
+    IMPORTANT = 1
+    DEBUG = 2
+
+
+# Default tier assignments for each notification type
+_DEFAULT_TIERS: Dict[str, NotificationTier] = {
+    "entry": NotificationTier.CRITICAL,
+    "exit": NotificationTier.CRITICAL,
+    "shutdown": NotificationTier.CRITICAL,
+    "circuit_breaker": NotificationTier.CRITICAL,
+    "risk_warning": NotificationTier.CRITICAL,
+    "startup": NotificationTier.IMPORTANT,
+    "status": NotificationTier.IMPORTANT,
+    "dashboard": NotificationTier.IMPORTANT,
+    "message": NotificationTier.IMPORTANT,
+    "raw_message": NotificationTier.IMPORTANT,
+    "data_quality": NotificationTier.DEBUG,
+    "heartbeat": NotificationTier.DEBUG,
+    "recovery": NotificationTier.DEBUG,
+}
+
+
 @dataclass(order=True)
 class Notification:
     """A queued notification with metadata."""
@@ -60,6 +93,7 @@ class Notification:
     callback: Optional[Callable[..., Coroutine]] = field(compare=False, default=None)
     retry_count: int = field(compare=False, default=0)
     max_retries: int = field(compare=False, default=3)
+    tier: int = field(compare=False, default=NotificationTier.IMPORTANT)
 
 
 class NotificationQueue:
@@ -77,6 +111,7 @@ class NotificationQueue:
         batch_delay_seconds: float = 0.5,
         max_retries: int = 3,
         retry_backoff_base: float = 2.0,
+        min_tier: str = "important",
     ):
         """
         Initialize the notification queue.
@@ -87,12 +122,17 @@ class NotificationQueue:
             batch_delay_seconds: Delay between processing batches
             max_retries: Maximum retry attempts per notification
             retry_backoff_base: Base for exponential backoff (seconds)
+            min_tier: Minimum notification tier to send ("critical", "important", "debug")
         """
         self.notifier = telegram_notifier
         self.max_queue_size = max_queue_size
         self.batch_delay = batch_delay_seconds
         self.max_retries = max_retries
         self.retry_backoff_base = retry_backoff_base
+
+        # Tier filtering: messages below this tier are silently dropped
+        _tier_map = {"critical": NotificationTier.CRITICAL, "important": NotificationTier.IMPORTANT, "debug": NotificationTier.DEBUG}
+        self.min_tier = _tier_map.get(min_tier.lower().strip(), NotificationTier.IMPORTANT)
 
         self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=max_queue_size)
         self._running = False
@@ -301,6 +341,7 @@ class NotificationQueue:
         payload: Dict[str, Any],
         priority: Priority = Priority.NORMAL,
         callback: Optional[Callable[..., Coroutine]] = None,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
         """
         Enqueue a notification for delivery.
@@ -310,10 +351,25 @@ class NotificationQueue:
             payload: Notification data
             priority: Delivery priority
             callback: Optional custom callback coroutine
+            tier: Notification tier (defaults to type's default tier)
 
         Returns:
-            True if enqueued, False if queue is full
+            True if enqueued, False if filtered or queue full
         """
+        # Resolve tier from explicit param, or from default mapping
+        resolved_tier = tier if tier is not None else _DEFAULT_TIERS.get(
+            notification_type, NotificationTier.IMPORTANT
+        )
+
+        # Filter: drop if below minimum tier
+        if resolved_tier > self.min_tier:
+            logger.debug(
+                f"Notification suppressed (tier {resolved_tier.name} < min {self.min_tier.name}): "
+                f"{notification_type}"
+            )
+            self._stats["dropped"] += 1
+            return False
+
         notification = Notification(
             priority=priority.value,
             timestamp=datetime.now(timezone.utc).timestamp(),
@@ -321,6 +377,7 @@ class NotificationQueue:
             payload=payload,
             callback=callback,
             max_retries=self.max_retries,
+            tier=resolved_tier,
         )
 
         try:
@@ -333,188 +390,119 @@ class NotificationQueue:
             return False
 
     async def enqueue_message(
-        self,
-        message: str,
-        priority: Priority = Priority.NORMAL,
+        self, message: str, priority: Priority = Priority.NORMAL,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a text message."""
-        return await self.enqueue(
-            "message",
-            {"message": message},
-            priority=priority,
-        )
+        """Enqueue a text message."""
+        return await self.enqueue("message", {"message": message}, priority=priority, tier=tier)
 
     async def enqueue_status(
-        self,
-        status: Dict[str, Any],
-        priority: Priority = Priority.LOW,
+        self, status: Dict[str, Any], priority: Priority = Priority.LOW,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a status update."""
-        return await self.enqueue(
-            "status",
-            {"status": status},
-            priority=priority,
-        )
+        """Enqueue a status update."""
+        return await self.enqueue("status", {"status": status}, priority=priority, tier=tier)
 
     async def enqueue_circuit_breaker(
-        self,
-        reason: str,
-        details: Optional[Dict[str, Any]] = None,
-        priority: Priority = Priority.CRITICAL,
+        self, reason: str, details: Optional[Dict[str, Any]] = None,
+        priority: Priority = Priority.CRITICAL, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a circuit breaker alert."""
-        return await self.enqueue(
-            "circuit_breaker",
-            {"reason": reason, "details": details},
-            priority=priority,
-        )
+        """Enqueue a circuit breaker alert."""
+        return await self.enqueue("circuit_breaker", {"reason": reason, "details": details}, priority=priority, tier=tier)
 
     async def enqueue_dashboard(
-        self,
-        status: Dict[str, Any],
-        chart_path: Optional[Any] = None,
-        priority: Priority = Priority.LOW,
+        self, status: Dict[str, Any], chart_path: Optional[Any] = None,
+        priority: Priority = Priority.LOW, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a dashboard notification."""
-        return await self.enqueue(
-            "dashboard",
-            {"status": status, "chart_path": chart_path},
-            priority=priority,
-        )
+        """Enqueue a dashboard notification."""
+        return await self.enqueue("dashboard", {"status": status, "chart_path": chart_path}, priority=priority, tier=tier)
 
     async def enqueue_data_quality_alert(
-        self,
-        alert_type: str,
-        message: str,
-        details: Optional[Dict[str, Any]] = None,
-        priority: Priority = Priority.NORMAL,
+        self, alert_type: str, message: str, details: Optional[Dict[str, Any]] = None,
+        priority: Priority = Priority.NORMAL, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a data quality alert."""
+        """Enqueue a data quality alert (DEBUG tier by default)."""
         return await self.enqueue(
             "data_quality",
             {"alert_type": alert_type, "message": message, "details": details or {}},
-            priority=priority,
+            priority=priority, tier=tier or NotificationTier.DEBUG,
         )
 
     async def enqueue_entry(
-        self,
-        signal_id: str,
-        entry_price: float,
-        signal: Dict[str, Any],
-        buffer_data: Optional[Any] = None,
-        priority: Priority = Priority.HIGH,
+        self, signal_id: str, entry_price: float, signal: Dict[str, Any],
+        buffer_data: Optional[Any] = None, priority: Priority = Priority.HIGH,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue an entry notification."""
+        """Enqueue an entry notification (CRITICAL tier)."""
         return await self.enqueue(
             "entry",
-            {
-                "signal_id": signal_id,
-                "entry_price": entry_price,
-                "signal": signal,
-                "buffer_data": buffer_data,
-            },
-            priority=priority,
+            {"signal_id": signal_id, "entry_price": entry_price, "signal": signal, "buffer_data": buffer_data},
+            priority=priority, tier=tier or NotificationTier.CRITICAL,
         )
 
     async def enqueue_exit(
-        self,
-        signal_id: str,
-        exit_price: float,
-        exit_reason: str,
-        pnl: float,
-        signal: Dict[str, Any],
-        hold_duration_minutes: Optional[float] = None,
-        buffer_data: Optional[Any] = None,
-        priority: Priority = Priority.HIGH,
+        self, signal_id: str, exit_price: float, exit_reason: str, pnl: float,
+        signal: Dict[str, Any], hold_duration_minutes: Optional[float] = None,
+        buffer_data: Optional[Any] = None, priority: Priority = Priority.HIGH,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue an exit notification."""
+        """Enqueue an exit notification (CRITICAL tier)."""
         return await self.enqueue(
             "exit",
-            {
-                "signal_id": signal_id,
-                "exit_price": exit_price,
-                "exit_reason": exit_reason,
-                "pnl": pnl,
-                "signal": signal,
-                "hold_duration_minutes": hold_duration_minutes,
-                "buffer_data": buffer_data,
-            },
-            priority=priority,
+            {"signal_id": signal_id, "exit_price": exit_price, "exit_reason": exit_reason,
+             "pnl": pnl, "signal": signal, "hold_duration_minutes": hold_duration_minutes,
+             "buffer_data": buffer_data},
+            priority=priority, tier=tier or NotificationTier.CRITICAL,
         )
 
     async def enqueue_heartbeat(
-        self,
-        status: Dict[str, Any],
-        priority: Priority = Priority.LOW,
+        self, status: Dict[str, Any], priority: Priority = Priority.LOW,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a heartbeat."""
-        return await self.enqueue(
-            "heartbeat",
-            {"status": status},
-            priority=priority,
-        )
+        """Enqueue a heartbeat (DEBUG tier by default)."""
+        return await self.enqueue("heartbeat", {"status": status}, priority=priority, tier=tier or NotificationTier.DEBUG)
 
     async def enqueue_startup(
-        self,
-        config: Dict[str, Any],
-        priority: Priority = Priority.NORMAL,
+        self, config: Dict[str, Any], priority: Priority = Priority.NORMAL,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a startup notification."""
-        return await self.enqueue(
-            "startup",
-            {"config": config},
-            priority=priority,
-        )
+        """Enqueue a startup notification (IMPORTANT tier)."""
+        return await self.enqueue("startup", {"config": config}, priority=priority, tier=tier or NotificationTier.IMPORTANT)
 
     async def enqueue_shutdown(
-        self,
-        summary: Dict[str, Any],
-        priority: Priority = Priority.CRITICAL,
+        self, summary: Dict[str, Any], priority: Priority = Priority.CRITICAL,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a shutdown notification."""
-        return await self.enqueue(
-            "shutdown",
-            {"summary": summary},
-            priority=priority,
-        )
+        """Enqueue a shutdown notification (CRITICAL tier)."""
+        return await self.enqueue("shutdown", {"summary": summary}, priority=priority, tier=tier or NotificationTier.CRITICAL)
 
     async def enqueue_recovery(
-        self,
-        recovery_info: Dict[str, Any],
-        priority: Priority = Priority.NORMAL,
+        self, recovery_info: Dict[str, Any], priority: Priority = Priority.NORMAL,
+        tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a recovery notification."""
-        return await self.enqueue(
-            "recovery",
-            {"recovery_info": recovery_info},
-            priority=priority,
-        )
+        """Enqueue a recovery notification (DEBUG tier by default)."""
+        return await self.enqueue("recovery", {"recovery_info": recovery_info}, priority=priority, tier=tier or NotificationTier.DEBUG)
 
     async def enqueue_raw_message(
-        self,
-        message: str,
-        parse_mode: Optional[str] = None,
-        dedupe: bool = True,
-        priority: Priority = Priority.NORMAL,
+        self, message: str, parse_mode: Optional[str] = None, dedupe: bool = True,
+        priority: Priority = Priority.NORMAL, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a raw Telegram message."""
+        """Enqueue a raw Telegram message."""
         return await self.enqueue(
             "raw_message",
             {"message": message, "parse_mode": parse_mode, "dedupe": dedupe},
-            priority=priority,
+            priority=priority, tier=tier,
         )
 
     async def enqueue_risk_warning(
-        self,
-        message: str,
-        risk_status: Optional[str] = None,
-        priority: Priority = Priority.CRITICAL,
+        self, message: str, risk_status: Optional[str] = None,
+        priority: Priority = Priority.CRITICAL, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Convenience method to enqueue a risk warning."""
+        """Enqueue a risk warning (CRITICAL tier)."""
         return await self.enqueue(
             "risk_warning",
             {"message": message, "risk_status": risk_status},
-            priority=priority,
+            priority=priority, tier=tier or NotificationTier.CRITICAL,
         )
 
     def get_stats(self) -> Dict[str, int]:

@@ -130,18 +130,22 @@ if [ "$COMMAND" = "stop" ]; then
         rm -f "$PID_FILE"
     fi
     
-    # Also kill any orphan processes matching the market agent pattern
-    # This catches stale processes that weren't started via this script
+    # Also kill orphan processes for THIS market only (check env/cmdline for state dir)
+    # Avoids killing other market agents (e.g., MFFU_EVAL when stopping NQ)
     ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
     if [ -n "$ORPHAN_PIDS" ]; then
         for OPID in $ORPHAN_PIDS; do
-            echo "🧹 Killing orphan agent process (PID: $OPID)"
-            kill "$OPID" 2>/dev/null || true
-            sleep 1
-            if ps -p "$OPID" > /dev/null 2>&1; then
-                kill -9 "$OPID" 2>/dev/null || true
+            # Only kill if this process belongs to our state dir
+            PROC_ENV=$(cat /proc/$OPID/environ 2>/dev/null | tr '\0' '\n' | grep "PEARLALGO_STATE_DIR" || true)
+            if echo "$PROC_ENV" | grep -q "$STATE_DIR" 2>/dev/null || [ -z "$PROC_ENV" ]; then
+                echo "🧹 Killing orphan agent process (PID: $OPID)"
+                kill "$OPID" 2>/dev/null || true
+                sleep 1
+                if ps -p "$OPID" > /dev/null 2>&1; then
+                    kill -9 "$OPID" 2>/dev/null || true
+                fi
+                STOPPED=true
             fi
-            STOPPED=true
         done
     fi
     
@@ -165,21 +169,28 @@ if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     exit 1
 fi
 
-# Pre-start cleanup: kill any stale agent processes to prevent IBKR client ID conflicts
+# Pre-start cleanup: kill stale agent processes for THIS market only
+# (avoids killing other market agents like MFFU_EVAL when restarting NQ)
 ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
+CLEANED=false
 if [ -n "$ORPHAN_PIDS" ]; then
-    echo "🧹 Cleaning up stale agent processes before start..."
     for OPID in $ORPHAN_PIDS; do
-        echo "   Killing PID: $OPID"
-        kill "$OPID" 2>/dev/null || true
-        sleep 1
-        if ps -p "$OPID" > /dev/null 2>&1; then
-            kill -9 "$OPID" 2>/dev/null || true
+        # Only kill if this process belongs to our state dir (or has no identifiable state dir)
+        PROC_ENV=$(cat /proc/$OPID/environ 2>/dev/null | tr '\0' '\n' | grep "PEARLALGO_STATE_DIR" || true)
+        if echo "$PROC_ENV" | grep -q "$STATE_DIR" 2>/dev/null || [ -z "$PROC_ENV" ]; then
+            echo "🧹 Killing stale agent (PID: $OPID)"
+            kill "$OPID" 2>/dev/null || true
+            sleep 1
+            if ps -p "$OPID" > /dev/null 2>&1; then
+                kill -9 "$OPID" 2>/dev/null || true
+            fi
+            CLEANED=true
         fi
     done
-    # Wait for IBKR to release the client ID
-    echo "   Waiting for IBKR connection cleanup..."
-    sleep 3
+    if [ "$CLEANED" = true ]; then
+        echo "   Waiting for IBKR connection cleanup..."
+        sleep 3
+    fi
 fi
 
 if [ -f "$PID_FILE" ]; then

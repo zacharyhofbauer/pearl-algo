@@ -29,7 +29,7 @@ from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_scre
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
-from pearlalgo.market_agent.notification_queue import NotificationQueue, Priority
+from pearlalgo.market_agent.notification_queue import NotificationQueue, NotificationTier, Priority
 from pearlalgo.market_agent.trading_circuit_breaker import (
     TradingCircuitBreaker,
     create_trading_circuit_breaker,
@@ -188,18 +188,38 @@ class MarketAgentService:
             state_dir=state_dir,
             state_manager=self.state_manager,
         )
+        # Derive account label for Telegram messages (e.g. "MFFU" for prop firm)
+        challenge_cfg = (config or {}).get("challenge", {}) if isinstance(config, dict) else {}
+        if not challenge_cfg:
+            try:
+                from pearlalgo.config.config_loader import load_service_config
+                challenge_cfg = load_service_config().get("challenge", {}) or {}
+            except Exception:
+                challenge_cfg = {}
+        _mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+        _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else None
+
         self.telegram_notifier = MarketAgentTelegramNotifier(
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
             state_dir=state_dir,
+            account_label=_account_label,
         )
         
         # Initialize notification queue for non-blocking Telegram delivery
+        # Load service config early for telegram tier (full config loaded later at line ~237)
+        try:
+            _early_cfg = load_service_config()
+            telegram_settings = _early_cfg.get("telegram", {}) or {}
+        except Exception:
+            telegram_settings = {}
+        _min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
         self.notification_queue = NotificationQueue(
             telegram_notifier=self.telegram_notifier,
             max_queue_size=1000,
             batch_delay_seconds=0.5,
             max_retries=3,
+            min_tier=_min_tier,
         )
         
         # Log Telegram configuration status
@@ -2255,7 +2275,8 @@ class MarketAgentService:
                                             )
                                             asyncio.create_task(
                                                 self.notification_queue.enqueue_raw_message(
-                                                    msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH
+                                                    msg, parse_mode="Markdown", dedupe=False,
+                                                    priority=Priority.HIGH, tier=NotificationTier.CRITICAL,
                                                 )
                                             )
                                         except Exception as tg_err:
@@ -5176,7 +5197,10 @@ class MarketAgentService:
                     f"Closed: `{closed_count}`\n"
                     f"Total P&L: `${total_pnl:,.2f}`"
                 )
-                await self.notification_queue.enqueue_raw_message(msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH)
+                await self.notification_queue.enqueue_raw_message(
+                    msg, parse_mode="Markdown", dedupe=False,
+                    priority=Priority.HIGH, tier=NotificationTier.CRITICAL,
+                )
             except Exception:
                 pass
 

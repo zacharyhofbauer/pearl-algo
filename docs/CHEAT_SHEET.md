@@ -20,10 +20,11 @@ The `pearl.sh` master script handles everything with simple commands:
 **Individual service control:**
 ```bash
 ./pearl.sh gateway start|stop|status
-./pearl.sh agent start|stop|status
+./pearl.sh agent start|stop|status       # Inception (NQ) agent
+./pearl.sh mffu start|stop|status|logs   # MFFU Eval (Tradovate paper)
 ./pearl.sh telegram start|stop|status
-./pearl.sh chart start|stop|status    # Live Chart (pearlalgo.io)
-./pearl.sh tunnel start|stop|status|logs  # Cloudflare Tunnel
+./pearl.sh chart start|stop|status       # Live Chart (pearlalgo.io)
+./pearl.sh tunnel start|stop|status|logs # Cloudflare Tunnel
 ```
 
 **Options:**
@@ -678,6 +679,87 @@ If PNL doesn't update when you tap the Refresh button:
 - **Open positions:** The PNL now includes unrealized PNL from open positions. If positions are shown but PNL is stale, the refresh should now recalculate unrealized PNL automatically.
 - **Virtual positions:** If using virtual PNL mode, positions shown are from signals.jsonl with status="entered". These are tracked positions, not necessarily broker-executed positions.
 - **State file:** The agent service updates the state file with unrealized PNL. If refresh still shows stale data, check that the agent service is running and cycling properly.
+
+---
+
+---
+
+## MFFU 50K Rapid Evaluation (Prop Firm)
+
+### Overview
+
+Pearl runs two isolated accounts simultaneously:
+- **Inception** (port 8000): Since-inception data collection on IBKR
+- **MFFU Eval** (port 8001): MyFundedFutures 50K Rapid Plan on Tradovate paper
+
+Each has its own state directory, API server, and data. They share IBKR market data but execute independently.
+
+### Quick Commands
+
+```bash
+./pearl.sh mffu start       # Start MFFU agent + API server
+./pearl.sh mffu stop        # Stop MFFU instance
+./pearl.sh mffu status      # Check MFFU status
+./pearl.sh mffu restart     # Restart MFFU instance
+./pearl.sh mffu api         # Start API server only (view data without trading)
+./pearl.sh mffu logs        # Tail MFFU agent log
+```
+
+### Web App Account Switching
+
+- Visit `pearlalgo.io` -- prompts which account on first visit
+- Visit `pearlalgo.io?account=mffu` -- goes directly to MFFU dashboard
+- Use the account switcher dropdown in the header bar to toggle
+
+### MFFU Evaluation Rules
+
+| Rule | Threshold |
+|------|-----------|
+| Start Balance | $50,000 |
+| Profit Target | $3,000 |
+| Max Loss (EOD trailing) | $2,000 |
+| Drawdown Floor Lock | $50,100 |
+| Max Contracts | 5 mini / 50 micro |
+| Consistency | 50% (no single day > 50% of total profit) |
+| Min Trading Days | 2 |
+| Trading Hours | 6 PM - 4:10 PM ET |
+| Auto-Flatten | 4:08 PM ET |
+| T1 News | Allowed during eval |
+| Hedging | Prohibited |
+
+### Tradovate Credentials
+
+Stored in `~/.config/pearlalgo/secrets.env` (never committed):
+```
+TRADOVATE_USERNAME=...
+TRADOVATE_PASSWORD=...
+TRADOVATE_CID=...
+TRADOVATE_SEC=...
+```
+
+### Config Files
+
+- `config/markets/mffu_eval.yaml` -- MFFU-specific config (challenge rules, Tradovate adapter, circuit breaker)
+- `data/agent_state/MFFU_EVAL/` -- MFFU state directory (signals, trades, challenge state)
+- `data/t1_news_2026.json` -- T1 news calendar for blackout detection
+
+### Telegram Notifications
+
+- MFFU signals are prefixed with `[MFFU]` in Telegram
+- The `/start` dashboard shows both accounts
+- Notification tier set to `important` (suppresses data quality spam)
+
+### Testing Tradovate Connection
+
+```bash
+python scripts/test_tradovate_connection.py
+```
+
+### Resetting the Evaluation
+
+1. Reset the Tradovate paper account via Tradovate UI
+2. Delete `data/agent_state/MFFU_EVAL/challenge_state.json`
+3. Restart: `./pearl.sh mffu restart`
 
 ---
 

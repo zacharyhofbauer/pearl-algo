@@ -9,6 +9,11 @@ telegram:
   enabled: true
   bot_token: ${TELEGRAM_BOT_TOKEN}
   chat_id: ${TELEGRAM_CHAT_ID}
+  # Notification tier filter: critical | important | debug
+  # critical = entries/exits/kill switch only
+  # important = + startup/shutdown/daily summary (default)
+  # debug = + data quality/heartbeats/recovery (everything)
+  notification_tier: important
 telegram_ui:
   compact_metrics_enabled: true
   show_progress_bars: false
@@ -132,7 +137,7 @@ storage:
   async_queue_max_size: 1000
   async_queue_priority_trades: true
 challenge:
-  enabled: true
+  enabled: false     # Disabled for inception -- MFFU eval uses its own tracker
   start_balance: 50000.0
   max_drawdown: 2000.0
   profit_target: 3000.0
