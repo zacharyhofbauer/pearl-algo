@@ -69,7 +69,7 @@ data:
 # Trading Circuit Breaker: MFFU Evaluation Gate
 # ---------------------------------------------------------------------------
 trading_circuit_breaker:
-  mode: enforce
+  mode: warn_only    # Standard checks log-only (same as inception); MFFU gate still enforces
   enable_mffu_eval_gate: true
   mffu_max_contracts_mini: 5
   mffu_max_contracts_micro: 50

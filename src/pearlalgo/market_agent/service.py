@@ -1643,8 +1643,10 @@ class MarketAgentService:
                     signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
 
                     cb_mode = str(getattr(self.trading_circuit_breaker.config, "mode", "enforce"))
-                    if cb_mode == "warn_only":
-                        # Tag signal so we can track its outcome after virtual exit
+                    # MFFU eval gate rules ALWAYS enforce (even in warn_only mode)
+                    is_mffu_block = str(cb_decision.reason or "").startswith("mffu_")
+                    if cb_mode == "warn_only" and not is_mffu_block:
+                        # Standard checks: warn only, don't block
                         signal["_cb_would_block"] = True
                         signal["_cb_would_block_reason"] = cb_decision.reason
                         self.trading_circuit_breaker.record_would_block(cb_decision.reason)
