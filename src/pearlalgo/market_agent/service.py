@@ -1262,10 +1262,7 @@ class MarketAgentService:
 
                 # Generate signals (or skip if no new bar)
                 signals = []
-                if self._mffu_enabled and self._mffu_tracker is not None:
-                    # MFFU mode: read signals from shared file (written by inception agent)
-                    signals = self._read_shared_signals()
-                elif skip_analysis:
+                if skip_analysis:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
@@ -1752,41 +1749,6 @@ class MarketAgentService:
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
 
-            # Write to shared signal file for MFFU agent to pick up.
-            # Dedup: only write if direction changed or cooldown (120s) elapsed.
-            try:
-                _sig_dir = signal.get("direction", "")
-                _sig_type = signal.get("type", "")
-                _now_ts = datetime.now(timezone.utc).timestamp()
-                _last = getattr(self, "_shared_last_write", None) or {}
-                _should_write = (
-                    _sig_dir != _last.get("direction")
-                    or _sig_type != _last.get("type")
-                    or (_now_ts - _last.get("ts", 0)) > 120
-                )
-                if _should_write:
-                    _shared_path = Path("data") / "shared_signals.jsonl"
-                    _shared_path.parent.mkdir(parents=True, exist_ok=True)
-                    _safe_signal = {}
-                    for _k, _v in signal.items():
-                        if _k.startswith("_"):
-                            continue
-                        try:
-                            json.dumps(_v)
-                            _safe_signal[_k] = _v
-                        except (TypeError, ValueError):
-                            _safe_signal[_k] = str(_v)
-                    with open(_shared_path, "a") as _sf:
-                        _sf.write(json.dumps({
-                            "signal_id": signal_id,
-                            "timestamp": get_utc_timestamp(),
-                            "signal": _safe_signal,
-                        }) + "\n")
-                    self._shared_last_write = {"direction": _sig_dir, "type": _sig_type, "ts": _now_ts}
-                    logger.info(f"Shared signal written: {signal_id}")
-            except Exception as _shared_err:
-                logger.warning(f"Could not write shared signal: {_shared_err}")
-
             # Virtual entry: enter immediately at the signal's entry price.
             # This enables per-signal PnL tracking without requiring IBKR fills.
             entry_price = 0.0
@@ -2080,68 +2042,6 @@ class MarketAgentService:
                 f"ML sizing adjusted position size: {base_size} -> {adjusted} "
                 f"(p={win_prob:.2f}, mult={multiplier:.2f})"
             )
-
-    def _read_shared_signals(self) -> list:
-        """
-        Read and consume signals from the shared signal file written by the inception agent.
-
-        Returns a list of signal dicts ready for _process_signal().
-        Tracks the last-read position to avoid processing duplicates.
-        """
-        shared_path = Path("data/shared_signals.jsonl")
-        if not shared_path.exists():
-            return []
-
-        signals = []
-        try:
-            # Read all lines
-            with open(shared_path, "r") as f:
-                lines = f.readlines()
-
-            if not lines:
-                return []
-
-            # Track what we've already processed
-            if not hasattr(self, "_shared_signals_last_id"):
-                self._shared_signals_last_id = set()
-
-            new_signals = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    sig_id = entry.get("signal_id", "")
-                    if sig_id and sig_id not in self._shared_signals_last_id:
-                        signal = entry.get("signal", {})
-                        if signal and signal.get("entry_price"):
-                            new_signals.append(signal)
-                            self._shared_signals_last_id.add(sig_id)
-                except (json.JSONDecodeError, KeyError):
-                    continue
-
-            if new_signals:
-                logger.info(
-                    f"[MFFU] Read {len(new_signals)} new signal(s) from shared file"
-                )
-                # Truncate file to prevent unbounded growth (keep last 5 lines for safety)
-                try:
-                    with open(shared_path, "w") as f:
-                        for line in lines[-5:]:
-                            f.write(line if line.endswith("\n") else line + "\n")
-                except Exception:
-                    pass
-
-            # Cap the tracking set to prevent memory growth
-            if len(self._shared_signals_last_id) > 500:
-                self._shared_signals_last_id = set(list(self._shared_signals_last_id)[-200:])
-
-            return new_signals
-
-        except Exception as e:
-            logger.debug(f"Could not read shared signals: {e}")
-            return []
 
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """
