@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import type { AgentState } from '@/stores'
 
 import DataPanelsContainer from './DataPanelsContainer'
@@ -18,28 +17,7 @@ interface PostTradesPanelsProps {
   agentState: AgentState
 }
 
-const LS_KEY = 'pearl.dashboard.showAdvancedPanels'
-
 export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) {
-  const [showAdvanced, setShowAdvanced] = useState(false)
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(LS_KEY)
-      if (raw === '1') setShowAdvanced(true)
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(LS_KEY, showAdvanced ? '1' : '0')
-    } catch {
-      // ignore
-    }
-  }, [showAdvanced])
-
   return (
     <div className="post-trades-panels">
       {/* Core panels (signals + readiness) */}
@@ -70,53 +48,38 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
         )}
       </DataPanelsContainer>
 
-      {/* Advanced (big) panels */}
-      <div className="post-trades-advanced-toggle-wrap">
-        <button
-          type="button"
-          className="post-trades-advanced-toggle"
-          onClick={() => setShowAdvanced((v) => !v)}
-        >
-          <span className="post-trades-advanced-label">More panels</span>
-          <span className="post-trades-advanced-sub">risk • market • health • config</span>
-          <span className="post-trades-advanced-icon">{showAdvanced ? '▲' : '▼'}</span>
-        </button>
-      </div>
+      {/* All panels visible (no toggle) */}
+      <DataPanelsContainer>
+        {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
+          <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
+        )}
 
-      {showAdvanced && (
-        <DataPanelsContainer>
-          {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
-            <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
-          )}
+        {agentState.challenge && (
+          <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />
+        )}
 
-          {agentState.challenge && (
-            <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />
-          )}
+        {(agentState.market_regime || agentState.buy_sell_pressure) && (
+          <MarketContextPanel regime={agentState.market_regime} pressure={agentState.buy_sell_pressure} />
+        )}
 
-          {(agentState.market_regime || agentState.buy_sell_pressure) && (
-            <MarketContextPanel regime={agentState.market_regime} pressure={agentState.buy_sell_pressure} />
-          )}
+        {(agentState.cadence_metrics ||
+          agentState.gateway_status ||
+          agentState.connection_health ||
+          agentState.data_quality) && (
+          <SystemHealthPanel
+            cadenceMetrics={agentState.cadence_metrics || null}
+            dataFresh={agentState.data_fresh || false}
+            gatewayStatus={agentState.gateway_status}
+            connectionHealth={agentState.connection_health}
+            errorSummary={agentState.error_summary}
+            dataQuality={agentState.data_quality}
+          />
+        )}
 
-          {(agentState.cadence_metrics ||
-            agentState.gateway_status ||
-            agentState.connection_health ||
-            agentState.data_quality) && (
-            <SystemHealthPanel
-              cadenceMetrics={agentState.cadence_metrics || null}
-              dataFresh={agentState.data_fresh || false}
-              gatewayStatus={agentState.gateway_status}
-              connectionHealth={agentState.connection_health}
-              errorSummary={agentState.error_summary}
-              dataQuality={agentState.data_quality}
-            />
-          )}
-
-          {agentState.config && <ConfigPanel config={agentState.config} />}
-        </DataPanelsContainer>
-      )}
+        {agentState.config && <ConfigPanel config={agentState.config} />}
+      </DataPanelsContainer>
 
       <HelpPanel />
     </div>
   )
 }
-
