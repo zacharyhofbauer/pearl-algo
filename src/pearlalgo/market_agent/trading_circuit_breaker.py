@@ -164,6 +164,15 @@ class TradingCircuitBreaker:
         self._would_have_blocked_regime: int = 0
         self._would_have_blocked_trigger: int = 0
         
+        # Shadow outcome tracking: what happened to signals CB would have blocked vs allowed
+        # These accumulate as virtual trades exit (TP/SL hit) and reset daily.
+        self._shadow_blocked_wins: int = 0
+        self._shadow_blocked_losses: int = 0
+        self._shadow_blocked_pnl: float = 0.0
+        self._shadow_allowed_wins: int = 0
+        self._shadow_allowed_losses: int = 0
+        self._shadow_allowed_pnl: float = 0.0
+        
         # Direction gating statistics
         self._direction_gating_blocks: int = 0
         
@@ -391,7 +400,49 @@ class TradingCircuitBreaker:
         self._would_block_total += 1
         self._would_block_by_reason[reason] = self._would_block_by_reason.get(reason, 0) + 1
         self._last_would_block_at = datetime.now(timezone.utc).isoformat()
-    
+
+    def record_shadow_outcome(self, pnl: float, is_win: bool, was_would_block: bool) -> None:
+        """Record the outcome of a virtual trade for shadow performance comparison.
+        
+        Called at virtual exit time with the trade's actual PnL and whether the
+        circuit breaker would have blocked it in enforce mode.
+        
+        Args:
+            pnl: Realized PnL of the virtual trade
+            is_win: Whether the trade was profitable
+            was_would_block: True if CB would have blocked this signal
+        """
+        if was_would_block:
+            if is_win:
+                self._shadow_blocked_wins += 1
+            else:
+                self._shadow_blocked_losses += 1
+            self._shadow_blocked_pnl += pnl
+        else:
+            if is_win:
+                self._shadow_allowed_wins += 1
+            else:
+                self._shadow_allowed_losses += 1
+            self._shadow_allowed_pnl += pnl
+
+    def get_shadow_outcome_stats(self) -> Dict[str, Any]:
+        """Get shadow outcome comparison stats for API/UI consumption."""
+        blocked_total = self._shadow_blocked_wins + self._shadow_blocked_losses
+        allowed_total = self._shadow_allowed_wins + self._shadow_allowed_losses
+        # Net saved = negative of blocked PnL (if blocked trades lost money, we saved it)
+        net_saved = -self._shadow_blocked_pnl
+        return {
+            "blocked_wins": self._shadow_blocked_wins,
+            "blocked_losses": self._shadow_blocked_losses,
+            "blocked_total": blocked_total,
+            "blocked_pnl": round(self._shadow_blocked_pnl, 2),
+            "allowed_wins": self._shadow_allowed_wins,
+            "allowed_losses": self._shadow_allowed_losses,
+            "allowed_total": allowed_total,
+            "allowed_pnl": round(self._shadow_allowed_pnl, 2),
+            "net_saved": round(net_saved, 2),
+        }
+
     def validate_config(self) -> List[str]:
         """
         Validate the circuit breaker configuration at startup.
@@ -522,6 +573,8 @@ class TradingCircuitBreaker:
             "ml_chop_shield_enabled": self.config.enable_ml_chop_shield,
             "ml_min_scored_trades": self.config.ml_min_scored_trades,
             "ml_chop_shield_regimes": self.config.ml_chop_shield_regimes,
+            # Shadow outcome tracking (what happened to would-block vs allowed signals)
+            "shadow_outcomes": self.get_shadow_outcome_stats(),
         }
     
     # =========================================================================

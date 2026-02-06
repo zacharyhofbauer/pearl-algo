@@ -1366,6 +1366,43 @@ export default function PearlInsightsPanel({
 
             {showDetails && (
               <div className="shadow-details">
+                {/* Circuit Breaker Shadow Outcomes */}
+                {shadowCounters && (shadowCounters.blocked_total > 0 || shadowCounters.allowed_total > 0) && (
+                  <div className="shadow-outcome-card">
+                    <div className="shadow-outcome-headline">
+                      <span className={`outcome-net ${(shadowCounters.net_saved || 0) >= 0 ? 'positive' : 'negative'}`}>
+                        {(shadowCounters.net_saved || 0) >= 0 ? 'Would save' : 'Would cost'}{' '}
+                        <strong>${Math.abs(shadowCounters.net_saved || 0).toFixed(0)}</strong>
+                        {' '}if enforced
+                      </span>
+                    </div>
+                    {shadowCounters.blocked_total > 0 && (
+                      <div className="shadow-outcome-row">
+                        <span className="outcome-label">Blocked</span>
+                        <span className="outcome-count">{shadowCounters.blocked_total} signals</span>
+                        <span className="outcome-breakdown">
+                          {shadowCounters.blocked_wins}W / {shadowCounters.blocked_losses}L
+                        </span>
+                        <span className={`outcome-pnl ${(shadowCounters.blocked_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                          {(shadowCounters.blocked_pnl || 0) >= 0 ? '+' : ''}${(shadowCounters.blocked_pnl || 0).toFixed(0)}
+                        </span>
+                      </div>
+                    )}
+                    {shadowCounters.allowed_total > 0 && (
+                      <div className="shadow-outcome-row">
+                        <span className="outcome-label">Allowed</span>
+                        <span className="outcome-count">{shadowCounters.allowed_total} signals</span>
+                        <span className="outcome-breakdown">
+                          {shadowCounters.allowed_wins}W / {shadowCounters.allowed_losses}L
+                        </span>
+                        <span className={`outcome-pnl ${(shadowCounters.allowed_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                          {(shadowCounters.allowed_pnl || 0) >= 0 ? '+' : ''}${(shadowCounters.allowed_pnl || 0).toFixed(0)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {shadowCounters && shadowCounters.would_block_total > 0 && (
                   <div className="shadow-blocks">
                     <span className="blocks-text">

@@ -4394,6 +4394,61 @@ body {
   gap: 10px;
 }
 
+/* Shadow Outcome Performance Card */
+.shadow-outcome-card {
+  background: rgba(20, 20, 35, 0.6);
+  border: 1px solid rgba(80, 80, 120, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shadow-outcome-headline {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shadow-outcome-headline .outcome-net.positive {
+  color: #00e676;
+}
+
+.shadow-outcome-headline .outcome-net.negative {
+  color: #ff5252;
+}
+
+.shadow-outcome-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.shadow-outcome-row .outcome-label {
+  font-weight: 600;
+  min-width: 52px;
+  color: var(--text-tertiary);
+}
+
+.shadow-outcome-row .outcome-count {
+  min-width: 60px;
+}
+
+.shadow-outcome-row .outcome-breakdown {
+  color: var(--text-muted);
+}
+
+.shadow-outcome-row .outcome-pnl {
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.shadow-outcome-row .outcome-pnl.positive { color: #00e676; }
+.shadow-outcome-row .outcome-pnl.negative { color: #ff5252; }
+
 .shadow-blocks {
   display: flex;
   flex-direction: column;
@@ -11754,6 +11809,52 @@ body {
 
 .main-content {
   padding-top: var(--pearl-header-height);
+  overscroll-behavior-y: contain;
+}
+
+/* Pull-to-refresh */
+.pull-to-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  transition: height 0.25s ease, opacity 0.2s ease;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pull-to-refresh:not(.visible):not(.refreshing) {
+  height: 0 !important;
+  opacity: 0 !important;
+}
+
+.pull-icon {
+  font-size: 16px;
+  color: var(--text-secondary);
+  transition: transform 0.1s ease;
+  line-height: 1;
+}
+
+.pull-icon.spinning {
+  animation: ptr-spin 0.8s linear infinite;
+  color: var(--accent-cyan);
+}
+
+.pull-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+.pull-to-refresh.refreshing .pull-text {
+  color: var(--accent-cyan);
+}
+
+@keyframes ptr-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .pearl-header-bar {
@@ -11900,11 +12001,18 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: opacity 0.3s ease;
+  transition: color 0.3s ease, opacity 0.3s ease;
 }
 
-.pearl-header-preview.fading {
-  opacity: 0;
+/* Flash state - Pearl AI is talking */
+.pearl-header-preview.flash {
+  color: var(--accent-cyan, #00d4ff);
+  animation: pearl-flash-in 0.3s ease;
+}
+
+@keyframes pearl-flash-in {
+  0% { opacity: 0; transform: translateY(-4px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 /* Carousel indicator dots — subtle and minimal */

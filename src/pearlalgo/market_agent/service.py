@@ -1567,6 +1567,9 @@ class MarketAgentService:
 
                     cb_mode = str(getattr(self.trading_circuit_breaker.config, "mode", "enforce"))
                     if cb_mode == "warn_only":
+                        # Tag signal so we can track its outcome after virtual exit
+                        signal["_cb_would_block"] = True
+                        signal["_cb_would_block_reason"] = cb_decision.reason
                         self.trading_circuit_breaker.record_would_block(cb_decision.reason)
                         logger.warning(
                             f"⚠️ Trading circuit breaker would block (warn-only): {cb_decision.reason} | "
@@ -2153,6 +2156,17 @@ class MarketAgentService:
                                 })
                             except Exception as cb_err:
                                 logger.debug(f"Could not record circuit breaker trade: {cb_err}")
+                            
+                            # Shadow outcome: track whether this was a would-block signal
+                            try:
+                                was_would_block = bool(sig.get("_cb_would_block", False))
+                                self.trading_circuit_breaker.record_shadow_outcome(
+                                    pnl=pnl_value,
+                                    is_win=is_win,
+                                    was_would_block=was_would_block,
+                                )
+                            except Exception as shadow_err:
+                                logger.debug(f"Could not record shadow outcome: {shadow_err}")
                         
                         # Record trade with 50k challenge tracker (pass/fail rules)
                         if self._challenge_tracker is not None:

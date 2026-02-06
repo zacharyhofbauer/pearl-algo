@@ -200,6 +200,16 @@ export interface ShadowCounters {
   ml_would_skip: number
   ml_total_decisions: number
   ml_execute_rate: number
+  // Shadow outcome comparison (what happened to blocked vs allowed signals)
+  blocked_wins: number
+  blocked_losses: number
+  blocked_total: number
+  blocked_pnl: number
+  allowed_wins: number
+  allowed_losses: number
+  allowed_total: number
+  allowed_pnl: number
+  net_saved: number
 }
 
 export interface GatewayStatus {

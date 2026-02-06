@@ -2131,10 +2131,13 @@ def _get_last_signal_decision(state: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
 
 def _get_shadow_counters(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Get shadow mode counters showing what would have been blocked."""
+    """Get shadow mode counters showing what would have been blocked + outcome stats."""
     circuit_breaker = state.get("trading_circuit_breaker", {})
     ml_filter = state.get("ml_filter", {})
     learning = state.get("learning", {})
+
+    # Shadow outcome stats (from circuit breaker's shadow outcome tracker)
+    shadow_outcomes = circuit_breaker.get("shadow_outcomes", {})
 
     return {
         "would_block_total": circuit_breaker.get("would_block_total", 0),
@@ -2142,6 +2145,16 @@ def _get_shadow_counters(state: Dict[str, Any]) -> Dict[str, Any]:
         "ml_would_skip": learning.get("total_skips", 0) if learning.get("mode") == "shadow" else 0,
         "ml_total_decisions": learning.get("total_decisions", 0),
         "ml_execute_rate": learning.get("execute_rate", 1.0),
+        # Shadow outcome comparison (what happened to blocked vs allowed signals)
+        "blocked_wins": shadow_outcomes.get("blocked_wins", 0),
+        "blocked_losses": shadow_outcomes.get("blocked_losses", 0),
+        "blocked_total": shadow_outcomes.get("blocked_total", 0),
+        "blocked_pnl": shadow_outcomes.get("blocked_pnl", 0.0),
+        "allowed_wins": shadow_outcomes.get("allowed_wins", 0),
+        "allowed_losses": shadow_outcomes.get("allowed_losses", 0),
+        "allowed_total": shadow_outcomes.get("allowed_total", 0),
+        "allowed_pnl": shadow_outcomes.get("allowed_pnl", 0.0),
+        "net_saved": shadow_outcomes.get("net_saved", 0.0),
     }
 
 

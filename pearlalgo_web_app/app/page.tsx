@@ -455,6 +455,96 @@ export default function PearlAlgoWebApp() {
     fetchData(timeframe, barCount)
   }, [fetchData, timeframe, barCount])
 
+  // Pull-to-refresh (mobile touch) - uses window scroll position
+  const pullStartY = useRef(0)
+  const pullActive = useRef(false)
+  const pullDistanceRef = useRef(0)
+  const [pullDistance, setPullDistance] = useState(0)
+  const [pullRefreshing, setPullRefreshing] = useState(false)
+  const PULL_THRESHOLD = 70
+
+  // Keep ref in sync with state for use in touchend
+  useEffect(() => { pullDistanceRef.current = pullDistance }, [pullDistance])
+
+  useEffect(() => {
+    let refreshingRef = false
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (refreshingRef) return
+      // Check both window scroll and document scroll (cross-browser)
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0
+      if (scrollTop <= 5) {
+        pullStartY.current = e.touches[0].clientY
+        pullActive.current = false
+      } else {
+        pullStartY.current = 0
+      }
+    }
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (pullStartY.current === 0 || refreshingRef) return
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0
+      const diff = e.touches[0].clientY - pullStartY.current
+
+      if (diff > 10 && scrollTop <= 5) {
+        // Pulling down from top - activate
+        pullActive.current = true
+        e.preventDefault()
+        const distance = Math.min(diff * 0.4, 100)
+        setPullDistance(distance)
+      } else if (diff < -5 && !pullActive.current) {
+        // Scrolling up - cancel pull tracking
+        pullStartY.current = 0
+      }
+    }
+
+    const onTouchEnd = () => {
+      if (!pullActive.current || refreshingRef) {
+        if (!refreshingRef) setPullDistance(0)
+        pullStartY.current = 0
+        pullActive.current = false
+        return
+      }
+
+      if (pullDistanceRef.current >= PULL_THRESHOLD * 0.4) {
+        refreshingRef = true
+        setPullRefreshing(true)
+        setPullDistance(40)
+        fetchData(timeframe, barCount).finally(() => {
+          refreshingRef = false
+          setPullRefreshing(false)
+          setPullDistance(0)
+        })
+      } else {
+        setPullDistance(0)
+      }
+      pullStartY.current = 0
+      pullActive.current = false
+    }
+
+    // Cancel pull if user scrolls via momentum after lifting finger
+    const onScroll = () => {
+      if (pullActive.current && !refreshingRef) {
+        pullActive.current = false
+        setPullDistance(0)
+      }
+    }
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true })
+    document.addEventListener('touchmove', onTouchMove, { passive: false })
+    document.addEventListener('touchend', onTouchEnd, { passive: true })
+    document.addEventListener('touchcancel', onTouchEnd, { passive: true })
+    window.addEventListener('scroll', onScroll, { passive: true })
+
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart)
+      document.removeEventListener('touchmove', onTouchMove)
+      document.removeEventListener('touchend', onTouchEnd)
+      document.removeEventListener('touchcancel', onTouchEnd)
+      window.removeEventListener('scroll', onScroll)
+    }
+  }, [fetchData, timeframe, barCount])
+
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
     return `${sign}$${pnl.toFixed(2)}`
@@ -836,6 +926,26 @@ export default function PearlAlgoWebApp() {
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <PearlHeaderBar />
       <main className="main-content" id="main-content">
+        {/* Pull-to-refresh indicator */}
+        <div
+          className={`pull-to-refresh ${pullRefreshing ? 'refreshing' : ''} ${pullDistance > 0 ? 'visible' : ''}`}
+          style={{
+            height: pullDistance > 0 ? pullDistance : 0,
+            opacity: pullDistance > 0 ? Math.min(pullDistance / PULL_THRESHOLD, 1) : 0,
+          }}
+        >
+          <div
+            className={`pull-icon ${pullRefreshing ? 'spinning' : ''}`}
+            style={{
+              transform: pullRefreshing ? 'none' : `rotate(${Math.min(pullDistance / PULL_THRESHOLD, 1) * 180}deg)`,
+            }}
+          >
+            {pullRefreshing ? '↻' : '↓'}
+          </div>
+          <div className="pull-text">
+            {pullRefreshing ? 'Refreshing...' : pullDistance >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}
+          </div>
+        </div>
         <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
           {/* Market Closed Banner */}
           {marketStatus && !marketStatus.is_open && (

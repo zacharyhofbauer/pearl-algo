@@ -51,55 +51,83 @@ export default function PearlHeaderBar() {
     return derivePearlMode(agentState?.ai_status || null, agentState?.pearl_insights || null)
   }, [agentState?.ai_status, agentState?.pearl_insights])
 
-  // Build carousel items from feed messages (last 5, most recent first)
-  const carouselItems = useMemo(() => {
-    const items: string[] = []
-    const maxLength = 55
-    
-    // Add the primary headline first
-    const headline = deriveHeadline(
-      agentState?.pearl_feed || [],
-      agentState?.pearl_suggestion || null,
-      agentState?.pearl_insights || null
-    )
-    items.push(truncateText(headline.text, maxLength))
-    
-    // Add recent feed messages (skip if same as headline)
+  // Data summary (default view)
+  const dataSummary = useMemo(() => {
+    if (!agentState) return 'Connecting…'
+
+    const parts: string[] = []
+
+    const pnl = agentState.daily_pnl || 0
+    const pnlSign = pnl >= 0 ? '+' : ''
+    parts.push(`${pnlSign}$${pnl.toFixed(0)}`)
+
+    const w = agentState.daily_wins || 0
+    const l = agentState.daily_losses || 0
+    if (w + l > 0) parts.push(`${w}W/${l}L`)
+
+    const active = agentState.active_trades_count || 0
+    if (active > 0) parts.push(`${active} active`)
+
+    const regime = agentState.market_regime
+    if (regime && regime.regime && regime.regime !== 'unknown') {
+      const label = regime.regime.replace('trending_', '').replace('_', ' ')
+      parts.push(label.charAt(0).toUpperCase() + label.slice(1))
+    }
+
+    return parts.join(' · ') || 'Watching…'
+  }, [agentState])
+
+  // Flash Pearl AI messages briefly (5s) then return to data summary
+  const [flashMessage, setFlashMessage] = useState<string | null>(null)
+  const lastSeenFeedId = useRef<string | null>(null)
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
     const feed = agentState?.pearl_feed || []
-    for (let i = 0; i < Math.min(feed.length, 4); i++) {
-      const msg = feed[i]
-      if (msg?.content && msg.content !== headline.text) {
-        items.push(truncateText(msg.content, maxLength))
-      }
-    }
-    
-    return items.length > 0 ? items : ['Watching for opportunities…']
-  }, [agentState?.pearl_feed, agentState?.pearl_insights, agentState?.pearl_suggestion])
+    if (feed.length === 0) return
 
-  // Carousel rotation (every 6 seconds, subtle)
+    const latest = feed[0] // Most recent message
+    if (!latest?.id || latest.id === lastSeenFeedId.current) return
+
+    // New message arrived
+    lastSeenFeedId.current = latest.id
+
+    // Strip all quotation marks from message text (straight, curly, backtick)
+    let text = (latest.content || '')
+      .replace(/"/g, '')
+      .replace(/\u201c/g, '')
+      .replace(/\u201d/g, '')
+      .replace(/'/g, '')
+      .replace(/\u2018/g, '')
+      .replace(/\u2019/g, '')
+      .replace(/`/g, '')
+      .trim()
+
+    // Show type indicator
+    const typeIcon = latest.type === 'narration' ? '💬' :
+                     latest.type === 'insight' ? '💡' :
+                     latest.type === 'alert' ? '⚠️' :
+                     latest.type === 'response' ? '🤖' : '💬'
+
+    setFlashMessage(`${typeIcon} ${truncateText(text, 50)}`)
+
+    // Clear previous timer
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+
+    // Auto-dismiss after 5 seconds
+    flashTimerRef.current = setTimeout(() => {
+      setFlashMessage(null)
+    }, 5000)
+  }, [agentState?.pearl_feed])
+
+  // Cleanup timer on unmount
   useEffect(() => {
-    if (carouselItems.length <= 1 || expanded) return
-    
-    const interval = setInterval(() => {
-      setIsTransitioning(true)
-      setTimeout(() => {
-        setCarouselIndex((prev) => (prev + 1) % carouselItems.length)
-        setIsTransitioning(false)
-      }, 300) // Fade out duration
-    }, 6000) // Rotate every 6 seconds
-    
-    return () => clearInterval(interval)
-  }, [carouselItems.length, expanded])
+    return () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current) }
+  }, [])
 
-  // Reset carousel index when items change significantly
-  useEffect(() => {
-    if (carouselIndex >= carouselItems.length) {
-      setCarouselIndex(0)
-    }
-  }, [carouselItems.length, carouselIndex])
-
-  // Current preview text for display
-  const previewText = carouselItems[carouselIndex] || carouselItems[0]
+  // Show flash message if active, otherwise show data summary
+  const previewText = flashMessage || dataSummary
+  const isFlashing = Boolean(flashMessage)
 
   // Toggle handler with keyboard support
   const handleToggle = useCallback(() => {
@@ -184,15 +212,8 @@ export default function PearlHeaderBar() {
         aria-label={hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
       />
 
-      <div className={`pearl-header-preview ${isTransitioning ? 'fading' : ''}`} aria-hidden="true">
+      <div className={`pearl-header-preview ${isFlashing ? 'flash' : ''}`} aria-hidden="true">
         {previewText}
-        {carouselItems.length > 1 && !expanded && (
-          <span className="pearl-header-carousel-dots">
-            {carouselItems.map((_, i) => (
-              <span key={i} className={`carousel-dot ${i === carouselIndex ? 'active' : ''}`} />
-            ))}
-          </span>
-        )}
       </div>
 
       <span className="pearl-header-arrow" aria-hidden="true">
