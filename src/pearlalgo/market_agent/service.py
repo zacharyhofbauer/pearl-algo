@@ -198,7 +198,7 @@ class MarketAgentService:
             except Exception:
                 challenge_cfg = {}
         _mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-        _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else None
+        _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else "INCEPTION"
 
         self.telegram_notifier = MarketAgentTelegramNotifier(
             bot_token=telegram_bot_token,
@@ -437,6 +437,9 @@ class MarketAgentService:
             logger.warning(f"MFFU tracker init failed (continuing without): {e}")
             self._mffu_tracker = None
             self._mffu_enabled = False
+
+        # Tradovate account cache (polled each cycle when execution adapter is Tradovate)
+        self._tradovate_account: Dict[str, Any] = {}
 
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
@@ -1470,6 +1473,13 @@ class MarketAgentService:
                     )
                 except Exception:
                     pass
+
+                # Poll Tradovate account data (MFFU: real broker values for dashboard)
+                if self.execution_adapter is not None and hasattr(self.execution_adapter, "get_account_summary"):
+                    try:
+                        self._tradovate_account = await self.execution_adapter.get_account_summary()
+                    except Exception:
+                        pass  # non-fatal: stale cache is fine
 
                 # Save state periodically
                 if self.cycle_count % self.state_save_interval == 0:
@@ -5568,6 +5578,9 @@ class MarketAgentService:
                     continue
 
                 self._shared_signals_processed_keys.add(dedup_key)
+                # Ensure position_size defaults to 1 (strategy doesn't always set it)
+                if not sig.get("position_size"):
+                    sig["position_size"] = 1
                 new_signals.append(sig)
 
             # Prevent unbounded memory growth: cap the dedup set
@@ -5856,6 +5869,17 @@ class MarketAgentService:
             if self.execution_adapter is not None
             else {"enabled": False, "armed": False, "mode": "disabled"}
         )
+        # Tradovate live account data (balance, positions, P&L, fills)
+        if self._tradovate_account:
+            # Separate fills from the summary to keep state.json cleaner
+            fills = self._tradovate_account.pop("fills", [])
+            state["tradovate_account"] = self._tradovate_account
+            state["tradovate_fills"] = fills
+            # Put fills back on the cached dict so next poll overwrites cleanly
+            self._tradovate_account["fills"] = fills
+            # Override virtual trade counts with real broker data
+            state["active_trades_count"] = self._tradovate_account.get("position_count", 0)
+            state["active_trades_unrealized_pnl"] = self._tradovate_account.get("open_pnl", 0.0)
         state["learning"] = (
             self.bandit_policy.get_status()
             if self.bandit_policy is not None

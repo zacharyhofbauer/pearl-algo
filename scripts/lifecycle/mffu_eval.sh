@@ -142,9 +142,39 @@ if [ "$COMMAND" = "status" ]; then
     fi
 fi
 
-if [ "$COMMAND" = "stop" ]; then
-    STOPPED=false
+# ---------------------------------------------------------------------------
+# Helper: kill any process holding our API port (prevents stale ghost servers)
+# ---------------------------------------------------------------------------
+kill_port_holders() {
+    local PORT="$1"
+    local PIDS
+    PIDS=$(ss -tlnp 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+    if [ -z "$PIDS" ]; then
+        # Fallback: lsof
+        PIDS=$(lsof -ti ":${PORT}" 2>/dev/null | sort -u || true)
+    fi
+    if [ -n "$PIDS" ]; then
+        for P in $PIDS; do
+            echo "  Killing stale process on port $PORT (PID: $P)"
+            kill "$P" 2>/dev/null || true
+        done
+        sleep 2
+        # Force-kill survivors
+        for P in $PIDS; do
+            if ps -p "$P" > /dev/null 2>&1; then
+                kill -9 "$P" 2>/dev/null || true
+            fi
+        done
+    fi
+}
 
+# ---------------------------------------------------------------------------
+# Helper: full stop (PID files + port cleanup + orphans)
+# ---------------------------------------------------------------------------
+do_stop() {
+    local STOPPED=false
+
+    # 1. Kill processes from PID files
     for PF in "$PID_FILE" "$API_PID_FILE"; do
         if [ -f "$PF" ]; then
             PID=$(cat "$PF")
@@ -160,13 +190,46 @@ if [ "$COMMAND" = "stop" ]; then
         fi
     done
 
-    if [ "$STOPPED" = true ]; then
+    # 2. Kill anything still holding our API port (catches manually started servers)
+    kill_port_holders "$API_PORT"
+
+    # 3. Kill orphan agent processes for this state dir
+    local ORPHAN_PIDS=""
+    ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
+    for OPID in $ORPHAN_PIDS; do
+        local PROC_ENV=""
+        PROC_ENV=$(cat /proc/$OPID/environ 2>/dev/null | tr '\0' '\n' | grep "PEARLALGO_STATE_DIR" || true)
+        if echo "$PROC_ENV" | grep -q "MFFU_EVAL" 2>/dev/null; then
+            echo "  Killing orphan MFFU agent (PID: $OPID)"
+            kill "$OPID" 2>/dev/null || true
+            sleep 1
+            kill -9 "$OPID" 2>/dev/null || true
+            STOPPED=true
+        fi
+    done
+
+    echo "$STOPPED"
+}
+
+if [ "$COMMAND" = "stop" ]; then
+    RESULT=$(do_stop)
+    if [ "$RESULT" = "true" ]; then
         echo "MFFU Eval instance stopped"
         exit 0
     fi
-
     echo "MFFU Eval instance not running"
-    exit 1
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Restart command: stop everything, then start
+# ---------------------------------------------------------------------------
+if [ "$COMMAND" = "restart" ]; then
+    echo "Restarting MFFU Eval instance..."
+    do_stop > /dev/null
+    sleep 1
+    # Fall through to start
+    COMMAND="start"
 fi
 
 if [ "$COMMAND" = "api" ]; then
@@ -174,19 +237,15 @@ if [ "$COMMAND" = "api" ]; then
     activate_venv
     PYTHON_CMD=$(get_python)
 
-    if [ -f "$API_PID_FILE" ]; then
-        OLD_PID=$(cat "$API_PID_FILE")
-        if ps -p "$OLD_PID" > /dev/null 2>&1; then
-            echo "API server already running (PID: $OLD_PID)"
-            exit 1
-        fi
-        rm -f "$API_PID_FILE"
-    fi
+    # Clear any stale process on our port first
+    kill_port_holders "$API_PORT"
+    rm -f "$API_PID_FILE"
 
     echo "Starting MFFU Eval API Server"
     echo "  State dir: $STATE_DIR"
     echo "  Port:      $API_PORT"
     echo "  Market:    $MARKET"
+    echo "  IBKR chart client ID: $IB_CLIENT_ID_LIVE_CHART"
 
     if [ "$BACKGROUND_MODE" = true ]; then
         nohup "$PYTHON_CMD" scripts/pearlalgo_web_app/api_server.py \
@@ -206,7 +265,7 @@ fi
 
 if [ "$COMMAND" != "start" ]; then
     echo "Unknown command: $COMMAND"
-    echo "Usage: $0 {start|stop|status|api} [--background]"
+    echo "Usage: $0 {start|stop|restart|status|api} [--background]"
     exit 1
 fi
 
@@ -221,16 +280,20 @@ if ! "$PYTHON_CMD" -c "import pearlalgo" 2>/dev/null; then
     exit 1
 fi
 
+# Kill any stale processes before starting fresh
+kill_port_holders "$API_PORT"
+
 # Check for stale PID
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if ps -p "$PID" > /dev/null 2>&1; then
-        echo "MFFU Eval agent already running (PID: $PID)"
+        echo "MFFU Eval agent already running (PID: $PID). Use 'restart' to replace."
         exit 1
     else
         rm -f "$PID_FILE"
     fi
 fi
+rm -f "$API_PID_FILE"
 
 echo "Starting MFFU Eval Instance"
 echo "  State dir:  $STATE_DIR"

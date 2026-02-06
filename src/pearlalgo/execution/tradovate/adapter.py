@@ -404,3 +404,69 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             "open_orders": len(self._open_orders),
         }
         return base
+
+    async def get_account_summary(self) -> Dict[str, Any]:
+        """
+        Get live Tradovate account summary (balance, positions, P&L).
+
+        Returns a dict suitable for embedding in state.json so the web
+        dashboard can display real broker values instead of virtual P&L.
+        """
+        if not self.is_connected():
+            return {}
+
+        result: Dict[str, Any] = {}
+        try:
+            snap = await self._client.get_cash_balance_snapshot()
+            result["equity"] = snap.get("netLiq", 0.0)
+            result["cash_balance"] = snap.get("totalCashValue", 0.0)
+            result["open_pnl"] = snap.get("openPnL", 0.0)
+            result["realized_pnl"] = snap.get("realizedPnL", 0.0)
+            result["week_realized_pnl"] = snap.get("weekRealizedPnL", 0.0)
+            result["initial_margin"] = snap.get("initialMargin", 0.0)
+            result["maintenance_margin"] = snap.get("maintenanceMargin", 0.0)
+        except Exception as e:
+            logger.debug(f"Tradovate balance query failed: {e}")
+
+        try:
+            tv_positions = await self._client.get_positions()
+            positions = []
+            for pos in tv_positions:
+                net_pos = pos.get("netPos", 0)
+                if net_pos == 0:
+                    continue
+                positions.append({
+                    "contract_id": pos.get("contractId"),
+                    "net_pos": net_pos,
+                    "net_price": pos.get("netPrice", 0.0),
+                    "open_pnl": pos.get("openPnL", 0.0),
+                })
+            result["positions"] = positions
+            result["position_count"] = len(positions)
+        except Exception as e:
+            logger.debug(f"Tradovate positions query failed: {e}")
+            result["positions"] = []
+            result["position_count"] = 0
+
+        try:
+            raw_fills = await self._client.get_fills()
+            fills = []
+            for f in raw_fills:
+                fills.append({
+                    "id": f.get("id"),
+                    "order_id": f.get("orderId"),
+                    "contract_id": f.get("contractId"),
+                    "timestamp": f.get("timestamp"),
+                    "action": f.get("action"),        # "Buy" or "Sell"
+                    "qty": f.get("qty", 0),
+                    "price": f.get("price", 0.0),
+                    "net_pos": f.get("netPos", 0),    # position after this fill
+                })
+            result["fills"] = fills
+        except Exception as e:
+            logger.debug(f"Tradovate fills query failed: {e}")
+            result["fills"] = []
+
+        result["account"] = self._client.account_name
+        result["env"] = self._tv_config.env
+        return result

@@ -312,9 +312,12 @@ class TradovateClient:
         return await self._get(url)
 
     async def get_fills(self, account_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """GET /fill/deps -- fills for an account."""
-        aid = account_id or self._account_id
-        url = f"{self.config.rest_url}/fill/deps?masterid={aid}"
+        """GET /fill/list -- all fills for the authenticated user.
+
+        Uses /fill/list (accessible with standard API key) instead of
+        /fill/deps (which requires elevated permissions).
+        """
+        url = f"{self.config.rest_url}/fill/list"
         return await self._get(url)
 
     # ── REST API: Orders ──────────────────────────────────────────────

@@ -126,75 +126,79 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
   return (
     <DataPanel title={panelTitle} className="challenge-panel" variant="feature">
-      <div className="challenge-header">
-        <div className="challenge-balance">
-          <div className="challenge-balance-row">
-            <span className="balance-amount">${challenge.current_balance.toLocaleString()}</span>
-            {challenge.attempt_number && (
-              <span className="challenge-attempt">#{challenge.attempt_number}</span>
-            )}
-            {mffu && (
-              <span className="challenge-stage-badge" style={{
-                background: mffu.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
-                color: '#0a0a0a',
-                padding: '1px 5px',
-                borderRadius: '3px',
-                fontSize: '9px',
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                marginLeft: '4px',
-              }}>
-                {mffu.stage === 'evaluation' ? 'EVAL' : mffu.stage === 'sim_funded' ? 'SIM' : 'LIVE'}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Row 1: Balance + ACTIVE badge */}
+        <div className="challenge-header">
+          <div className="challenge-balance">
+            <div className="challenge-balance-row">
+              <span className="balance-amount">${challenge.current_balance.toLocaleString()}</span>
+              {challenge.attempt_number && (
+                <span className="challenge-attempt">#{challenge.attempt_number}</span>
+              )}
+              {mffu && (
+                <span className="challenge-stage-badge" style={{
+                  background: mffu.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
+                  color: '#0a0a0a',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                  marginLeft: '4px',
+                }}>
+                  {mffu.stage === 'evaluation' ? 'EVAL' : mffu.stage === 'sim_funded' ? 'SIM' : 'LIVE'}
+                </span>
+              )}
+            </div>
+            <span className={`balance-pnl ${challenge.pnl >= 0 ? 'positive' : 'negative'}`}>
+              {formatPnL(challenge.pnl)}
+            </span>
+            {gapFromPeak > 1 && (
+              <span className="peak-gap-indicator">
+                ↓${gapFromPeak.toFixed(0)} from peak
               </span>
             )}
           </div>
-          <span className={`balance-pnl ${challenge.pnl >= 0 ? 'positive' : 'negative'}`}>
-            {formatPnL(challenge.pnl)}
-          </span>
-          {gapFromPeak > 1 && (
-            <span className="peak-gap-indicator">
-              ↓${gapFromPeak.toFixed(0)} from peak
+          <div className="challenge-header-right">
+            {equityCurve && equityCurve.length > 1 && (
+              <MiniSparkline data={equityCurve} isPositive={challenge.pnl >= 0} />
+            )}
+            <span className={`challenge-outcome ${getOutcomeStyle()}`}>
+              {getOutcomeText()}
             </span>
-          )}
-        </div>
-        <div className="challenge-header-right">
-          {equityCurve && equityCurve.length > 1 && (
-            <MiniSparkline data={equityCurve} isPositive={challenge.pnl >= 0} />
-          )}
-          <span className={`challenge-outcome ${getOutcomeStyle()}`}>
-            {getOutcomeText()}
-          </span>
-        </div>
-      </div>
-
-      <div className="challenge-progress">
-        <div className="progress-label">
-          <span>Drawdown Risk</span>
-          <span className={challenge.drawdown_risk_pct > 70 ? 'negative' : challenge.drawdown_risk_pct > 40 ? 'warning' : ''}>
-            {challenge.drawdown_risk_pct.toFixed(1)}%
-          </span>
-        </div>
-        <div className="progress-bar">
-          <div className="progress-segments">
-            {[...Array(10)].map((_, i) => (
-              <div
-                key={i}
-                className={`progress-segment ${
-                  (i + 1) * 10 <= challenge.drawdown_risk_pct
-                    ? challenge.drawdown_risk_pct > 70
-                      ? 'filled-danger'
-                      : challenge.drawdown_risk_pct > 40
-                      ? 'filled-warning'
-                      : 'filled'
-                    : ''
-                }`}
-              />
-            ))}
           </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-3 gap-sm">
+        {/* Row 2: Drawdown Risk */}
+        <div className="challenge-progress" style={{ marginBottom: 0 }}>
+          <div className="progress-label">
+            <span>Drawdown Risk</span>
+            <span className={challenge.drawdown_risk_pct > 70 ? 'negative' : challenge.drawdown_risk_pct > 40 ? 'warning' : ''}>
+              {challenge.drawdown_risk_pct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-segments">
+              {[...Array(10)].map((_, i) => (
+                <div
+                  key={i}
+                  className={`progress-segment ${
+                    (i + 1) * 10 <= challenge.drawdown_risk_pct
+                      ? challenge.drawdown_risk_pct > 70
+                        ? 'filled-danger'
+                        : challenge.drawdown_risk_pct > 40
+                        ? 'filled-warning'
+                        : 'filled'
+                      : ''
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: Stats */}
+        <div className="grid grid-cols-3 gap-sm">
         <StatDisplay
           label="Trades"
           value={challenge.trades}
@@ -236,9 +240,8 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         </div>
       )}
 
-      {/* MFFU-specific info */}
-      {mffu && (
-        <div className="mffu-details" style={{ marginTop: 'var(--space-sm, 8px)' }}>
+        {/* MFFU-specific info */}
+        {mffu && (
           <div className="grid grid-cols-3 gap-sm">
             <StatDisplay
               label="DD Floor"
@@ -262,19 +265,18 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
               colorMode="financial"
             />
           </div>
-          {mffu.drawdown_locked && (
-            <div style={{
-              fontSize: '10px',
-              color: 'var(--accent-green, #00e676)',
-              marginTop: '4px',
-              textAlign: 'center',
-              opacity: 0.8,
-            }}>
-              DD Floor Locked at ${mffu.current_drawdown_floor?.toLocaleString()}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+        {mffu?.drawdown_locked && (
+          <div style={{
+            fontSize: '10px',
+            color: 'var(--accent-green, #00e676)',
+            textAlign: 'center',
+            opacity: 0.8,
+          }}>
+            DD Floor Locked at ${mffu.current_drawdown_floor?.toLocaleString()}
+          </div>
+        )}
+      </div>
     </DataPanel>
   )
 }

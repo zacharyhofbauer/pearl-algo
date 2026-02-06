@@ -1057,6 +1057,7 @@ class ConnectionManager:
                                     "last_signal_decision": state.get("last_signal_decision"),
                                     "shadow_counters": state.get("shadow_counters"),
                                     "execution_state": state.get("execution_state"),
+                                    "tradovate_account": state.get("tradovate_account"),
                                     "circuit_breaker": state.get("circuit_breaker"),
                                     "ml_filter_performance": state.get("ml_filter_performance"),
                                     "session_context": state.get("session_context"),
@@ -1459,7 +1460,58 @@ def _get_trading_day_start() -> datetime:
 
 
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET."""
+    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET.
+
+    Priority order for MFFU accounts:
+    1. Tradovate live account data (realized PnL from broker)
+    2. Challenge state (trade count / wins)
+    3. signals.jsonl virtual tracking
+    """
+    # Check for live Tradovate account data in state.json first
+    try:
+        state_file = state_dir / "state.json"
+        if state_file.exists():
+            state_data = json.loads(state_file.read_text()) or {}
+            tv = state_data.get("tradovate_account")
+            if tv and isinstance(tv, dict) and tv.get("equity"):
+                # Single source of truth: equity - start_balance
+                equity = float(tv.get("equity", 0))
+                open_pnl = round(tv.get("open_pnl", 0.0), 2)
+                pos_count = tv.get("position_count", 0)
+                # Resolve start balance from challenge config
+                start_balance = 50000.0
+                try:
+                    ch_file = state_dir / "challenge_state.json"
+                    if ch_file.exists():
+                        _ch = json.loads(ch_file.read_text())
+                        start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
+                except Exception:
+                    pass
+                pnl = round(equity - start_balance, 2)
+                # Trade counts from performance.json (actual tracked trades)
+                trades, wins, losses = 0, 0, 0
+                try:
+                    pf = state_dir / "performance.json"
+                    if pf.exists():
+                        _trades = json.loads(pf.read_text())
+                        if isinstance(_trades, list) and _trades:
+                            trades = len(_trades)
+                            wins = sum(1 for t in _trades if (t.get("pnl") or 0) > 0)
+                            losses = trades - wins
+                except Exception:
+                    pass
+                return {
+                    "daily_pnl": pnl,
+                    "daily_trades": trades,
+                    "daily_wins": wins,
+                    "daily_losses": losses,
+                    "tradovate_equity": round(equity, 2),
+                    "tradovate_open_pnl": open_pnl,
+                    "tradovate_positions": pos_count,
+                }
+    except Exception:
+        pass
+
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
         # signals.jsonl missing (e.g. after reset) -- fall back to challenge data
@@ -1567,7 +1619,49 @@ def _get_previous_trading_day_bounds() -> tuple:
 
 
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute performance stats for yesterday, 24h, 72h, and 30d periods."""
+    """Compute performance stats for yesterday, 24h, 72h, and 30d periods.
+
+    When Tradovate live account data is available (MFFU), use the broker's
+    equity-based P&L as the single source of truth for ALL periods.  This
+    avoids the mismatch between virtual exit grading and real fills.
+    """
+    # Priority 1: Tradovate live data (MFFU accounts)
+    try:
+        state_file = state_dir / "state.json"
+        if state_file.exists():
+            _sd = json.loads(state_file.read_text()) or {}
+            tv = _sd.get("tradovate_account")
+            if tv and isinstance(tv, dict) and tv.get("equity"):
+                start_balance = 50000.0  # MFFU eval start
+                try:
+                    ch_file = state_dir / "challenge_state.json"
+                    if ch_file.exists():
+                        _ch = json.loads(ch_file.read_text())
+                        start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
+                except Exception:
+                    pass
+                equity = float(tv.get("equity", 0))
+                open_pnl = float(tv.get("open_pnl", 0))
+                pnl = round(equity - start_balance, 2)
+                # Build a single stat block used for every period
+                tv_stats = {"pnl": pnl, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
+                            "tradovate_equity": round(equity, 2), "tradovate_open_pnl": round(open_pnl, 2)}
+                # Read trade counts from performance.json if available
+                try:
+                    pf = state_dir / "performance.json"
+                    if pf.exists():
+                        trades = json.loads(pf.read_text())
+                        if isinstance(trades, list) and trades:
+                            tv_stats["trades"] = len(trades)
+                            tv_stats["wins"] = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
+                            tv_stats["losses"] = len(trades) - tv_stats["wins"]
+                            tv_stats["win_rate"] = round(tv_stats["wins"] / len(trades) * 100, 1)
+                except Exception:
+                    pass
+                return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
+    except Exception:
+        pass
+
     performance_file = state_dir / "performance.json"
     if not performance_file.exists():
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
@@ -1698,8 +1792,181 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     return stats
 
 
+# ==========================================================================
+# TRADOVATE DATA HELPERS (MFFU: broker as single source of truth)
+# ==========================================================================
+
+def _is_mffu_account(state_dir: Path) -> bool:
+    """Check if this state_dir has live Tradovate account data (MFFU mode)."""
+    try:
+        state_file = state_dir / "state.json"
+        if state_file.exists():
+            data = json.loads(state_file.read_text()) or {}
+            tv = data.get("tradovate_account")
+            return bool(tv and isinstance(tv, dict) and tv.get("equity"))
+    except Exception:
+        pass
+    return False
+
+
+def _get_tradovate_state(state_dir: Path) -> tuple:
+    """Load tradovate_account and tradovate_fills from state.json.
+
+    Returns (tradovate_account_dict, fills_list).
+    """
+    try:
+        state_file = state_dir / "state.json"
+        if state_file.exists():
+            data = json.loads(state_file.read_text()) or {}
+            tv = data.get("tradovate_account") or {}
+            fills = data.get("tradovate_fills") or []
+            return tv, fills
+    except Exception:
+        pass
+    return {}, []
+
+
+def _tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert raw Tradovate fills into paired trade records.
+
+    Pairs Buy fills with subsequent Sell fills (and vice versa) to produce
+    trade records with entry_price, exit_price, pnl, direction, etc.
+
+    MNQ point value = $2 per point per contract.
+    """
+    if not fills:
+        return []
+
+    POINT_VALUE = 2.0  # MNQ micro
+
+    # Sort fills by timestamp
+    sorted_fills = sorted(fills, key=lambda f: f.get("timestamp") or "")
+
+    trades: List[Dict[str, Any]] = []
+    pending_entries: List[Dict[str, Any]] = []  # fills waiting for a closing fill
+
+    for fill in sorted_fills:
+        action = fill.get("action", "")
+        net_pos_after = fill.get("net_pos", 0)
+        price = float(fill.get("price", 0))
+        qty = int(fill.get("qty", 1))
+        ts = fill.get("timestamp", "")
+
+        if not pending_entries:
+            # This is an opening fill
+            pending_entries.append(fill)
+        elif (pending_entries[0].get("action") == "Buy" and action == "Sell") or \
+             (pending_entries[0].get("action") == "Sell" and action == "Buy"):
+            # This closes a pending entry
+            entry_fill = pending_entries.pop(0)
+            entry_price = float(entry_fill.get("price", 0))
+            entry_action = entry_fill.get("action", "Buy")
+            direction = "long" if entry_action == "Buy" else "short"
+
+            if direction == "long":
+                pnl = round((price - entry_price) * qty * POINT_VALUE, 2)
+            else:
+                pnl = round((entry_price - price) * qty * POINT_VALUE, 2)
+
+            trades.append({
+                "signal_id": f"tv_{entry_fill.get('id', '')}_{fill.get('id', '')}",
+                "symbol": "MNQ",
+                "direction": direction,
+                "position_size": qty,
+                "entry_time": entry_fill.get("timestamp"),
+                "entry_price": entry_price,
+                "exit_time": ts,
+                "exit_price": price,
+                "pnl": pnl,
+                "exit_reason": "take_profit" if pnl > 0 else "stop_loss",
+            })
+
+            # If net_pos is still non-zero, this fill might also open a new position
+            if net_pos_after != 0 and not pending_entries:
+                pending_entries.append(fill)
+        else:
+            # Same direction fill (adding to position)
+            pending_entries.append(fill)
+
+    return trades
+
+
+def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert tradovate_account positions to the format /api/positions expects."""
+    positions = []
+    for pos in tv.get("positions", []):
+        net_pos = pos.get("net_pos", 0)
+        if net_pos == 0:
+            continue
+        direction = "long" if net_pos > 0 else "short"
+        positions.append({
+            "signal_id": f"tv_pos_{pos.get('contract_id', '')}",
+            "symbol": "MNQ",
+            "direction": direction,
+            "position_size": abs(net_pos),
+            "entry_price": pos.get("net_price", 0),
+            "entry_time": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "open_pnl": pos.get("open_pnl", 0),
+        })
+    return positions
+
+
+def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any]], state_dir: Path) -> Dict[str, Any]:
+    """Build performance summary from Tradovate data for all time periods."""
+    start_balance = 50000.0
+    try:
+        ch_file = state_dir / "challenge_state.json"
+        if ch_file.exists():
+            _ch = json.loads(ch_file.read_text())
+            start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
+    except Exception:
+        pass
+
+    equity = float(tv.get("equity", 0))
+    pnl = round(equity - start_balance, 2)
+
+    trades = _tradovate_fills_to_trades(fills)
+    total = len(trades)
+    wins = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
+    losses = total - wins
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    stats = {
+        "pnl": pnl,
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "tradovate_equity": round(equity, 2),
+    }
+    return stats
+
+
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
-    """Get recent exits from signals.jsonl with full trade details."""
+    """Get recent exits. MFFU: from Tradovate fills. Inception: from signals.jsonl."""
+    # MFFU: use Tradovate fills
+    if _is_mffu_account(state_dir):
+        _, fills = _get_tradovate_state(state_dir)
+        trades = _tradovate_fills_to_trades(fills)
+        recent = []
+        for t in trades[-limit:]:
+            pnl = t.get("pnl", 0)
+            recent.append({
+                "signal_id": t.get("signal_id"),
+                "direction": t.get("direction", "long"),
+                "pnl": pnl,
+                "exit_reason": t.get("exit_reason", ""),
+                "exit_time": t.get("exit_time"),
+                "entry_time": t.get("entry_time"),
+                "entry_price": t.get("entry_price"),
+                "exit_price": t.get("exit_price"),
+                "entry_reason": "",
+                "duration_seconds": None,
+            })
+        return recent
+
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
         return []
@@ -1823,6 +2090,33 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
                 "trading_days_count": mffu.get("trading_days_count", 0),
                 "max_contracts_mini": mffu.get("max_contracts_mini", 5),
             }
+
+        # MFFU: override balance/pnl/trades with Tradovate live data
+        if _is_mffu_account(state_dir):
+            tv, fills = _get_tradovate_state(state_dir)
+            if tv.get("equity"):
+                start_balance = config.get("start_balance", 50000.0)
+                equity = float(tv.get("equity", 0))
+                pnl = round(equity - start_balance, 2)
+                trades_list = _tradovate_fills_to_trades(fills)
+                total = len(trades_list)
+                wins = sum(1 for t in trades_list if (t.get("pnl") or 0) > 0)
+                losses = total - wins
+                win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+                result["current_balance"] = round(equity, 2)
+                result["pnl"] = pnl
+                result["trades"] = total
+                result["wins"] = wins
+                result["win_rate"] = win_rate
+
+                # Drawdown risk based on live equity vs floor
+                if mffu and mffu.get("current_drawdown_floor"):
+                    floor = float(mffu.get("current_drawdown_floor", 48000))
+                    max_dd_dist = config.get("max_drawdown", 2000.0)
+                    distance_to_floor = equity - floor
+                    dd_risk = max(0, min(100, ((max_dd_dist - distance_to_floor) / max_dd_dist) * 100)) if max_dd_dist > 0 else 0
+                    result["drawdown_risk_pct"] = round(dd_risk, 1)
 
         return result
     except Exception:
@@ -2572,6 +2866,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 
         # NEW: Extended data quality
         "data_quality": _get_data_quality(state),
+
+        # Tradovate live account data (MFFU)
+        "tradovate_account": state.get("tradovate_account"),
     }
 
 
@@ -2925,29 +3222,33 @@ def _get_year_to_date_start(now_utc: datetime) -> datetime:
 @app.get("/api/performance-summary")
 async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     """
-    Performance summary for common operator timeframes.
-
-    Periods:
-    - td: trading-day-to-date (6pm ET boundary)
-    - yday: previous complete trading day (6pm ET to 6pm ET)
-    - wtd: week-to-date (Sunday 6pm ET boundary)
-    - mtd: month-to-date (6pm ET boundary)
-    - ytd: year-to-date (6pm ET boundary)
+    Performance summary. MFFU: from Tradovate equity/fills. Inception: from performance.json.
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
+    # MFFU: single Tradovate-based stats for every period
+    if _is_mffu_account(_state_dir):
+        tv, fills = _get_tradovate_state(_state_dir)
+        stats = _tradovate_performance_summary(tv, fills, _state_dir)
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "td": stats,
+            "yday": {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
+            "wtd": stats,
+            "mtd": stats,
+            "ytd": stats,
+            "all": stats,
+        }
+
+    # Inception: existing performance.json logic
     performance_file = _state_dir / "performance.json"
     if not performance_file.exists():
         empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
         return {
             "as_of": datetime.now(timezone.utc).isoformat(),
-            "td": empty,
-            "yday": empty,
-            "wtd": empty,
-            "mtd": empty,
-            "ytd": empty,
-            "all": empty,
+            "td": empty, "yday": empty, "wtd": empty,
+            "mtd": empty, "ytd": empty, "all": empty,
         }
 
     try:
@@ -2964,8 +3265,6 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     wtd_start = _get_trading_week_start(now)
     mtd_start = _get_month_to_date_start(now)
     ytd_start = _get_year_to_date_start(now)
-
-    # All time - use a very old date as cutoff
     all_time_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
     return {
@@ -2983,16 +3282,20 @@ async def get_trades(
     limit: int = Query(default=20, ge=1, le=100, description="Max trades to return"),
     api_key: Optional[str] = Depends(verify_api_key),
 ):
-    """Get recent trades from signals.jsonl."""
+    """Get recent trades. MFFU: from Tradovate fills. Inception: from signals.jsonl."""
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
-    
+
+    # MFFU: reconstruct trades from Tradovate fills
+    if _is_mffu_account(_state_dir):
+        _, fills = _get_tradovate_state(_state_dir)
+        trades = _tradovate_fills_to_trades(fills)
+        return trades[-limit:]
+
+    # Inception: existing signals.jsonl logic
     signals_file = _state_dir / "signals.jsonl"
-    # Load enough lines to reliably return `limit` exited trades even if many
-    # recent lines are still-open positions.
     signals = _load_jsonl_file(signals_file, max_lines=max(500, limit * 10))
     
-    # Filter to exited trades only
     trades = []
     for s in signals:
         if s.get("status") != "exited":
@@ -3031,21 +3334,24 @@ async def get_positions(
     """Get currently open positions with entry price, stop loss, and take profit.
 
     Returns positions for display on chart as price lines.
+    MFFU: uses live Tradovate positions instead of virtual signals.jsonl.
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
+    # MFFU: return live Tradovate positions
+    if _is_mffu_account(_state_dir):
+        tv, _ = _get_tradovate_state(_state_dir)
+        return _tradovate_positions_for_api(tv)
+
+    # Inception: existing signals.jsonl logic
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=500)
 
-    # Filter to open positions only (not exited)
     positions = []
     for s in signals:
-        # Skip exited trades
         if s.get("status") == "exited":
             continue
-
-        # Must have entry to be an open position
         entry_price = s.get("entry_price")
         if not entry_price:
             continue
@@ -3054,8 +3360,6 @@ async def get_positions(
         direction = signal_data.get("direction", "long") if isinstance(signal_data, dict) else s.get("direction", "long")
         symbol = signal_data.get("symbol") if isinstance(signal_data, dict) else None
         position_size = signal_data.get("position_size") if isinstance(signal_data, dict) else None
-
-        # Get stop loss and take profit from signal data
         stop_loss = signal_data.get("stop_loss") if isinstance(signal_data, dict) else None
         take_profit = signal_data.get("take_profit") if isinstance(signal_data, dict) else None
 
@@ -3417,17 +3721,39 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
 async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
     """
     Session and time-based performance analytics.
-
-    Returns:
-    - session_performance: 6 trading sessions with wins, losses, pnl, win_rate
-    - best_hours: Top 3 hours by P&L (min 5 trades)
-    - worst_hours: Bottom 3 hours by P&L (min 5 trades)
-    - hold_duration: Quick/Medium/Long breakdown with win rates
-    - direction_breakdown: LONG vs SHORT counts and P&L
-    - status_breakdown: Generated/Entered/Exited/Cancelled counts
+    MFFU: direction breakdown from Tradovate fills. Inception: from performance.json.
     """
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
+
+    # MFFU: build analytics from Tradovate fills (include all fields the frontend expects)
+    if _is_mffu_account(_state_dir):
+        _, fills = _get_tradovate_state(_state_dir)
+        trades = _tradovate_fills_to_trades(fills)
+        long_trades = [t for t in trades if t.get("direction") == "long"]
+        short_trades = [t for t in trades if t.get("direction") == "short"]
+        long_pnl = sum(t.get("pnl", 0) for t in long_trades)
+        short_pnl = sum(t.get("pnl", 0) for t in short_trades)
+        total = len(trades)
+        tv, _ = _get_tradovate_state(_state_dir)
+        open_count = len([p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0])
+        entered = total + open_count
+        return {
+            "session_performance": [],
+            "best_hours": [],
+            "worst_hours": [],
+            "hold_duration": [],
+            "direction_breakdown": {
+                "long": {"count": len(long_trades), "pnl": round(long_pnl, 2)},
+                "short": {"count": len(short_trades), "pnl": round(short_pnl, 2)},
+            },
+            "status_breakdown": {
+                "generated": entered,
+                "entered": entered,
+                "exited": total,
+                "cancelled": 0,
+            },
+        }
 
     return _get_session_analytics(_state_dir)
 

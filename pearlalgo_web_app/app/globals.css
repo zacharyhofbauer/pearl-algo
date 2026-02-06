@@ -3223,13 +3223,16 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 12px;
+  margin-bottom: 0;
+  gap: 8px;
 }
 
 .challenge-balance {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
 
 .balance-amount {
@@ -3278,7 +3281,7 @@ body {
 
 /* Progress Bar */
 .challenge-progress {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .progress-label {
@@ -6315,6 +6318,7 @@ body {
   display: flex;
   align-items: baseline;
   gap: var(--space-4);
+  flex-wrap: wrap;
 }
 
 .challenge-attempt {
@@ -6328,6 +6332,8 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+  flex-shrink: 0;
+  min-width: fit-content;
 }
 
 .challenge-sparkline {

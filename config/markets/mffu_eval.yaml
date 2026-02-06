@@ -50,7 +50,7 @@ execution:
   armed: true                # Auto-armed for paper trading
   mode: paper                # paper = Tradovate demo simulation
   adapter: tradovate         # Use TradovateExecutionAdapter
-  max_positions: 5           # MFFU max 5 mini contracts
+  max_positions: 20          # MNQ micro: up to 20 concurrent positions (within 50 micro limit)
   max_orders_per_day: 50
   max_daily_loss: 1800.0     # Safety: slightly below $2000 MFFU limit
   cooldown_seconds: 30
@@ -82,7 +82,7 @@ trading_circuit_breaker:
   max_consecutive_losses: 5
   max_session_drawdown: 1800.0
   max_daily_drawdown: 1800.0
-  max_concurrent_positions: 5
+  max_concurrent_positions: 20
   # Disable session filter -- MFFU eval gate handles hours, allow all sessions
   enable_session_filter: false
   # Disable direction gating -- trade both directions for evaluation
