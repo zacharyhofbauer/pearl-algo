@@ -20,6 +20,13 @@ interface PostTradesPanelsProps {
 export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) {
   return (
     <div className="post-trades-panels">
+      {/* MFFU Eval panel -- first, right below trades */}
+      {agentState.challenge && (
+        <DataPanelsContainer>
+          <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />
+        </DataPanelsContainer>
+      )}
+
       {/* Core panels (signals + readiness) */}
       <DataPanelsContainer>
         <div className="panel-span-all">
@@ -52,10 +59,6 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
       <DataPanelsContainer>
         {(agentState.risk_metrics || (agentState.equity_curve && agentState.equity_curve.length > 0)) && (
           <RiskEquityPanel riskMetrics={agentState.risk_metrics} equityCurve={agentState.equity_curve || []} />
-        )}
-
-        {agentState.challenge && (
-          <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />
         )}
 
         {(agentState.market_regime || agentState.buy_sell_pressure) && (

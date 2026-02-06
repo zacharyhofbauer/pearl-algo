@@ -927,17 +927,6 @@ function PearlAlgoWebAppInner() {
         <PearlHeaderBar />
         <main className="main-content" id="main-content">
           <div className={`dashboard ultrawide-mode`} data-chart-ready={isChartReady ? 'true' : 'false'}>
-            {/* Market Closed Banner */}
-            {marketStatus && !marketStatus.is_open && (
-              <div className="market-closed-banner ultrawide-banner">
-                <span className="market-closed-icon">🔴</span>
-                <span className="market-closed-text">
-                  Market Closed ({marketStatus.close_reason})
-                  {marketStatus.next_open && <> — Opens {formatNextOpen(marketStatus.next_open)}</>}
-                </span>
-              </div>
-            )}
-
             <UltrawideLayout
               headerSection={renderUltrawideHeader()}
               chartSection={renderChart()}
@@ -1072,19 +1061,6 @@ function PearlAlgoWebAppInner() {
           </div>
         </div>
         <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
-          {/* Market Closed Banner */}
-          {marketStatus && !marketStatus.is_open && (
-            <div className="market-closed-banner">
-              <span className="market-closed-icon">🔴</span>
-              <span className="market-closed-text">
-                Market Closed ({marketStatus.close_reason})
-                {marketStatus.next_open && (
-                  <> — Opens {formatNextOpen(marketStatus.next_open)}</>
-                )}
-              </span>
-            </div>
-          )}
-
           {renderHeader()}
           {renderStatusPanel()}
           {renderChart()}

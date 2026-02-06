@@ -3281,7 +3281,7 @@ body {
 
 /* Progress Bar */
 .challenge-progress {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .progress-label {
@@ -4782,9 +4782,9 @@ body {
   /* ===================
      CHALLENGE PANEL
      =================== */
-  .challenge-progress {
-    height: 8px;
-    border-radius: 4px;
+  .challenge-progress .progress-bar {
+    height: 6px;
+    border-radius: 3px;
   }
 
   .challenge-stats {
@@ -12268,6 +12268,11 @@ body {
 .pearl-header-status-dot.connected.shadow {
   background: #ffc107;
   box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+}
+
+.pearl-header-status-dot.market-closed {
+  background: var(--accent-red, #ff5252);
+  box-shadow: 0 0 4px var(--accent-red, #ff5252);
 }
 
 @keyframes pulse-live {

@@ -131,14 +131,18 @@ export default function PearlHeaderBar() {
     return () => window.clearInterval(id)
   }, [tickOperator])
 
+  // Market open/closed status from agent state
+  const isMarketOpen = agentState?.futures_market_open ?? true
+
   // Status dot class based on connection and AI state
   const statusDotClass = useMemo(() => {
+    if (!isMarketOpen) return 'market-closed'
     if (!hasAI && !isConnected) return ''
     if (aiMode === 'live') return 'connected live'
     if (aiMode === 'shadow') return 'connected shadow'
     if (aiMode !== 'off' || hasAI) return 'connected'
     return ''
-  }, [hasAI, isConnected, aiMode])
+  }, [hasAI, isConnected, aiMode, isMarketOpen])
 
   return (
     <div
@@ -161,11 +165,13 @@ export default function PearlHeaderBar() {
       <span
         className={`pearl-header-status-dot ${statusDotClass}`}
         role="status"
-        aria-label={hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
+        aria-label={!isMarketOpen ? 'Market closed' : hasAI ? `Pearl AI ${aiMode}` : 'Pearl AI disconnected'}
       />
 
       <div className="pearl-header-preview" aria-hidden="true">
-        {previewText}
+        {!isMarketOpen
+          ? 'Market Closed'
+          : previewText}
       </div>
 
       <span className="pearl-header-arrow" aria-hidden="true">

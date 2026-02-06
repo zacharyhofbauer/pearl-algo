@@ -126,7 +126,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
   return (
     <DataPanel title={panelTitle} className="challenge-panel" variant="feature">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Row 1: Balance + ACTIVE badge */}
         <div className="challenge-header">
           <div className="challenge-balance">
@@ -170,7 +170,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         </div>
 
         {/* Row 2: Drawdown Risk */}
-        <div className="challenge-progress" style={{ marginBottom: 0 }}>
+        <div className="challenge-progress">
           <div className="progress-label">
             <span>Drawdown Risk</span>
             <span className={challenge.drawdown_risk_pct > 70 ? 'negative' : challenge.drawdown_risk_pct > 40 ? 'warning' : ''}>
@@ -199,46 +199,46 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
         {/* Row 3: Stats */}
         <div className="grid grid-cols-3 gap-sm">
-        <StatDisplay
-          label="Trades"
-          value={challenge.trades}
-          variant="compact"
-        />
-        <StatDisplay
-          label="Win Rate"
-          value={`${challenge.win_rate.toFixed(1)}%`}
-          variant="compact"
-          colorMode="financial"
-          positive={challenge.win_rate >= 50}
-          negative={challenge.win_rate < 50}
-        />
-        <StatDisplay
-          label="Target"
-          value={`$${challenge.profit_target.toLocaleString()}`}
-          variant="compact"
-          positive
-        />
-      </div>
+          <StatDisplay
+            label="Trades"
+            value={challenge.trades}
+            variant="compact"
+          />
+          <StatDisplay
+            label="Win Rate"
+            value={`${challenge.win_rate.toFixed(1)}%`}
+            variant="compact"
+            colorMode="financial"
+            positive={challenge.win_rate >= 50}
+            negative={challenge.win_rate < 50}
+          />
+          <StatDisplay
+            label="Target"
+            value={`$${challenge.profit_target.toLocaleString()}`}
+            variant="compact"
+            positive
+          />
+        </div>
 
-      {challenge.outcome === 'active' && challenge.pnl > 0 && (
-        <div className="challenge-target-progress">
-          <div className="target-progress-container">
-            <div className="target-progress-bar">
-              <div
-                className="target-progress-fill"
-                style={{ width: `${profitProgress}%` }}
-              />
-              {/* Milestone markers at 25%, 50%, 75% */}
-              <div className="milestone-markers">
-                <div className="milestone-marker" style={{ left: '25%' }} />
-                <div className="milestone-marker" style={{ left: '50%' }} />
-                <div className="milestone-marker" style={{ left: '75%' }} />
+        {/* Row 4: Progress to target */}
+        {challenge.outcome === 'active' && challenge.pnl > 0 && (
+          <div className="challenge-target-progress">
+            <div className="target-progress-container">
+              <div className="target-progress-bar">
+                <div
+                  className="target-progress-fill"
+                  style={{ width: `${profitProgress}%` }}
+                />
+                <div className="milestone-markers">
+                  <div className="milestone-marker" style={{ left: '25%' }} />
+                  <div className="milestone-marker" style={{ left: '50%' }} />
+                  <div className="milestone-marker" style={{ left: '75%' }} />
+                </div>
               </div>
             </div>
+            <span className="target-progress-label">{profitProgress.toFixed(0)}% to target</span>
           </div>
-          <span className="target-progress-label">{profitProgress.toFixed(0)}% to target</span>
-        </div>
-      )}
+        )}
 
         {/* MFFU-specific info */}
         {mffu && (
