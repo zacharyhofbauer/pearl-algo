@@ -88,43 +88,26 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
 /**
  * Check if the account selector should be shown.
  *
- * Returns true when:
- * - No ?account= param in URL
- * - No stored preference in localStorage
+ * Always shows on a clean pearlalgo.io load (no ?account= param).
+ * Only skips if the URL already has an explicit account selection.
  */
 export function shouldShowAccountSelector(): boolean {
   if (typeof window === 'undefined') return false
 
-  // If URL already has an account param, don't show
+  // If URL already has an account param, user already chose -- don't show
   const params = new URLSearchParams(window.location.search)
   if (params.has('account') || params.has('api_port')) return false
 
-  // If there's a stored preference, auto-apply it instead of prompting
-  try {
-    const stored = localStorage.getItem(LS_KEY)
-    if (stored) return false
-  } catch { /* ignore */ }
-
+  // Always show the selector on a clean URL (pearlalgo.io with no params)
   return true
 }
 
 /**
- * Get the stored account preference and return its URL param.
- * Returns undefined if no stored preference (show selector instead).
- * Returns null if inception (no param needed).
- * Returns "mffu" if MFFU account.
+ * Get the stored account preference.
+ * No longer auto-applies -- always returns undefined so the selector shows.
  */
 export function getStoredAccountParam(): string | null | undefined {
-  if (typeof window === 'undefined') return undefined
-
-  const params = new URLSearchParams(window.location.search)
-  if (params.has('account') || params.has('api_port')) return undefined
-
-  try {
-    const stored = localStorage.getItem(LS_KEY)
-    if (stored === 'inception') return null
-    if (stored === 'mffu_eval') return 'mffu'
-  } catch { /* ignore */ }
-
+  // Always return undefined so the AccountGate shows the selector
+  // The selector handles navigation after user picks
   return undefined
 }

@@ -19,7 +19,7 @@ import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import AccountSelector, { shouldShowAccountSelector, getStoredAccountParam } from '@/components/AccountSelector'
+import AccountSelector, { shouldShowAccountSelector } from '@/components/AccountSelector'
 import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
@@ -59,19 +59,8 @@ function AccountGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    // Auto-apply stored preference (redirect without showing picker)
-    const storedParam = getStoredAccountParam()
-    if (storedParam !== undefined) {
-      if (storedParam !== null) {
-        const url = new URL(window.location.href)
-        url.searchParams.set('account', storedParam)
-        window.location.href = url.toString()
-        return
-      }
-      setReady(true)
-      return
-    }
-
+    // Show account selector on every clean URL (no ?account= param)
+    // Once user picks, the URL gets ?account=mffu and the selector won't show
     if (shouldShowAccountSelector()) {
       setShowPicker(true)
     } else {
