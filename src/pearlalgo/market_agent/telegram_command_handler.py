@@ -4836,8 +4836,12 @@ class TelegramCommandHandler:
             # ==========================================================================
             try:
                 import aiohttp as _aiohttp
+                _mffu_headers = {}
+                _mffu_api_key = os.getenv("PEARL_API_KEY") or ""
+                if _mffu_api_key:
+                    _mffu_headers["X-API-Key"] = _mffu_api_key
                 async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=3)) as _sess:
-                    async with _sess.get("http://localhost:8001/api/state") as _resp:
+                    async with _sess.get("http://localhost:8001/api/state", headers=_mffu_headers) as _resp:
                         if _resp.status == 200:
                             _mffu_data = await _resp.json()
                             _mffu_ch = _mffu_data.get("challenge")
