@@ -860,6 +860,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Path prefix stripping middleware for reverse-proxy deployments
+# (e.g., Cloudflare Tunnel routes /mffu/api/* to port 8001)
+@app.middleware("http")
+async def strip_path_prefix(request, call_next):
+    """Strip /mffu prefix so routes match when behind a reverse proxy."""
+    path = request.scope.get("path", "")
+    if path.startswith("/mffu/"):
+        request.scope["path"] = path[5:]  # Remove "/mffu" prefix, keep the "/"
+    elif path == "/mffu":
+        request.scope["path"] = "/"
+    return await call_next(request)
+
 # Global state
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
@@ -1146,6 +1159,7 @@ async def startup_event():
 
 
 @app.websocket("/ws")
+@app.websocket("/mffu/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
     """WebSocket endpoint for real-time state updates."""
     # Verify API key if authentication is enabled.

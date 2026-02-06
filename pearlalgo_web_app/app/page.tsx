@@ -19,6 +19,7 @@ import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import AccountSelector, { shouldShowAccountSelector, getStoredAccountParam } from '@/components/AccountSelector'
 import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
@@ -48,7 +49,67 @@ const MIN_BARS = 500
 // Fetch 72 hours (3 days) of markers - API limit
 const MARKER_HOURS = 72
 
-export default function PearlAlgoWebApp() {
+/**
+ * Account selection gate -- shown on first visit when no account is chosen.
+ * Wraps the real dashboard so hooks inside PearlAlgoWebApp are never called
+ * conditionally (React rules of hooks).
+ */
+function AccountGate({ children }: { children: React.ReactNode }) {
+  const [showPicker, setShowPicker] = useState(false)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    // Auto-apply stored preference (redirect without showing picker)
+    const storedParam = getStoredAccountParam()
+    if (storedParam !== undefined) {
+      if (storedParam !== null) {
+        const url = new URL(window.location.href)
+        url.searchParams.set('account', storedParam)
+        window.location.href = url.toString()
+        return
+      }
+      setReady(true)
+      return
+    }
+
+    if (shouldShowAccountSelector()) {
+      setShowPicker(true)
+    } else {
+      setReady(true)
+    }
+  }, [])
+
+  if (showPicker) {
+    return (
+      <AccountSelector
+        onSelect={(param) => {
+          setShowPicker(false)
+          if (param) {
+            const url = new URL(window.location.href)
+            url.searchParams.set('account', param)
+            window.location.href = url.toString()
+            return
+          }
+          setReady(true)
+        }}
+      />
+    )
+  }
+
+  if (!ready) return null
+
+  return <>{children}</>
+}
+
+export default function PearlAlgoWebAppWrapper() {
+  return (
+    <AccountGate>
+      <PearlAlgoWebAppInner />
+    </AccountGate>
+  )
+}
+
+function PearlAlgoWebAppInner() {
   // Agent store
   const agentState = useAgentStore((s) => s.agentState)
   const setAgentState = useAgentStore((s) => s.setAgentState)

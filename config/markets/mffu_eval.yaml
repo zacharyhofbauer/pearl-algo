@@ -32,8 +32,8 @@ challenge:
 #   TRADOVATE_USERNAME, TRADOVATE_PASSWORD, TRADOVATE_CID, TRADOVATE_SEC
 #
 execution:
-  enabled: false             # Enable when ready to trade (change to true)
-  armed: false               # Arm via Telegram /arm command or set true
+  enabled: true              # LIVE on Tradovate paper
+  armed: true                # Auto-armed for paper trading
   mode: paper                # paper = Tradovate demo simulation
   adapter: tradovate         # Use TradovateExecutionAdapter
   max_positions: 5           # MFFU max 5 mini contracts
@@ -42,6 +42,14 @@ execution:
   cooldown_seconds: 30
   symbol_whitelist:
     - MNQ
+  # IBKR data connection (separate client IDs to avoid clash with inception NQ agent)
+  ibkr_trading_client_id: 50
+  ibkr_host: "127.0.0.1"
+  ibkr_port: 4001
+
+# IBKR data provider override (avoid client ID clash with inception agent)
+data:
+  ibkr_data_client_id: 51
 
 # ---------------------------------------------------------------------------
 # Trading Circuit Breaker: MFFU Evaluation Gate

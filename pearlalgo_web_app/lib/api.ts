@@ -43,13 +43,32 @@ export function getApiUrl(): string {
   if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
   const hostname = window.location.hostname
 
-  // Check URL params for API port override (useful for testing different ports)
+  // Check URL params for account switching
   const urlParams = new URLSearchParams(window.location.search)
+  const account = urlParams.get('account')
   const apiPort = urlParams.get('api_port')
-  if (apiPort) return `http://localhost:${apiPort}`
+  const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
-  // Use relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
-  return ['localhost', '127.0.0.1'].includes(hostname) ? 'http://localhost:8000' : ''
+  // Account-based switching: ?account=mffu uses /mffu/ prefix on production
+  if (account === 'mffu') {
+    if (isLocal) {
+      return 'http://localhost:8001'
+    }
+    // On production: use /mffu path prefix (routed by Cloudflare tunnel)
+    return '/mffu'
+  }
+
+  // Legacy port-based switching: ?api_port=8001 (for local dev)
+  if (apiPort) {
+    if (isLocal) {
+      return `http://localhost:${apiPort}`
+    }
+    const protocol = window.location.protocol
+    return `${protocol}//${hostname}:${apiPort}`
+  }
+
+  // Default: relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
+  return isLocal ? 'http://localhost:8000' : ''
 }
 
 /**

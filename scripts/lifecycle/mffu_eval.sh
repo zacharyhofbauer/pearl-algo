@@ -73,6 +73,10 @@ export PEARLALGO_MARKET="$MARKET"
 export PEARLALGO_STATE_DIR="$STATE_DIR"
 export API_PORT="$API_PORT"
 
+# Use unique IBKR client IDs to avoid clashing with inception agent (10/11)
+export IBKR_CLIENT_ID=50
+export IBKR_DATA_CLIENT_ID=51
+
 # Use MFFU-specific config overlay if it exists, otherwise base config
 if [ -f "$PROJECT_DIR/config/markets/mffu_eval.yaml" ]; then
     export PEARLALGO_CONFIG_PATH="$PROJECT_DIR/config/markets/mffu_eval.yaml"

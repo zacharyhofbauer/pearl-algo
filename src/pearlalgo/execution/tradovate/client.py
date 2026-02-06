@@ -475,22 +475,44 @@ class TradovateClient:
         body = {"name": name, "forward": forward, "ifExpired": True}
         return await self._post(url, body)
 
+    async def suggest_contracts(self, text: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """GET /contract/suggest -- search contracts by text."""
+        url = f"{self.config.rest_url}/contract/suggest?t={text}&l={limit}"
+        return await self._get(url)
+
     async def resolve_front_month(self, product: str = "MNQ") -> str:
         """
         Resolve the front-month contract symbol for a product.
 
         E.g. "MNQ" -> "MNQH6"
+
+        Tries multiple strategies:
+        1. contract/suggest (most reliable on demo)
+        2. contract/rollcontract
+        3. contract/find
         """
+        # Strategy 1: suggest (works on demo, returns sorted by nearest expiry)
+        try:
+            suggestions = await self.suggest_contracts(product, limit=1)
+            if suggestions and isinstance(suggestions, list) and suggestions[0].get("name"):
+                name = suggestions[0]["name"]
+                logger.info(f"Resolved {product} -> {name} via contract/suggest")
+                return name
+        except Exception as e:
+            logger.debug(f"contract/suggest failed for {product}: {e}")
+
+        # Strategy 2: roll_contract
         try:
             result = await self.roll_contract(product)
             contract = result.get("contract", {})
             name = contract.get("name")
             if name:
+                logger.info(f"Resolved {product} -> {name} via contract/rollcontract")
                 return name
         except Exception as e:
-            logger.warning(f"roll_contract failed for {product}: {e}")
+            logger.debug(f"roll_contract failed for {product}: {e}")
 
-        # Fallback: try to find directly
+        # Strategy 3: direct find
         try:
             result = await self.find_contract(product)
             name = result.get("name")

@@ -25,18 +25,21 @@ from pearlalgo.utils.paths import ensure_state_dir
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# Load .env files if they exist (secrets first, then project .env overrides)
+# Load .env files if they exist.
+# IMPORTANT: override=False so that shell-level env vars (from launch scripts)
+# take precedence over .env file values. This lets mffu_eval.sh set its own
+# IBKR_CLIENT_ID/IBKR_DATA_CLIENT_ID without .env clobbering them.
 try:
     from dotenv import load_dotenv
-    # Load secrets (Tradovate credentials, API keys, etc.)
+    # Load secrets (Tradovate credentials, API keys, etc.) - don't clobber shell env
     secrets_path = Path.home() / ".config" / "pearlalgo" / "secrets.env"
     if secrets_path.exists():
-        load_dotenv(secrets_path)
+        load_dotenv(secrets_path, override=False)
         logger.info(f"Loaded secrets from {secrets_path}")
-    # Load project .env (can override secrets if needed)
+    # Load project .env defaults - don't clobber shell env or secrets
     env_path = project_root / ".env"
     if env_path.exists():
-        load_dotenv(env_path, override=True)
+        load_dotenv(env_path, override=False)
         logger.info(f"Loaded environment variables from {env_path}")
 except ImportError:
     pass  # dotenv not required, but helpful

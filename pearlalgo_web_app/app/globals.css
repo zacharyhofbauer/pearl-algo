@@ -12135,6 +12135,109 @@ body {
 
 /* ── End Account Switcher ────────────────────────────────────────────── */
 
+/* ── Account Selector (full-screen prompt) ───────────────────────────── */
+
+.account-selector-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary, #0a0a0a);
+}
+
+.account-selector-card {
+  max-width: 400px;
+  width: 90%;
+  padding: 32px 28px;
+  border-radius: 12px;
+  border: 1px solid var(--border-primary, rgba(255,255,255,0.08));
+  background: var(--bg-secondary, #141414);
+  text-align: center;
+}
+
+.account-selector-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.account-selector-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  margin: 0;
+}
+
+.account-selector-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary, rgba(255,255,255,0.45));
+  margin: 0 0 24px 0;
+  line-height: 1.5;
+}
+
+.account-selector-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-selector-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid var(--border-primary, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  background: var(--bg-primary, #0a0a0a);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.1s ease;
+  text-align: left;
+}
+
+.account-selector-option:hover {
+  border-color: var(--border-secondary, rgba(255,255,255,0.2));
+  background: var(--bg-tertiary, rgba(255,255,255,0.04));
+  transform: translateY(-1px);
+}
+
+.account-selector-option:active {
+  transform: translateY(0);
+}
+
+.account-selector-option-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-selector-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--bg-primary, #0a0a0a);
+}
+
+.account-selector-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+.account-selector-desc {
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255,255,255,0.6));
+  line-height: 1.4;
+}
+
+/* ── End Account Selector ────────────────────────────────────────────── */
+
 .pearl-header-status-dot {
   width: 6px;
   height: 6px;

@@ -10,7 +10,8 @@ interface AccountDef {
   id: string
   label: string
   shortLabel: string
-  port: number | null // null = default (no ?api_port param)
+  /** URL param value for ?account= (null = default/inception) */
+  accountParam: string | null
   badge?: string
   badgeColor?: string
 }
@@ -20,7 +21,7 @@ const ACCOUNTS: AccountDef[] = [
     id: 'inception',
     label: 'Inception',
     shortLabel: 'INC',
-    port: null, // default port 8000
+    accountParam: null, // default (no ?account param)
     badge: 'LIVE',
     badgeColor: 'var(--color-green, #00e676)',
   },
@@ -28,7 +29,7 @@ const ACCOUNTS: AccountDef[] = [
     id: 'mffu_eval',
     label: 'Prop Firm - MFFU Eval',
     shortLabel: 'MFFU',
-    port: 8001,
+    accountParam: 'mffu',
     badge: 'EVAL',
     badgeColor: 'var(--color-accent, #7c4dff)',
   },
@@ -36,15 +37,14 @@ const ACCOUNTS: AccountDef[] = [
 
 const LS_KEY = 'pearl.account.selected'
 
-function getPortFromUrl(): number | null {
+function getAccountFromUrl(): string | null {
   if (typeof window === 'undefined') return null
   const params = new URLSearchParams(window.location.search)
-  const port = params.get('api_port')
-  return port ? parseInt(port, 10) : null
+  return params.get('account')
 }
 
-function findAccountByPort(port: number | null): AccountDef {
-  return ACCOUNTS.find((a) => a.port === port) || ACCOUNTS[0]
+function findAccountByParam(param: string | null): AccountDef {
+  return ACCOUNTS.find((a) => a.accountParam === param) || ACCOUNTS[0]
 }
 
 export default function AccountSwitcher() {
@@ -53,7 +53,7 @@ export default function AccountSwitcher() {
 
   // Derive current account from URL
   const currentAccount = useMemo(() => {
-    return findAccountByPort(getPortFromUrl())
+    return findAccountByParam(getAccountFromUrl())
   }, [])
 
   // Close on outside click
@@ -88,13 +88,15 @@ export default function AccountSwitcher() {
       // ignore
     }
 
-    // Build new URL with the correct api_port
+    // Build new URL with the correct account param
     const url = new URL(window.location.href)
-    if (account.port) {
-      url.searchParams.set('api_port', String(account.port))
+    if (account.accountParam) {
+      url.searchParams.set('account', account.accountParam)
     } else {
-      url.searchParams.delete('api_port')
+      url.searchParams.delete('account')
     }
+    // Clean up legacy api_port param if present
+    url.searchParams.delete('api_port')
 
     // Navigate (full reload to reset all stores/WS connections cleanly)
     window.location.href = url.toString()
