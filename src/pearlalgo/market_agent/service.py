@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import fcntl
 import json
 import signal
 from datetime import date, datetime, time, timedelta, timezone
@@ -249,6 +250,33 @@ class MarketAgentService:
         signal_settings = service_config.get("signals", {}) or {}
         self._risk_settings = service_config.get("risk", {}) or {}
         self._strategy_settings = service_config.get("strategy", {}) or {}
+
+        # ==========================================================================
+        # SIGNAL FORWARDING (inception -> MFFU)
+        # ==========================================================================
+        # Writer mode: inception writes signals to shared file after processing.
+        # Follower mode: MFFU reads from shared file instead of strategy.analyze().
+        sf_cfg = service_config.get("signal_forwarding", {}) or {}
+        self._signal_forwarding_enabled = bool(sf_cfg.get("enabled", False))
+        self._signal_forwarding_mode = str(sf_cfg.get("mode", "off")).strip().lower()
+        self._signal_follower_mode = self._signal_forwarding_enabled and self._signal_forwarding_mode == "follower"
+        self._signal_writer_mode = self._signal_forwarding_enabled and self._signal_forwarding_mode == "writer"
+        self._shared_signals_path = Path(sf_cfg.get("shared_file", "data/shared_signals.jsonl"))
+        self._shared_signals_max_lines = int(sf_cfg.get("max_lines", 500))
+        self._shared_signals_processed_keys: set = set()
+
+        if self._signal_follower_mode:
+            logger.info(
+                f"Signal forwarding: FOLLOWER mode | "
+                f"shared_file={self._shared_signals_path} | "
+                f"strategy.analyze() will be SKIPPED -- reading from inception"
+            )
+        elif self._signal_writer_mode:
+            logger.info(
+                f"Signal forwarding: WRITER mode | "
+                f"shared_file={self._shared_signals_path} | "
+                f"max_lines={self._shared_signals_max_lines}"
+            )
 
         # Track config flags that are currently non-enforced (warn-only telemetry)
         self._config_warnings: list[dict[str, Any]] = []
@@ -1125,6 +1153,8 @@ class MarketAgentService:
                             self.paused = True
                             self.pause_reason = "connection_failures"
 
+                        # MFFU follower: still read shared signals on connection error
+                        await self._process_forwarded_signals(market_data)
                         await self._sleep_until_next_cycle()
                         continue
 
@@ -1184,6 +1214,8 @@ class MarketAgentService:
                         await self._interruptible_sleep(self.config.scan_interval * 2)
                     else:
                         await self._sleep_until_next_cycle()
+                    # MFFU follower: still read shared signals on data fetch error
+                    await self._process_forwarded_signals()
                     continue
 
                 if market_data["df"].empty:
@@ -1219,6 +1251,8 @@ class MarketAgentService:
                     await self._check_dashboard(market_data, quiet_reason=quiet_reason)
                     self.cycle_count += 1
                     
+                    # MFFU follower: still read shared signals when data is empty
+                    await self._process_forwarded_signals(market_data)
                     await self._sleep_until_next_cycle()
                     continue
 
@@ -1266,12 +1300,22 @@ class MarketAgentService:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
-                    # Full analysis: new bar arrived - use pearl_bot_auto
-                    df = market_data.get("df")
-                    if df is not None and not df.empty:
-                        signals = self.strategy.analyze(df, current_time=datetime.now(timezone.utc))
+                    # Full analysis: new bar arrived
+                    if self._signal_follower_mode:
+                        # MFFU follower: read from shared file instead of strategy
+                        signals = self._read_shared_signals()
+                        if signals:
+                            logger.info(
+                                f"MFFU: Read {len(signals)} forwarded signal(s) "
+                                f"from {self._shared_signals_path.name}"
+                            )
                     else:
-                        signals = []
+                        # Normal mode: run pearl_bot_auto strategy
+                        df = market_data.get("df")
+                        if df is not None and not df.empty:
+                            signals = self.strategy.analyze(df, current_time=datetime.now(timezone.utc))
+                        else:
+                            signals = []
                     self._analysis_run_count += 1
                     # Update last analyzed bar timestamp
                     if current_bar_ts is not None:
@@ -1346,6 +1390,10 @@ class MarketAgentService:
                             except Exception:
                                 pass  # Non-fatal
                         
+                        # Attach bar timestamp for signal forwarding (writer mode)
+                        if current_bar_ts is not None:
+                            signal["_bar_timestamp"] = current_bar_ts.isoformat()
+
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
                         try:
@@ -1748,6 +1796,12 @@ class MarketAgentService:
             signal_id = self.performance_tracker.track_signal_generated(signal)
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
+
+            # Signal forwarding: write to shared file for MFFU (writer mode)
+            if self._signal_writer_mode:
+                bar_ts = signal.get("_bar_timestamp")
+                if bar_ts:
+                    self._write_shared_signal(signal, signal_id, bar_ts)
 
             # Virtual entry: enter immediately at the signal's entry price.
             # This enables per-signal PnL tracking without requiring IBKR fills.
@@ -5403,6 +5457,159 @@ class MarketAgentService:
                             self._mffu_tracker.update_eod_hwm()
                         except Exception as e:
                             logger.debug(f"Could not update MFFU EOD HWM: {e}")
+
+    # ==========================================================================
+    # SIGNAL FORWARDING: Inception -> MFFU via shared JSONL file
+    # ==========================================================================
+
+    def _write_shared_signal(self, signal: Dict, signal_id: str, bar_timestamp: str) -> None:
+        """
+        Write a signal to the shared JSONL file for the MFFU agent to read.
+
+        Called by inception (writer mode) inside _process_signal() after
+        signal_id assignment.  Non-fatal: errors are logged but never crash
+        the inception agent.
+        """
+        try:
+            self._shared_signals_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Build a JSON-safe copy of the signal (strip internal/non-serializable keys)
+            safe_signal: Dict[str, Any] = {}
+            for k, v in signal.items():
+                if k.startswith("_"):
+                    continue  # skip internal metadata keys
+                try:
+                    json.dumps(v)
+                    safe_signal[k] = v
+                except (TypeError, ValueError):
+                    safe_signal[k] = str(v)
+
+            record = {
+                "signal_id": signal_id,
+                "bar_timestamp": bar_timestamp,
+                "timestamp": get_utc_timestamp(),
+                "signal": safe_signal,
+            }
+
+            lock_path = Path(str(self._shared_signals_path) + ".lock")
+            with open(lock_path, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    # Append the new record
+                    with open(self._shared_signals_path, "a") as f:
+                        f.write(json.dumps(record) + "\n")
+
+                    # Rotate if file exceeds max_lines
+                    try:
+                        with open(self._shared_signals_path, "r") as f:
+                            lines = f.readlines()
+                        if len(lines) > self._shared_signals_max_lines:
+                            keep = lines[-self._shared_signals_max_lines :]
+                            with open(self._shared_signals_path, "w") as f:
+                                f.writelines(keep)
+                    except Exception:
+                        pass  # rotation failure is non-critical
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+            logger.debug(
+                f"Shared signal written: {signal_id[:16]} | "
+                f"bar={bar_timestamp} | direction={signal.get('direction')}"
+            )
+        except Exception as e:
+            logger.debug(f"Could not write shared signal (non-critical): {e}")
+
+    def _read_shared_signals(self) -> list[Dict]:
+        """
+        Read new signals from the shared JSONL file (MFFU follower mode).
+
+        Deduplicates by ``(direction, bar_timestamp)`` so the same EMA cross
+        signal is processed at most once per bar per direction, regardless of
+        how many cycles the inception agent emits it.
+
+        Returns:
+            List of signal dicts ready for ``_process_signal()``.
+        """
+        if not self._shared_signals_path.exists():
+            return []
+
+        new_signals: list[Dict] = []
+        try:
+            lock_path = Path(str(self._shared_signals_path) + ".lock")
+            with open(lock_path, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_SH)  # shared (read) lock
+                try:
+                    with open(self._shared_signals_path, "r") as f:
+                        lines = f.readlines()
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug(f"Shared signal: skipping malformed JSON line")
+                    continue
+
+                sig = record.get("signal")
+                if not isinstance(sig, dict):
+                    continue
+
+                direction = str(sig.get("direction") or "")
+                bar_ts = str(record.get("bar_timestamp") or "")
+                if not direction or not bar_ts:
+                    continue
+
+                dedup_key = (direction, bar_ts)
+                if dedup_key in self._shared_signals_processed_keys:
+                    continue
+
+                self._shared_signals_processed_keys.add(dedup_key)
+                new_signals.append(sig)
+
+            # Prevent unbounded memory growth: cap the dedup set
+            if len(self._shared_signals_processed_keys) > 2000:
+                # Keep only the keys we just added (recent enough)
+                recent_keys = {(str(s.get("direction")), str(s.get("_bar_timestamp", "")))
+                               for s in new_signals}
+                self._shared_signals_processed_keys = recent_keys
+
+        except Exception as e:
+            logger.warning(f"Error reading shared signals: {e}")
+
+        return new_signals
+
+    async def _process_forwarded_signals(
+        self, market_data: Optional[Dict] = None
+    ) -> None:
+        """
+        Read and process forwarded signals from inception (MFFU follower mode).
+
+        Called in the main loop's early-exit paths (connection error, fetch
+        exception, empty data) so the MFFU agent never misses a signal even
+        when its own IBKR data connection is broken.
+        """
+        if not self._signal_follower_mode:
+            return
+        try:
+            forwarded = self._read_shared_signals()
+            if not forwarded:
+                return
+            logger.info(
+                f"MFFU: Processing {len(forwarded)} forwarded signal(s) from inception"
+            )
+            buffer: Optional[Any] = None
+            if isinstance(market_data, dict):
+                _df = market_data.get("df")
+                if _df is not None and not getattr(_df, "empty", True):
+                    buffer = _df
+            for sig in forwarded:
+                await self._process_signal(sig, buffer_data=buffer)
+        except Exception as e:
+            logger.warning(f"MFFU signal forwarding error: {e}")
 
     def _save_state(self) -> None:
         """Save current service state."""

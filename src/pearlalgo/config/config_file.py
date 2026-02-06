@@ -191,6 +191,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # AI integrations
     "ai_chat",
     "ai_briefings",
+    # Signal forwarding (inception -> MFFU)
+    "signal_forwarding",
 })
 
 # Config keys expected to be specific types after env substitution

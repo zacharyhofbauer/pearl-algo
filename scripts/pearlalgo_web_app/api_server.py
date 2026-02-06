@@ -931,11 +931,13 @@ class ConnectionManager:
                 global _pearl_last_state_seen_time, _pearl_last_state_sync_time, _pearl_last_state_sync_error
 
                 if _state_dir:
-                    # Get current state
+                    # Get current state (use empty dict as fallback so we can
+                    # still broadcast challenge/performance data when the agent
+                    # is stopped and state.json doesn't exist).
                     state_file = _state_dir / "state.json"
-                    state = _load_json_file(state_file)
+                    state = _load_json_file(state_file) or {}
 
-                    if state:
+                    if state or _get_challenge_status(_state_dir):
                         # Heartbeat: the API server can see agent state
                         _pearl_last_state_seen_time = datetime.now(timezone.utc).isoformat()
 
@@ -1210,11 +1212,13 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
 
     await ws_manager.connect(websocket)
     try:
-        # Send initial state immediately
+        # Send initial state immediately (even when agent is stopped,
+        # so the dashboard can show challenge / performance data).
         if _state_dir:
             state_file = _state_dir / "state.json"
-            state = _load_json_file(state_file)
-            if state:
+            state = _load_json_file(state_file) or {}
+            # Broadcast if we have agent state OR persistent challenge data
+            if state or _get_challenge_status(_state_dir):
                 daily_stats = _compute_daily_stats(_state_dir)
                 initial_data = {
                     "type": "initial_state",
@@ -1280,8 +1284,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                 elif data == "refresh":
                     if _state_dir:
                         state_file = _state_dir / "state.json"
-                        state = _load_json_file(state_file)
-                        if state:
+                        state = _load_json_file(state_file) or {}
+                        if state or _get_challenge_status(_state_dir):
                             daily_stats = _compute_daily_stats(_state_dir)
                             refresh_data = {
                                 "type": "full_refresh",
@@ -1458,7 +1462,18 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     """Compute daily P&L and trade stats from signals.jsonl since 6pm ET."""
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
-        return {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
+        # signals.jsonl missing (e.g. after reset) -- fall back to challenge data
+        empty = {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
+        try:
+            challenge = _get_challenge_status(state_dir)
+            if challenge and challenge.get("trades", 0) > 0:
+                empty["daily_pnl"] = round(challenge.get("pnl", 0.0), 2)
+                empty["daily_trades"] = challenge.get("trades", 0)
+                empty["daily_wins"] = challenge.get("wins", 0)
+                empty["daily_losses"] = challenge.get("trades", 0) - challenge.get("wins", 0)
+        except Exception:
+            pass
+        return empty
 
     # Get trading day start (6pm ET)
     trading_day_start = _get_trading_day_start()
@@ -1498,12 +1513,28 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     except Exception:
         pass
 
-    return {
+    result = {
         "daily_pnl": round(daily_pnl, 2),
         "daily_trades": daily_wins + daily_losses,
         "daily_wins": daily_wins,
         "daily_losses": daily_losses,
     }
+
+    # Fallback: if signals.jsonl is empty (e.g. after a reset) but
+    # challenge_state.json has trade data, use the challenge data so the
+    # dashboard header isn't misleadingly blank.
+    if result["daily_trades"] == 0:
+        try:
+            challenge = _get_challenge_status(state_dir)
+            if challenge and challenge.get("trades", 0) > 0:
+                result["daily_pnl"] = round(challenge.get("pnl", 0.0), 2)
+                result["daily_trades"] = challenge.get("trades", 0)
+                result["daily_wins"] = challenge.get("wins", 0)
+                result["daily_losses"] = challenge.get("trades", 0) - challenge.get("wins", 0)
+        except Exception:
+            pass
+
+    return result
 
 
 def _get_previous_trading_day_bounds() -> tuple:
@@ -1540,7 +1571,22 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     performance_file = state_dir / "performance.json"
     if not performance_file.exists():
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
-        return {"yesterday": empty_stats.copy(), "24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
+        result = {"yesterday": empty_stats.copy(), "24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
+        # Fallback: populate from challenge_state.json when performance.json is missing
+        try:
+            challenge = _get_challenge_status(state_dir)
+            if challenge and challenge.get("trades", 0) > 0:
+                ch_pnl = round(challenge.get("pnl", 0.0), 2)
+                ch_trades = challenge.get("trades", 0)
+                ch_wins = challenge.get("wins", 0)
+                ch_losses = ch_trades - ch_wins
+                ch_wr = round(ch_wins / ch_trades * 100, 1) if ch_trades > 0 else 0.0
+                ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
+                for period in result:
+                    result[period] = ch_stats.copy()
+        except Exception:
+            pass
+        return result
 
     now = datetime.now(timezone.utc)
     prev_day_start, prev_day_end = _get_previous_trading_day_bounds()
@@ -1630,6 +1676,24 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 stats["24h"]["streak_type"] = streak_type
     except Exception:
         pass
+
+    # Fallback: if performance.json had zero trades but challenge has data,
+    # populate all periods from the challenge so the PERFORMANCE panel isn't blank.
+    total_trades = sum(stats[p]["trades"] for p in ("24h", "72h", "30d"))
+    if total_trades == 0:
+        try:
+            challenge = _get_challenge_status(state_dir)
+            if challenge and challenge.get("trades", 0) > 0:
+                ch_pnl = round(challenge.get("pnl", 0.0), 2)
+                ch_trades = challenge.get("trades", 0)
+                ch_wins = challenge.get("wins", 0)
+                ch_losses = ch_trades - ch_wins
+                ch_wr = round(ch_wins / ch_trades * 100, 1) if ch_trades > 0 else 0.0
+                ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
+                for period in ("yesterday", "24h", "72h", "30d"):
+                    stats[period] = {**stats[period], **ch_stats}
+        except Exception:
+            pass
 
     return stats
 
@@ -2394,10 +2458,34 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail="State directory not configured")
 
     state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file)
+    state = _load_json_file(state_file) or {}
 
     if not state:
-        return {"error": "state_file_missing", "path": str(state_file)}
+        # Agent not running / state.json missing -- still serve persistent
+        # data (challenge, performance, daily stats) so the dashboard is not
+        # blank when the agent is stopped.
+        daily_stats = _compute_daily_stats(_state_dir)
+        return {
+            "running": False,
+            "paused": False,
+            "daily_pnl": daily_stats["daily_pnl"],
+            "daily_trades": daily_stats["daily_trades"],
+            "daily_wins": daily_stats["daily_wins"],
+            "daily_losses": daily_stats["daily_losses"],
+            "active_trades_count": 0,
+            "active_trades_unrealized_pnl": None,
+            "futures_market_open": False,
+            "data_fresh": False,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "ai_status": None,
+            "challenge": _get_challenge_status(_state_dir),
+            "recent_exits": _get_recent_exits(_state_dir, limit=3),
+            "performance": _compute_performance_stats(_state_dir),
+            "equity_curve": _get_equity_curve(_state_dir, hours=72),
+            "risk_metrics": _get_risk_metrics(_state_dir),
+            "pearl_ai_available": False,
+            "operator_lock_enabled": bool(_operator_enabled),
+        }
 
     # Compute daily stats from actual trades
     daily_stats = _compute_daily_stats(_state_dir)

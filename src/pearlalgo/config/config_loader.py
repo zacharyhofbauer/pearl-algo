@@ -334,6 +334,13 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "auto_reset_on_pass": defaults.CHALLENGE_AUTO_RESET_ON_PASS,
         "auto_reset_on_fail": defaults.CHALLENGE_AUTO_RESET_ON_FAIL,
     },
+    # Signal forwarding (inception -> MFFU)
+    "signal_forwarding": {
+        "enabled": False,
+        "mode": "off",           # "writer" | "follower" | "off"
+        "shared_file": "data/shared_signals.jsonl",
+        "max_lines": 500,
+    },
 }
 
 

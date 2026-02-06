@@ -106,3 +106,12 @@ auto_flat:
   weekend_enabled: true
   notify: true
   timezone: "America/New_York"
+
+# ---------------------------------------------------------------------------
+# Signal Forwarding: MFFU reads signals from inception instead of running
+# its own strategy.analyze() (which fails due to IBKR data connection issues).
+# ---------------------------------------------------------------------------
+signal_forwarding:
+  enabled: true
+  mode: follower                        # writer | follower | off
+  shared_file: data/shared_signals.jsonl
