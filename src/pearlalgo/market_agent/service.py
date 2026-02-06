@@ -1752,28 +1752,38 @@ class MarketAgentService:
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
 
-            # Write to shared signal file for MFFU agent to pick up
+            # Write to shared signal file for MFFU agent to pick up.
+            # Dedup: only write if direction changed or cooldown (120s) elapsed.
             try:
-                _shared_path = Path("data") / "shared_signals.jsonl"
-                _shared_path.parent.mkdir(parents=True, exist_ok=True)
-                # Build a serializable copy (exclude internal objects that can't be JSON'd)
-                _safe_signal = {}
-                for _k, _v in signal.items():
-                    if _k.startswith("_"):
-                        continue
-                    try:
-                        json.dumps(_v)
-                        _safe_signal[_k] = _v
-                    except (TypeError, ValueError):
-                        _safe_signal[_k] = str(_v)
-                _payload = json.dumps({
-                    "signal_id": signal_id,
-                    "timestamp": get_utc_timestamp(),
-                    "signal": _safe_signal,
-                })
-                with open(_shared_path, "a") as _sf:
-                    _sf.write(_payload + "\n")
-                logger.info(f"Shared signal written: {signal_id}")
+                _sig_dir = signal.get("direction", "")
+                _sig_type = signal.get("type", "")
+                _now_ts = datetime.now(timezone.utc).timestamp()
+                _last = getattr(self, "_shared_last_write", None) or {}
+                _should_write = (
+                    _sig_dir != _last.get("direction")
+                    or _sig_type != _last.get("type")
+                    or (_now_ts - _last.get("ts", 0)) > 120
+                )
+                if _should_write:
+                    _shared_path = Path("data") / "shared_signals.jsonl"
+                    _shared_path.parent.mkdir(parents=True, exist_ok=True)
+                    _safe_signal = {}
+                    for _k, _v in signal.items():
+                        if _k.startswith("_"):
+                            continue
+                        try:
+                            json.dumps(_v)
+                            _safe_signal[_k] = _v
+                        except (TypeError, ValueError):
+                            _safe_signal[_k] = str(_v)
+                    with open(_shared_path, "a") as _sf:
+                        _sf.write(json.dumps({
+                            "signal_id": signal_id,
+                            "timestamp": get_utc_timestamp(),
+                            "signal": _safe_signal,
+                        }) + "\n")
+                    self._shared_last_write = {"direction": _sig_dir, "type": _sig_type, "ts": _now_ts}
+                    logger.info(f"Shared signal written: {signal_id}")
             except Exception as _shared_err:
                 logger.warning(f"Could not write shared signal: {_shared_err}")
 
