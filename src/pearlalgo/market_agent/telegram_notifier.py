@@ -1998,8 +1998,9 @@ class MarketAgentTelegramNotifier:
             fut_dot = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪️"
             ses_dot = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪️"
 
-            # Simple 2-line startup message
-            msg = f"🚀 *{market} Agent Started* • {time_str}\n"
+            # Simple 2-line startup message with account label
+            acct_tag = f" [{self.account_label}]" if self.account_label else ""
+            msg = f"🚀 *{market} Agent Started{acct_tag}* • {time_str}\n"
             msg += f"{fut_dot} Futures {ses_dot} Session\n\n"
             msg += "Use /start for full dashboard"
 
@@ -2026,7 +2027,8 @@ class MarketAgentTelegramNotifier:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
             
             # Header with reason (if abnormal)
-            message = "🛑 *Agent Stopped*\n"
+            acct_tag = f" [{self.account_label}]" if self.account_label else ""
+            message = f"🛑 *Agent Stopped{acct_tag}*\n"
             if shutdown_reason and shutdown_reason not in ("Normal shutdown", "Final cleanup"):
                 reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
                 message += f"{reason_emoji} {safe_label(str(shutdown_reason))}\n"
