@@ -2033,38 +2033,16 @@ class MarketAgentTelegramNotifier:
                 reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
                 message += f"{reason_emoji} {safe_label(str(shutdown_reason))}\n"
             
-            # Session stats (compact single-line style)
+            # Session stats (compact)
             uptime_h = summary.get('uptime_hours', 0)
             uptime_m = summary.get('uptime_minutes', 0)
             scans = summary.get('cycle_count', 0)
             signals = summary.get('signal_count', 0)
-            errors = summary.get('error_count', 0)
 
-            message += f"\n⏱ {uptime_h:.0f}h {uptime_m:.0f}m"
-            message += f" • 🔄 {scans:,} scans"
-            message += f" • 🔔 {signals} signals"
-            if errors > 0:
-                message += f" • ⚠️ {errors} errors"
-            message += "\n"
-
-            # Performance if available (compact)
-            wins = summary.get('wins', 0)
-            losses = summary.get('losses', 0)
-            total_pnl = summary.get('total_pnl')
-
-            if wins > 0 or losses > 0:
-                win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
-                pnl_str = ""
-                if total_pnl is not None:
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    pnl_str = f" • {pnl_emoji} {_format_currency(total_pnl)}"
-                message += f"\n✅ {wins}W ❌ {losses}L ({win_rate:.0f}%){pnl_str}\n"
-            elif total_pnl is not None:
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                message += f"\n{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
+            message += f"\n⏱ {uptime_h:.0f}h {uptime_m:.0f}m • {signals} signals"
 
             # Restart hint
-            message += "\n💡 /start\\_agent"
+            message += "\n\n💡 /start"
 
             await self.telegram.send_message(message)
             return True
