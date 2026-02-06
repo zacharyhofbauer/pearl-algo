@@ -13237,7 +13237,7 @@ body {
   background: rgba(0, 0, 0, 0.25);
   color: var(--text-primary);
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: 16px;  /* Must be >= 16px to prevent iOS Safari auto-zoom on focus */
   outline: none;
   transition: border-color var(--duration-fast) ease,
               box-shadow var(--duration-fast) ease;
@@ -13360,7 +13360,7 @@ body {
   background: rgba(0, 0, 0, 0.25);
   color: var(--text-primary);
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: 16px;  /* Must be >= 16px to prevent iOS Safari auto-zoom on focus */
   outline: none;
   width: 180px;
   transition: border-color var(--duration-fast) ease,
