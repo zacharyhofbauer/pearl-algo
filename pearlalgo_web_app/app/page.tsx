@@ -1107,14 +1107,6 @@ function PearlAlgoWebAppInner() {
             activeTradesCount={agentState?.active_trades_count}
           />
 
-          {/* MFFU Challenge Panel - always visible above other panels */}
-          {agentState?.challenge && (
-            <ChallengePanel
-              challenge={agentState.challenge}
-              equityCurve={agentState.equity_curve}
-            />
-          )}
-
           {/* Post-trade panels (signals / ops / advanced analytics) */}
           {agentState && <PostTradesPanels agentState={agentState} />}
         </div>

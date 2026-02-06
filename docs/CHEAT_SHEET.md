@@ -692,23 +692,48 @@ Pearl runs two isolated accounts simultaneously:
 - **Inception** (port 8000): Since-inception data collection on IBKR (virtual PnL, no real orders)
 - **MFFU Eval** (port 8001): MyFundedFutures 50K Rapid Plan on Tradovate paper (real orders on demo)
 
-### Architecture: Signal Forwarding
+### Architecture: Signal Forwarding (Inception -> MFFU)
 
-Inception generates ALL signals via the strategy. MFFU does NOT run its own strategy -- instead it reads signals from a shared file written by inception. This guarantees both accounts trade the same signals.
+Inception generates ALL signals via `strategy.analyze()`. MFFU does NOT run its own strategy -- instead it reads signals from a shared JSONL file written by inception. This guarantees both accounts trade the same signals without the IBKR dual-connection issues that caused MFFU to generate zero signals independently.
 
 ```
-Inception Agent                    MFFU Agent
-  strategy.analyze()                 _read_shared_signals()
-       |                                  |
-  circuit breaker (warn_only)        circuit breaker (MFFU eval gate)
-       |                                  |
-  write -> data/shared_signals.jsonl -> read
-       |                                  |
-  virtual PnL tracking              Tradovate place_bracket()
-  signals.jsonl (NQ/)               signals.jsonl (MFFU_EVAL/)
+Inception Agent (WRITER)              MFFU Agent (FOLLOWER)
+  IBKR data -> strategy.analyze()       _read_shared_signals()
+       |                                      |
+  _write_shared_signal()               dedup by (direction, bar_ts)
+       |                                      |
+  data/shared_signals.jsonl  -------->  read from shared file
+       |                                      |
+  virtual PnL + [INCEPTION] Telegram    MFFU eval gate (hours/contracts/news)
+                                              |
+                                        Tradovate place_bracket() (OSO order)
+                                              |
+                                        [MFFU] Telegram notifications
 ```
 
-### Isolation Model (what can/cannot affect each account)
+**Dedup key:** `(direction, bar_timestamp)` -- prevents the same EMA cross signal from being processed multiple times across cycles. Each signal fires once per bar per direction.
+
+**Config:**
+- Inception: `config/config.yaml` has `signal_forwarding.mode: writer`
+- MFFU: `config/markets/mffu_eval.yaml` has `signal_forwarding.mode: follower`
+
+### MFFU Dashboard: Tradovate as Single Source of Truth
+
+The MFFU web dashboard gets ALL trade/position/P&L data from Tradovate -- no virtual tracking. This is enforced at the API layer:
+
+| Dashboard Element | Data Source | How |
+|-------------------|-------------|-----|
+| Header P&L | Tradovate equity - $50K | `_compute_daily_stats()` reads `state.json -> tradovate_account.equity` |
+| Header W/L | Tradovate fills | Fills paired into trades, wins/losses counted |
+| Open Positions | Tradovate `get_positions()` | `/api/positions` returns live positions |
+| Recent Trades | Tradovate `get_fills()` | `/api/trades` pairs fills into trade records |
+| Performance Panels | Tradovate equity | `/api/performance-summary` and `_compute_performance_stats()` |
+| Challenge Panel | Tradovate equity + fills | `_get_challenge_status()` overrides with live TV data |
+| Chart Data | IBKR (unchanged) | `/api/candles` still from IBKR client ID 97 |
+
+**The agent polls `get_account_summary()` every cycle (~5s), which calls Tradovate's `cashBalanceSnapshot`, `position/deps`, and `fill/list` endpoints. Results cached in `state.json` as `tradovate_account` and `tradovate_fills`.**
+
+### Isolation Model
 
 | Component | Inception | MFFU | Shared? |
 |-----------|-----------|------|---------|
@@ -716,24 +741,30 @@ Inception Agent                    MFFU Agent
 | State directory | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` | No -- separate dirs |
 | API server | Port 8000 | Port 8001 | No -- separate processes |
 | Signal generation | `strategy.analyze()` | Reads from shared file | One-way: inception writes, MFFU reads |
+| Dashboard data | `signals.jsonl` + `performance.json` | **Tradovate API** (live) | No -- different sources |
 | Circuit breaker | `warn_only` mode | `warn_only` + MFFU eval gate | Same class, different config |
 | Execution | Disabled (virtual only) | Tradovate paper (armed) | No -- different adapters |
-| Telegram | No prefix | `[MFFU]` prefix | Same bot, different labels |
+| Telegram | `[INCEPTION]` prefix | `[MFFU]` prefix | Same bot, different labels |
 | IBKR client IDs | 10/11 (agent), 96 (chart) | 50/51 (agent), 97 (chart) | Same gateway, different IDs |
-| Code (`service.py`) | Shared | Shared | **Yes** -- MFFU paths gated by `_mffu_enabled` |
+| Code (`service.py`) | Shared | Shared | **Yes** -- MFFU paths gated by `_mffu_enabled` / `_signal_follower_mode` |
 
-**Rule: editing `config/config.yaml` only affects inception. Editing `config/markets/mffu_eval.yaml` only affects MFFU. Editing `service.py` affects both (check for `_mffu_enabled` gates).**
+**Rule: editing `config/config.yaml` only affects inception. Editing `config/markets/mffu_eval.yaml` only affects MFFU. Editing `service.py` affects both.**
 
 ### Quick Commands
 
 ```bash
-./pearl.sh mffu start       # Start MFFU agent + API server
-./pearl.sh mffu stop        # Stop MFFU instance
-./pearl.sh mffu status      # Check MFFU status
-./pearl.sh mffu restart     # Restart MFFU instance
-./pearl.sh mffu api         # Start API server only (view data without trading)
-./pearl.sh mffu logs        # Tail MFFU agent log
+# Lifecycle (always use these -- never start API servers manually)
+./scripts/lifecycle/mffu_eval.sh start --background   # Start MFFU agent + API
+./scripts/lifecycle/mffu_eval.sh stop                  # Stop everything (kills port holders too)
+./scripts/lifecycle/mffu_eval.sh restart --background  # Clean restart (kills stale, starts fresh)
+./scripts/lifecycle/mffu_eval.sh status                # Check status
+./scripts/lifecycle/mffu_eval.sh api --background      # API server only (no trading)
+
+# Or via pearl.sh wrapper
+./pearl.sh mffu start|stop|restart|status|api|logs
 ```
+
+**Important: the `restart` command kills ALL processes on port 8001 (not just PID file entries), preventing stale ghost servers that cause wrong data.**
 
 ### Web App Account Switching
 
@@ -750,6 +781,7 @@ Inception Agent                    MFFU Agent
 | Max Loss (EOD trailing) | $2,000 |
 | Drawdown Floor Lock | $50,100 |
 | Max Contracts | 5 mini / 50 micro |
+| Max Positions | 20 (configured in `mffu_eval.yaml`) |
 | Consistency | 50% (no single day > 50% of total profit) |
 | Min Trading Days | 2 |
 | Trading Hours | 6 PM - 4:10 PM ET |
@@ -771,10 +803,10 @@ TRADOVATE_SEC=...
 
 | File | Purpose | Affects |
 |------|---------|--------|
-| `config/config.yaml` | Base config (all settings) | Inception only |
-| `config/markets/mffu_eval.yaml` | MFFU overlay (challenge, execution, circuit breaker) | MFFU only |
+| `config/config.yaml` | Base config + `signal_forwarding.mode: writer` | Inception only |
+| `config/markets/mffu_eval.yaml` | MFFU overlay + `signal_forwarding.mode: follower` | MFFU only |
 | `~/.config/pearlalgo/secrets.env` | Credentials (Telegram, Tradovate, API keys) | Both |
-| `.env` | Non-sensitive defaults (IBKR ports, data provider) | Both |
+| `.env` | Non-sensitive defaults (IBKR ports, client IDs) | Both |
 | `data/t1_news_2026.json` | T1 news calendar for blackout detection | MFFU only |
 | `data/shared_signals.jsonl` | Signal forwarding file (inception writes, MFFU reads) | Both |
 
@@ -782,19 +814,21 @@ TRADOVATE_SEC=...
 
 | File | Purpose | Change affects |
 |------|---------|---------------|
-| `src/pearlalgo/market_agent/service.py` | Main agent orchestrator | **Both** (MFFU gated by `_mffu_enabled`) |
+| `src/pearlalgo/market_agent/service.py` | Agent orchestrator, signal forwarding, Tradovate polling | **Both** |
 | `src/pearlalgo/market_agent/mffu_eval_tracker.py` | MFFU challenge state tracking | MFFU only |
-| `src/pearlalgo/execution/tradovate/` | Tradovate REST/WS client + adapter | MFFU only |
-| `src/pearlalgo/market_agent/trading_circuit_breaker.py` | Risk management | **Both** (MFFU gate gated by `enable_mffu_eval_gate`) |
-| `src/pearlalgo/utils/news_calendar.py` | T1 news blackout service | MFFU only |
-| `scripts/lifecycle/mffu_eval.sh` | MFFU launch script | MFFU only |
-| `pearlalgo_web_app/components/AccountSwitcher.tsx` | Account dropdown | Web app only |
-| `pearlalgo_web_app/components/ChallengePanel.tsx` | MFFU challenge display | Web app only |
+| `src/pearlalgo/execution/tradovate/adapter.py` | Tradovate execution + `get_account_summary()` | MFFU only |
+| `src/pearlalgo/execution/tradovate/client.py` | Tradovate REST/WS client (`get_fills()`, `get_positions()`) | MFFU only |
+| `src/pearlalgo/market_agent/trading_circuit_breaker.py` | Risk management + MFFU eval gate | **Both** |
+| `src/pearlalgo/config/config_loader.py` | Config loading (`signal_forwarding` defaults) | Both |
+| `scripts/lifecycle/mffu_eval.sh` | MFFU launch script (port cleanup, restart) | MFFU only |
+| `scripts/pearlalgo_web_app/api_server.py` | API server (Tradovate data helpers for MFFU) | Web app |
+| `pearlalgo_web_app/components/ChallengePanel.tsx` | MFFU challenge display panel | Web app only |
 
 ### Telegram Notifications
 
-- MFFU signals are prefixed with `[MFFU]` in Telegram
-- The `/start` dashboard shows both accounts
+- Inception signals prefixed with `[INCEPTION]`
+- MFFU signals prefixed with `[MFFU]`
+- Both entry and exit notifications include the label
 - Notification tier set to `important` (suppresses data quality spam)
 
 ### Testing Tradovate Connection
@@ -805,9 +839,21 @@ python scripts/test_tradovate_connection.py
 
 ### Resetting the Evaluation
 
-1. Reset the Tradovate paper account via Tradovate UI
-2. Delete `data/agent_state/MFFU_EVAL/challenge_state.json`
-3. Restart: `./pearl.sh mffu restart`
+1. Adjust Tradovate paper balance via Tradovate UI (Settings > Accounts > Modify Balance)
+2. Delete challenge state: `rm data/agent_state/MFFU_EVAL/challenge_state.json`
+3. Clear virtual files: `rm -f data/agent_state/MFFU_EVAL/signals.jsonl data/agent_state/MFFU_EVAL/performance.json`
+4. Restart: `./scripts/lifecycle/mffu_eval.sh restart --background`
+
+### Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Dashboard shows stale/wrong P&L | Old API server on port 8001 | `./scripts/lifecycle/mffu_eval.sh restart --background` |
+| No signals forwarded to MFFU | Inception not generating signals | Check `logs/agent_NQ.log` for `NoOpportunity` -- normal if no EMA crossover |
+| `shared_signals.jsonl` not created | No signals since last inception restart | Wait for a crossover -- file created on first signal |
+| Tradovate fills show 401 | Wrong fill endpoint | Fixed: uses `/fill/list` instead of `/fill/deps` |
+| Chart shows CACHE instead of LIVE | IBKR client ID conflict | Restart via lifecycle script (sets `IB_CLIENT_ID_LIVE_CHART=97`) |
+| MFFU positions phantom (virtual) | Old code using signals.jsonl | Ensure latest code with `_is_mffu_account()` checks |
 
 ---
 
