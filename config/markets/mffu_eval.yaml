@@ -26,6 +26,20 @@ challenge:
   auto_reset_on_fail: true
 
 # ---------------------------------------------------------------------------
+# Session & Strategy (must match base config for signal generation)
+# ---------------------------------------------------------------------------
+session:
+  start_time: '18:00'
+  end_time: '15:45'
+  timezone: 'America/New_York'
+
+virtual_pnl:
+  enabled: true
+  intrabar_tiebreak: take_profit
+  notify_entry: true
+  notify_exit: true
+
+# ---------------------------------------------------------------------------
 # Execution: Tradovate Paper (Demo)
 # ---------------------------------------------------------------------------
 # Credentials are loaded from environment variables (secrets.env):
@@ -69,6 +83,10 @@ trading_circuit_breaker:
   max_session_drawdown: 1800.0
   max_daily_drawdown: 1800.0
   max_concurrent_positions: 5
+  # Disable session filter -- MFFU eval gate handles hours, allow all sessions
+  enable_session_filter: false
+  # Disable direction gating -- trade both directions for evaluation
+  enable_direction_gating: false
 
 # ---------------------------------------------------------------------------
 # Telegram: notification tier
