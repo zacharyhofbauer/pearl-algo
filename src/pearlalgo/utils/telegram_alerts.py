@@ -1866,10 +1866,10 @@ class TelegramPrefs:
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
         "interval_notifications": True,     # Enable hourly interval notifications (chart + status)
         # Pearl preferences
-        "pearl_suggestions_enabled": True,        # Master toggle for proactive suggestions
+        "pearl_suggestions_enabled": False,       # Disabled -- Pearl AI in web app only
         "pearl_suggestion_cooldown_minutes": 30,  # Min time between similar suggestions
-        "pearl_greeting_enabled": True,           # Morning/evening greetings
-        "pearl_review_enabled": True,             # Periodic PEARL-style reviews
+        "pearl_greeting_enabled": False,          # Disabled -- no greetings in Telegram
+        "pearl_review_enabled": False,            # Disabled -- no reviews in Telegram
         "pearl_review_interval_minutes": 60,      # Min minutes between reviews (hourly)
         "pearl_review_last_sent_at": None,        # Internal: ISO timestamp of last review
     }

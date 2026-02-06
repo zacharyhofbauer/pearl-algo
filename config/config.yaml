@@ -420,12 +420,12 @@ knowledge:
 # Pearl AI provides conversational chat and proactive briefings via Telegram.
 # Requires OPENAI_API_KEY environment variable.
 ai_chat:
-  enabled: true
+  enabled: false    # Disabled in Telegram -- available on web app only
   model: gpt-4o-mini
   rate_limit_per_minute: 5
   max_response_length: 280
   temperature: 0.7
 ai_briefings:
-  enabled: true
+  enabled: false    # Disabled -- no morning/EOD briefings in Telegram
   morning_time: "06:30"   # ET - Morning market prep
   eod_time: "16:00"       # ET - End of day summary (uses existing 3:55-4:05 window)
