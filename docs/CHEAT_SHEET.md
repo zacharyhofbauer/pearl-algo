@@ -21,7 +21,7 @@ The `pearl.sh` master script handles everything with simple commands:
 ```bash
 ./pearl.sh gateway start|stop|status
 ./pearl.sh agent start|stop|status       # Inception (NQ) agent
-./pearl.sh mffu start|stop|status|logs   # MFFU Eval (Tradovate paper)
+./pearl.sh mffu start|stop|status|restart|api|logs  # MFFU Eval (Tradovate paper)
 ./pearl.sh telegram start|stop|status
 ./pearl.sh chart start|stop|status       # Live Chart (pearlalgo.io)
 ./pearl.sh tunnel start|stop|status|logs # Cloudflare Tunnel
