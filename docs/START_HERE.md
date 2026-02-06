@@ -11,52 +11,51 @@ This repo is a **trading platform** with three hard requirements:
 - **Service**: `src/pearlalgo/market_agent/service.py` (orchestrator)
 - **Market data**: `src/pearlalgo/data_providers/` (IBKR provider + executor)
 - **Strategy**: `src/pearlalgo/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
-- **Execution**: `src/pearlalgo/execution/` (adapters; guarded by config + arming)
-- **State/metrics**: `src/pearlalgo/market_agent/state_manager.py`, `performance_tracker.py`
-- **Ops/UI**: Telegram notifier + command handler
+- **Execution adapters**:
+  - `src/pearlalgo/execution/ibkr/` (IBKR -- inception account)
+  - `src/pearlalgo/execution/tradovate/` (Tradovate -- MFFU prop firm account)
+- **MFFU tracker**: `src/pearlalgo/market_agent/mffu_eval_tracker.py` (prop firm rule enforcement)
+- **Ops/UI**: Telegram notifier + command handler, Web app (pearlalgo.io)
 
-### The single source of truth
+### Two accounts
 
-- **Configuration**: `config/config.yaml`
-- **System reference**: `docs/PROJECT_SUMMARY.md`
+Pearl runs two isolated accounts simultaneously:
 
-### Persistent memory (SQLite)
-
-We **dual-write** signals/trades to SQLite (queryable, durable) while keeping JSON/JSONL
-for compatibility with existing Telegram/mobile views.
-
-- DB: `data/agent_state/<MARKET>/trades.db`
-- Config: `storage.sqlite_enabled` in `config/config.yaml`
+| Account | Purpose | Execution | State Dir | API Port |
+|---------|---------|-----------|-----------|----------|
+| **Inception** | Since-inception data collection | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
+| **MFFU Eval** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/MFFU_EVAL/` | 8001 |
 
 ### Quick operational checklist
 
-- **Gateway**: `./scripts/gateway/gateway.sh start`
-  - If Gateway is installed outside the repo, set `PEARLALGO_IBKR_HOME` first (example: `/opt/ibkr`).
-- **Agent**: `./scripts/lifecycle/agent.sh start --market NQ --background`
-- **Status**: `./scripts/lifecycle/check_agent_status.sh --market NQ`
+```bash
+./pearl.sh start          # Start everything
+./pearl.sh stop           # Stop everything
+./pearl.sh restart        # Restart everything
+./pearl.sh quick          # One-liner status
+./pearl.sh mffu restart   # Restart MFFU independently
+./pearl.sh mffu logs      # Tail MFFU agent log
+```
 
-### Fast validation (mobile + CLI)
+### Web app (pearlalgo.io)
 
-- **Telegram**: use *Health → Doctor* or `/doctor` for a 24h rollup (signals, rejects, stops, sizing)
-- **CLI**: `python scripts/monitoring/doctor_cli.py --hours 24`
-- **Pearl AI prompts**: `make eval` (prompt regression suite; mock mode, no API calls)
+- Hard refresh shows account selector (Inception vs MFFU)
+- Header dropdown to switch accounts anytime
+- `pearlalgo.io` = inception, `pearlalgo.io?account=mffu` = MFFU
 
-### Execution safety model (non-negotiable)
+### Telegram
 
-- **Modes**: `execution.mode: dry_run | paper | live`
-- **Arming**: execution must be explicitly armed (see docs + Telegram command handler)
-- **Caps**: max daily loss, max positions, max orders/day, stop caps, prop-firm guardrails
+- `/start` shows both accounts (inception + MFFU section)
+- `[MFFU]` prefix on all MFFU notifications
 
-### How to extend (future-proof path)
+### Configuration
 
-- **Add an indicator**: Add functions to `src/pearlalgo/trading_bots/pearl_bot_auto.py` or create new trading bot files
-- **Add a strategy**: Create a new file in `src/pearlalgo/trading_bots/` following the single-file pattern, or extend `pearl_bot_auto.py`
-- **Add a data provider**: implement `src/pearlalgo/data_providers/base.py` and register in `factory.py`.
-- **Add an execution adapter**: implement `src/pearlalgo/execution/base.py` and register in the execution factory.
+- `config/config.yaml` (inception base config)
+- `config/markets/mffu_eval.yaml` (MFFU overlay)
+- `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
 
 ### Where to go next
 
-- **Architecture overview**: `docs/PROJECT_SUMMARY.md`
-- **Operational runbooks**: `docs/MARKET_AGENT_GUIDE.md`, `docs/GATEWAY.md`, `docs/TELEGRAM_GUIDE.md`
-- **Testing**: `docs/TESTING_GUIDE.md`
-
+- **Daily operations**: `docs/CHEAT_SHEET.md`
+- **Architecture**: `docs/PROJECT_SUMMARY.md`
+- **Runbooks**: `docs/MARKET_AGENT_GUIDE.md`, `docs/GATEWAY.md`, `docs/TELEGRAM_GUIDE.md`

@@ -117,6 +117,43 @@ Notes:
 - Strategy‑specific parameters such as symbol, timeframe, risk parameters, ATR multipliers, R:R ratios.
 - May read environment overrides (via `os.getenv` helper) but is primarily driven by `config/config.yaml`.
 
+
+
+### 1.2 Tradovate environment variables (from `~/.config/pearlalgo/secrets.env`)
+
+These are used by the MFFU evaluation instance only:
+
+- `TRADOVATE_USERNAME` -- Tradovate account username
+- `TRADOVATE_PASSWORD` -- Tradovate account password
+- `TRADOVATE_CID` -- Client app ID (integer, from Tradovate API key)
+- `TRADOVATE_SEC` -- API secret (UUID, from Tradovate API key)
+- `TRADOVATE_APP_ID` -- Free-form app name (default: "PearlAlgo")
+- `TRADOVATE_APP_VERSION` -- App version (default: "1.0")
+- `TRADOVATE_ENV` -- "demo" or "live" (default: "demo")
+- `TRADOVATE_ACCOUNT_NAME` -- Optional account name filter (e.g., "DEMO6315448")
+- `TRADOVATE_DEVICE_ID` -- Unique device UUID (auto-generated if not set)
+
+**Used by**: `src/pearlalgo/execution/tradovate/config.py` (`TradovateConfig.from_env()`)
+
+### 1.3 MFFU-specific environment variables (from `scripts/lifecycle/mffu_eval.sh`)
+
+- `IBKR_CLIENT_ID=50` -- IBKR client ID for MFFU agent (avoids clash with inception=10)
+- `IBKR_DATA_CLIENT_ID=51` -- IBKR data client ID for MFFU (avoids clash with inception=11)
+- `IB_CLIENT_ID_LIVE_CHART=97` -- Chart data client ID for MFFU API (avoids clash with inception=96)
+- `PEARLALGO_STATE_DIR=data/agent_state/MFFU_EVAL` -- Isolated state directory
+- `PEARLALGO_CONFIG_PATH=config/markets/mffu_eval.yaml` -- MFFU config overlay
+- `API_PORT=8001` -- MFFU API server port
+
+### 1.4 Config files
+
+| File | Purpose |
+|------|---------|
+| `config/config.yaml` | Base config (inception). All settings. |
+| `config/markets/mffu_eval.yaml` | MFFU overlay. Merged on top of base via deep merge. |
+| `~/.config/pearlalgo/secrets.env` | Secrets (Telegram, Tradovate, API keys). Never committed. |
+| `.env` | Non-sensitive defaults (IBKR ports, data provider). |
+| `pearlalgo_web_app/.env.local` | Web app API key (auto-synced from secrets by pearl.sh). |
+
 ## 2. What belongs where
 
 - **Environment (`.env`)** – deployment‑specific values:
