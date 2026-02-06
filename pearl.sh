@@ -77,6 +77,19 @@ load_env_files() {
     if [ -n "${PEARL_API_KEY:-}" ] && [ -z "${NEXT_PUBLIC_API_KEY:-}" ]; then
         export NEXT_PUBLIC_API_KEY="$PEARL_API_KEY"
     fi
+
+    # Keep .env.local in sync with secrets (prevents stale API key issues)
+    local env_local="$SCRIPT_DIR/pearlalgo_web_app/.env.local"
+    if [ -n "${PEARL_API_KEY:-}" ]; then
+        local current_key=""
+        if [ -f "$env_local" ]; then
+            current_key=$(grep "NEXT_PUBLIC_API_KEY=" "$env_local" 2>/dev/null | cut -d= -f2)
+        fi
+        if [ "$current_key" != "$PEARL_API_KEY" ]; then
+            echo "# API Configuration (auto-synced from secrets.env)" > "$env_local"
+            echo "NEXT_PUBLIC_API_KEY=$PEARL_API_KEY" >> "$env_local"
+        fi
+    fi
 }
 
 # Activate virtual environment
@@ -272,12 +285,6 @@ start_chart() {
         return
     fi
 
-    # Check if already running
-    if pgrep -f "api_server.py" &>/dev/null && pgrep -f "next" &>/dev/null; then
-        echo -e "${YELLOW}⏭ Web App already running${NC}"
-        return
-    fi
-
     echo -e "${CYAN}▶ Starting Web App (pearlalgo.io)...${NC}"
 
     load_env_files
@@ -287,18 +294,24 @@ start_chart() {
     local API_PORT="${PEARL_API_PORT:-8000}"
     local CHART_PORT="${PEARL_CHART_PORT:-3001}"
 
-    # Start API server
-    if ! pgrep -f "api_server.py" &>/dev/null; then
+    # Start inception API server on port 8000 (only if not already running)
+    if ! pgrep -f "api_server.py.*--port $API_PORT" &>/dev/null && ! pgrep -f "api_server.py$" &>/dev/null; then
         python3 scripts/pearlalgo_web_app/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/web_app_api.log" 2>&1 &
         echo "   API server started (port $API_PORT)"
+    else
+        echo "   API server already running (port $API_PORT)"
     fi
 
-    # Start web interface
-    if ! pgrep -f "next" &>/dev/null; then
+    # Start web interface (only if not already running)
+    if ! pgrep -f "next-server" &>/dev/null; then
+        # Ensure NEXT_PUBLIC_API_KEY is set from secrets
+        export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
         cd "$CHART_DIR"
-        PORT=$CHART_PORT npm run dev > "$LOG_DIR/web_app.log" 2>&1 &
+        nohup npx next dev -p "$CHART_PORT" > "$LOG_DIR/web_app.log" 2>&1 &
         cd "$SCRIPT_DIR"
         echo "   Chart web started (port $CHART_PORT)"
+    else
+        echo "   Chart web already running"
     fi
     
     echo "   URL: http://localhost:$CHART_PORT"
@@ -352,6 +365,13 @@ start_all() {
     sleep 2
     start_agent
     sleep 2
+    # Start MFFU if config exists
+    if [ -f "$SCRIPT_DIR/config/markets/mffu_eval.yaml" ]; then
+        echo -e "${CYAN}▶ Starting MFFU Eval...${NC}"
+        ./scripts/lifecycle/mffu_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   MFFU start failed (non-critical)${NC}"
+        echo ""
+    fi
+    sleep 1
     start_telegram
     sleep 1
     start_chart
@@ -389,7 +409,15 @@ stop_telegram() {
 
 stop_chart() {
     echo -e "${CYAN}■ Stopping Web App...${NC}"
-    pkill -f "api_server.py" 2>/dev/null && echo "   Stopped API server" || echo "   API server not running"
+    # Kill only the inception API server (port 8000), NOT MFFU (port 8001)
+    local api_pids=$(pgrep -f "api_server.py" 2>/dev/null || true)
+    for pid in $api_pids; do
+        # Check if this is the MFFU API (port 8001) -- skip it
+        if grep -q "8001" /proc/$pid/cmdline 2>/dev/null; then
+            continue
+        fi
+        kill "$pid" 2>/dev/null && echo "   Stopped API server (PID $pid)"
+    done
     pkill -f "next-server" 2>/dev/null || true
     pkill -f "next dev" 2>/dev/null && echo "   Stopped web app" || echo "   Web app not running"
     echo ""
@@ -425,6 +453,12 @@ stop_all() {
     # Stop in reverse dependency order
     stop_tunnel
     stop_chart
+    # Stop MFFU if running
+    if [ -f "$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid" ] || [ -f "$SCRIPT_DIR/logs/api_MFFU_EVAL.pid" ]; then
+        echo -e "${CYAN}■ Stopping MFFU Eval...${NC}"
+        ./scripts/lifecycle/mffu_eval.sh stop 2>/dev/null || true
+        echo ""
+    fi
     stop_agent
     stop_telegram
     stop_gateway
