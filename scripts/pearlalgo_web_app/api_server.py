@@ -2060,21 +2060,22 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
 
 
 def _get_market_regime(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract market regime information from circuit breaker state."""
+    """Extract market regime information from agent state.
+    
+    The agent now computes regime from the data buffer via detect_market_regime()
+    and stores regime, regime_confidence, regime_trend_strength, etc. in state.
+    """
     circuit_breaker = state.get("trading_circuit_breaker", {})
 
-    # Try to get regime from state (if available)
+    # Get regime from state (computed by service._save_state from buffer data)
     regime = state.get("regime") or "unknown"
 
-    # Calculate confidence based on various factors
-    confidence = 0.0
-    if regime and regime != "unknown":
-        confidence = 0.75  # Base confidence when regime is known
+    # Use actual confidence from detect_market_regime() if available
+    confidence = float(state.get("regime_confidence", 0.0) or 0.0)
 
     # Determine allowed direction based on direction gating
     allowed_direction = "both"
     if circuit_breaker.get("direction_gating_enabled", False):
-        # Check if there's a specific direction allowed
         min_confidence = circuit_breaker.get("direction_gating_min_confidence", 0.7)
         if confidence >= min_confidence:
             if regime in ["trending_up"]:

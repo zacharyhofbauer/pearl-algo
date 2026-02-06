@@ -481,38 +481,50 @@ body {
 .header-row-secondary {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: clamp(10px, 2.5vw, 16px);
-  padding: 8px clamp(12px, 2vw, 20px);
-  margin-top: 6px;
+  gap: 6px;
+  padding: 4px clamp(8px, 1.5vw, 14px);
+  margin-top: 4px;
   background: rgba(18, 18, 28, 0.7);
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid rgba(60, 60, 80, 0.25);
-  flex-wrap: wrap;
-  min-height: 34px;
+}
+
+/* Shadow count inside AI badge */
+.badge-shadow-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  margin-left: 3px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* Badges */
 .header-badges {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .header-badges .badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 10px;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
+  letter-spacing: 0.2px;
   white-space: nowrap;
-  min-width: fit-content;
 }
 
 .header-badges .agent-badge {
@@ -584,7 +596,66 @@ body {
   opacity: 0.8;
 }
 
-/* Health Indicators */
+/* Gateway badge */
+.header-badges .gw-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+}
+.header-badges .gw-badge.ok {
+  background: rgba(0, 230, 118, 0.10);
+  color: #00e676;
+}
+.header-badges .gw-badge.error {
+  background: rgba(255, 82, 82, 0.12);
+  color: #ff5252;
+}
+
+/* Data freshness badge */
+.header-badges .data-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+}
+.header-badges .data-badge.ok {
+  background: rgba(0, 230, 118, 0.10);
+  color: #00e676;
+}
+.header-badges .data-badge.stale {
+  background: rgba(255, 82, 82, 0.12);
+  color: #ff5252;
+}
+
+/* Circuit breaker badge */
+.header-badges .cb-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+}
+.header-badges .cb-badge.tripped {
+  background: rgba(255, 82, 82, 0.15);
+  color: #ff5252;
+}
+.header-badges .cb-badge.ok {
+  background: rgba(0, 230, 118, 0.08);
+  color: #66bb6a;
+}
+
+/* Direction gating badge */
+.header-badges .gate-badge {
+  background: rgba(100, 100, 120, 0.15);
+  color: var(--text-secondary);
+}
+.header-badges .gate-badge.blocking {
+  background: rgba(255, 193, 7, 0.12);
+  color: #ffc107;
+}
+
+/* Shadow counters badge */
+.header-badges .shadow-badge {
+  background: rgba(171, 71, 188, 0.10);
+  color: #ce93d8;
+  opacity: 0.8;
+}
+
+/* Health Indicators (legacy - kept for backward compat) */
 .header-health {
   display: flex;
   align-items: center;
@@ -761,52 +832,26 @@ body {
     display: none;
   }
 
-  /* Secondary row - show badges, health */
+  /* Secondary row - compact */
   .header-row-secondary {
-    padding: 6px 10px;
-    margin-top: 4px;
-    gap: 8px;
-    justify-content: flex-start;
+    padding: 3px 6px;
+    margin-top: 3px;
+    gap: 4px;
     border-radius: 6px;
   }
 
-  .header-badges {
-    gap: 5px;
-    flex-wrap: wrap;
-  }
-
   .header-badges .badge {
-    padding: 3px 6px;
+    padding: 2px 5px;
     font-size: 8px;
-    gap: 3px;
+    gap: 2px;
   }
 
   .header-badges .badge-dot {
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
   }
 
-  /* Show all badges but smaller */
-  .header-badges .market-badge .countdown {
-    font-size: 8px;
-  }
-
-  /* Compact health with short labels */
-  .header-health {
-    gap: 4px;
-  }
-
-  .header-health .health-dot {
-    width: 6px;
-    height: 6px;
-  }
-
-  .header-health .health-label {
-    font-size: 8px;
-    margin-right: 4px;
-  }
-
-  /* Hide legend from header - it's in chart info bar now */
+  /* Hide legend from header on mobile */
   .header-legend {
     display: none;
   }
@@ -859,23 +904,14 @@ body {
   }
 
   .header-row-secondary {
-    padding: 4px 8px;
-    gap: 4px;
+    padding: 2px 4px;
+    gap: 2px;
+    margin-top: 2px;
   }
 
   .header-badges .badge {
-    padding: 2px 4px;
+    padding: 1px 3px;
     font-size: 7px;
-  }
-
-  /* Hide less critical badges on very small screens */
-  .header-badges .ai-badge,
-  .header-badges .regime-badge {
-    display: none;
-  }
-
-  .header-health {
-    display: none;
   }
 }
 

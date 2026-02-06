@@ -533,9 +533,8 @@ export default function PearlAlgoWebApp() {
           </div>
         </div>
 
-        {/* Secondary Row - Badges, Health, Legends */}
+        {/* Secondary Row - System Status Badges */}
         <div className="header-row-secondary">
-          {/* Badges */}
           <div className="header-badges">
             {agentState && (
               <span className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}>
@@ -543,51 +542,31 @@ export default function PearlAlgoWebApp() {
                 {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
               </span>
             )}
+            {agentState && (
+              <span className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}>
+                <span className="badge-dot"></span>
+                GW
+              </span>
+            )}
             {aiMode && (
               <span className={`badge ai-badge ${aiMode}`}>
                 🧠 {aiMode.toUpperCase()}
-              </span>
-            )}
-            {regime && (
-              <span className={`badge regime-badge`}>
-                {regime.icon} {regime.label}
+                {aiMode === 'shadow' && agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
+                  <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
+                )}
               </span>
             )}
             {marketStatus && (
               <span className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
                 {marketStatus.is_open ? '🟢 OPEN' : '🔴 CLOSED'}
-                {countdown && <span className="countdown">{countdown}</span>}
               </span>
             )}
-          </div>
-
-          {/* Health Indicators */}
-          {agentState && (
-            <div className="header-health">
-              <span className={`health-dot ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}></span>
-              <span className="health-label">GW</span>
-              <span className={`health-dot ${agentState.data_fresh ? 'ok' : 'error'}`}></span>
-              <span className="health-label">Data</span>
-              <span className={`health-dot ${agentState.futures_market_open ? 'ok' : 'warning'}`}></span>
-              <span className="health-label">Mkt</span>
-              {dirGate?.enabled && (
-                <>
-                  <span className={`health-dot ${dirGate.blocks > 0 ? 'warning' : 'ok'}`}></span>
-                  <span className="health-label">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Chart Legend */}
-          <div className="header-legend">
-            <span className="legend-item"><span className="legend-line ema9"></span>EMA9</span>
-            <span className="legend-item"><span className="legend-line ema21"></span>EMA21</span>
-            <span className="legend-item"><span className="legend-line vwap"></span>VWAP</span>
-            <span className="legend-item"><span className="legend-marker long">▲</span>Long</span>
-            <span className="legend-item"><span className="legend-marker short">▼</span>Short</span>
-            <span className="legend-item"><span className="legend-marker win">●</span>Win</span>
-            <span className="legend-item"><span className="legend-marker loss">●</span>Loss</span>
+            {agentState && (
+              <span className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}>
+                <span className="badge-dot"></span>
+                Data
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -609,7 +588,20 @@ export default function PearlAlgoWebApp() {
           isLoading={isFetching}
           staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
           onRefresh={handleForceRefresh}
-          onFitAll={() => mainChartApi?.timeScale().fitContent()}
+          onFitAll={() => {
+            if (mainChartApi && candles.length > 0) {
+              // Zoom to show last ~100 bars for a readable view
+              const visibleBars = Math.min(100, candles.length)
+              if (candles.length > visibleBars) {
+                const fromTime = candles[candles.length - visibleBars].time as unknown as import('lightweight-charts').Time
+                const toTime = candles[candles.length - 1].time as unknown as import('lightweight-charts').Time
+                mainChartApi.timeScale().setVisibleRange({ from: fromTime, to: toTime })
+              } else {
+                mainChartApi.timeScale().fitContent()
+              }
+              mainChartApi.timeScale().scrollToRealTime()
+            }
+          }}
           onGoLive={() => mainChartApi?.timeScale().scrollToRealTime()}
           variant="floating"
         />

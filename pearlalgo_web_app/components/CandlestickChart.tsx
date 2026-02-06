@@ -523,11 +523,21 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }))
     volumeSeriesRef.current.setData(volumeData)
 
-    // Auto-fit when data length changes significantly (timeframe switch) or on initial load
+    // On data load: show recent bars (zoomed in) rather than fitting ALL content.
+    // fitContent() zooms out too far showing all bars. Instead, show the last N bars
+    // with a sensible zoom level, then scroll to the latest bar.
     if (chartRef.current) {
       const lengthChanged = Math.abs(data.length - prevDataLength.current) > 5
       if (lengthChanged || prevDataLength.current === 0) {
-        chartRef.current.timeScale().fitContent()
+        // Show last ~100 bars (reasonable zoom level for readability)
+        const visibleBars = Math.min(100, data.length)
+        if (data.length > visibleBars) {
+          const fromTime = data[data.length - visibleBars].time as Time
+          const toTime = data[data.length - 1].time as Time
+          chartRef.current.timeScale().setVisibleRange({ from: fromTime, to: toTime })
+        } else {
+          chartRef.current.timeScale().fitContent()
+        }
       }
       chartRef.current.timeScale().scrollToRealTime()
       prevDataLength.current = data.length

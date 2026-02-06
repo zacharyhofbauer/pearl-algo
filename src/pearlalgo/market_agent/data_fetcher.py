@@ -164,14 +164,21 @@ class MarketAgentDataFetcher:
                 )
 
             # Update buffer if we have data (bars-only contract: only real OHLCV bars).
+            # IMPORTANT: Always update buffer when we have valid data, regardless of freshness.
+            # Freshness check is for alerting only - blocking buffer updates causes regime
+            # detection to fail (returns "unknown" when buffer has < 50 bars).
             if not df.empty:
                 # Log data freshness status
                 if not data_freshness_warning:
                     logger.debug(
                         f'Data is fresh: {len(df)} bars retrieved for {self.config.get("symbol", "MNQ")}'
                     )
-                    # Use centralized normalization to avoid double-reset_index issues
-                    self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
+                else:
+                    logger.debug(
+                        f'Data may be stale but updating buffer: {len(df)} bars retrieved for {self.config.get("symbol", "MNQ")}'
+                    )
+                # Always update buffer with valid data (freshness is for alerting, not blocking)
+                self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
                 
                 # Log data freshness at INFO level for observability
                 if "timestamp" in df.columns:
@@ -187,6 +194,13 @@ class MarketAgentDataFetcher:
                     logger.info(f"Buffer: {buffer_size} bars, latest_timestamp={latest_buffer_time}")
                 else:
                     logger.info(f"Buffer: {buffer_size} bars")
+                
+                # Warn if buffer is below minimum for regime detection (50 bars required)
+                if buffer_size < 50:
+                    logger.warning(
+                        f"Buffer size ({buffer_size}) is below 50 bars - market regime detection will return 'unknown'. "
+                        f"Need more historical data or longer historical_hours setting."
+                    )
             else:
                 # No historical data, but we'll still try real-time Level 1
                 logger.info("Buffer: 0 bars (historical data unavailable, will try Level 1 real-time data)")

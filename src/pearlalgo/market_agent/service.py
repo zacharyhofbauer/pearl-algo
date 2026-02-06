@@ -5454,8 +5454,26 @@ class MarketAgentService:
         except Exception:
             state["strategy_session_open"] = None
 
-        state["regime"] = None
-        state["regime_timestamp"] = None
+        # Compute market regime from buffer data (best-effort)
+        # This populates the regime field used by the web dashboard header badges
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            df_for_regime = last_market_data.get("df")
+            if isinstance(df_for_regime, pd.DataFrame) and not df_for_regime.empty and len(df_for_regime) >= 50:
+                from pearlalgo.trading_bots.pearl_bot_auto import detect_market_regime
+                regime_result = detect_market_regime(df_for_regime, lookback=50)
+                state["regime"] = regime_result.regime
+                state["regime_confidence"] = regime_result.confidence
+                state["regime_trend_strength"] = regime_result.trend_strength
+                state["regime_volatility_ratio"] = regime_result.volatility_ratio
+                state["regime_recommendation"] = regime_result.recommendation
+                state["regime_timestamp"] = datetime.now(timezone.utc).isoformat()
+            else:
+                state["regime"] = None
+                state["regime_timestamp"] = None
+        except Exception:
+            state["regime"] = None
+            state["regime_timestamp"] = None
 
         # Compute and persist buy/sell pressure from last market data (best-effort)
         try:
