@@ -76,6 +76,7 @@ export API_PORT="$API_PORT"
 # Use unique IBKR client IDs to avoid clashing with inception agent (10/11)
 export IBKR_CLIENT_ID=50
 export IBKR_DATA_CLIENT_ID=51
+export IB_CLIENT_ID_LIVE_CHART=97
 
 # Use MFFU-specific config overlay if it exists, otherwise base config
 if [ -f "$PROJECT_DIR/config/markets/mffu_eval.yaml" ]; then
