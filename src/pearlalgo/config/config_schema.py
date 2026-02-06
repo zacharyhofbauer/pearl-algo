@@ -314,7 +314,7 @@ class ExecutionConfig(BaseModel):
     enabled: bool = False
     armed: bool = False
     mode: Literal["dry_run", "paper", "live"] = "dry_run"
-    adapter: Literal["ibkr"] = "ibkr"
+    adapter: Literal["ibkr", "tradovate"] = "ibkr"
     max_positions: int = Field(default=1, ge=1)
     max_orders_per_day: int = Field(default=20, ge=1)
     max_daily_loss: float = Field(default=500.0, ge=0)

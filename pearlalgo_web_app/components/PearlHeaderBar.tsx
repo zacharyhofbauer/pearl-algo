@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import PearlInsightsPanel from './PearlInsightsPanel'
+import AccountSwitcher from './AccountSwitcher'
 import { useAgentStore, useOperatorStore } from '@/stores'
 import { derivePearlMode, deriveHeadline } from '@/types/pearl'
 
@@ -154,6 +155,8 @@ export default function PearlHeaderBar() {
       <div className="pearl-header-icon" aria-hidden="true">
         <Image src="/pearl-emoji.png" alt="" width={20} height={20} priority />
       </div>
+
+      <AccountSwitcher />
 
       <span
         className={`pearl-header-status-dot ${statusDotClass}`}

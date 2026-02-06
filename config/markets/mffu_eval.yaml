@@ -1,0 +1,76 @@
+# ============================================================================
+# MFFU 50K Rapid Plan - Evaluation Stage Configuration
+#
+# This config overlay is used by the MFFU Eval instance (port 8001).
+# It extends the base config.yaml with prop-firm-specific settings.
+#
+# Launch: ./scripts/lifecycle/mffu_eval.sh start --background
+# Web:    http://localhost:3000?api_port=8001
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Challenge: MFFU 50K Rapid Evaluation
+# ---------------------------------------------------------------------------
+challenge:
+  enabled: true
+  stage: mffu_eval          # Activates MFFUEvaluationTracker instead of ChallengeTracker
+  start_balance: 50000.0
+  profit_target: 3000.0
+  max_drawdown: 2000.0      # EOD trailing distance
+  max_contracts_mini: 5
+  max_contracts_micro: 50
+  consistency_pct: 0.50      # No single day > 50% of total profit
+  min_trading_days: 2
+  t1_news_allowed: true      # Evaluation allows T1 news trading
+  auto_reset_on_pass: true
+  auto_reset_on_fail: true
+
+# ---------------------------------------------------------------------------
+# Execution: Tradovate Paper (Demo)
+# ---------------------------------------------------------------------------
+# Credentials are loaded from environment variables (secrets.env):
+#   TRADOVATE_USERNAME, TRADOVATE_PASSWORD, TRADOVATE_CID, TRADOVATE_SEC
+#
+execution:
+  enabled: false             # Enable when ready to trade (change to true)
+  armed: false               # Arm via Telegram /arm command or set true
+  mode: paper                # paper = Tradovate demo simulation
+  adapter: tradovate         # Use TradovateExecutionAdapter
+  max_positions: 5           # MFFU max 5 mini contracts
+  max_orders_per_day: 50
+  max_daily_loss: 1800.0     # Safety: slightly below $2000 MFFU limit
+  cooldown_seconds: 30
+  symbol_whitelist:
+    - MNQ
+
+# ---------------------------------------------------------------------------
+# Trading Circuit Breaker: MFFU Evaluation Gate
+# ---------------------------------------------------------------------------
+trading_circuit_breaker:
+  mode: enforce
+  enable_mffu_eval_gate: true
+  mffu_max_contracts_mini: 5
+  mffu_max_contracts_micro: 50
+  mffu_trading_start_hour_et: 18    # 6 PM ET
+  mffu_trading_end_hour_et: 16      # 4 PM ET
+  mffu_trading_end_minute_et: 10    # 4:10 PM ET
+  mffu_near_max_loss_buffer: 200.0  # Block entries within $200 of floor
+  mffu_enable_news_blackout: true
+  # Standard circuit breaker settings
+  max_consecutive_losses: 5
+  max_session_drawdown: 1800.0
+  max_daily_drawdown: 1800.0
+  max_concurrent_positions: 5
+
+# ---------------------------------------------------------------------------
+# Auto-Flat: MFFU session close at 4:08 PM ET
+# ---------------------------------------------------------------------------
+auto_flat:
+  enabled: true
+  daily_enabled: true
+  daily_time: "16:08"        # 4:08 PM ET (2 min before MFFU 4:10 close)
+  friday_enabled: true
+  friday_time: "16:08"
+  weekend_enabled: true
+  notify: true
+  timezone: "America/New_York"

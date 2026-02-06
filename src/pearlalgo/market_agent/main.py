@@ -25,12 +25,18 @@ from pearlalgo.utils.paths import ensure_state_dir
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# Load .env file if it exists
+# Load .env files if they exist (secrets first, then project .env overrides)
 try:
     from dotenv import load_dotenv
+    # Load secrets (Tradovate credentials, API keys, etc.)
+    secrets_path = Path.home() / ".config" / "pearlalgo" / "secrets.env"
+    if secrets_path.exists():
+        load_dotenv(secrets_path)
+        logger.info(f"Loaded secrets from {secrets_path}")
+    # Load project .env (can override secrets if needed)
     env_path = project_root / ".env"
     if env_path.exists():
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=True)
         logger.info(f"Loaded environment variables from {env_path}")
 except ImportError:
     pass  # dotenv not required, but helpful

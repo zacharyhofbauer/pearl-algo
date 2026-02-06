@@ -121,14 +121,31 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
   const gapFromPeak = peakBalance - challenge.current_balance
 
+  const mffu = challenge.mffu
+  const panelTitle = mffu ? `MFFU ${mffu.stage === 'evaluation' ? 'Eval' : mffu.stage === 'sim_funded' ? 'Sim' : 'Live'}` : 'Challenge'
+
   return (
-    <DataPanel title="Challenge" className="challenge-panel" variant="feature">
+    <DataPanel title={panelTitle} className="challenge-panel" variant="feature">
       <div className="challenge-header">
         <div className="challenge-balance">
           <div className="challenge-balance-row">
             <span className="balance-amount">${challenge.current_balance.toLocaleString()}</span>
             {challenge.attempt_number && (
               <span className="challenge-attempt">#{challenge.attempt_number}</span>
+            )}
+            {mffu && (
+              <span className="challenge-stage-badge" style={{
+                background: mffu.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
+                color: '#0a0a0a',
+                padding: '1px 5px',
+                borderRadius: '3px',
+                fontSize: '9px',
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                marginLeft: '4px',
+              }}>
+                {mffu.stage === 'evaluation' ? 'EVAL' : mffu.stage === 'sim_funded' ? 'SIM' : 'LIVE'}
+              </span>
             )}
           </div>
           <span className={`balance-pnl ${challenge.pnl >= 0 ? 'positive' : 'negative'}`}>
@@ -216,6 +233,46 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
             </div>
           </div>
           <span className="target-progress-label">{profitProgress.toFixed(0)}% to target</span>
+        </div>
+      )}
+
+      {/* MFFU-specific info */}
+      {mffu && (
+        <div className="mffu-details" style={{ marginTop: 'var(--space-sm, 8px)' }}>
+          <div className="grid grid-cols-3 gap-sm">
+            <StatDisplay
+              label="DD Floor"
+              value={mffu.current_drawdown_floor != null ? `$${mffu.current_drawdown_floor.toLocaleString()}` : '--'}
+              variant="compact"
+            />
+            <StatDisplay
+              label="Days"
+              value={`${mffu.min_days?.days_traded ?? 0}/${mffu.min_days?.days_required ?? 2}`}
+              variant="compact"
+              positive={mffu.min_days?.met}
+              negative={!mffu.min_days?.met}
+              colorMode="financial"
+            />
+            <StatDisplay
+              label="Consistency"
+              value={mffu.consistency?.met ? 'OK' : `${mffu.consistency?.best_day_pct?.toFixed(0) ?? 0}%`}
+              variant="compact"
+              positive={mffu.consistency?.met}
+              negative={!mffu.consistency?.met && (mffu.consistency?.best_day_pct ?? 0) > 50}
+              colorMode="financial"
+            />
+          </div>
+          {mffu.drawdown_locked && (
+            <div style={{
+              fontSize: '10px',
+              color: 'var(--accent-green, #00e676)',
+              marginTop: '4px',
+              textAlign: 'center',
+              opacity: 0.8,
+            }}>
+              DD Floor Locked at ${mffu.current_drawdown_floor?.toLocaleString()}
+            </div>
+          )}
         </div>
       )}
     </DataPanel>

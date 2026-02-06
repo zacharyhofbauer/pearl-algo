@@ -1700,7 +1700,7 @@ def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
-    """Get challenge status from challenge_state.json."""
+    """Get challenge status from challenge_state.json (supports both inception + MFFU)."""
     challenge_file = state_dir / "challenge_state.json"
     if not challenge_file.exists():
         return None
@@ -1718,7 +1718,7 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
         current_dd = abs(current.get("max_drawdown_hit", 0.0))
         dd_risk_pct = min(100.0, (current_dd / max_dd * 100)) if max_dd > 0 else 0.0
 
-        return {
+        result: Dict[str, Any] = {
             "enabled": True,
             "current_balance": round(config.get("start_balance", 50000.0) + current.get("pnl", 0.0), 2),
             "pnl": round(current.get("pnl", 0.0), 2),
@@ -1729,7 +1729,24 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
             "outcome": current.get("outcome", "active"),
             "profit_target": config.get("profit_target", 3000.0),
             "max_drawdown": max_dd,
+            "attempt_number": current.get("attempt_id"),
         }
+
+        # MFFU extensions (present when stage is set in challenge_state.json)
+        mffu = data.get("mffu")
+        if mffu and isinstance(mffu, dict):
+            result["mffu"] = {
+                "stage": mffu.get("stage", "evaluation"),
+                "eod_high_water_mark": mffu.get("eod_high_water_mark"),
+                "current_drawdown_floor": mffu.get("current_drawdown_floor"),
+                "drawdown_locked": mffu.get("drawdown_locked", False),
+                "consistency": mffu.get("consistency", {}),
+                "min_days": mffu.get("min_days", {}),
+                "trading_days_count": mffu.get("trading_days_count", 0),
+                "max_contracts_mini": mffu.get("max_contracts_mini", 5),
+            }
+
+        return result
     except Exception:
         return None
 

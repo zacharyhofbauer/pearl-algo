@@ -58,6 +58,16 @@ except ImportError:
     ExecutionConfig = None  # type: ignore
     IBKRExecutionAdapter = None  # type: ignore
 
+# Tradovate execution adapter (optional - only for prop firm / MFFU)
+try:
+    from pearlalgo.execution.tradovate.adapter import TradovateExecutionAdapter
+    from pearlalgo.execution.tradovate.config import TradovateConfig
+    TRADOVATE_AVAILABLE = True
+except ImportError:
+    TRADOVATE_AVAILABLE = False
+    TradovateExecutionAdapter = None  # type: ignore
+    TradovateConfig = None  # type: ignore
+
 # Learning layer imports (optional - only used if learning.enabled)
 try:
     from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig, BanditDecision
@@ -337,6 +347,48 @@ class MarketAgentService:
             logger.warning(f"Challenge tracker init failed (continuing without): {e}")
             self._challenge_tracker = None
             self._challenge_enabled = False
+
+        # ==========================================================================
+        # MFFU EVALUATION TRACKER (Prop Firm Rules)
+        # ==========================================================================
+        self._mffu_tracker = None
+        self._mffu_enabled = False
+        try:
+            challenge_cfg = service_config.get("challenge", {}) or {}
+            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+                from pearlalgo.market_agent.mffu_eval_tracker import (
+                    MFFUEvaluationTracker,
+                    MFFUEvalConfig,
+                )
+                mffu_cfg = MFFUEvalConfig(
+                    enabled=True,
+                    stage=mffu_stage if mffu_stage != "mffu_eval" else "evaluation",
+                    start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
+                    profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
+                    max_loss_distance=float(challenge_cfg.get("max_drawdown", 2_000.0)),
+                    max_contracts_mini=int(challenge_cfg.get("max_contracts_mini", 5)),
+                    max_contracts_micro=int(challenge_cfg.get("max_contracts_micro", 50)),
+                    consistency_pct=float(challenge_cfg.get("consistency_pct", 0.50)),
+                    min_trading_days=int(challenge_cfg.get("min_trading_days", 2)),
+                    t1_news_allowed=bool(challenge_cfg.get("t1_news_allowed", True)),
+                    auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
+                    auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
+                )
+                self._mffu_tracker = MFFUEvaluationTracker(
+                    config=mffu_cfg,
+                    state_dir=self.state_manager.state_dir,
+                )
+                self._mffu_enabled = True
+                logger.info(
+                    f"MFFU Eval Tracker enabled: stage={mffu_cfg.stage}, "
+                    f"target=+${mffu_cfg.profit_target:,.0f}, "
+                    f"max_loss=-${mffu_cfg.max_loss_distance:,.0f}"
+                )
+        except Exception as e:
+            logger.warning(f"MFFU tracker init failed (continuing without): {e}")
+            self._mffu_tracker = None
+            self._mffu_enabled = False
 
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
@@ -634,6 +686,11 @@ class MarketAgentService:
                 self._execution_config = ExecutionConfig.from_dict(execution_settings)
                 if execution_adapter_name in ("ibkr", "", "interactivebrokers"):
                     self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
+                elif execution_adapter_name == "tradovate" and TRADOVATE_AVAILABLE:
+                    tv_config = TradovateConfig.from_env()
+                    self.execution_adapter = TradovateExecutionAdapter(
+                        self._execution_config, tradovate_config=tv_config,
+                    )
                 else:
                     raise ValueError(f"Unknown execution.adapter: {execution_adapter_name!r}")
                 logger.info(
@@ -2205,6 +2262,36 @@ class MarketAgentService:
                                             logger.debug(f"Could not queue challenge alert: {tg_err}")
                             except Exception as challenge_err:
                                 logger.debug(f"Could not record challenge trade: {challenge_err}")
+
+                        # Record trade with MFFU evaluation tracker (prop firm rules)
+                        if self._mffu_tracker is not None:
+                            try:
+                                from datetime import date as _date_cls
+                                trade_date_str = _date_cls.today().isoformat()
+                                mffu_result = self._mffu_tracker.record_trade(
+                                    pnl=pnl_value,
+                                    is_win=is_win,
+                                    trade_date=trade_date_str,
+                                )
+                                if mffu_result.get("triggered"):
+                                    mffu_outcome = mffu_result.get("outcome", "")
+                                    mffu_attempt = mffu_result.get("attempt", {})
+                                    logger.info(
+                                        f"MFFU attempt #{mffu_attempt.get('attempt_id', 0)} ended: "
+                                        f"{mffu_outcome.upper()} | PnL: ${mffu_attempt.get('pnl', 0):.2f}"
+                                    )
+                                    # On FAIL: flatten all positions immediately
+                                    if mffu_outcome == "fail" and self.execution_adapter is not None:
+                                        try:
+                                            self.execution_adapter.disarm()
+                                            asyncio.create_task(
+                                                self.execution_adapter.flatten_all_positions()
+                                            )
+                                            logger.warning("MFFU FAIL: execution disarmed + positions flattened")
+                                        except Exception:
+                                            pass
+                            except Exception as mffu_err:
+                                logger.debug(f"Could not record MFFU trade: {mffu_err}")
                         
                         # Record outcome with bandit policy for learning
                         if self.bandit_policy is not None:
@@ -4992,6 +5079,12 @@ class MarketAgentService:
                 if self._auto_flat_last_dates.get("weekend_auto_flat") != local_now.date():
                     return "weekend_auto_flat"
 
+        # MFFU Evaluation: auto-flatten at 4:08 PM ET (2 min before 4:10 session close)
+        if self._mffu_enabled and self._mffu_tracker is not None:
+            if local_now.time() >= time(16, 8) and local_now.time() < time(16, 11):
+                if self._auto_flat_last_dates.get("mffu_session_close") != local_now.date():
+                    return "mffu_session_close"
+
         return None
 
     async def _close_all_virtual_trades(self, *, market_data: Dict, reason: str) -> int:
@@ -5277,6 +5370,13 @@ class MarketAgentService:
                         self._auto_flat_last_dates[reason] = local_now.date()
                     except Exception:
                         self._auto_flat_last_dates[reason] = now.date()
+
+                    # MFFU: update EOD high-water mark after session close flatten
+                    if reason == "mffu_session_close" and self._mffu_tracker is not None:
+                        try:
+                            self._mffu_tracker.update_eod_hwm()
+                        except Exception as e:
+                            logger.debug(f"Could not update MFFU EOD HWM: {e}")
 
     def _save_state(self) -> None:
         """Save current service state."""

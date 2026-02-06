@@ -1,0 +1,182 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+/**
+ * Account definition for the switcher.
+ * Each account maps to a separate API server port and state directory.
+ */
+interface AccountDef {
+  id: string
+  label: string
+  shortLabel: string
+  port: number | null // null = default (no ?api_port param)
+  badge?: string
+  badgeColor?: string
+}
+
+const ACCOUNTS: AccountDef[] = [
+  {
+    id: 'inception',
+    label: 'Inception',
+    shortLabel: 'INC',
+    port: null, // default port 8000
+    badge: 'LIVE',
+    badgeColor: 'var(--color-green, #00e676)',
+  },
+  {
+    id: 'mffu_eval',
+    label: 'Prop Firm - MFFU Eval',
+    shortLabel: 'MFFU',
+    port: 8001,
+    badge: 'EVAL',
+    badgeColor: 'var(--color-accent, #7c4dff)',
+  },
+]
+
+const LS_KEY = 'pearl.account.selected'
+
+function getPortFromUrl(): number | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const port = params.get('api_port')
+  return port ? parseInt(port, 10) : null
+}
+
+function findAccountByPort(port: number | null): AccountDef {
+  return ACCOUNTS.find((a) => a.port === port) || ACCOUNTS[0]
+}
+
+export default function AccountSwitcher() {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Derive current account from URL
+  const currentAccount = useMemo(() => {
+    return findAccountByPort(getPortFromUrl())
+  }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open])
+
+  const handleSelect = useCallback((account: AccountDef) => {
+    setOpen(false)
+
+    // Persist selection
+    try {
+      localStorage.setItem(LS_KEY, account.id)
+    } catch {
+      // ignore
+    }
+
+    // Build new URL with the correct api_port
+    const url = new URL(window.location.href)
+    if (account.port) {
+      url.searchParams.set('api_port', String(account.port))
+    } else {
+      url.searchParams.delete('api_port')
+    }
+
+    // Navigate (full reload to reset all stores/WS connections cleanly)
+    window.location.href = url.toString()
+  }, [])
+
+  const handleToggle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setOpen((v) => !v)
+  }, [])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      e.stopPropagation()
+      setOpen((v) => !v)
+    }
+  }, [])
+
+  return (
+    <div
+      ref={containerRef}
+      className="account-switcher"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <button
+        className="account-switcher-trigger"
+        onClick={handleToggle}
+        onKeyDown={handleKeyDown}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={`Current account: ${currentAccount.label}`}
+        type="button"
+      >
+        <span className="account-switcher-badge" style={{
+          background: currentAccount.badgeColor,
+        }}>
+          {currentAccount.badge}
+        </span>
+        <span className="account-switcher-name">{currentAccount.shortLabel}</span>
+        <svg
+          className={`account-switcher-chevron ${open ? 'open' : ''}`}
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M2 3.5L5 6.5L8 3.5"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="account-switcher-dropdown" role="listbox">
+          {ACCOUNTS.map((account) => (
+            <button
+              key={account.id}
+              className={`account-switcher-option ${account.id === currentAccount.id ? 'active' : ''}`}
+              onClick={() => handleSelect(account)}
+              role="option"
+              aria-selected={account.id === currentAccount.id}
+              type="button"
+            >
+              <span className="account-option-badge" style={{
+                background: account.badgeColor,
+              }}>
+                {account.badge}
+              </span>
+              <span className="account-option-label">{account.label}</span>
+              {account.id === currentAccount.id && (
+                <span className="account-option-check" aria-hidden="true">&#10003;</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

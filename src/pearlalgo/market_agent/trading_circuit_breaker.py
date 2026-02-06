@@ -127,6 +127,18 @@ class TradingCircuitBreakerConfig:
     ml_min_winrate_delta: float = 0.15  # PASS vs FAIL must differ by 15+ percentage points
     ml_chop_shield_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
 
+    # =========================================================================
+    # MFFU Evaluation Gate (prop firm rule enforcement)
+    # =========================================================================
+    enable_mffu_eval_gate: bool = False  # Enable for MFFU prop firm accounts
+    mffu_max_contracts_mini: int = 5
+    mffu_max_contracts_micro: int = 50
+    mffu_trading_start_hour_et: int = 18  # 6 PM ET (session open)
+    mffu_trading_end_hour_et: int = 16    # 4 PM ET
+    mffu_trading_end_minute_et: int = 10  # 4:10 PM ET (session close)
+    mffu_near_max_loss_buffer: float = 200.0  # Block new entries within $200 of floor
+    mffu_enable_news_blackout: bool = True
+
 
 class TradingCircuitBreaker:
     """
@@ -313,6 +325,15 @@ class TradingCircuitBreaker:
         # =======================================================================
         if self.config.enable_ml_chop_shield and ml_stats is not None:
             decision = self._check_ml_chop_shield(signal, ml_stats)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+
+        # =======================================================================
+        # MFFU Evaluation Gate (prop firm rule enforcement)
+        # =======================================================================
+        if self.config.enable_mffu_eval_gate:
+            decision = self._check_mffu_eval_gate(signal, active_positions)
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
@@ -1134,6 +1155,108 @@ class TradingCircuitBreaker:
         )
 
 
+    def _check_mffu_eval_gate(
+        self,
+        signal: Dict[str, Any],
+        active_positions: Optional[List[Dict[str, Any]]] = None,
+    ) -> CircuitBreakerDecision:
+        """
+        MFFU Evaluation Gate: enforce prop firm rules before order placement.
+
+        Checks:
+        1. Max contracts (5 mini / 50 micro)
+        2. Trading hours (6 PM ET - 4:10 PM ET)
+        3. No hedging (no opposite direction on same underlying)
+        4. News blackout (2 min before/after any release)
+        """
+        from datetime import time as _time_cls
+        now_utc = datetime.now(timezone.utc)
+        try:
+            now_et = now_utc.astimezone(ET)
+        except Exception:
+            now_et = now_utc
+
+        # ── Check 1: Trading hours ────────────────────────────────────
+        et_time = now_et.time()
+        session_open = _time_cls(self.config.mffu_trading_start_hour_et, 0)
+        session_close = _time_cls(self.config.mffu_trading_end_hour_et, self.config.mffu_trading_end_minute_et)
+
+        # Trading window: 6 PM ET -> 4:10 PM ET next day (crosses midnight)
+        in_session = (et_time >= session_open) or (et_time < session_close)
+        if not in_session:
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="mffu_outside_trading_hours",
+                severity="warning",
+                details={
+                    "current_time_et": str(et_time),
+                    "session_open": str(session_open),
+                    "session_close": str(session_close),
+                },
+            )
+
+        # ── Check 2: Max contracts ────────────────────────────────────
+        if active_positions:
+            total_qty = sum(
+                abs(int(p.get("position_size", 0) or p.get("quantity", 0) or 1))
+                for p in active_positions
+            )
+            new_qty = int(signal.get("position_size", 1))
+            if total_qty + new_qty > self.config.mffu_max_contracts_mini:
+                return CircuitBreakerDecision(
+                    allowed=False,
+                    reason="mffu_max_contracts_exceeded",
+                    severity="critical",
+                    details={
+                        "current_contracts": total_qty,
+                        "new_contracts": new_qty,
+                        "max_allowed": self.config.mffu_max_contracts_mini,
+                    },
+                )
+
+        # ── Check 3: No hedging ───────────────────────────────────────
+        if active_positions:
+            signal_direction = str(signal.get("direction", "")).lower()
+            for pos in active_positions:
+                pos_direction = str(pos.get("direction", "")).lower()
+                if pos_direction and signal_direction and pos_direction != signal_direction:
+                    return CircuitBreakerDecision(
+                        allowed=False,
+                        reason="mffu_hedging_prohibited",
+                        severity="critical",
+                        details={
+                            "signal_direction": signal_direction,
+                            "existing_direction": pos_direction,
+                            "message": "MFFU prohibits hedging (simultaneous long + short on same underlying)",
+                        },
+                    )
+
+        # ── Check 4: News blackout ────────────────────────────────────
+        if self.config.mffu_enable_news_blackout:
+            try:
+                from pearlalgo.utils.news_calendar import get_news_calendar
+                calendar = get_news_calendar()
+                in_blackout, event_name = calendar.is_in_blackout(now_utc)
+                if in_blackout:
+                    return CircuitBreakerDecision(
+                        allowed=False,
+                        reason="mffu_news_blackout",
+                        severity="warning",
+                        details={
+                            "event": event_name,
+                            "message": f"News blackout: {event_name} (2 min before/after)",
+                        },
+                    )
+            except Exception as e:
+                logger.debug(f"News calendar check failed (allowing trade): {e}")
+
+        return CircuitBreakerDecision(
+            allowed=True,
+            reason="mffu_eval_gate_passed",
+            severity="info",
+        )
+
+
 def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> TradingCircuitBreaker:
     """
     Factory function to create a TradingCircuitBreaker from a config dict.
@@ -1185,6 +1308,15 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         ml_min_scored_trades=config.get("ml_min_scored_trades", 50),
         ml_min_winrate_delta=config.get("ml_min_winrate_delta", 0.15),
         ml_chop_shield_regimes=config.get("ml_chop_shield_regimes", ["ranging", "volatile"]),
+        # MFFU Evaluation Gate
+        enable_mffu_eval_gate=config.get("enable_mffu_eval_gate", False),
+        mffu_max_contracts_mini=config.get("mffu_max_contracts_mini", 5),
+        mffu_max_contracts_micro=config.get("mffu_max_contracts_micro", 50),
+        mffu_trading_start_hour_et=config.get("mffu_trading_start_hour_et", 18),
+        mffu_trading_end_hour_et=config.get("mffu_trading_end_hour_et", 16),
+        mffu_trading_end_minute_et=config.get("mffu_trading_end_minute_et", 10),
+        mffu_near_max_loss_buffer=config.get("mffu_near_max_loss_buffer", 200.0),
+        mffu_enable_news_blackout=config.get("mffu_enable_news_blackout", True),
     )
     
     return TradingCircuitBreaker(cb_config)
