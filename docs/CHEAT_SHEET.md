@@ -1,778 +1,82 @@
 # PEARLalgo Cheat Sheet
 
-> **Goal:** One-page operational quick reference for daily use.
-> For full details, see `MARKET_AGENT_GUIDE.md`, `GATEWAY.md`, and `TELEGRAM_GUIDE.md`.
+> Quick reference for daily operations. Most-used commands first.
 
 ---
 
-## 🐚 Quick Start (NEW - Recommended)
-
-The `pearl.sh` master script handles everything with simple commands:
+## 1. Daily Commands
 
 ```bash
-./pearl.sh start      # Start all: Gateway → Agent → Telegram → Chart
-./pearl.sh stop       # Stop all services gracefully
-./pearl.sh restart    # Restart everything
-./pearl.sh status     # Show status of all services
-./pearl.sh quick      # One-liner status check
-```
+# Start/stop everything
+./pearl.sh start                # Gateway -> Agent -> Telegram -> Chart
+./pearl.sh stop                 # Stop all services
+./pearl.sh restart              # Restart all
+./pearl.sh status               # Full status dashboard
+./pearl.sh quick                # One-liner: Gateway OK | Agent OK | ...
 
-**Individual service control:**
-```bash
+# MFFU (prop firm eval -- most used)
+./scripts/lifecycle/mffu_eval.sh restart --background   # Clean restart (kills stale processes)
+./scripts/lifecycle/mffu_eval.sh start --background     # Start agent + API
+./scripts/lifecycle/mffu_eval.sh stop                   # Stop everything
+./scripts/lifecycle/mffu_eval.sh status                 # Check status
+
+# Individual services
 ./pearl.sh gateway start|stop|status
-./pearl.sh agent start|stop|status       # Inception (NQ) agent
-./pearl.sh mffu start|stop|status|restart|api|logs  # MFFU Eval (Tradovate paper)
+./pearl.sh agent start|stop|status         # Inception (NQ)
+./pearl.sh mffu start|stop|restart|status  # MFFU Eval
 ./pearl.sh telegram start|stop|status
-./pearl.sh chart start|stop|status       # Live Chart (pearlalgo.io)
-./pearl.sh tunnel start|stop|status|logs # Cloudflare Tunnel
+./pearl.sh chart start|stop|status         # Web app (pearlalgo.io)
+./pearl.sh tunnel start|stop|status        # Cloudflare tunnel
 ```
 
-**Options:**
-```bash
-./pearl.sh start --market ES        # Different market (default: NQ)
-./pearl.sh start --no-telegram      # Skip Telegram handler
-./pearl.sh start --no-chart         # Skip Live Chart
-./pearl.sh start --foreground       # Run agent in foreground (debugging)
-```
+**After any code change:** `./scripts/lifecycle/mffu_eval.sh restart --background` for MFFU, `./pearl.sh restart` for inception.
 
 ---
 
-## 1. Environment & Setup (once per machine)
+## 2. MFFU 50K Rapid Evaluation
 
-- **Create venv & install**
-  ```bash
-  cd ~/pearlalgo-dev-ai-agents
+Pearl runs two isolated accounts:
+- **Inception** (port 8000): Virtual PnL on IBKR, no real orders
+- **MFFU Eval** (port 8001): Real orders on Tradovate paper (demo)
 
-  source .venv/bin/activate
+### Signal Forwarding (Inception -> MFFU)
 
-  ```
-
-- **`.env` essentials**
-  ```bash
-  # Copy template, then edit real values
-  cp env.example .env
-  ```
-
-  **Key concepts (don't confuse these):**
-  - **StrategySessionOpen**: when the strategy is allowed to generate signals (config-driven session window; see `config/config.yaml` for start_time and end_time).
-  - **FuturesMarketOpen**: when CME futures data is generally available (ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break).
-  ```bash
-  TELEGRAM_BOT_TOKEN=your_bot_token_here
-  TELEGRAM_CHAT_ID=your_chat_id_here
-
-  IBKR_HOST=127.0.0.1
-  IBKR_PORT=4002
-  IBKR_CLIENT_ID=10
-  IBKR_DATA_CLIENT_ID=11
-
-  # Optional: external IBKR Gateway install location
-  # PEARLALGO_IBKR_HOME=/opt/ibkr
-
-  PEARLALGO_DATA_PROVIDER=ibkr
-  ```
-
----
-
-## 2. Daily Start-Up Flow
-
-### Option A: One Command (⭐ Recommended)
-
-```bash
-cd ~/pearlalgo-dev-ai-agents
-./pearl.sh start
-```
-
-That's it! This starts Gateway → Agent → Telegram in the correct order.
-
-**Check status anytime:**
-```bash
-./pearl.sh status     # Detailed view
-./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅ | Chart ✅ | Tunnel ✅
-```
-
-### Option B: From Telegram (Remote Control)
-
-**Prerequisites:** Telegram Menu Handler must be running (started by `./pearl.sh start`)
-
-- Send `/start` to access the main control panel
-- Tap buttons for: Activity, System, Health, Settings
-- **UI policy (don't drift):** keep `/start` as the only slash command; keep ops behind buttons.
-- **Status semantics:** Agent/Gateway dots = services; Health dot = data/connection.
-
-### Option C: From Terminal (Traditional/Manual)
-
-If you prefer individual control:
-
-1. **Start IBKR Gateway**
-   ```bash
-   ./scripts/gateway/gateway.sh start
-   ./scripts/gateway/gateway.sh status   # expect: RUNNING + API READY
-   ```
-
-2. **Start Market Agent Service**
-   ```bash
-   ./scripts/lifecycle/agent.sh start --market NQ --background
-   ./scripts/lifecycle/check_agent_status.sh --market NQ
-   ```
-
-3. **Start Telegram Command Handler**
-   ```bash
-   ./scripts/telegram/start_command_handler.sh --background
-   ```
-
----
-
-## 3. Core Commands You Actually Use
-
-### Master Control (⭐ Recommended)
-
-```bash
-./pearl.sh start      # Start everything
-./pearl.sh stop       # Stop everything  
-./pearl.sh restart    # Restart everything
-./pearl.sh status     # Full status dashboard
-./pearl.sh quick      # One-liner status
-```
-
-### From Telegram (Notifications & Dashboard)
-
-- **Dashboard & Menu:**
-  ```
-  /start             # Open dashboard + menu buttons
-  ```
-
-> **Note:** Telegram is for notifications and dashboard only. For AI assistance, use CLI/terminal with `/pearl`.
-
-### Individual Service Control (if needed)
-
-- **Service lifecycle**
-  ```bash
-  ./pearl.sh agent start|stop|status        # Via master script
-  # Or directly:
-  ./scripts/lifecycle/agent.sh start --market NQ --background
-  ./scripts/lifecycle/agent.sh stop --market NQ
-  ./scripts/lifecycle/check_agent_status.sh --market NQ
-  ```
-
-- **Gateway**
-  ```bash
-  ./pearl.sh gateway start|stop|status      # Via master script
-  # Or directly:
-  ./scripts/gateway/gateway.sh start
-  ./scripts/gateway/gateway.sh stop
-  ./scripts/gateway/gateway.sh status
-  ```
-
-- **Telegram Menu Handler**
-  ```bash
-  ./pearl.sh telegram start|stop|status     # Via master script
-  # Or directly:
-  ./scripts/telegram/start_command_handler.sh --background
-  ./scripts/telegram/check_command_handler.sh
-  ```
-
----
-
-## 4. Telegram Usage (what to expect)
-
-- **Works even without menu handler:**
-  - Startup / shutdown notifications
-  - **Dashboard** hourly by default (consolidated: price sparkline, MTF trends, session stats, performance)
-  - Signal alerts, error/circuit‑breaker alerts
-
-> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message per `dashboard_chart_interval` (default 1h).
-
-- **Menu Handler Features:**
-  - Interactive button-based control panel
-  - Service management (start/stop agent/gateway)
-  - Real-time monitoring and status
-  - Performance analytics and reporting
-
-### Menu Handler Features
-
-- **Commands (minimal by design):**
-  - `/start` – Main dashboard + button menus (the ONLY slash command)
-- **Everything else is via buttons (recommended on mobile):**
-  - **📊 Activity** → trades, signals, P&L, history
-  - **🎛️ System** → start/stop/restart agent, gateway controls
-  - **🛡️ Health** → connection status, data quality, diagnostics
-  - **⚙️ Settings** → markets, alert preferences, bots
-
----
-
-## 5. Quick Troubleshooting
-
-- **No Telegram responses to `/start`:**
-  ```bash
-  ./scripts/telegram/check_command_handler.sh
-  ./scripts/lifecycle/check_agent_status.sh --market NQ
-  ```
-
-- **pearlalgo.io not loading / tunnel down:**
-  ```bash
-  ./pearl.sh tunnel status              # Check tunnel + public access
-  sudo ./scripts/setup-cloudflared-service.sh  # Install as auto-start service (run once)
-  ./pearl.sh tunnel logs                # View tunnel logs
-  ```
-
-- **No market data / no signals:**
-  ```bash
-  ./scripts/gateway/gateway.sh status
-  cat data/agent_state/NQ/state.json | jq .buffer_size
-  ```
-
-- **Dashboard looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
-  - `buffer_size` is a **rolling window** capped by config (often 100 bars). It will not grow with time.
-  - `cycle_count` can be **total since first run** (persisted), while uptime is per-process.
-  - Use Telegram **Dashboard** (`/start`) to see **session/total scans** and **signals generated vs sent vs failed**.
-- **Service looks stuck / weird:**
-  ```bash
-  ./scripts/lifecycle/check_agent_status.sh --market NQ
-  ./scripts/lifecycle/agent.sh stop --market NQ
-  ./scripts/lifecycle/agent.sh start --market NQ
-  ```
-
-- **Verify Telegram config quickly:**
-  ```bash
-  echo $TELEGRAM_BOT_TOKEN
-  echo $TELEGRAM_CHAT_ID
-  python3 scripts/testing/test_all.py telegram
-  ```
-
-- **Check architecture boundaries (for development):**
-  ```bash
-  python3 scripts/testing/test_all.py arch                          # warn-only
-  PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch # strict
-  ```
-
-- **Prompt regression eval (Pearl AI prompts/tools):**
-  ```bash
-  # Fast, deterministic, no API calls
-  python3 -m pearl_ai.eval.ci --mock
-
-  # Optional: install pre-commit hook (runs eval when prompt files are staged)
-  ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit
-  ```
-
----
-
-## 6. Logs (systemd / journalctl)
-
-When running via systemd, logs go to journald. Use these commands:
-
-```bash
-# Follow live logs
-journalctl -u pearlalgo-mnq.service -f
-
-# Last 10 minutes
-journalctl -u pearlalgo-mnq.service --since -10m
-
-# Since yesterday (for overnight review)
-journalctl -u pearlalgo-mnq.service --since yesterday
-
-# Filter by priority (errors only)
-journalctl -u pearlalgo-mnq.service -p err
-```
-
-**Observability environment variables** (optional, in `.env`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PEARLALGO_LOG_LEVEL` | `INFO` | Override log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `PEARLALGO_LOG_JSON` | `false` | Set to `true` for JSON logs (useful for log aggregation) |
-| `PEARLALGO_LOG_EXTRA` | `false` | Set to `true` to include `extra={...}` context in text logs |
-
-**Notes:**
-- When stdout is not a TTY (e.g., under systemd), ANSI colors are automatically disabled.
-- Each process start gets a unique `run_id` (first 8 chars of UUID) for log correlation.
-- Cycle-by-cycle context (cycle number, freshness, signals) appears in `extra` fields.
-
----
-
-## 7. Where things live
-
-- **Config**: `config/config.yaml`, `.env`
-- **State**: `data/agent_state/<MARKET>/` (`state.json`, `signals.jsonl`, `exports/`)
-- **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
-- **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
-- **Deep-dive docs**: `MARKET_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
-
----
-
-## 8. Pearl Algo Web App
-
-A web-based TradingView-style chart with **real-time IBKR data**, indicators, and trade markers.
-
-> ✅ **Data Source:** Live IBKR market data (often AHEAD of TradingView by 1-2 candles!)
-> ⚠️ **Requires:** Node.js 20.x + IBKR Gateway connected. Shows "No Data" if IBKR is offline.
-
-**First-time setup (Node.js):**
-
-```bash
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-```
-
-**Start/Stop:**
-
-```bash
-./pearl.sh chart start     # Start (API + Chart)
-./pearl.sh chart stop      # Stop all
-./pearl.sh chart restart   # Restart all
-```
-
-**Emergency rollback (Web App UI template):**
-
-If a UI/CSS refactor goes sideways, roll back **only** the web app paths (safe; no history rewrite):
-
-Known-good baseline tag:
-- `baseline/webapp-2026-02-03-0803Z`
-
-```bash
-./scripts/maintenance/git_rollback_paths.sh \
-  --target baseline/webapp-2026-02-03-0803Z \
-  --path pearlalgo_web_app \
-  --path scripts/pearlalgo_web_app \
-  --run "cd pearlalgo_web_app && npm run build" \
-  --commit \
-  --message "Rollback web app UI to known-good template" \
-  --yes
-```
-
-> Creates a backup branch `backup/pre-rollback-...` first.
-
-**Access:**
-- **Local:** http://localhost:3001
-- **Public:** https://pearlalgo.io (via Cloudflare Tunnel)
-
-**Features:**
-
-| Feature | Description |
-|---------|-------------|
-| **Timeframe Selector** | Switch between 1m, 5m, 15m, 1h (header buttons) |
-| **Dynamic Viewport** | Bar count adjusts to screen width automatically |
-| **Fit All / Go Live** | Quick buttons (top-right) to fit all data or jump to live edge |
-| **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
-| **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
-| **WebSocket Updates** | Real-time state updates via WebSocket |
-| **Error Boundaries** | Graceful component failure handling |
-
-**Environment Variables (.env):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `IB_CLIENT_ID_LIVE_CHART` | `88` | IBKR client ID (must be unique!) |
-| `PEARL_MINI_APP_URL` | `https://pearlalgo.io/` | Public HTTPS URL |
-| `PEARL_API_PORT` | `8000` | API server port |
-| `PEARL_CHART_PORT` | `3001` | Chart web interface port |
-| `PEARL_WEBAPP_AUTH_ENABLED` | `false` | Enable passcode-gated access to the dashboard (recommended when sharing link) |
-| `PEARL_WEBAPP_PASSCODE` | *(unset)* | Passcode when auth is enabled (set in secrets file; never commit) |
-| `PEARL_API_AUTH_ENABLED` | `true` | Enable API key authentication |
-| `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
-| `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |
-
-⚠️ **Client ID Conflicts:** If you see "Error 326: client id already in use", change `IB_CLIENT_ID_LIVE_CHART` to an unused ID (96, 95, etc.) and restart.
-
-**Telegram Screenshot** (optional):
-
-The dashboard can include a chart screenshot at `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`.
-
-```bash
-pip install playwright && playwright install chromium
-```
-
-### Cloudflare Tunnel (Public Access)
-
-The chart is accessible at **https://pearlalgo.io** via Cloudflare Tunnel.
-
-**First-time setup (run once to enable auto-start on boot):**
-```bash
-sudo ./scripts/setup-cloudflared-service.sh
-```
-
-This installs cloudflared as a systemd service that:
-- Auto-starts on boot
-- Auto-restarts if it crashes
-- Always keeps pearlalgo.io accessible
-
-**Check tunnel status:**
-```bash
-./pearl.sh tunnel status              # Quick status + public access check
-./pearl.sh tunnel logs                # View tunnel logs
-systemctl status cloudflared-pearlalgo  # Systemd service status
-```
-
-**Manual control (if needed):**
-```bash
-./pearl.sh tunnel start    # Start tunnel
-./pearl.sh tunnel stop     # Stop tunnel (systemd service stays on)
-./pearl.sh tunnel restart  # Restart tunnel
-```
-
-**Troubleshooting:**
-- **pearlalgo.io unreachable**: Run `./pearl.sh tunnel status` - if not running, run `sudo ./scripts/setup-cloudflared-service.sh`
-- **Chart shows "No Data"**: IBKR Gateway is offline or disconnected
-- **Chart not loading**: Check if web app processes are running (`./pearl.sh chart status`)
-- **Data delayed**: This is normal! Chart often shows fresher data than TradingView
-
----
-
-## 9. AI Assistant (CLI/Terminal)
-
-Pearl AI assistant is available via CLI/terminal only. Telegram is for notifications and dashboard.
-
-**Usage:**
-
-```bash
-# In terminal, use /pearl to chat with Pearl AI
-/pearl
-
-# Examples:
-# - "how am I doing today?"
-# - "what's my P&L?"
-# - "restart the agent"
-# - "show my trades"
-```
-
-> **Note:** AI features were removed from Telegram to keep the mobile interface clean and focused on notifications.
-
----
-
-## 10. Quick Health Check (2-Minute Checklist)
-
-**Fastest check (⭐ Recommended):**
-```bash
-./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅
-./pearl.sh status     # Full dashboard with P&L and trades
-```
-
-**Or use the quick status script:**
-```bash
-./scripts/ops/quick_status.sh
-```
-
-**What it verifies:**
-- ✅ NQ Agent running
-- ✅ Telegram Handler running
-- ✅ IBKR Gateway running
-- ✅ Cloudflare Tunnel running (pearlalgo.io accessible)
-- ✅ State file present and fresh
-- ✅ Market & Session gates open
-- ✅ Recent signal activity
-
-**Manual checks (if needed):**
-
-```bash
-# Check all services running
-pgrep -f "pearlalgo.market_agent.main" && echo "✅ Agent OK"
-pgrep -f "telegram_command_handler" && echo "✅ Telegram OK"
-
-# Check state freshness
-stat data/agent_state/NQ/state.json | grep Modify
-
-# Check signal diagnostics
-cat data/agent_state/NQ/state.json | jq '.signal_diagnostics'
-
-# Check today's signals
-grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
-```
-
----
-
-## 11. Restart Commands Quick Reference
-
-### Using pearl.sh (⭐ Recommended)
-
-```bash
-./pearl.sh restart              # Restart everything
-./pearl.sh gateway restart      # Restart just Gateway
-./pearl.sh agent restart        # Restart just Agent
-./pearl.sh telegram restart     # Restart just Telegram
-./pearl.sh chart restart        # Restart just Live Chart
-./pearl.sh tunnel restart       # Restart just Tunnel
-```
-
-### Manual Commands (if needed)
-
-| Service | Stop | Start | Restart |
-|---------|------|-------|---------|
-| **All** | `./pearl.sh stop` | `./pearl.sh start` | `./pearl.sh restart` |
-| **Agent (NQ)** | `./scripts/lifecycle/agent.sh stop --market NQ` | `./scripts/lifecycle/agent.sh start --market NQ --background` | Stop + Start |
-| **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | `./scripts/telegram/restart_command_handler.sh --background` |
-| **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
-| **Tunnel** | `./pearl.sh tunnel stop` | `./pearl.sh tunnel start` | `./pearl.sh tunnel restart` |
-
-**Common restart scenarios:**
-
-```bash
-# After config.yaml change (full restart)
-./pearl.sh restart
-
-# Or manually:
-./scripts/lifecycle/agent.sh stop --market NQ
-./scripts/lifecycle/agent.sh start --market NQ --background
-
-# After code change (full restart all)
-./pearl.sh restart
-
-# Or manually:
-./scripts/lifecycle/agent.sh stop --market NQ
-pkill -f telegram_command_handler
-./scripts/lifecycle/agent.sh start --market NQ --background
-./scripts/telegram/start_command_handler.sh --background
-```
-
----
-
-## 12. Safe Optimization Workflow (No Opportunity Loss)
-
-> **Golden Rule:** Never tighten filters that reduce signal count without backtesting.
-
-### Step 1: Check Current Performance
-
-```bash
-# View 7-day metrics
-cat data/agent_state/NQ/signals.jsonl | jq -s '
-  [.[] | select(.status == "exited")] |
-  {total: length, wins: [.[] | select(.is_win == true)] | length, pnl: [.[].pnl] | add}'
-```
-
-Or from Telegram: `/performance 7d`
-
-### Step 2: Identify Improvement Target
-
-- **In-trade adjustments** (safe): trailing stops, breakeven, position sizing
-- **Entry filtering** (risky): min_confidence, min_risk_reward, quality scorer
-
-### Step 3: Test with Backtest Gate
-
-For manual testing:
-```bash
-# Backtesting scripts removed - using pearl_bot_auto only
-  # Backtesting scripts removed
-  --data-path data/historical/MNQ_1m_2w.parquet
-```
-
-### Step 4: Apply Change
-
-Edit `config/config.yaml` and restart:
-```bash
-./scripts/lifecycle/agent.sh stop --market NQ
-./scripts/lifecycle/agent.sh start --market NQ --background
-```
-
-### Step 5: Verify No Opportunity Loss
-
-Check signal diagnostics after a few cycles:
-```bash
-cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
-```
-
-- `raw_signals` should be similar to before
-- `validated_signals` should be similar (or higher if loosening)
-- `rejected_*` counters show what's filtering
-
----
-
-## 13. Key Config Paths (config/config.yaml)
-
-| Path | Impact | Safe to Tune? |
-|------|--------|---------------|
-| `signals.min_confidence` | Filters low-confidence signals | ⚠️ Backtest first |
-| `signals.min_risk_reward` | Filters poor R:R signals | ⚠️ Backtest first |
-| `signals.quality_score.enabled` | Quality scorer on/off | ⚠️ Can block all signals |
-| `risk.signal_type_size_multipliers` | Per-type position sizing | ✅ Safe (keeps signals) |
-| `risk.signal_type_max_contracts` | Per-type contract caps | ✅ Safe (keeps signals) |
-
----
-
-## 14. Direction Gating & Risk Phases (config/config.yaml)
-
-The trading circuit breaker includes multiple phases of risk control that can be individually enabled/disabled.
-
-### Phase 1: Direction Gating (ENABLED by default)
-Blocks signals based on market regime alignment:
-- **trending_up** → long only
-- **trending_down** → short only  
-- **ranging/volatile/unknown** → long only (conservative)
-
-**Rollback:** Set `enable_direction_gating: false` under `trading_circuit_breaker`
-
-### Phase 2: Regime Avoidance (OFF by default)
-Blocks all signals in poor-performing regimes (ranging, volatile).
-Shadow measurement logs "would-have-blocked" counts when OFF.
-
-**Rollback:** Set `enable_regime_avoidance: false` under `trading_circuit_breaker`
-
-### Phase 3: Trigger Filters (OFF by default)
-Requires volume confirmation for ema_cross triggers and low-regime entries.
-
-**Rollback:** Set `enable_trigger_filters: false` under `trading_circuit_breaker`
-
-### Phase 4: ML Chop Shield (OFF by default)
-Blocks ML FAIL signals in ranging/volatile regimes after lift is proven (50+ scored trades, 15%+ win-rate delta).
-
-**Rollback:** Set `enable_ml_chop_shield: false` under `trading_circuit_breaker`
-
-### Validation Checklist
-After enabling any phase:
-1. Check Telegram dashboard for `🛡️ Gate:` status line
-2. Verify `state.json` shows `trading_circuit_breaker` section with correct flags
-3. Monitor `blocks_by_reason` in circuit breaker status
-4. Review logs for `Trading circuit breaker blocked signal` entries
-
----
-
-## 15. Maintenance Scripts
-
-### Reset 30-Day Performance
-
-Reset the 30-day performance to a specific value (useful for prop firm account resets):
-
-```bash
-# Reset to $41.14 for market NQ
-python3 scripts/maintenance/reset_30d_performance.py 41.14 NQ
-```
-
-This:
-1. Deletes all trades from the last 30 days
-2. Inserts a single trade with the specified PNL to set the 30d performance
-
-### Purge Runtime Artifacts
-
-Clean up runtime files (logs, PID files, cache):
-
-```bash
-# Dry run (see what would be deleted)
-./scripts/maintenance/purge_runtime_artifacts.sh
-
-# Actually delete (requires --yes)
-./scripts/maintenance/purge_runtime_artifacts.sh --yes
-```
-
----
-
-## 16. Troubleshooting & Maintenance
-
-### Clearing Telegram Chat History
-
-If you need to clear the Telegram chat history with the bot to start fresh:
-
-**On Mobile (iOS/Android):**
-1. Open the Telegram app
-2. Navigate to the chat with your bot (e.g., "PEARLalgo" or "NQ Agent")
-3. Tap on the bot's name/header at the top
-4. Tap "Clear History" or "Delete Chat" (exact wording varies by platform)
-5. Confirm the action
-
-**On Desktop (Telegram Desktop):**
-1. Right-click on the bot chat in the chat list
-2. Select "Clear History" or "Delete Chat"
-3. Confirm the action
-
-**Note:** This only clears the chat history on your device. The bot's state and data (positions, PNL, signals) are stored server-side and are not affected by clearing chat history.
-
-### PNL Not Updating on Refresh
-
-If PNL doesn't update when you tap the Refresh button:
-- **Open positions:** The PNL now includes unrealized PNL from open positions. If positions are shown but PNL is stale, the refresh should now recalculate unrealized PNL automatically.
-- **Virtual positions:** If using virtual PNL mode, positions shown are from signals.jsonl with status="entered". These are tracked positions, not necessarily broker-executed positions.
-- **State file:** The agent service updates the state file with unrealized PNL. If refresh still shows stale data, check that the agent service is running and cycling properly.
-
----
-
----
-
-## MFFU 50K Rapid Evaluation (Prop Firm)
-
-### Overview
-
-Pearl runs two isolated accounts simultaneously:
-- **Inception** (port 8000): Since-inception data collection on IBKR (virtual PnL, no real orders)
-- **MFFU Eval** (port 8001): MyFundedFutures 50K Rapid Plan on Tradovate paper (real orders on demo)
-
-### Architecture: Signal Forwarding (Inception -> MFFU)
-
-Inception generates ALL signals via `strategy.analyze()`. MFFU does NOT run its own strategy -- instead it reads signals from a shared JSONL file written by inception. This guarantees both accounts trade the same signals without the IBKR dual-connection issues that caused MFFU to generate zero signals independently.
+Inception generates signals. MFFU reads them from a shared file -- it does NOT run its own strategy.
 
 ```
-Inception Agent (WRITER)              MFFU Agent (FOLLOWER)
-  IBKR data -> strategy.analyze()       _read_shared_signals()
+Inception (WRITER)                    MFFU (FOLLOWER)
+  IBKR -> strategy.analyze()            _read_shared_signals()
        |                                      |
-  _write_shared_signal()               dedup by (direction, bar_ts)
+  shared_signals.jsonl  ----------->  dedup (direction, bar_ts)
        |                                      |
-  data/shared_signals.jsonl  -------->  read from shared file
-       |                                      |
-  virtual PnL + [INCEPTION] Telegram    MFFU eval gate (hours/contracts/news)
+  virtual PnL + [INCEPTION] TG         MFFU eval gate -> Tradovate bracket order
                                               |
-                                        Tradovate place_bracket() (OSO order)
-                                              |
-                                        [MFFU] Telegram notifications
+                                        [MFFU] Telegram
 ```
 
-**Dedup key:** `(direction, bar_timestamp)` -- prevents the same EMA cross signal from being processed multiple times across cycles. Each signal fires once per bar per direction.
+**Safety guards:**
+- Shared signals file cleared on MFFU restart (no replay)
+- Market-closed check before processing any forwarded signal
+- Auto-flat disabled (Tradovate bracket orders handle exits)
 
-**Config:**
-- Inception: `config/config.yaml` has `signal_forwarding.mode: writer`
-- MFFU: `config/markets/mffu_eval.yaml` has `signal_forwarding.mode: follower`
+### Dashboard: Tradovate Only
 
-### MFFU Dashboard: Tradovate as Single Source of Truth
+Every number on the MFFU dashboard comes from Tradovate. No virtual tracking.
 
-The MFFU web dashboard gets ALL trade/position/P&L data from Tradovate -- no virtual tracking. This is enforced at the API layer:
+| Panel | Source |
+|-------|--------|
+| Header P&L | `tradovate_account.equity - $50K` |
+| Positions | `tradovate get_positions()` |
+| Recent Trades | `tradovate get_fills()` (FIFO paired) |
+| Performance | Tradovate equity |
+| Challenge | Tradovate equity + fills |
+| Risk Metrics | Tradovate fills |
+| Analytics | Tradovate fills |
+| Chart | IBKR (client ID 97) |
 
-| Dashboard Element | Data Source | How |
-|-------------------|-------------|-----|
-| Header P&L | Tradovate equity - $50K | `_compute_daily_stats()` reads `state.json -> tradovate_account.equity` |
-| Header W/L | Tradovate fills | Fills paired into trades, wins/losses counted |
-| Open Positions | Tradovate `get_positions()` | `/api/positions` returns live positions |
-| Recent Trades | Tradovate `get_fills()` | `/api/trades` pairs fills into trade records |
-| Performance Panels | Tradovate equity | `/api/performance-summary` and `_compute_performance_stats()` |
-| Challenge Panel | Tradovate equity + fills | `_get_challenge_status()` overrides with live TV data |
-| Chart Data | IBKR (unchanged) | `/api/candles` still from IBKR client ID 97 |
+Fills persist to `tradovate_fills.json` across sessions (Tradovate clears `/fill/list` daily).
 
-**The agent polls `get_account_summary()` every cycle (~5s), which calls Tradovate's `cashBalanceSnapshot`, `position/deps`, and `fill/list` endpoints. Results cached in `state.json` as `tradovate_account` and `tradovate_fills`.**
-
-### Isolation Model
-
-| Component | Inception | MFFU | Shared? |
-|-----------|-----------|------|---------|
-| Config file | `config/config.yaml` | `config/markets/mffu_eval.yaml` | No -- separate files |
-| State directory | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` | No -- separate dirs |
-| API server | Port 8000 | Port 8001 | No -- separate processes |
-| Signal generation | `strategy.analyze()` | Reads from shared file | One-way: inception writes, MFFU reads |
-| Dashboard data | `signals.jsonl` + `performance.json` | **Tradovate API** (live) | No -- different sources |
-| Circuit breaker | `warn_only` mode | `warn_only` + MFFU eval gate | Same class, different config |
-| Execution | Disabled (virtual only) | Tradovate paper (armed) | No -- different adapters |
-| Telegram | `[INCEPTION]` prefix | `[MFFU]` prefix | Same bot, different labels |
-| IBKR client IDs | 10/11 (agent), 96 (chart) | 50/51 (agent), 97 (chart) | Same gateway, different IDs |
-| Code (`service.py`) | Shared | Shared | **Yes** -- MFFU paths gated by `_mffu_enabled` / `_signal_follower_mode` |
-
-**Rule: editing `config/config.yaml` only affects inception. Editing `config/markets/mffu_eval.yaml` only affects MFFU. Editing `service.py` affects both.**
-
-### Quick Commands
-
-```bash
-# Lifecycle (always use these -- never start API servers manually)
-./scripts/lifecycle/mffu_eval.sh start --background   # Start MFFU agent + API
-./scripts/lifecycle/mffu_eval.sh stop                  # Stop everything (kills port holders too)
-./scripts/lifecycle/mffu_eval.sh restart --background  # Clean restart (kills stale, starts fresh)
-./scripts/lifecycle/mffu_eval.sh status                # Check status
-./scripts/lifecycle/mffu_eval.sh api --background      # API server only (no trading)
-
-# Or via pearl.sh wrapper
-./pearl.sh mffu start|stop|restart|status|api|logs
-```
-
-**Important: the `restart` command kills ALL processes on port 8001 (not just PID file entries), preventing stale ghost servers that cause wrong data.**
-
-### Web App Account Switching
-
-- Visit `pearlalgo.io` -- prompts which account on first visit
-- Visit `pearlalgo.io?account=mffu` -- goes directly to MFFU dashboard
-- Use the account switcher dropdown in the header bar to toggle
-
-### MFFU Evaluation Rules
+### Evaluation Rules
 
 | Rule | Threshold |
 |------|-----------|
@@ -781,17 +85,23 @@ The MFFU web dashboard gets ALL trade/position/P&L data from Tradovate -- no vir
 | Max Loss (EOD trailing) | $2,000 |
 | Drawdown Floor Lock | $50,100 |
 | Max Contracts | 5 mini / 50 micro |
-| Max Positions | 20 (configured in `mffu_eval.yaml`) |
-| Consistency | 50% (no single day > 50% of total profit) |
+| Max Positions | 20 |
+| Consistency | 50% (no single day > 50% of profit) |
 | Min Trading Days | 2 |
 | Trading Hours | 6 PM - 4:10 PM ET |
-| Auto-Flatten | 4:08 PM ET |
 | T1 News | Allowed during eval |
 | Hedging | Prohibited |
 
+### Reset Procedure
+
+1. Adjust Tradovate balance: Settings > Accounts > Modify Balance
+2. `rm data/agent_state/MFFU_EVAL/challenge_state.json`
+3. `rm -f data/agent_state/MFFU_EVAL/signals.jsonl data/agent_state/MFFU_EVAL/performance.json data/agent_state/MFFU_EVAL/tradovate_fills.json`
+4. `./scripts/lifecycle/mffu_eval.sh restart --background`
+
 ### Tradovate Credentials
 
-Stored in `~/.config/pearlalgo/secrets.env` (never committed):
+In `~/.config/pearlalgo/secrets.env` (never committed):
 ```
 TRADOVATE_USERNAME=...
 TRADOVATE_PASSWORD=...
@@ -799,62 +109,187 @@ TRADOVATE_CID=...
 TRADOVATE_SEC=...
 ```
 
-### Config Files
+---
 
-| File | Purpose | Affects |
-|------|---------|--------|
-| `config/config.yaml` | Base config + `signal_forwarding.mode: writer` | Inception only |
-| `config/markets/mffu_eval.yaml` | MFFU overlay + `signal_forwarding.mode: follower` | MFFU only |
-| `~/.config/pearlalgo/secrets.env` | Credentials (Telegram, Tradovate, API keys) | Both |
-| `.env` | Non-sensitive defaults (IBKR ports, client IDs) | Both |
-| `data/t1_news_2026.json` | T1 news calendar for blackout detection | MFFU only |
-| `data/shared_signals.jsonl` | Signal forwarding file (inception writes, MFFU reads) | Both |
-
-### Key Files (code)
-
-| File | Purpose | Change affects |
-|------|---------|---------------|
-| `src/pearlalgo/market_agent/service.py` | Agent orchestrator, signal forwarding, Tradovate polling | **Both** |
-| `src/pearlalgo/market_agent/mffu_eval_tracker.py` | MFFU challenge state tracking | MFFU only |
-| `src/pearlalgo/execution/tradovate/adapter.py` | Tradovate execution + `get_account_summary()` | MFFU only |
-| `src/pearlalgo/execution/tradovate/client.py` | Tradovate REST/WS client (`get_fills()`, `get_positions()`) | MFFU only |
-| `src/pearlalgo/market_agent/trading_circuit_breaker.py` | Risk management + MFFU eval gate | **Both** |
-| `src/pearlalgo/config/config_loader.py` | Config loading (`signal_forwarding` defaults) | Both |
-| `scripts/lifecycle/mffu_eval.sh` | MFFU launch script (port cleanup, restart) | MFFU only |
-| `scripts/pearlalgo_web_app/api_server.py` | API server (Tradovate data helpers for MFFU) | Web app |
-| `pearlalgo_web_app/components/ChallengePanel.tsx` | MFFU challenge display panel | Web app only |
-
-### Telegram Notifications
-
-- Inception signals prefixed with `[INCEPTION]`
-- MFFU signals prefixed with `[MFFU]`
-- Both entry and exit notifications include the label
-- Notification tier set to `important` (suppresses data quality spam)
-
-### Testing Tradovate Connection
+## 3. Web Dashboard (pearlalgo.io)
 
 ```bash
-python scripts/test_tradovate_connection.py
+# Local
+http://localhost:3001                        # Web app
+http://localhost:3001?account=mffu           # MFFU dashboard
+
+# Public
+https://pearlalgo.io                         # Inception
+https://pearlalgo.io/?account=mffu           # MFFU
 ```
 
-### Resetting the Evaluation
+Account switcher dropdown in the header bar toggles between accounts.
 
-1. Adjust Tradovate paper balance via Tradovate UI (Settings > Accounts > Modify Balance)
-2. Delete challenge state: `rm data/agent_state/MFFU_EVAL/challenge_state.json`
-3. Clear virtual files: `rm -f data/agent_state/MFFU_EVAL/signals.jsonl data/agent_state/MFFU_EVAL/performance.json`
-4. Restart: `./scripts/lifecycle/mffu_eval.sh restart --background`
+### Key Environment Variables
 
-### Troubleshooting
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `IB_CLIENT_ID_LIVE_CHART` | `96` | IBKR chart client ID (inception) |
+| `PEARL_API_KEY` | secrets.env | API authentication |
+| `PEARL_API_PORT` | `8000` | Inception API |
+| `PEARL_CHART_PORT` | `3001` | Next.js web app |
 
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| Dashboard shows stale/wrong P&L | Old API server on port 8001 | `./scripts/lifecycle/mffu_eval.sh restart --background` |
-| No signals forwarded to MFFU | Inception not generating signals | Check `logs/agent_NQ.log` for `NoOpportunity` -- normal if no EMA crossover |
-| `shared_signals.jsonl` not created | No signals since last inception restart | Wait for a crossover -- file created on first signal |
-| Tradovate fills show 401 | Wrong fill endpoint | Fixed: uses `/fill/list` instead of `/fill/deps` |
-| Chart shows CACHE instead of LIVE | IBKR client ID conflict | Restart via lifecycle script (sets `IB_CLIENT_ID_LIVE_CHART=97`) |
-| MFFU positions phantom (virtual) | Old code using signals.jsonl | Ensure latest code with `_is_mffu_account()` checks |
+MFFU uses client ID 97, set by `mffu_eval.sh`.
+
+### Tunnel Commands
+
+```bash
+./pearl.sh tunnel status       # Check public access
+./pearl.sh tunnel restart      # Restart tunnel
+./pearl.sh tunnel logs         # View logs
+```
+
+First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 
 ---
 
-This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.
+## 4. Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| MFFU dashboard wrong data | `./scripts/lifecycle/mffu_eval.sh restart --background` |
+| No signals forwarded | Check `logs/agent_NQ.log` -- `NoOpportunity` = normal (no crossover) |
+| Chart shows CACHE not LIVE | Restart via lifecycle script (fixes client ID conflicts) |
+| pearlalgo.io unreachable | `./pearl.sh tunnel status` then `sudo ./scripts/setup-cloudflared-service.sh` |
+| No market data | `./scripts/gateway/gateway.sh status` -- gateway may be down |
+| Telegram not responding | `./pearl.sh telegram status` then `./pearl.sh telegram restart` |
+| "client id already in use" | Another process holds the IBKR client ID -- restart the conflicting service |
+| MFFU signals on restart | Fixed: shared file cleared on startup + market-closed guard |
+| Fills show 0 after restart | Normal if market closed -- fills persist in `tradovate_fills.json` |
+
+### Logs
+
+```bash
+tail -f logs/agent_NQ.log          # Inception agent
+tail -f logs/agent_MFFU_EVAL.log   # MFFU agent
+tail -f logs/api_MFFU_EVAL.log     # MFFU API server
+tail -f logs/web_app.log           # Next.js
+```
+
+---
+
+## 5. Architecture Reference
+
+### File Locations
+
+| What | Where |
+|------|-------|
+| Inception config | `config/config.yaml` |
+| MFFU config | `config/markets/mffu_eval.yaml` |
+| Credentials | `~/.config/pearlalgo/secrets.env` |
+| Env defaults | `.env` |
+| Inception state | `data/agent_state/NQ/` |
+| MFFU state | `data/agent_state/MFFU_EVAL/` |
+| Signal forwarding | `data/shared_signals.jsonl` |
+| MFFU fills (persistent) | `data/agent_state/MFFU_EVAL/tradovate_fills.json` |
+| Scripts | `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/` |
+
+### IBKR Client ID Map
+
+| Service | Client ID | Port |
+|---------|-----------|------|
+| Inception agent (trading) | 10 | 4001 |
+| Inception agent (data) | 11 | 4001 |
+| Inception chart API | 96 | 4001 |
+| MFFU agent (trading) | 50 | 4001 |
+| MFFU agent (data) | 51 | 4001 |
+| MFFU chart API | 97 | 4001 |
+
+### Key Code Files
+
+| File | Purpose | Affects |
+|------|---------|---------|
+| `service.py` | Agent orchestrator, signal forwarding, Tradovate polling | Both |
+| `mffu_eval_tracker.py` | Challenge state tracking | MFFU |
+| `tradovate/adapter.py` | Execution + `get_account_summary()` | MFFU |
+| `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | MFFU |
+| `trading_circuit_breaker.py` | Risk management + MFFU eval gate | Both |
+| `config_loader.py` | Config loading, signal_forwarding defaults | Both |
+| `mffu_eval.sh` | MFFU lifecycle (port cleanup, restart) | MFFU |
+| `api_server.py` | API server (Tradovate helpers for MFFU) | Dashboard |
+| `ChallengePanel.tsx` | MFFU eval display | Dashboard |
+| `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
+
+### Isolation Model
+
+| Component | Inception | MFFU |
+|-----------|-----------|------|
+| Config | `config/config.yaml` | `config/markets/mffu_eval.yaml` |
+| State dir | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` |
+| API port | 8000 | 8001 |
+| Signal gen | `strategy.analyze()` | Reads shared file |
+| Dashboard data | `signals.jsonl` + `performance.json` | Tradovate API |
+| Execution | Disabled (virtual) | Tradovate paper (armed) |
+| Telegram label | `[INCEPTION]` | `[MFFU]` |
+
+**Rule:** `config.yaml` changes only affect inception. `mffu_eval.yaml` only affects MFFU. `service.py` changes affect both.
+
+---
+
+## 6. First-Time Setup
+
+### Python Environment
+
+```bash
+cd ~/pearlalgo-dev-ai-agents
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### Environment Files
+
+```bash
+cp env.example .env
+# Edit .env with your IBKR ports, client IDs, etc.
+```
+
+Key `.env` variables:
+```
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+IBKR_HOST=127.0.0.1
+IBKR_PORT=4002
+IBKR_CLIENT_ID=10
+IBKR_DATA_CLIENT_ID=11
+IB_CLIENT_ID_LIVE_CHART=96
+PEARLALGO_DATA_PROVIDER=ibkr
+```
+
+### Node.js (for web app)
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+cd pearlalgo_web_app && npm install
+```
+
+### Cloudflare Tunnel
+
+```bash
+sudo ./scripts/setup-cloudflared-service.sh   # One-time: auto-starts on boot
+```
+
+### Telegram
+
+```bash
+# Verify config
+echo $TELEGRAM_BOT_TOKEN
+echo $TELEGRAM_CHAT_ID
+python3 scripts/testing/test_all.py telegram
+```
+
+---
+
+## Key Concepts
+
+- **StrategySessionOpen**: When the strategy generates signals (config session window)
+- **FuturesMarketOpen**: When CME data flows (Sun 6 PM ET - Fri 5 PM ET, with daily 5-6 PM break)
+- **Signal forwarding**: Inception writes signals, MFFU reads them. One-way, deduped by `(direction, bar_timestamp)`
+- **Tradovate bracket order**: Entry + stop loss + take profit placed as OSO (one-sends-other)
+- **FIFO fill pairing**: Tradovate fills matched oldest-first to compute per-trade P&L
