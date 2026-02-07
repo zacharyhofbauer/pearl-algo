@@ -7962,11 +7962,48 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
+.axiom-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.axiom-cal-nav-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  padding: 0;
+  line-height: 1;
+}
+
+.axiom-cal-nav-btn:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.axiom-cal-nav-btn:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
 .axiom-cal-month {
   font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.3px;
+  min-width: 120px;
+  text-align: center;
 }
 
 .axiom-cal-stats {
@@ -8032,7 +8069,12 @@ body {
 }
 
 .axiom-cal-no-trades {
-  opacity: 0.35;
+  opacity: 0.4;
+}
+
+.axiom-cal-future {
+  opacity: 0.15;
+  pointer-events: none;
 }
 
 .axiom-cal-today {

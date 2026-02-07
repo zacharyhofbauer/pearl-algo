@@ -3815,6 +3815,24 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
         },
     }
 
+    # Build calendar data server-side from all exits (signals.jsonl has full history)
+    from collections import defaultdict as _defaultdict
+    cal_by_date: Dict[str, Dict[str, float]] = _defaultdict(lambda: {"pnl": 0.0, "trades": 0})
+    if signals_file.exists():
+        try:
+            all_sigs = _load_jsonl_file(signals_file, max_lines=5000)
+            for s in all_sigs:
+                if s.get("status") != "exited":
+                    continue
+                xt = s.get("exit_time", "")
+                if xt:
+                    dk = str(xt)[:10]
+                    cal_by_date[dk]["pnl"] += (s.get("pnl") or 0)
+                    cal_by_date[dk]["trades"] += 1
+        except Exception:
+            pass
+    calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(cal_by_date.items())]
+
     return {
         "session_performance": session_performance,
         "best_hours": best_hours,
@@ -3822,6 +3840,7 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
         "hold_duration": hold_duration,
         "direction_breakdown": direction_breakdown,
         "status_breakdown": status_breakdown,
+        "calendar_data": calendar_data,
     }
 
 
@@ -3927,6 +3946,17 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
             wr = round(d["wins"] / tot * 100, 1) if tot > 0 else 0.0
             hold_duration.append({"id": k, "name": d["name"], "pnl": round(d["pnl"], 2), "wins": d["wins"], "losses": d["losses"], "win_rate": wr})
 
+        # MFFU calendar from fills
+        from collections import defaultdict as _dd
+        mffu_cal: Dict[str, Dict[str, float]] = _dd(lambda: {"pnl": 0.0, "trades": 0})
+        for t in trades:
+            xt = t.get("exit_time", "")
+            if xt:
+                dk = str(xt)[:10]
+                mffu_cal[dk]["pnl"] += (t.get("pnl") or 0)
+                mffu_cal[dk]["trades"] += 1
+        calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(mffu_cal.items())]
+
         return {
             "session_performance": session_performance,
             "best_hours": best_hours,
@@ -3942,6 +3972,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
                 "exited": total,
                 "cancelled": 0,
             },
+            "calendar_data": calendar_data,
         }
 
     return _get_session_analytics(_state_dir)

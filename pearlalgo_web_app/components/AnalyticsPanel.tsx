@@ -23,6 +23,10 @@ interface DayPnL {
 
 export default function AnalyticsPanel({ analytics, recentExits = [] }: AnalyticsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>('sessions')
+  const [calMonth, setCalMonth] = useState(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() }
+  })
 
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
@@ -40,48 +44,57 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     1
   )
 
-  // Build calendar data from recent exits
+  // Build calendar data for the selected month
+  // Uses server-side calendar_data from analytics (has ALL trades, not just recent 100)
   const calendarData = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const now = new Date()
+    const { year, month } = calMonth
+    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth()
+    const todayDate = isCurrentMonth ? now.getDate() : -1
 
-    // Get last 28 days (4 weeks)
-    const days: DayPnL[] = []
+    // Server-side aggregated P&L by date (from analytics endpoint)
+    const serverCal = (analytics as any)?.calendar_data as Array<{ date: string; pnl: number; trades: number }> | undefined
     const pnlByDate: Record<string, { pnl: number; trades: number }> = {}
 
-    // Aggregate P&L by date from recent exits
-    recentExits.forEach(exit => {
-      if (!exit.exit_time) return
-      const date = new Date(exit.exit_time)
-      const dateKey = date.toISOString().split('T')[0]
-      if (!pnlByDate[dateKey]) {
-        pnlByDate[dateKey] = { pnl: 0, trades: 0 }
-      }
-      pnlByDate[dateKey].pnl += exit.pnl
-      pnlByDate[dateKey].trades += 1
-    })
+    if (serverCal && serverCal.length > 0) {
+      serverCal.forEach(d => {
+        pnlByDate[d.date] = { pnl: d.pnl, trades: d.trades }
+      })
+    } else {
+      recentExits.forEach(exit => {
+        if (!exit.exit_time) return
+        const date = new Date(exit.exit_time)
+        const dateKey = date.toISOString().split('T')[0]
+        if (!pnlByDate[dateKey]) {
+          pnlByDate[dateKey] = { pnl: 0, trades: 0 }
+        }
+        pnlByDate[dateKey].pnl += exit.pnl
+        pnlByDate[dateKey].trades += 1
+      })
+    }
 
-    // Generate last 28 days
-    for (let i = 27; i >= 0; i--) {
-      const date = new Date(today)
-      date.setDate(date.getDate() - i)
-      const dateKey = date.toISOString().split('T')[0]
-      const dayOfWeek = date.getDay() // 0 = Sunday
-      const weekOfMonth = Math.floor((27 - i) / 7)
+    // Generate every day of the selected month
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const days: DayPnL[] = []
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d)
+      const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      const dayOfWeek = date.getDay()
+      const isFuture = isCurrentMonth ? d > todayDate : (year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth()))
 
       days.push({
         date: dateKey,
         dayOfWeek,
-        weekOfMonth,
+        weekOfMonth: 0,
         pnl: pnlByDate[dateKey]?.pnl || 0,
         trades: pnlByDate[dateKey]?.trades || 0,
-        isToday: i === 0,
-        isFuture: false,
+        isToday: d === todayDate,
+        isFuture,
       })
     }
 
     return days
-  }, [recentExits])
+  }, [analytics, recentExits, calMonth])
 
   // Find max absolute P&L for heatmap scaling
   const maxCalendarPnL = useMemo(() => {
@@ -240,15 +253,37 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     const firstDay = calendarData.length > 0 ? calendarData[0] : null
     const startPadding = firstDay ? firstDay.dayOfWeek : 0
 
-    // Get month/year label
+    // Month label from calMonth state
+    const monthDate = new Date(calMonth.year, calMonth.month, 1)
+    const monthLabel = monthDate.toLocaleString('default', { month: 'long', year: 'numeric' })
     const now = new Date()
-    const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' })
+    const isCurrentMonth = calMonth.year === now.getFullYear() && calMonth.month === now.getMonth()
+
+    const goToPrevMonth = (e: React.MouseEvent) => {
+      e.stopPropagation()
+      setCalMonth(prev => {
+        const d = new Date(prev.year, prev.month - 1, 1)
+        return { year: d.getFullYear(), month: d.getMonth() }
+      })
+    }
+    const goToNextMonth = (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (isCurrentMonth) return // can't go to future
+      setCalMonth(prev => {
+        const d = new Date(prev.year, prev.month + 1, 1)
+        return { year: d.getFullYear(), month: d.getMonth() }
+      })
+    }
 
     return (
       <div className="axiom-calendar">
-        {/* Month header + summary */}
+        {/* Month header with nav arrows + summary */}
         <div className="axiom-cal-header">
-          <span className="axiom-cal-month">{monthLabel}</span>
+          <div className="axiom-cal-nav">
+            <button className="axiom-cal-nav-btn" onClick={goToPrevMonth} aria-label="Previous month">&lt;</button>
+            <span className="axiom-cal-month">{monthLabel}</span>
+            <button className="axiom-cal-nav-btn" onClick={goToNextMonth} disabled={isCurrentMonth} aria-label="Next month">&gt;</button>
+          </div>
           <div className="axiom-cal-stats">
             <span className={`axiom-cal-pnl ${totalPnL >= 0 ? 'positive' : 'negative'}`}>
               {totalPnL >= 0 ? '+' : ''}${Math.abs(totalPnL).toFixed(0)}
@@ -291,12 +326,12 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
             return (
               <div
                 key={day.date}
-                className={`axiom-cal-cell ${day.isToday ? 'axiom-cal-today' : ''} ${!hasTrades ? 'axiom-cal-no-trades' : ''}`}
-                style={{ backgroundColor: bgColor }}
-                title={`${day.date}: ${hasTrades ? `${formatPnL(day.pnl)} (${day.trades} trades)` : 'No trades'}`}
+                className={`axiom-cal-cell ${day.isToday ? 'axiom-cal-today' : ''} ${day.isFuture ? 'axiom-cal-future' : ''} ${!hasTrades && !day.isFuture ? 'axiom-cal-no-trades' : ''}`}
+                style={{ backgroundColor: day.isFuture ? 'transparent' : bgColor }}
+                title={day.isFuture ? '' : `${day.date}: ${hasTrades ? `${formatPnL(day.pnl)} (${day.trades} trades)` : 'No trades'}`}
               >
                 <span className="axiom-cal-date">{dayNum}</span>
-                {hasTrades ? (
+                {day.isFuture ? null : hasTrades ? (
                   <span className={`axiom-cal-amount ${isProfit ? 'positive' : 'negative'}`}>
                     {isProfit ? '+' : '-'}${Math.abs(Math.round(day.pnl))}
                   </span>
