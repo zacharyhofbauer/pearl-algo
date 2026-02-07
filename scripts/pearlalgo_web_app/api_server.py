@@ -3957,6 +3957,17 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
                 mffu_cal[dk]["trades"] += 1
         calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(mffu_cal.items())]
 
+        # Use equity-based total (accounts for fees) instead of fill sum
+        start_balance = 50000.0
+        try:
+            ch_file = _state_dir / "challenge_state.json"
+            if ch_file.exists():
+                _chd = json.loads(ch_file.read_text())
+                start_balance = float(_chd.get("config", {}).get("start_balance", 50000.0))
+        except Exception:
+            pass
+        equity_pnl = round(float(tv.get("equity", 0)) - start_balance, 2) if tv.get("equity") else None
+
         return {
             "session_performance": session_performance,
             "best_hours": best_hours,
@@ -3973,6 +3984,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
                 "cancelled": 0,
             },
             "calendar_data": calendar_data,
+            "calendar_total_pnl": equity_pnl,
         }
 
     return _get_session_analytics(_state_dir)

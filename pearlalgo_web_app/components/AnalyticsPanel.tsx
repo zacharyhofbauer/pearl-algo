@@ -243,21 +243,27 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
   const renderCalendarTab = () => {
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-    // Calculate total P&L for the period
-    const totalPnL = calendarData.reduce((sum, d) => sum + d.pnl, 0)
-    const totalTrades = calendarData.reduce((sum, d) => sum + d.trades, 0)
-    const profitDays = calendarData.filter(d => d.pnl > 0).length
-    const lossDays = calendarData.filter(d => d.pnl < 0).length
-
-    // Build proper month grid (pad start to align with day-of-week)
-    const firstDay = calendarData.length > 0 ? calendarData[0] : null
-    const startPadding = firstDay ? firstDay.dayOfWeek : 0
-
     // Month label from calMonth state
     const monthDate = new Date(calMonth.year, calMonth.month, 1)
     const monthLabel = monthDate.toLocaleString('default', { month: 'long', year: 'numeric' })
     const now = new Date()
     const isCurrentMonth = calMonth.year === now.getFullYear() && calMonth.month === now.getMonth()
+
+    // Use equity-based total when available (MFFU current month), else sum from calendar days
+    const serverTotalPnL = (analytics as any)?.calendar_total_pnl as number | undefined
+    const sumPnL = calendarData.reduce((sum, d) => sum + d.pnl, 0)
+    const useEquityTotal = serverTotalPnL != null && isCurrentMonth
+    const totalPnL = useEquityTotal ? serverTotalPnL : sumPnL
+    const totalTrades = calendarData.reduce((sum, d) => sum + d.trades, 0)
+    const profitDays = calendarData.filter(d => d.pnl > 0).length
+    const lossDays = calendarData.filter(d => d.pnl < 0).length
+
+    // Scale factor to adjust per-day PnL to match equity total (accounts for fees)
+    const pnlScale = (useEquityTotal && sumPnL !== 0) ? serverTotalPnL / sumPnL : 1
+
+    // Build proper month grid (pad start to align with day-of-week)
+    const firstDay = calendarData.length > 0 ? calendarData[0] : null
+    const startPadding = firstDay ? firstDay.dayOfWeek : 0
 
     const goToPrevMonth = (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -314,9 +320,10 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
           {calendarData.map((day) => {
             const dayNum = parseInt(day.date.split('-')[2], 10)
             const hasTrades = day.trades > 0
-            const isProfit = day.pnl > 0
-            const isLoss = day.pnl < 0
-            const intensity = hasTrades ? Math.min(Math.abs(day.pnl) / maxCalendarPnL, 1) : 0
+            const adjustedPnl = day.pnl * pnlScale
+            const isProfit = adjustedPnl > 0
+            const isLoss = adjustedPnl < 0
+            const intensity = hasTrades ? Math.min(Math.abs(adjustedPnl) / (maxCalendarPnL * Math.abs(pnlScale) || 1), 1) : 0
             const alpha = hasTrades ? 0.15 + intensity * 0.55 : 0
 
             let bgColor = 'transparent'
@@ -328,12 +335,12 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
                 key={day.date}
                 className={`axiom-cal-cell ${day.isToday ? 'axiom-cal-today' : ''} ${day.isFuture ? 'axiom-cal-future' : ''} ${!hasTrades && !day.isFuture ? 'axiom-cal-no-trades' : ''}`}
                 style={{ backgroundColor: day.isFuture ? 'transparent' : bgColor }}
-                title={day.isFuture ? '' : `${day.date}: ${hasTrades ? `${formatPnL(day.pnl)} (${day.trades} trades)` : 'No trades'}`}
+                title={day.isFuture ? '' : `${day.date}: ${hasTrades ? `${formatPnL(adjustedPnl)} (${day.trades} trades)` : 'No trades'}`}
               >
                 <span className="axiom-cal-date">{dayNum}</span>
                 {day.isFuture ? null : hasTrades ? (
                   <span className={`axiom-cal-amount ${isProfit ? 'positive' : 'negative'}`}>
-                    {isProfit ? '+' : '-'}${Math.abs(Math.round(day.pnl))}
+                    {isProfit ? '+' : '-'}${Math.abs(Math.round(adjustedPnl))}
                   </span>
                 ) : (
                   <span className="axiom-cal-amount axiom-cal-dash">-</span>
