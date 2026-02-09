@@ -6,16 +6,16 @@ Provides entry points for continuous integration pipelines.
 
 Usage:
     # Run full eval suite
-    python -m pearl_ai.eval.ci
+    python -m pearlalgo.pearl_ai.eval.ci
 
     # Run only on changed prompt files (for pre-commit)
-    python -m pearl_ai.eval.ci --changed-only
+    python -m pearlalgo.pearl_ai.eval.ci --changed-only
 
     # Run with specific threshold
-    python -m pearl_ai.eval.ci --threshold 0.90
+    python -m pearlalgo.pearl_ai.eval.ci --threshold 0.90
 
     # Run specific dataset
-    python -m pearl_ai.eval.ci --dataset golden_expanded.json
+    python -m pearlalgo.pearl_ai.eval.ci --dataset golden_expanded.json
 """
 
 import argparse
@@ -237,11 +237,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m pearl_ai.eval.ci                      # Run default eval
-  python -m pearl_ai.eval.ci --threshold 0.90     # Require 90% pass rate
-  python -m pearl_ai.eval.ci --changed-only       # Only if prompt files changed
-  python -m pearl_ai.eval.ci --mock               # Use mock LLM
-  python -m pearl_ai.eval.ci --dataset golden_expanded.json
+  python -m pearlalgo.pearl_ai.eval.ci                      # Run default eval
+  python -m pearlalgo.pearl_ai.eval.ci --threshold 0.90     # Require 90% pass rate
+  python -m pearlalgo.pearl_ai.eval.ci --changed-only       # Only if prompt files changed
+  python -m pearlalgo.pearl_ai.eval.ci --mock               # Use mock LLM
+  python -m pearlalgo.pearl_ai.eval.ci --dataset golden_expanded.json
         """,
     )
 

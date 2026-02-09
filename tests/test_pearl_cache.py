@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from pearl_ai.cache import ResponseCache, CacheEntry
+from pearlalgo.pearl_ai.cache import ResponseCache, CacheEntry
 
 
 class TestCacheEntry:

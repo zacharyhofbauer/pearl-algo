@@ -41,7 +41,7 @@ if [ -f ".venv/bin/python" ]; then
 fi
 
 # Run quick eval
-$PYTHON -m pearl_ai.eval.ci \
+$PYTHON -m pearlalgo.pearl_ai.eval.ci \
     --dataset golden_core.json \
     --threshold 0.80 \
     --mock
@@ -51,7 +51,7 @@ RESULT=$?
 if [ $RESULT -ne 0 ]; then
     echo ""
     echo "❌ Evaluation failed! Please review the failures above."
-    echo "   Run 'python -m pearl_ai.eval.ci --verbose' for more details."
+    echo "   Run 'python -m pearlalgo.pearl_ai.eval.ci --verbose' for more details."
     echo ""
     echo "To bypass (not recommended): git commit --no-verify"
     exit 1

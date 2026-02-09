@@ -27,7 +27,7 @@ jobs:
 
       - name: Pearl AI prompt eval (mock)
         run: |
-          python -m pearl_ai.eval.ci --mock --output-dir eval-reports
+          python -m pearlalgo.pearl_ai.eval.ci --mock --output-dir eval-reports
 
       - name: IBKR vendor guard
         run: |

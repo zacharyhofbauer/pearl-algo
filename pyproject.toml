@@ -35,11 +35,11 @@ build-backend = "setuptools.build_meta"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["pearlalgo", "pearlalgo.*", "pearl_ai", "pearl_ai.*"]
+where = ["src"]
+include = ["pearlalgo", "pearlalgo.*"]
 namespaces = false
 exclude = ["pearlalgo_web_app*"]
 
 [tool.setuptools.package-data]
-pearl_ai = ["eval/datasets/*.json"]
+"pearlalgo.pearl_ai" = ["eval/datasets/*.json"]
 

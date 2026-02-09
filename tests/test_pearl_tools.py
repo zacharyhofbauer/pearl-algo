@@ -8,7 +8,7 @@ and error handling.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from pearl_ai.tools import (
+from pearlalgo.pearl_ai.tools import (
     ToolDefinition,
     ToolResult,
     ToolExecutor,

@@ -60,7 +60,7 @@ jobs:
       - name: Run evaluation (mock mode - core)
         id: eval
         run: |
-          python -m pearl_ai.eval.ci \
+          python -m pearlalgo.pearl_ai.eval.ci \
             --dataset ${{ github.event.inputs.dataset || 'golden_core.json' }} \
             --threshold ${{ github.event.inputs.threshold || '0.85' }} \
             --mock \
@@ -70,7 +70,7 @@ jobs:
       - name: Run evaluation (mock mode - adversarial)
         id: eval_adversarial
         run: |
-          python -m pearl_ai.eval.ci \
+          python -m pearlalgo.pearl_ai.eval.ci \
             --dataset golden_adversarial.json \
             --threshold ${{ github.event.inputs.threshold || '0.85' }} \
             --mock \
@@ -169,7 +169,7 @@ jobs:
 
       - name: Run evaluation (real LLM)
         run: |
-          python -m pearl_ai.eval.ci \
+          python -m pearlalgo.pearl_ai.eval.ci \
             --dataset ${{ github.event.inputs.dataset || 'golden_core.json' }} \
             --threshold ${{ github.event.inputs.threshold || '0.85' }} \
             --llm-graders \

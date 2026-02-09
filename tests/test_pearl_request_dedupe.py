@@ -5,7 +5,7 @@ Tests for request deduplication.
 import asyncio
 import pytest
 
-from pearl_ai.cache import RequestDeduplicator
+from pearlalgo.pearl_ai.cache import RequestDeduplicator
 
 
 @pytest.mark.asyncio

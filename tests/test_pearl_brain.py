@@ -10,9 +10,9 @@ import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pearl_ai.brain import PearlBrain, QueryComplexity, ResponseSource, PearlMessage
-from pearl_ai.llm_mock import MockLLM, MockClaudeLLM
-from pearl_ai.config import get_config
+from pearlalgo.pearl_ai.brain import PearlBrain, QueryComplexity, ResponseSource, PearlMessage
+from pearlalgo.pearl_ai.llm_mock import MockLLM, MockClaudeLLM
+from pearlalgo.pearl_ai.config import get_config
 
 
 class TestQueryClassification:

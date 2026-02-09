@@ -49,6 +49,8 @@ from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
 from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
+from pearlalgo.market_agent.order_manager import OrderManager
+from pearlalgo.market_agent.signal_handler import SignalHandler
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -862,6 +864,42 @@ class MarketAgentService:
         else:
             logger.debug("Contextual bandit not available (import failed)")
 
+        # ------------------------------------------------------------------
+        # SignalHandler: extracted signal processing pipeline (Arch-1B)
+        # ------------------------------------------------------------------
+        self._order_manager = OrderManager(
+            risk_settings=self._risk_settings,
+            strategy_settings=self._strategy_settings,
+            ml_signal_filter=self._ml_signal_filter,
+            ml_adjust_sizing=self._ml_adjust_sizing,
+        )
+        self._signal_handler = SignalHandler(
+            state_manager=self.state_manager,
+            performance_tracker=self.performance_tracker,
+            notification_queue=self.notification_queue,
+            order_manager=self._order_manager,
+            trading_circuit_breaker=self.trading_circuit_breaker,
+            bandit_policy=self.bandit_policy,
+            bandit_config=self._bandit_config,
+            contextual_policy=self.contextual_policy,
+            ml_signal_filter=self._ml_signal_filter,
+            ml_filter_enabled=self._ml_filter_enabled,
+            ml_filter_mode=self._ml_filter_mode,
+            ml_shadow_threshold=self._ml_shadow_threshold,
+            execution_adapter=self.execution_adapter,
+            telegram_notifier=self.telegram_notifier,
+        )
+        # Propagate persisted counters so handler continues from saved state
+        self._signal_handler.signal_count = self.signal_count
+        self._signal_handler.signals_sent = self.signals_sent
+        self._signal_handler.signals_send_failures = self.signals_send_failures
+        self._signal_handler.last_signal_generated_at = self.last_signal_generated_at
+        self._signal_handler.last_signal_sent_at = self.last_signal_sent_at
+        self._signal_handler.last_signal_send_error = self.last_signal_send_error
+        self._signal_handler.last_signal_id_prefix = self.last_signal_id_prefix
+        # Handler error_count starts at 0; service error_count includes non-signal errors
+        self._prev_sh_error_count = 0
+
         logger.info("MarketAgentService initialized")
 
     async def start(self) -> None:
@@ -881,8 +919,8 @@ class MarketAgentService:
 
         # Setup signal handlers
         # Note: These set shutdown_requested flag, stop() is called in finally block
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGINT, self._os_signal_handler)
+        signal.signal(signal.SIGTERM, self._os_signal_handler)
 
         logger.info("NQ Agent Service starting...")
 
@@ -1332,7 +1370,7 @@ class MarketAgentService:
                     if isinstance(market_data, dict):
                         market_data["ml_blocking_allowed"] = bool(getattr(self, "_ml_blocking_allowed", False))
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.warning(f"Critical path error: {e}", exc_info=True)
 
                 # Generate signals (or skip if no new bar)
                 signals = []
@@ -1348,7 +1386,7 @@ class MarketAgentService:
                         try:
                             _market_open_for_signals = bool(get_market_hours().is_market_open())
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.warning(f"Critical path error: {e}", exc_info=True)
                         signals = self._read_shared_signals() if _market_open_for_signals else []
                         if signals:
                             self._follower_last_signal_at = datetime.now(timezone.utc)
@@ -1462,7 +1500,13 @@ class MarketAgentService:
                             )
                         except Exception as e:
                             logger.debug(f"Non-critical: {e}")
-                        await self._process_signal(signal, buffer_data=buffer_data)
+                        await self._signal_handler.process_signal(signal, buffer_data=buffer_data)
+                        self._sync_signal_handler_counters()
+                        # Signal forwarding: write to shared file for MFFU (writer mode)
+                        if self._signal_writer_mode:
+                            bar_ts = signal.get("_bar_timestamp")
+                            if bar_ts and self._signal_handler.last_signal_id_prefix:
+                                self._write_shared_signal(signal, self._signal_handler.last_signal_id_prefix, bar_ts)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
@@ -1696,353 +1740,35 @@ class MarketAgentService:
             trend_strength=0.5,
         )
 
-    async def _process_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> None:
-        """
-        Process a trading signal.
-        
-        Args:
-            signal: Signal dictionary
-            buffer_data: Optional DataFrame with OHLCV data for chart generation
-        """
-        try:
-            # ==========================================================================
-            # TRADING CIRCUIT BREAKER: Check if signal should be allowed
-            # ==========================================================================
-            if self.trading_circuit_breaker is not None:
-                # Get active positions for clustering check
-                active_positions = []
-                try:
-                    recent_signals = self.state_manager.get_recent_signals(limit=100)
-                    for rec in recent_signals:
-                        if isinstance(rec, dict) and rec.get("status") == "entered":
-                            active_positions.append(rec)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                
-                # Get market data for volatility filter
-                market_data = {}
-                if buffer_data is not None and len(buffer_data) > 0:
-                    try:
-                        from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr
-                        atr_series = calculate_atr(buffer_data, period=14)
-                        if len(atr_series) > 20:
-                            atr_current = float(atr_series.iloc[-1])
-                            atr_average = float(atr_series.iloc[-20:].mean())
-                            market_data = {
-                                "atr_current": atr_current,
-                                "atr_average": atr_average,
-                            }
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                
-                # Check if signal should be allowed
-                cb_decision = self.trading_circuit_breaker.should_allow_signal(
-                    signal=signal,
-                    active_positions=active_positions,
-                    market_data=market_data,
-                )
-                
-                if not cb_decision.allowed:
-                    signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
+    # Signal processing delegated to self._signal_handler (see signal_handler.py)
 
-                    cb_mode = str(getattr(self.trading_circuit_breaker.config, "mode", "enforce"))
-                    # MFFU eval gate rules ALWAYS enforce (even in warn_only mode)
-                    is_mffu_block = str(cb_decision.reason or "").startswith("mffu_")
-                    if cb_mode == "warn_only" and not is_mffu_block:
-                        # Standard checks: warn only, don't block
-                        signal["_cb_would_block"] = True
-                        signal["_cb_would_block_reason"] = cb_decision.reason
-                        self.trading_circuit_breaker.record_would_block(cb_decision.reason)
-                        logger.warning(
-                            f"⚠️ Trading circuit breaker would block (warn-only): {cb_decision.reason} | "
-                            f"details={cb_decision.details}"
-                        )
-                        if cb_decision.severity == "critical":
-                            asyncio.create_task(
-                                self.notification_queue.enqueue_circuit_breaker(
-                                    f"Risk warning (warn-only): {cb_decision.reason}",
-                                    cb_decision.details,
-                                    priority=Priority.HIGH,
-                                )
-                            )
-                    else:
-                        logger.warning(
-                            f"🛑 Trading circuit breaker blocked signal: {cb_decision.reason} | "
-                            f"details={cb_decision.details}"
-                        )
-                        # Notify via Telegram for critical blocks
-                        if cb_decision.severity == "critical":
-                            asyncio.create_task(
-                                self.notification_queue.enqueue_circuit_breaker(
-                                    f"Trading paused: {cb_decision.reason}",
-                                    cb_decision.details,
-                                    priority=Priority.HIGH,
-                                )
-                            )
-                        return  # Skip this signal
+    def _sync_signal_handler_counters(self) -> None:
+        """Sync counters from SignalHandler back to service for state persistence."""
+        sh = self._signal_handler
+        self.signal_count = sh.signal_count
+        self.signals_sent = sh.signals_sent
+        self.signals_send_failures = sh.signals_send_failures
+        # Error count: add handler delta (service error_count includes non-signal errors)
+        new_errors = sh.error_count - self._prev_sh_error_count
+        if new_errors > 0:
+            self.error_count += new_errors
+            self._prev_sh_error_count = sh.error_count
+        if sh.last_signal_generated_at:
+            self.last_signal_generated_at = sh.last_signal_generated_at
+        if sh.last_signal_sent_at:
+            self.last_signal_sent_at = sh.last_signal_sent_at
+        self.last_signal_send_error = sh.last_signal_send_error
+        if sh.last_signal_id_prefix:
+            self.last_signal_id_prefix = sh.last_signal_id_prefix
 
-            # ==========================================================================
-            # ML FILTER (shadow): attach prediction for later analytics/lift measurement
-            # NOTE: In shadow mode we NEVER block. We only record `_ml_prediction` on the signal.
-            # ==========================================================================
-            try:
-                if self._ml_filter_enabled and self._ml_signal_filter is not None:
-                    ctx: Dict[str, Any] = {}
-                    # Best-effort regime mapping if available on signal
-                    try:
-                        mr = signal.get("market_regime") or {}
-                        if isinstance(mr, dict):
-                            regime_type = str(mr.get("regime") or "")
-                            # bucket volatility if we only have ratio
-                            vol_bucket = ""
-                            try:
-                                vr = mr.get("volatility_ratio")
-                                if vr is not None:
-                                    v = float(vr)
-                                    if v < 0.8:
-                                        vol_bucket = "low"
-                                    elif v > 1.5:
-                                        vol_bucket = "high"
-                                    else:
-                                        vol_bucket = "normal"
-                            except Exception:
-                                vol_bucket = ""
-                            ctx["regime"] = {
-                                "regime": regime_type,
-                                "volatility": vol_bucket,
-                                "session": str(mr.get("session") or ""),
-                            }
-                    except Exception:
-                        ctx = {}
-
-                    _should_exec, pred = self._ml_signal_filter.should_execute(signal, ctx)
-                    try:
-                        signal["_ml_prediction"] = pred.to_dict()
-                        # Shadow-only note (helps audits; not used for gating).
-                        # For lift measurement we can optionally use a separate shadow threshold
-                        # so we get a meaningful PASS/FAIL split without affecting trading.
-                        pass_for_lift = bool(_should_exec)
-                        try:
-                            if (
-                                getattr(self, "_ml_filter_mode", "shadow") == "shadow"
-                                and getattr(self, "_ml_shadow_threshold", None) is not None
-                            ):
-                                pass_for_lift = float(getattr(pred, "win_probability", 0.0) or 0.0) >= float(
-                                    self._ml_shadow_threshold  # type: ignore[arg-type]
-                                )
-                                signal["_ml_shadow_threshold"] = float(self._ml_shadow_threshold)  # type: ignore[arg-type]
-                        except Exception:
-                            pass_for_lift = bool(_should_exec)
-                        signal["_ml_shadow_pass_filter"] = bool(pass_for_lift)
-                    except Exception:
-                        signal["_ml_prediction"] = None
-            except Exception as e:
-                logger.debug(f"ML prediction failed (non-fatal): {e}")
-
-            # ==========================================================================
-            # ML OPPORTUNITY SIZING (shadow-safe): adjust size/priority within risk gates
-            # ==========================================================================
-            try:
-                self._apply_ml_opportunity_sizing(signal)
-            except Exception as e:
-                logger.debug(f"ML sizing adjustment failed (non-fatal): {e}")
-            
-            # Track signal generation (delegates to state_manager for persistence)
-            signal_id = self.performance_tracker.track_signal_generated(signal)
-            self.last_signal_generated_at = get_utc_timestamp()
-            self.last_signal_id_prefix = str(signal_id)[:16]
-
-            # Signal forwarding: write to shared file for MFFU (writer mode)
-            if self._signal_writer_mode:
-                bar_ts = signal.get("_bar_timestamp")
-                if bar_ts:
-                    self._write_shared_signal(signal, signal_id, bar_ts)
-
-            # Virtual entry: enter immediately at the signal's entry price.
-            # This enables per-signal PnL tracking without requiring IBKR fills.
-            entry_price = 0.0
-            try:
-                entry_price = float(signal.get("entry_price") or 0.0)
-                signal_direction = signal.get("direction", "unknown")
-                if entry_price > 0:
-                    # SANITY CHECK: Log direction at entry
-                    logger.info(
-                        f"🔍 VIRTUAL ENTRY: signal_id={signal_id[:16]} | direction={signal_direction.upper()} | "
-                        f"entry={entry_price:.2f} | stop={signal.get('stop_loss', 'N/A')} | "
-                        f"target={signal.get('take_profit', 'N/A')}"
-                    )
-                    self.performance_tracker.track_entry(
-                        signal_id=signal_id,
-                        entry_price=entry_price,
-                        entry_time=datetime.now(timezone.utc),
-                    )
-            except Exception as e:
-                logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
-
-            # ==========================================================================
-            # BANDIT POLICY: Evaluate signal type and decide whether to execute
-            # ==========================================================================
-            policy_decision = None
-            policy_status = "not_evaluated"
-            
-            if self.bandit_policy is not None:
-                try:
-                    policy_decision = self.bandit_policy.decide(signal)
-                    policy_status = f"{policy_decision.mode}:{policy_decision.reason}"
-                    
-                    logger.info(
-                        f"Policy decision: {signal.get('type')} -> "
-                        f"execute={policy_decision.execute} | "
-                        f"score={policy_decision.sampled_score:.2f} | "
-                        f"mode={policy_decision.mode}"
-                    )
-                except Exception as policy_e:
-                    policy_status = f"error:{str(policy_e)[:50]}"
-                    logger.error(f"Policy evaluation error: {policy_e}", exc_info=True)
-            
-            # Store policy status in signal
-            signal["_policy_status"] = policy_status
-            if policy_decision:
-                # Full structured policy payload for transparency (Telegram details, miniapp, exports)
-                try:
-                    signal["_policy"] = policy_decision.to_dict()
-                except Exception:
-                    # Never let optional explainability break signal processing
-                    signal["_policy"] = None
-                signal["_policy_execute"] = policy_decision.execute
-                signal["_policy_score"] = policy_decision.sampled_score
-                signal["_policy_size_multiplier"] = policy_decision.size_multiplier
-
-            # ==========================================================================
-            # CONTEXTUAL POLICY (optional): learn by session/regime/time bucket
-            # ==========================================================================
-            ctx_decision = None
-            if self.contextual_policy is not None:
-                try:
-                    ctx_features = self._build_context_features_for_signal(signal)
-                    if ctx_features is not None:
-                        ctx_decision = self.contextual_policy.decide(signal, ctx_features)
-                        # Persist context + decision on the signal for later audits and outcome learning
-                        try:
-                            signal["_context_features"] = ctx_features.to_dict()
-                        except Exception:
-                            signal["_context_features"] = None
-                        try:
-                            signal["_policy_ctx"] = ctx_decision.to_dict()
-                        except Exception:
-                            signal["_policy_ctx"] = None
-                except Exception as e:
-                    # Never let optional contextual learning break the scan loop
-                    signal["_policy_ctx"] = {"error": str(e)[:120]}
-            
-            # ==========================================================================
-            # EXECUTION: Place bracket order if execution adapter is enabled + armed
-            # ==========================================================================
-            execution_result = None
-            execution_status = "not_attempted"
-            
-            # Gate execution by policy decision (only in live mode)
-            should_execute = True
-            if (policy_decision is not None 
-                and self._bandit_config is not None 
-                and self._bandit_config.mode == "live"):
-                should_execute = policy_decision.execute
-                if not should_execute:
-                    execution_status = f"policy_skip:{policy_decision.reason}"
-                    logger.info(
-                        f"Execution blocked by policy (live mode): {policy_decision.reason}"
-                    )
-
-            if should_execute and self.execution_adapter is not None:
-                try:
-                    # Check preconditions (enabled, armed, limits, cooldowns)
-                    decision = self.execution_adapter.check_preconditions(signal)
-                    
-                    if decision.execute:
-                        # Apply size multiplier from policy (if in live mode)
-                        if (policy_decision is not None 
-                            and self._bandit_config is not None 
-                            and self._bandit_config.mode == "live"):
-                            original_size = signal.get("position_size", 1)
-                            adjusted_size = int(original_size * policy_decision.size_multiplier)
-                            adjusted_size = max(1, adjusted_size)  # At least 1 contract
-                            signal["position_size"] = adjusted_size
-                            logger.info(
-                                f"Position size adjusted by policy: {original_size} -> {adjusted_size} "
-                                f"(multiplier={policy_decision.size_multiplier})"
-                            )
-                        
-                        # Place bracket order
-                        execution_result = await self.execution_adapter.place_bracket(signal)
-                        
-                        if execution_result.success:
-                            execution_status = "placed"
-                            logger.info(
-                                f"✅ Order placed: {signal.get('type')} {signal.get('direction')} | "
-                                f"order_id={execution_result.parent_order_id}"
-                            )
-                        else:
-                            execution_status = f"place_failed:{execution_result.error_message}"
-                            logger.warning(
-                                f"⚠️ Order placement failed: {execution_result.error_message}"
-                            )
-                    else:
-                        # Preconditions not met - log why
-                        execution_status = f"skipped:{decision.reason}"
-                        logger.info(
-                            f"Order skipped: {decision.reason} | signal_id={signal_id[:16]}"
-                        )
-                        
-                except Exception as exec_e:
-                    execution_status = f"error:{str(exec_e)[:50]}"
-                    logger.error(f"Execution error: {exec_e}", exc_info=True)
-            
-            # Store execution status in signal for state persistence
-            signal["_execution_status"] = execution_status
-            if execution_result:
-                signal["_execution_order_id"] = execution_result.parent_order_id
-
-            # Queue entry alert to Telegram (non-blocking)
-            signal_type = signal.get('type', 'unknown')
-            signal_direction = signal.get('direction', 'unknown')
-            logger.info(f"Processing signal: {signal_type} {signal_direction}")
-
-            # Always send entry notification as the canonical alert
-            entry_priority = Priority.HIGH
-            try:
-                if bool(signal.get("_ml_priority") == "critical"):
-                    entry_priority = Priority.CRITICAL
-            except Exception:
-                entry_priority = Priority.HIGH
-            queued = await self.notification_queue.enqueue_entry(
-                signal_id=str(signal_id),
-                entry_price=float(entry_price),
-                signal=signal,
-                buffer_data=buffer_data,
-                priority=entry_priority,
-            )
-            if queued:
-                logger.info(f"✅ Entry queued for Telegram: {signal_type} {signal_direction}")
-                self.signals_sent += 1
-                self.last_signal_sent_at = get_utc_timestamp()
-                self.last_signal_send_error = None
-            else:
-                logger.error(
-                    f"❌ Failed to queue entry to Telegram (queue full): {signal_type} {signal_direction}. "
-                    f"Telegram enabled: {self.telegram_notifier.enabled}, "
-                    f"Telegram instance: {self.telegram_notifier.telegram is not None}"
-                )
-                self.signals_send_failures += 1
-                self.last_signal_send_error = "Notification queue full - entry dropped"
-
-            self.signal_count += 1
-
-            # Entry notification is delivered via NotificationQueue when enabled, so it
-            # inherits retry/backoff behavior and preserves consistent delivery ordering.
-
-        except Exception as e:
-            logger.error(f"Error processing signal: {e}", exc_info=True)
-            self.error_count += 1
+    # -- DELETED: ~350-line inline _process_signal method --
+    # All signal processing logic (circuit breaker, ML filter, ML sizing,
+    # performance tracking, bandit/contextual policy, execution, notifications)
+    # now lives in signal_handler.py::SignalHandler.process_signal().
+    # Call sites updated to use self._signal_handler.process_signal() directly.
+    # Helper methods below (_compute_base_position_size, _apply_ml_opportunity_sizing,
+    # _build_context_features_for_signal) were only called from _process_signal
+    # but are kept as they may be useful for other code paths.
 
     def _compute_base_position_size(self, signal: Dict) -> int:
         """Compute a base position size from config + signal confidence."""
@@ -2051,7 +1777,7 @@ class MarketAgentService:
             if existing is not None:
                 return max(1, int(float(existing)))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
 
         cfg = self._strategy_settings or {}
         enable_dynamic = bool(cfg.get("enable_dynamic_sizing", False))
@@ -2087,7 +1813,7 @@ class MarketAgentService:
             if sig_type in multipliers:
                 size = int(round(size * float(multipliers.get(sig_type) or 1.0)))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
 
         # Clamp to risk min/max
         try:
@@ -2225,7 +1951,7 @@ class MarketAgentService:
                         if entry_time and entry_time.tzinfo is None:
                             entry_time = entry_time.replace(tzinfo=timezone.utc)
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.warning(f"Critical path error: {e}", exc_info=True)
 
                 sig = rec.get("signal", {}) or {}
                 direction = str(sig.get("direction") or "long").lower()
@@ -2305,7 +2031,7 @@ class MarketAgentService:
                         if exit_bar_ts and exit_bar_ts.tzinfo is None:
                             exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.warning(f"Critical path error: {e}", exc_info=True)
 
                     # SANITY CHECK: Log direction consistency
                     logger.info(
@@ -2421,7 +2147,7 @@ class MarketAgentService:
                                             )
                                             logger.warning("MFFU FAIL: execution disarmed + positions flattened")
                                         except Exception as e:
-                                            logger.debug(f"Non-critical: {e}")
+                                            logger.warning(f"Critical path error: {e}", exc_info=True)
                             except Exception as mffu_err:
                                 logger.debug(f"Could not record MFFU trade: {mffu_err}")
                         
@@ -4444,7 +4170,7 @@ class MarketAgentService:
                     try:
                         self.execution_adapter.disarm()
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.warning(f"Critical path error: {e}", exc_info=True)
                 finally:
                     kill_file.unlink(missing_ok=True)
                     # Also remove any pending disarm flag (kill already disarms)
@@ -5711,8 +5437,8 @@ class MarketAgentService:
         """
         Write a signal to the shared JSONL file for the MFFU agent to read.
 
-        Called by inception (writer mode) inside _process_signal() after
-        signal_id assignment.  Non-fatal: errors are logged but never crash
+        Called by inception (writer mode) after signal_handler.process_signal()
+        and signal_id assignment.  Non-fatal: errors are logged but never crash
         the inception agent.
         """
         try:
@@ -5861,7 +5587,8 @@ class MarketAgentService:
                 if _df is not None and not getattr(_df, "empty", True):
                     buffer = _df
             for sig in forwarded:
-                await self._process_signal(sig, buffer_data=buffer)
+                await self._signal_handler.process_signal(sig, buffer_data=buffer)
+                self._sync_signal_handler_counters()
         except Exception as e:
             logger.warning(f"MFFU signal forwarding error: {e}")
 
@@ -6482,8 +6209,8 @@ class MarketAgentService:
             )
             self.last_connection_failure_alert = now
 
-    def _signal_handler(self, signum, frame) -> None:
-        """Handle shutdown signals."""
+    def _os_signal_handler(self, signum, frame) -> None:
+        """Handle OS shutdown signals (SIGINT/SIGTERM)."""
         signal_names = {
             signal.SIGINT: "SIGINT (Ctrl+C)",
             signal.SIGTERM: "SIGTERM",

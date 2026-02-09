@@ -2,7 +2,7 @@
 Tests for Claude LLM response parsing.
 """
 
-from pearl_ai.llm_claude import ClaudeLLM
+from pearlalgo.pearl_ai.llm_claude import ClaudeLLM
 
 
 def test_parse_response_concatenates_text_blocks():

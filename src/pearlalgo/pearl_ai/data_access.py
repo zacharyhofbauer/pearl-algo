@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 cursor = conn.execute("""
                     SELECT
@@ -117,8 +118,8 @@ class TradeDataAccess:
                         AVG(hold_duration_minutes) as avg_hold_minutes
                     FROM trades
                     WHERE regime = ?
-                    AND exit_time > datetime('now', ?)
-                """, (regime, f'-{days} days'))
+                    AND exit_time > ?
+                """, (regime, cutoff))
                 row = cursor.fetchone()
 
                 if not row or row["total_trades"] == 0:
@@ -229,6 +230,7 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 cursor = conn.execute("""
                     SELECT
@@ -242,8 +244,8 @@ class TradeDataAccess:
                         COUNT(DISTINCT regime) as regime_count,
                         COUNT(DISTINCT signal_type) as signal_type_count
                     FROM trades
-                    WHERE exit_time > datetime('now', ?)
-                """, (f'-{days} days',))
+                    WHERE exit_time > ?
+                """, (cutoff,))
                 row = cursor.fetchone()
 
                 if not row or row["total"] == 0:
@@ -288,6 +290,7 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 cursor = conn.execute("""
                     SELECT
@@ -297,9 +300,9 @@ class TradeDataAccess:
                         SUM(pnl) as total_pnl,
                         AVG(pnl) as avg_pnl
                     FROM trades
-                    WHERE exit_time > datetime('now', ?)
+                    WHERE exit_time > ?
                     GROUP BY direction
-                """, (f'-{days} days',))
+                """, (cutoff,))
                 rows = cursor.fetchall()
 
                 result = {}
@@ -339,6 +342,7 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 cursor = conn.execute("""
                     SELECT
@@ -348,10 +352,10 @@ class TradeDataAccess:
                         SUM(pnl) as total_pnl,
                         AVG(pnl) as avg_pnl
                     FROM trades
-                    WHERE exit_time > datetime('now', ?)
+                    WHERE exit_time > ?
                     GROUP BY hour
                     ORDER BY hour
-                """, (f'-{days} days',))
+                """, (cutoff,))
                 rows = cursor.fetchall()
 
                 result = {}
@@ -432,6 +436,7 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 cursor = conn.execute("""
                     SELECT
@@ -442,10 +447,10 @@ class TradeDataAccess:
                         AVG(pnl) as avg_pnl
                     FROM trades
                     WHERE regime IS NOT NULL
-                    AND exit_time > datetime('now', ?)
+                    AND exit_time > ?
                     GROUP BY regime
                     ORDER BY total DESC
-                """, (f'-{days} days',))
+                """, (cutoff,))
                 rows = cursor.fetchall()
 
                 result = {}
@@ -482,13 +487,14 @@ class TradeDataAccess:
             return {}
 
         try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             with self._connection() as conn:
                 # Get trades ordered by time
                 cursor = conn.execute("""
                     SELECT is_win FROM trades
-                    WHERE exit_time > datetime('now', ?)
+                    WHERE exit_time > ?
                     ORDER BY exit_time ASC
-                """, (f'-{days} days',))
+                """, (cutoff,))
                 rows = cursor.fetchall()
 
                 if not rows:
@@ -623,6 +629,7 @@ class TradeDataAccess:
 
     def _query_regime_performance(self, conn, regime: str, days: int = 30) -> Dict[str, Any]:
         """Query regime performance using an existing connection."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         try:
             cursor = conn.execute("""
                 SELECT
@@ -635,8 +642,8 @@ class TradeDataAccess:
                     AVG(hold_duration_minutes) as avg_hold_minutes
                 FROM trades
                 WHERE regime = ?
-                AND exit_time > datetime('now', ?)
-            """, (regime, f'-{days} days'))
+                AND exit_time > ?
+            """, (regime, cutoff))
             row = cursor.fetchone()
             if not row or row["total_trades"] == 0:
                 return {"total_trades": 0, "regime": regime}
@@ -661,6 +668,7 @@ class TradeDataAccess:
     def _query_direction_performance(self, conn, days: int = 30) -> Dict[str, Dict[str, Any]]:
         """Query direction performance using an existing connection."""
         result = {}
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         try:
             cursor = conn.execute("""
                 SELECT
@@ -670,9 +678,9 @@ class TradeDataAccess:
                     SUM(pnl) as total_pnl,
                     AVG(pnl) as avg_pnl
                 FROM trades
-                WHERE exit_time > datetime('now', ?)
+                WHERE exit_time > ?
                 GROUP BY direction
-            """, (f'-{days} days',))
+            """, (cutoff,))
             for row in cursor.fetchall():
                 d = row["direction"]
                 total = row["total_trades"]
@@ -711,6 +719,7 @@ class TradeDataAccess:
 
     def _query_performance_summary(self, conn, days: int = 7) -> Dict[str, Any]:
         """Query performance summary using an existing connection."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         try:
             cursor = conn.execute("""
                 SELECT
@@ -719,8 +728,8 @@ class TradeDataAccess:
                     SUM(pnl) as total_pnl,
                     AVG(pnl) as avg_pnl
                 FROM trades
-                WHERE exit_time > datetime('now', ?)
-            """, (f'-{days} days',))
+                WHERE exit_time > ?
+            """, (cutoff,))
             row = cursor.fetchone()
             if not row or row["total_trades"] == 0:
                 return {"total_trades": 0}
@@ -741,6 +750,7 @@ class TradeDataAccess:
     def _query_hourly_performance(self, conn, days: int = 30) -> Dict[int, Dict[str, Any]]:
         """Query hourly performance using an existing connection."""
         result = {}
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         try:
             cursor = conn.execute("""
                 SELECT
@@ -750,10 +760,10 @@ class TradeDataAccess:
                     AVG(pnl) as avg_pnl,
                     SUM(pnl) as total_pnl
                 FROM trades
-                WHERE exit_time > datetime('now', ?)
+                WHERE exit_time > ?
                 GROUP BY hour
                 ORDER BY hour
-            """, (f'-{days} days',))
+            """, (cutoff,))
             for row in cursor.fetchall():
                 h = row["hour"]
                 total = row["total_trades"]

@@ -51,7 +51,7 @@ execution:
   mode: paper                # paper = Tradovate demo simulation
   adapter: tradovate         # Use TradovateExecutionAdapter
   max_positions: 20          # MNQ micro: up to 20 concurrent positions (within 50 micro limit)
-  max_orders_per_day: 50
+  max_orders_per_day: 500     # Paper account: no practical limit needed
   max_daily_loss: 1800.0     # Safety: slightly below $2000 MFFU limit
   cooldown_seconds: 30
   symbol_whitelist:

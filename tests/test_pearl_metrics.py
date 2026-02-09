@@ -4,7 +4,7 @@ Tests for Pearl AI metrics tool-call tracing.
 
 from datetime import datetime
 
-from pearl_ai.metrics import (
+from pearlalgo.pearl_ai.metrics import (
     MetricsCollector,
     LLMRequest,
     ToolCall,

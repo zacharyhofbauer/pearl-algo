@@ -2,8 +2,8 @@
 Tests for Pearl AI API router configuration.
 """
 
-from pearl_ai.api_router import create_pearl_router
-from pearl_ai.brain import PearlBrain
+from pearlalgo.pearl_ai.api_router import create_pearl_router
+from pearlalgo.pearl_ai.brain import PearlBrain
 
 
 def test_metrics_sources_route_unique():

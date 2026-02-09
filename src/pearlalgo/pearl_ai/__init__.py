@@ -18,7 +18,7 @@ from __future__ import annotations
 # NOTE:
 # This package is used in multiple contexts (runtime app, CI eval runner, tooling).
 # Avoid importing optional/heavy dependencies at import time so that lightweight
-# tooling (e.g., `python -m pearl_ai.eval.ci --mock`) can run without requiring
+# tooling (e.g., `python -m pearlalgo.pearl_ai.eval.ci --mock`) can run without requiring
 # the full LLM stack to be installed.
 
 import importlib

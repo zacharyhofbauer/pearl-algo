@@ -17,9 +17,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import statistics
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -55,10 +57,36 @@ from pearlalgo.market_agent.stats_computation import (
     compute_daily_stats as _shared_compute_daily_stats,
     get_trading_day_start as _shared_get_trading_day_start,
 )
-from pearlalgo.utils.state_io import load_json_file as _shared_load_json, load_jsonl_file as _shared_load_jsonl
-from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _shared_tv_fills_to_trades
+from pearlalgo.utils.state_io import load_json_file as _load_json_file, load_jsonl_file as _load_jsonl_file
+from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tradovate_fills_to_trades
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# TTL Cache for expensive broadcast-loop helpers
+# ---------------------------------------------------------------------------
+
+_ttl_cache: Dict[str, Any] = {}
+_ttl_cache_lock = threading.Lock()
+
+
+def _cached(key: str, ttl_seconds: float, fn, *args, **kwargs):
+    """Return cached result if still fresh, otherwise call fn and cache."""
+    now = time.monotonic()
+    with _ttl_cache_lock:
+        entry = _ttl_cache.get(key)
+        if entry is not None:
+            value, expires = entry
+            if now < expires:
+                return value
+    # Compute outside lock to avoid blocking other readers
+    result = fn(*args, **kwargs)
+    with _ttl_cache_lock:
+        _ttl_cache[key] = (result, now + ttl_seconds)
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -116,8 +144,8 @@ def _get_client_id(request: Request) -> str:
         fwd = request.headers.get("x-forwarded-for")
         if fwd:
             return (fwd.split(",")[0] or "").strip() or "unknown"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
     try:
         return request.client.host if request.client else "unknown"
     except Exception:
@@ -286,14 +314,27 @@ def _resolve_state_dir(market: str) -> Path:
     return PROJECT_ROOT / "data" / "agent_state" / market_upper
 
 
-def _load_json_file(path: Path) -> Dict[str, Any]:
-    """Delegate to shared state_io module."""
-    return _shared_load_json(path)
+
+# _load_json_file and _load_jsonl_file imported directly from pearlalgo.utils.state_io above.
+
+_DEFAULT_START_BALANCE = 50000.0
 
 
-def _load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
-    """Delegate to shared state_io module."""
-    return _shared_load_jsonl(path, max_lines=max_lines)
+def _get_start_balance(state_dir: Path) -> float:
+    """Read MFFU start balance from challenge_state.json, or return default.
+
+    Centralises the 'read challenge config -> fall back to 50 000' pattern
+    that was previously duplicated across 4 call sites.
+    """
+    try:
+        ch_file = state_dir / "challenge_state.json"
+        if ch_file.exists():
+            ch_data = json.loads(ch_file.read_text())
+            return float(ch_data.get("config", {}).get("start_balance", _DEFAULT_START_BALANCE))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Could not read start_balance from challenge_state.json: {e}")
+    return _DEFAULT_START_BALANCE
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +373,8 @@ def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
         if cache_file.exists():
             try:
                 existing = json.loads(cache_file.read_text())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         # Update with new data
         existing[key] = {
@@ -343,8 +384,8 @@ def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
 
         # Keep only last 24 hours of cache entries
         cache_file.write_text(json.dumps(existing))
-    except Exception:
-        pass  # Cache write failures are not critical
+    except Exception as e:
+        logger.debug(f"Cache write failures are not critical: {e}")
 
 
 def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
@@ -367,8 +408,8 @@ def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
                 if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
                     _candle_cache[key] = cached["candles"]
                     return cached["candles"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
 
     return None
 
@@ -471,8 +512,8 @@ async def _fetch_candles(
                 return candles
         except asyncio.TimeoutError:
             pass  # Fall through to cache
-        except Exception:
-            pass  # Fall through to cache
+        except Exception as e:
+            logger.debug(f"Fall through to cache: {e}")
 
     # Try cache fallback
     if use_cache_fallback:
@@ -556,8 +597,8 @@ async def _fetch_candles_with_source(
                 return (candles, "live")
         except asyncio.TimeoutError:
             pass  # Fall through to cache
-        except Exception:
-            pass  # Fall through to cache
+        except Exception as e:
+            logger.debug(f"Fall through to cache: {e}")
 
     # Try cache fallback
     if use_cache_fallback:
@@ -942,8 +983,8 @@ class ConnectionManager:
                             self._cached_state = {}
                             self._last_state_mtime_ns = 0
                             self._last_state_size = 0
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Non-critical: {e}")
                     state = self._cached_state
 
                     if state or _get_challenge_status(_state_dir):
@@ -969,33 +1010,33 @@ class ConnectionManager:
                                             "daily_wins": daily_stats.get("daily_wins"),
                                             "daily_losses": daily_stats.get("daily_losses"),
                                         })
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     try:
-                                        enriched["recent_exits"] = _get_recent_exits(_state_dir, limit=100)
-                                    except Exception:
-                                        pass
+                                        enriched["recent_exits"] = _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100)
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     try:
                                         enriched["market_regime"] = _get_market_regime(state)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     try:
                                         enriched["signal_rejections_24h"] = _get_signal_rejections_24h(state)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     try:
                                         enriched["last_signal_decision"] = _get_last_signal_decision(state)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     try:
-                                        enriched["risk_metrics"] = _get_risk_metrics(_state_dir)
-                                    except Exception:
-                                        pass
+                                        enriched["risk_metrics"] = _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir)
+                                    except Exception as e:
+                                        logger.debug(f"Non-critical: {e}")
 
                                     _pearl_brain.update_state(enriched)
                                     _pearl_last_state_sync_time = datetime.now(timezone.utc).isoformat()
@@ -1020,11 +1061,10 @@ class ConnectionManager:
                             except Exception:
                                 pearl_fingerprint = "error"
 
-                        combined_hash = str(hash(json.dumps(
-                            {"state": state, "pearl": pearl_fingerprint},
-                            sort_keys=True,
-                            default=str
-                        )))
+                        # Cheap fingerprint: mtime/size already track state.json
+                        # changes; pearl_fingerprint tracks Pearl AI changes.
+                        # Avoids expensive json.dumps serialization every cycle.
+                        combined_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}:{pearl_fingerprint}"
 
                         # Only broadcast if state OR Pearl feed/chat changed
                         if self.active_connections and combined_hash != self._last_state_hash:
@@ -1057,10 +1097,10 @@ class ConnectionManager:
                                     "data_quality": _get_data_quality(state),
                                     # Performance data (previously HTTP-only)
                                     "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _get_recent_exits(_state_dir, limit=100),
+                                    "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
                                     "performance": _compute_performance_stats(_state_dir),
-                                    "equity_curve": _get_equity_curve(_state_dir, hours=72),
-                                    "risk_metrics": _get_risk_metrics(_state_dir),
+                                    "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+                                    "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
                                     # Signal activity & execution state
                                     "signal_rejections_24h": state.get("signal_rejections_24h"),
                                     "last_signal_decision": state.get("last_signal_decision"),
@@ -1245,10 +1285,10 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
                         "challenge": _get_challenge_status(_state_dir),
-                        "recent_exits": _get_recent_exits(_state_dir, limit=100),
+                        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
                         "performance": _compute_performance_stats(_state_dir),
-                        "equity_curve": _get_equity_curve(_state_dir, hours=72),
-                        "risk_metrics": _get_risk_metrics(_state_dir),
+                        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+                        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
                         "cadence_metrics": _get_cadence_metrics_enhanced(state),
                         "market_regime": _get_market_regime(state),
                         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -1283,8 +1323,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         if isinstance(payload, dict) and payload.get("type") == "auth":
                             await websocket.send_json({"type": "auth_ok"})
                             continue
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Non-critical: {e}")
 
                 # Handle ping
                 if data == "ping":
@@ -1312,10 +1352,10 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
                                     "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _get_recent_exits(_state_dir, limit=100),
+                                    "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
                                     "performance": _compute_performance_stats(_state_dir),
-                                    "equity_curve": _get_equity_curve(_state_dir, hours=72),
-                                    "risk_metrics": _get_risk_metrics(_state_dir),
+                                    "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+                                    "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
                                     "cadence_metrics": _get_cadence_metrics_enhanced(state),
                                     "market_regime": _get_market_regime(state),
                                     "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -1465,15 +1505,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 equity = float(tv.get("equity", 0))
                 open_pnl = round(tv.get("open_pnl", 0.0), 2)
                 pos_count = tv.get("position_count", 0)
-                # Resolve start balance from challenge config
-                start_balance = 50000.0
-                try:
-                    ch_file = state_dir / "challenge_state.json"
-                    if ch_file.exists():
-                        _ch = json.loads(ch_file.read_text())
-                        start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
-                except Exception:
-                    pass
+                start_balance = _get_start_balance(state_dir)
                 pnl = round(equity - start_balance, 2)
                 # Trade counts from Tradovate fills (state.json -> persistent file -> fallback)
                 trades, wins, losses = 0, 0, 0
@@ -1488,8 +1520,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                         trades = len(paired)
                         wins = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
                         losses = trades - wins
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Non-critical: {e}")
                 return {
                     "daily_pnl": pnl,
                     "daily_trades": trades,
@@ -1499,8 +1531,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     "tradovate_open_pnl": open_pnl,
                     "tradovate_positions": pos_count,
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
 
     # Delegate to shared stats_computation module (single source of truth for
     # signals.jsonl parsing with built-in 5-second TTL cache).
@@ -1518,8 +1550,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 result["daily_trades"] = challenge.get("trades", 0)
                 result["daily_wins"] = challenge.get("wins", 0)
                 result["daily_losses"] = challenge.get("trades", 0) - challenge.get("wins", 0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     return result
 
@@ -1567,14 +1599,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
             _sd = json.loads(state_file.read_text()) or {}
             tv = _sd.get("tradovate_account")
             if tv and isinstance(tv, dict) and tv.get("equity"):
-                start_balance = 50000.0  # MFFU eval start
-                try:
-                    ch_file = state_dir / "challenge_state.json"
-                    if ch_file.exists():
-                        _ch = json.loads(ch_file.read_text())
-                        start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
-                except Exception:
-                    pass
+                start_balance = _get_start_balance(state_dir)
                 equity = float(tv.get("equity", 0))
                 open_pnl = float(tv.get("open_pnl", 0))
                 pnl = round(equity - start_balance, 2)
@@ -1591,11 +1616,11 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                             tv_stats["wins"] = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
                             tv_stats["losses"] = len(trades) - tv_stats["wins"]
                             tv_stats["win_rate"] = round(tv_stats["wins"] / len(trades) * 100, 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
 
     performance_file = state_dir / "performance.json"
     if not performance_file.exists():
@@ -1613,8 +1638,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
                 for period in result:
                     result[period] = ch_stats.copy()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         return result
 
     now = datetime.now(timezone.utc)
@@ -1664,8 +1689,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                     stats["yesterday"]["wins"] += 1
                 else:
                     stats["yesterday"]["losses"] += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
 
     # Calculate win rates and compute streaks for 24h
     for period in stats:
@@ -1703,8 +1728,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                         break
                 stats["24h"]["streak"] = streak
                 stats["24h"]["streak_type"] = streak_type
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
 
     # Fallback: if performance.json had zero trades but challenge has data,
     # populate all periods from the challenge so the PERFORMANCE panel isn't blank.
@@ -1721,8 +1746,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
                 for period in ("yesterday", "24h", "72h", "30d"):
                     stats[period] = {**stats[period], **ch_stats}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     return stats
 
@@ -1739,8 +1764,8 @@ def _is_mffu_account(state_dir: Path) -> bool:
             data = json.loads(state_file.read_text()) or {}
             tv = data.get("tradovate_account")
             return bool(tv and isinstance(tv, dict) and tv.get("equity"))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
     return False
 
 
@@ -1782,8 +1807,8 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
             data = json.loads(state_file.read_text()) or {}
             tv = data.get("tradovate_account") or {}
             fills = data.get("tradovate_fills") or []
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
 
     # Fallback: read from persistent fills file when state.json has none
     if not fills:
@@ -1791,8 +1816,8 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
             fills_file = state_dir / "tradovate_fills.json"
             if fills_file.exists():
                 fills = json.loads(fills_file.read_text()) or []
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     # Normalize all fills to snake_case keys
     fills = [_normalize_fill(f) for f in fills]
@@ -1800,9 +1825,8 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
     return tv, fills
 
 
-def _tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Delegate to shared tradovate utils module."""
-    return _shared_tv_fills_to_trades(fills)
+
+# _tradovate_fills_to_trades imported directly from pearlalgo.execution.tradovate.utils above.
 
 
 def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1848,14 +1872,7 @@ def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any]], state_dir: Path) -> Dict[str, Any]:
     """Build overall performance summary from Tradovate data (equity-based)."""
-    start_balance = 50000.0
-    try:
-        ch_file = state_dir / "challenge_state.json"
-        if ch_file.exists():
-            _ch = json.loads(ch_file.read_text())
-            start_balance = float(_ch.get("config", {}).get("start_balance", 50000.0))
-    except Exception:
-        pass
+    start_balance = _get_start_balance(state_dir)
 
     equity = float(tv.get("equity", 0))
     pnl = round(equity - start_balance, 2)
@@ -1963,8 +1980,8 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
                     entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
                     exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
                     duration_seconds = int((exit_dt - entry_dt).total_seconds())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
             exits.append({
                 "signal_id": s.get("signal_id", ""),
@@ -1981,8 +1998,8 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
             })
         # Sort by exit time descending and take most recent
         exits.sort(key=lambda x: x.get("exit_time", ""), reverse=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
 
     return exits[:limit]
 
@@ -2204,10 +2221,24 @@ def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
         }
 
 
-def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
-    """Get equity curve data (cumulative P&L over time) for the mini chart."""
+def _load_performance_data(state_dir: Path) -> Optional[list]:
+    """Load and parse performance.json (shared by equity_curve & risk_metrics)."""
     performance_file = state_dir / "performance.json"
     if not performance_file.exists():
+        return None
+    try:
+        data = json.loads(performance_file.read_text())
+        if not isinstance(data, list):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
+    """Get equity curve data (cumulative P&L over time) for the mini chart."""
+    data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+    if not data:
         return []
 
     now = datetime.now(timezone.utc)
@@ -2215,10 +2246,6 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
 
     curve = []
     try:
-        data = json.loads(performance_file.read_text())
-        if not isinstance(data, list):
-            return []
-
         # Sort trades by exit time
         trades = []
         for trade in data:
@@ -2252,15 +2279,14 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
                 "time": time_val,
                 "value": round(cumulative, 2),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
 
     return curve
 
 
 def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
     """Calculate risk metrics: max drawdown, Sharpe ratio, average R:R, profit factor."""
-    performance_file = state_dir / "performance.json"
     signals_file = state_dir / "signals.jsonl"
     default_metrics = {
         "max_drawdown": 0.0,
@@ -2339,14 +2365,11 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         except Exception:
             return default_metrics
 
-    if not performance_file.exists():
+    data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+    if not data:
         return default_metrics
 
     try:
-        data = json.loads(performance_file.read_text())
-        if not isinstance(data, list) or len(data) == 0:
-            return default_metrics
-
         # Extract P&L values
         pnls = [t.get("pnl", 0.0) or 0.0 for t in data if t.get("pnl") is not None]
         if not pnls:
@@ -2458,8 +2481,8 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
                     max_concurrent = max(max_concurrent, current_positions)
                     max_stop_risk = max(max_stop_risk, current_stop_risk)
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         return {
             "max_drawdown": round(max_dd, 2),
@@ -2628,8 +2651,8 @@ def _get_gateway_status() -> Dict[str, Any]:
             s.settimeout(1)
             result = s.connect_ex(("127.0.0.1", gateway_port))
             port_listening = result == 0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
 
     # Determine overall status
     if process_running and port_listening:
@@ -2693,8 +2716,8 @@ def _get_error_summary(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]
                     last_error_time = error_data.get("timestamp")
                 except json.JSONDecodeError:
                     last_error = last_line[:100]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     # Truncate error message if too long
     if last_error and len(last_error) > 80:
@@ -2806,10 +2829,10 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "ai_status": None,
             "challenge": _get_challenge_status(_state_dir),
-            "recent_exits": _get_recent_exits(_state_dir, limit=100),
+            "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
             "performance": _compute_performance_stats(_state_dir),
-            "equity_curve": _get_equity_curve(_state_dir, hours=72),
-            "risk_metrics": _get_risk_metrics(_state_dir),
+            "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+            "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
             "pearl_ai_available": False,
             "operator_lock_enabled": bool(_operator_enabled),
         }
@@ -2839,7 +2862,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "challenge": _get_challenge_status(_state_dir),
 
         # NEW: Recent exits
-        "recent_exits": _get_recent_exits(_state_dir, limit=100),
+        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
 
         # NEW: Performance stats
         "performance": _compute_performance_stats(_state_dir),
@@ -2862,10 +2885,10 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "operator_lock_enabled": bool(_operator_enabled),
 
         # NEW: Equity curve for mini chart
-        "equity_curve": _get_equity_curve(_state_dir, hours=72),
+        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
 
         # NEW: Risk metrics
-        "risk_metrics": _get_risk_metrics(_state_dir),
+        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
 
         # NEW: Buy/Sell Pressure (already in state.json)
         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -3499,8 +3522,8 @@ async def get_markers(
                         "entry_price": s.get("entry_price"),
                         "reason": reason,
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
         
         # Exit marker
         exit_time = s.get("exit_time")
@@ -3532,8 +3555,8 @@ async def get_markers(
                         "pnl": pnl,
                         "exit_reason": s.get("exit_reason", ""),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
     
     # Sort markers by time (required by Lightweight Charts)
     markers.sort(key=lambda m: m["time"])
@@ -3667,8 +3690,8 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
                                 duration_stats[duration_key]["losses"] += 1
                         except (ValueError, TypeError):
                             pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     # Process signals.jsonl for status breakdown AND hold duration
     # (performance.json often lacks entry_time, signals.jsonl has both timestamps)
@@ -3705,8 +3728,8 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
                 status = s.get("status", "").lower()
                 if status in status_breakdown:
                     status_breakdown[status] += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     # Calculate win rates and format session performance
     session_performance = []
@@ -3795,8 +3818,8 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
                     dk = str(xt)[:10]
                     cal_by_date[dk]["pnl"] += (s.get("pnl") or 0)
                     cal_by_date[dk]["trades"] += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
     calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(cal_by_date.items())]
 
     return {
@@ -3889,8 +3912,8 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
                 _duration[dk]["pnl"] += pnl
                 if is_win: _duration[dk]["wins"] += 1
                 else: _duration[dk]["losses"] += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         # Format session_performance
         session_performance = []
@@ -3924,14 +3947,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
         calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(mffu_cal.items())]
 
         # Use equity-based total (accounts for fees) instead of fill sum
-        start_balance = 50000.0
-        try:
-            ch_file = _state_dir / "challenge_state.json"
-            if ch_file.exists():
-                _chd = json.loads(ch_file.read_text())
-                start_balance = float(_chd.get("config", {}).get("start_balance", 50000.0))
-        except Exception:
-            pass
+        start_balance = _get_start_balance(_state_dir)
         equity_pnl = round(float(tv.get("equity", 0)) - start_balance, 2) if tv.get("equity") else None
 
         return {

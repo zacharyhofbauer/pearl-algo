@@ -2,7 +2,7 @@
 Regression tests for Pearl AI config defaults.
 """
 
-from pearl_ai.config import get_config
+from pearlalgo.pearl_ai.config import get_config
 
 
 def test_default_cache_config_values():

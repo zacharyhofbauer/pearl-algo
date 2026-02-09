@@ -521,25 +521,34 @@ class MarketAgentStateManager:
 
     def save_state(self, state: Dict) -> None:
         """
-        Save service state.
+        Save service state under exclusive lock.
+
+        Uses the same ``.state.lock`` file that :class:`StateReader` acquires
+        a shared lock on, so readers and writers are properly coordinated.
         
         Args:
             state: State dictionary
         """
+        lock_file = self.state_dir / ".state.lock"
         try:
             state["last_updated"] = get_utc_timestamp()
-            tmp_path = Path(str(self.state_file) + ".tmp")
-            with open(tmp_path, "w") as f:
-                json.dump(state, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.state_file)
+            with open(lock_file, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    tmp_path = Path(str(self.state_file) + ".tmp")
+                    with open(tmp_path, "w") as f:
+                        json.dump(state, f, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, self.state_file)
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         except Exception as e:
             logger.error(f"Error saving state: {e}")
 
     def load_state(self) -> Dict:
         """
-        Load service state.
+        Load service state under shared lock.
         
         Returns:
             State dictionary (empty dict if no state exists)
@@ -547,9 +556,15 @@ class MarketAgentStateManager:
         if not self.state_file.exists():
             return {}
 
+        lock_file = self.state_dir / ".state.lock"
         try:
-            with open(self.state_file, "r") as f:
-                return json.load(f)
+            with open(lock_file, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
+                try:
+                    with open(self.state_file, "r") as f:
+                        return json.load(f)
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         except Exception as e:
             logger.error(f"Error loading state: {e}")
             return {}
