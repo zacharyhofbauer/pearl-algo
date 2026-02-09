@@ -2170,6 +2170,10 @@ class TelegramAlerts:
                 self.last_error = None
                 return True  # Return True since message was already sent
 
+        # NOTE: Intentional divergence from pearlalgo.utils.retry.async_retry_with_backoff.
+        # This retry loop has Telegram-specific behavior (markdown→plain fallback on
+        # parse errors, 404 early-exit, dedup tracking) that is too intertwined with
+        # the send logic to cleanly delegate to the generic retry utility.
         for attempt in range(max_retries):
             try:
                 await self.bot.send_message(

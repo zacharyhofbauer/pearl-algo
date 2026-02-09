@@ -23,6 +23,7 @@ import statistics
 import sys
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -32,9 +33,27 @@ from typing import Any, Dict, List, Optional
 # Thread pool for running blocking data provider calls
 _executor = ThreadPoolExecutor(max_workers=2)
 
-# Cache for candle data when market is closed
-_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
+# Cache for candle data when market is closed (LRU, bounded)
+_CANDLE_CACHE_MAX_ENTRIES = 50
+_candle_cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
 _cache_file: Optional[Path] = None
+
+
+def _candle_cache_get(key: str) -> Optional[List[Dict[str, Any]]]:
+    """Get a value from the candle cache, promoting it to most-recently-used."""
+    if key in _candle_cache:
+        _candle_cache.move_to_end(key)
+        return _candle_cache[key]
+    return None
+
+
+def _candle_cache_set(key: str, value: List[Dict[str, Any]]) -> None:
+    """Set a value in the candle cache with LRU eviction."""
+    if key in _candle_cache:
+        _candle_cache.move_to_end(key)
+    _candle_cache[key] = value
+    while len(_candle_cache) > _CANDLE_CACHE_MAX_ENTRIES:
+        _candle_cache.popitem(last=False)
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -70,12 +89,31 @@ logger = logging.getLogger(__name__)
 
 _ttl_cache: Dict[str, Any] = {}
 _ttl_cache_lock = threading.Lock()
+_TTL_CLEANUP_INTERVAL = 60.0  # seconds between expired-entry sweeps
+_last_ttl_cleanup: float = 0.0
+
+
+def _cleanup_ttl_cache() -> None:
+    """Remove all expired entries from ``_ttl_cache``.
+
+    Must be called while ``_ttl_cache_lock`` is held.
+    """
+    global _last_ttl_cleanup
+    now = time.monotonic()
+    expired_keys = [k for k, (_, expires) in _ttl_cache.items() if now >= expires]
+    for k in expired_keys:
+        del _ttl_cache[k]
+    _last_ttl_cleanup = now
 
 
 def _cached(key: str, ttl_seconds: float, fn, *args, **kwargs):
     """Return cached result if still fresh, otherwise call fn and cache."""
     now = time.monotonic()
     with _ttl_cache_lock:
+        # Periodic cleanup of expired entries
+        if now - _last_ttl_cleanup >= _TTL_CLEANUP_INTERVAL:
+            _cleanup_ttl_cache()
+
         entry = _ttl_cache.get(key)
         if entry is not None:
             value, expires = entry
@@ -86,6 +124,28 @@ def _cached(key: str, ttl_seconds: float, fn, *args, **kwargs):
     with _ttl_cache_lock:
         _ttl_cache[key] = (result, now + ttl_seconds)
     return result
+
+
+def _get_cached_performance_data(state_dir: Path) -> dict:
+    """Load performance.json with a 5-second TTL cache.
+
+    Returns a dict with a ``"trades"`` key holding the list of trade records,
+    or an empty dict when the file is missing / invalid.  The cache key
+    includes *state_dir* so multiple markets never collide.
+    """
+    def _read_perf() -> dict:
+        pf = state_dir / "performance.json"
+        if not pf.exists():
+            return {}
+        try:
+            data = json.loads(pf.read_text())
+            if isinstance(data, list):
+                return {"trades": data}
+            return {}
+        except Exception:
+            return {}
+
+    return _cached(f"perf_data:{state_dir}", 5.0, _read_perf)
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +420,7 @@ def _get_cache_file() -> Path:
 
 def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
     """Save candles to cache (memory and disk)."""
-    global _candle_cache
-    _candle_cache[key] = candles
+    _candle_cache_set(key, candles)
 
     # Also save to disk for persistence across restarts
     try:
@@ -390,11 +449,10 @@ def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
 
 def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
     """Load candles from cache."""
-    global _candle_cache
-
-    # Try memory cache first
-    if key in _candle_cache:
-        return _candle_cache[key]
+    # Try memory cache first (promotes to most-recently-used)
+    cached_value = _candle_cache_get(key)
+    if cached_value is not None:
+        return cached_value
 
     # Try disk cache
     try:
@@ -406,7 +464,7 @@ def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
                 # Check if cache is less than 24 hours old
                 cache_time = datetime.fromisoformat(cached["timestamp"].replace("Z", "+00:00"))
                 if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
-                    _candle_cache[key] = cached["candles"]
+                    _candle_cache_set(key, cached["candles"])
                     return cached["candles"]
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
@@ -1561,28 +1619,15 @@ def _get_previous_trading_day_bounds() -> tuple:
     Get the start and end of the previous trading day (6pm ET to 6pm ET).
 
     Returns (start_utc, end_utc) for the previous complete trading day.
+    Delegates to shared get_trading_day_start() for the 6pm ET logic.
     """
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
-    et_tz = ZoneInfo("America/New_York")
-    now_et = datetime.now(et_tz)
-
-    # Current trading day start
-    if now_et.hour < 18:
-        # Before 6pm - current trading day started yesterday at 6pm
-        current_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        # After 6pm - current trading day started today at 6pm
-        current_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+    current_day_start = _shared_get_trading_day_start()
 
     # Previous trading day is the 24h window before current trading day start
     prev_day_end = current_day_start
     prev_day_start = current_day_start - timedelta(days=1)
 
-    return prev_day_start.astimezone(timezone.utc), prev_day_end.astimezone(timezone.utc)
+    return prev_day_start, prev_day_end
 
 
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
@@ -1592,6 +1637,17 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     equity-based P&L as the single source of truth for ALL periods.  This
     avoids the mismatch between virtual exit grading and real fills.
     """
+    # --- Read performance.json once for all code paths below ---
+    performance_file = state_dir / "performance.json"
+    perf_data: Optional[list] = None  # None = missing or invalid
+    if performance_file.exists():
+        try:
+            _raw = json.loads(performance_file.read_text())
+            if isinstance(_raw, list):
+                perf_data = _raw
+        except Exception:
+            pass
+
     # Priority 1: Tradovate live data (MFFU accounts)
     try:
         state_file = state_dir / "state.json"
@@ -1606,24 +1662,17 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 # Build a single stat block used for every period
                 tv_stats = {"pnl": pnl, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
                             "tradovate_equity": round(equity, 2), "tradovate_open_pnl": round(open_pnl, 2)}
-                # Read trade counts from performance.json if available
-                try:
-                    pf = state_dir / "performance.json"
-                    if pf.exists():
-                        trades = json.loads(pf.read_text())
-                        if isinstance(trades, list) and trades:
-                            tv_stats["trades"] = len(trades)
-                            tv_stats["wins"] = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
-                            tv_stats["losses"] = len(trades) - tv_stats["wins"]
-                            tv_stats["win_rate"] = round(tv_stats["wins"] / len(trades) * 100, 1)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                # Use pre-loaded performance data for trade counts
+                if perf_data:
+                    tv_stats["trades"] = len(perf_data)
+                    tv_stats["wins"] = sum(1 for t in perf_data if (t.get("pnl") or 0) > 0)
+                    tv_stats["losses"] = len(perf_data) - tv_stats["wins"]
+                    tv_stats["win_rate"] = round(tv_stats["wins"] / len(perf_data) * 100, 1)
                 return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
 
-    performance_file = state_dir / "performance.json"
-    if not performance_file.exists():
+    if perf_data is None:
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
         result = {"yesterday": empty_stats.copy(), "24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
         # Fallback: populate from challenge_state.json when performance.json is missing
@@ -1655,9 +1704,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     stats["yesterday"] = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
 
     try:
-        data = json.loads(performance_file.read_text())
-        if not isinstance(data, list):
-            data = []
+        data = perf_data if perf_data is not None else []
 
         for trade in data:
             exit_time_str = trade.get("exit_time")
@@ -1702,11 +1749,10 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     stats["24h"]["streak"] = 0
     stats["24h"]["streak_type"] = "none"
     try:
-        data = json.loads(performance_file.read_text())
-        if isinstance(data, list):
+        if perf_data:
             cutoff_24h = cutoffs["24h"]
             recent_trades = []
-            for trade in data:
+            for trade in perf_data:
                 exit_time_str = trade.get("exit_time")
                 if not exit_time_str:
                     continue
@@ -2222,17 +2268,12 @@ def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
 
 
 def _load_performance_data(state_dir: Path) -> Optional[list]:
-    """Load and parse performance.json (shared by equity_curve & risk_metrics)."""
-    performance_file = state_dir / "performance.json"
-    if not performance_file.exists():
-        return None
-    try:
-        data = json.loads(performance_file.read_text())
-        if not isinstance(data, list):
-            return None
-        return data
-    except Exception:
-        return None
+    """Load and parse performance.json (shared by equity_curve & risk_metrics).
+
+    Delegates to :func:`_get_cached_performance_data` so the underlying
+    disk read is shared across all callers within the 5-second TTL window.
+    """
+    return _get_cached_performance_data(state_dir).get("trades")
 
 
 def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
@@ -2966,13 +3007,14 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
         raise HTTPException(status_code=500, detail=f"Failed to write kill flag: {str(e)[:200]}")
 
 
-@app.post("/api/close-all-trades")
+@app.post("/api/close-all-trades", status_code=202)
 async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     """
     Request the agent to close ALL virtual trades (status=entered).
 
-    Implementation: sets `close_all_requested=true` in state.json. The Market Agent
-    will process this within its next cycle.
+    Implementation: writes a ``close_all_request.flag`` file into the state
+    directory.  The Market Agent will pick this up within its next cycle.
+    This avoids editing state.json directly (reduces race risk with agent writes).
 
     Safety policy:
     - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
@@ -2981,26 +3023,21 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    state_file = _state_dir / "state.json"
-    if not state_file.exists():
-        raise HTTPException(status_code=404, detail="State file not found. Is the agent running?")
-
     try:
-        raw = state_file.read_text(encoding="utf-8")
-        state = json.loads(raw) if raw else {}
-        if not isinstance(state, dict):
-            state = {}
-
-        state["close_all_requested"] = True
-        state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
-        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-
+        _state_dir.mkdir(parents=True, exist_ok=True)
+        flag_file = _state_dir / "close_all_request.flag"
+        payload = {
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "source": "web",
+        }
+        flag_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info("close-all-trades: wrote %s", flag_file)
         return {"ok": True, "message": "Close-all requested."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to request close-all: {str(e)[:200]}")
 
 
-@app.post("/api/close-trade")
+@app.post("/api/close-trade", status_code=202)
 async def close_trade(
     payload: Dict[str, Any] = Body(default={}),
     _: str = Depends(require_operator_or_api_key),
@@ -3008,7 +3045,10 @@ async def close_trade(
     """
     Request the agent to close a specific virtual trade by signal_id.
 
-    Implementation: appends to `close_signals_requested` array in state.json.
+    Implementation: writes an operator request file into
+    ``{state_dir}/operator_requests/close_trade_{ts_ms}.json``.
+    The Market Agent will pick this up within its next cycle.
+    This avoids editing state.json directly (reduces race risk with agent writes).
 
     Safety policy:
     - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
@@ -3021,26 +3061,15 @@ async def close_trade(
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    state_file = _state_dir / "state.json"
-    if not state_file.exists():
-        raise HTTPException(status_code=404, detail="State file not found. Is the agent running?")
-
     try:
-        raw = state_file.read_text(encoding="utf-8")
-        state = json.loads(raw) if raw else {}
-        if not isinstance(state, dict):
-            state = {}
-
-        requested = state.get("close_signals_requested", [])
-        if not isinstance(requested, list):
-            requested = []
-
-        if signal_id not in requested:
-            requested.append(signal_id)
-        state["close_signals_requested"] = requested
-        state["close_signals_requested_time"] = datetime.now(timezone.utc).isoformat()
-
-        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        req_payload = {
+            "action": "close_trade",
+            "signal_id": signal_id,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "source": "web",
+        }
+        out_path = _write_operator_request(_state_dir, "close_trade", req_payload)
+        logger.info("close-trade: wrote %s (signal_id=%s)", out_path, signal_id)
         return {"ok": True, "message": "Close requested.", "signal_id": signal_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to request close: {str(e)[:200]}")
@@ -3311,23 +3340,16 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
             "all": all_fill_stats,
         }
 
-    # Inception: existing performance.json logic
-    performance_file = _state_dir / "performance.json"
-    if not performance_file.exists():
+    # Inception: existing performance.json logic (cached read)
+    cached_perf = _get_cached_performance_data(_state_dir)
+    trades = cached_perf.get("trades")
+    if trades is None:
         empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
         return {
             "as_of": datetime.now(timezone.utc).isoformat(),
             "td": empty, "yday": empty, "wtd": empty,
             "mtd": empty, "ytd": empty, "all": empty,
         }
-
-    try:
-        raw = performance_file.read_text(encoding="utf-8")
-        trades = json.loads(raw) if raw else []
-        if not isinstance(trades, list):
-            trades = []
-    except Exception:
-        trades = []
 
     now = datetime.now(timezone.utc)
     td_start = _get_trading_day_start()
@@ -3568,269 +3590,17 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
     """
     Compute session and time-based performance analytics from performance.json.
 
-    Returns session performance, best/worst hours, hold duration stats,
-    direction breakdown, and status breakdown.
+    Delegates to :func:`pearlalgo.analytics.session_analytics.compute_session_analytics`.
     """
-    performance_file = state_dir / "performance.json"
+    from pearlalgo.analytics.session_analytics import compute_session_analytics
+
     signals_file = state_dir / "signals.jsonl"
+    signals = _load_jsonl_file(signals_file, max_lines=5000) if signals_file.exists() else []
 
-    # Session definitions (ET timezone)
-    sessions = {
-        "overnight": {"start": 18, "end": 4, "name": "Overnight", "pnl": 0.0, "wins": 0, "losses": 0},
-        "premarket": {"start": 4, "end": 6, "name": "Premarket", "pnl": 0.0, "wins": 0, "losses": 0},
-        "morning": {"start": 6, "end": 10, "name": "Morning", "pnl": 0.0, "wins": 0, "losses": 0},
-        "midday": {"start": 10, "end": 14, "name": "Midday", "pnl": 0.0, "wins": 0, "losses": 0},
-        "afternoon": {"start": 14, "end": 17, "name": "Afternoon", "pnl": 0.0, "wins": 0, "losses": 0},
-        "close": {"start": 17, "end": 18, "name": "Close", "pnl": 0.0, "wins": 0, "losses": 0},
-    }
+    cached_perf = _get_cached_performance_data(state_dir)
+    performance_trades = cached_perf.get("trades") or []
 
-    # Hourly stats
-    hourly_stats: Dict[int, Dict[str, Any]] = {h: {"pnl": 0.0, "trades": 0, "wins": 0} for h in range(24)}
-
-    # Hold duration stats
-    duration_stats = {
-        "quick": {"name": "Quick (<30m)", "pnl": 0.0, "wins": 0, "losses": 0},
-        "medium": {"name": "Medium (30-60m)", "pnl": 0.0, "wins": 0, "losses": 0},
-        "long": {"name": "Long (60m+)", "pnl": 0.0, "wins": 0, "losses": 0},
-    }
-
-    # Direction breakdown
-    direction_stats = {
-        "long": {"count": 0, "pnl": 0.0},
-        "short": {"count": 0, "pnl": 0.0},
-    }
-
-    # Status breakdown from signals.jsonl
-    status_breakdown = {
-        "generated": 0,
-        "entered": 0,
-        "exited": 0,
-        "cancelled": 0,
-    }
-
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
-    et_tz = ZoneInfo("America/New_York")
-
-    def get_session_for_hour(hour: int) -> str:
-        """Determine which session an hour belongs to."""
-        if hour >= 18 or hour < 4:
-            return "overnight"
-        elif 4 <= hour < 6:
-            return "premarket"
-        elif 6 <= hour < 10:
-            return "morning"
-        elif 10 <= hour < 14:
-            return "midday"
-        elif 14 <= hour < 17:
-            return "afternoon"
-        else:  # 17-18
-            return "close"
-
-    # Process performance.json for closed trades
-    if performance_file.exists():
-        try:
-            data = json.loads(performance_file.read_text())
-            if isinstance(data, list):
-                for trade in data:
-                    exit_time_str = trade.get("exit_time")
-                    entry_time_str = trade.get("entry_time")
-                    pnl = trade.get("pnl", 0.0) or 0.0
-                    is_win = trade.get("is_win", pnl > 0)
-                    direction = trade.get("direction", "long").lower()
-
-                    # Direction stats
-                    if direction in direction_stats:
-                        direction_stats[direction]["count"] += 1
-                        direction_stats[direction]["pnl"] += pnl
-
-                    if exit_time_str:
-                        try:
-                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                            exit_time_et = exit_time.astimezone(et_tz)
-                            hour = exit_time_et.hour
-
-                            # Session stats
-                            session_key = get_session_for_hour(hour)
-                            sessions[session_key]["pnl"] += pnl
-                            if is_win:
-                                sessions[session_key]["wins"] += 1
-                            else:
-                                sessions[session_key]["losses"] += 1
-
-                            # Hourly stats
-                            hourly_stats[hour]["pnl"] += pnl
-                            hourly_stats[hour]["trades"] += 1
-                            if is_win:
-                                hourly_stats[hour]["wins"] += 1
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Duration stats
-                    if entry_time_str and exit_time_str:
-                        try:
-                            entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
-                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                            duration_minutes = (exit_time - entry_time).total_seconds() / 60
-
-                            if duration_minutes < 30:
-                                duration_key = "quick"
-                            elif duration_minutes < 60:
-                                duration_key = "medium"
-                            else:
-                                duration_key = "long"
-
-                            duration_stats[duration_key]["pnl"] += pnl
-                            if is_win:
-                                duration_stats[duration_key]["wins"] += 1
-                            else:
-                                duration_stats[duration_key]["losses"] += 1
-                        except (ValueError, TypeError):
-                            pass
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-    # Process signals.jsonl for status breakdown AND hold duration
-    # (performance.json often lacks entry_time, signals.jsonl has both timestamps)
-    if signals_file.exists():
-        try:
-            signals = _load_jsonl_file(signals_file, max_lines=2000)
-            # Compute hold duration from signals (which have entry_time + exit_time)
-            for s in signals:
-                if s.get("status") != "exited":
-                    continue
-                et_str = s.get("entry_time")
-                xt_str = s.get("exit_time")
-                pnl = s.get("pnl", 0) or 0
-                is_win = pnl > 0
-                if et_str and xt_str:
-                    try:
-                        et_dt = datetime.fromisoformat(str(et_str).replace("Z", "+00:00"))
-                        xt_dt = datetime.fromisoformat(str(xt_str).replace("Z", "+00:00"))
-                        dur_min = (xt_dt - et_dt).total_seconds() / 60
-                        if dur_min < 30:
-                            dk = "quick"
-                        elif dur_min < 60:
-                            dk = "medium"
-                        else:
-                            dk = "long"
-                        duration_stats[dk]["pnl"] += pnl
-                        if is_win:
-                            duration_stats[dk]["wins"] += 1
-                        else:
-                            duration_stats[dk]["losses"] += 1
-                    except (ValueError, TypeError):
-                        pass
-            for s in signals:
-                status = s.get("status", "").lower()
-                if status in status_breakdown:
-                    status_breakdown[status] += 1
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-    # Calculate win rates and format session performance
-    session_performance = []
-    for key, session in sessions.items():
-        total = session["wins"] + session["losses"]
-        win_rate = round(session["wins"] / total * 100, 1) if total > 0 else 0.0
-        session_performance.append({
-            "id": key,
-            "name": session["name"],
-            "pnl": round(session["pnl"], 2),
-            "wins": session["wins"],
-            "losses": session["losses"],
-            "win_rate": win_rate,
-        })
-
-    # Best and worst hours (min 5 trades)
-    qualified_hours = [
-        {"hour": h, **stats}
-        for h, stats in hourly_stats.items()
-        if stats["trades"] >= 5
-    ]
-
-    # Sort by P&L
-    sorted_by_pnl = sorted(qualified_hours, key=lambda x: x["pnl"], reverse=True)
-    best_hours = []
-    worst_hours = []
-
-    for h in sorted_by_pnl[:3]:
-        win_rate = round(h["wins"] / h["trades"] * 100, 1) if h["trades"] > 0 else 0.0
-        best_hours.append({
-            "hour": h["hour"],
-            "hour_label": f"{h['hour']:02d}:00 ET",
-            "pnl": round(h["pnl"], 2),
-            "trades": h["trades"],
-            "win_rate": win_rate,
-        })
-
-    for h in sorted_by_pnl[-3:][::-1]:  # Reverse to get worst first
-        if h["pnl"] < 0:  # Only include negative hours
-            win_rate = round(h["wins"] / h["trades"] * 100, 1) if h["trades"] > 0 else 0.0
-            worst_hours.append({
-                "hour": h["hour"],
-                "hour_label": f"{h['hour']:02d}:00 ET",
-                "pnl": round(h["pnl"], 2),
-                "trades": h["trades"],
-                "win_rate": win_rate,
-            })
-
-    # Format duration breakdown
-    hold_duration = []
-    for key, dur in duration_stats.items():
-        total = dur["wins"] + dur["losses"]
-        win_rate = round(dur["wins"] / total * 100, 1) if total > 0 else 0.0
-        hold_duration.append({
-            "id": key,
-            "name": dur["name"],
-            "pnl": round(dur["pnl"], 2),
-            "wins": dur["wins"],
-            "losses": dur["losses"],
-            "win_rate": win_rate,
-        })
-
-    # Format direction breakdown
-    direction_breakdown = {
-        "long": {
-            "count": direction_stats["long"]["count"],
-            "pnl": round(direction_stats["long"]["pnl"], 2),
-        },
-        "short": {
-            "count": direction_stats["short"]["count"],
-            "pnl": round(direction_stats["short"]["pnl"], 2),
-        },
-    }
-
-    # Build calendar data server-side from all exits (signals.jsonl has full history)
-    from collections import defaultdict as _defaultdict
-    cal_by_date: Dict[str, Dict[str, float]] = _defaultdict(lambda: {"pnl": 0.0, "trades": 0})
-    if signals_file.exists():
-        try:
-            all_sigs = _load_jsonl_file(signals_file, max_lines=5000)
-            for s in all_sigs:
-                if s.get("status") != "exited":
-                    continue
-                xt = s.get("exit_time", "")
-                if xt:
-                    dk = str(xt)[:10]
-                    cal_by_date[dk]["pnl"] += (s.get("pnl") or 0)
-                    cal_by_date[dk]["trades"] += 1
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-    calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(cal_by_date.items())]
-
-    return {
-        "session_performance": session_performance,
-        "best_hours": best_hours,
-        "worst_hours": worst_hours,
-        "hold_duration": hold_duration,
-        "direction_breakdown": direction_breakdown,
-        "status_breakdown": status_breakdown,
-        "calendar_data": calendar_data,
-    }
+    return compute_session_analytics(signals=signals, performance_trades=performance_trades)
 
 
 @app.get("/api/analytics")

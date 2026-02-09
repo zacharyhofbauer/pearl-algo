@@ -768,6 +768,25 @@ class PerformanceTracker:
         except Exception as e:
             logger.debug(f"Could not write signal event to SQLite: {e}")
 
+    def load_performance_data(self) -> list:
+        """Load all performance records from ``performance.json``.
+
+        Returns:
+            List of trade-performance dicts (empty list if file is
+            missing or corrupt).
+        """
+        if not self.performance_file.exists():
+            return []
+        try:
+            with open(self.performance_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+            return []
+        except Exception as e:
+            logger.error(f"Error loading performance data: {e}")
+            return []
+
     def _save_performance(self, performance: Dict) -> None:
         """Save performance record."""
         # Load existing performance records

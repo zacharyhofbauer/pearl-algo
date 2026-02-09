@@ -80,7 +80,8 @@ class ScheduledTasks:
             morning_time_str = str(briefing_config.get("morning_time", "06:30"))
             try:
                 morning_hour, morning_minute = map(int, morning_time_str.split(":"))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 morning_hour, morning_minute = 6, 30
 
             now_utc = datetime.now(timezone.utc)
@@ -88,7 +89,8 @@ class ScheduledTasks:
                 from zoneinfo import ZoneInfo
                 et_tz = ZoneInfo("America/New_York")
                 now_et = now_utc.astimezone(et_tz)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 now_et = now_utc - timedelta(hours=5)
 
             today_str = now_et.strftime("%Y-%m-%d")
@@ -197,7 +199,8 @@ class ScheduledTasks:
                 import pytz
                 et_tz = pytz.timezone("US/Eastern")
                 now_et = now_utc.astimezone(et_tz)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 now_et = now_utc - timedelta(hours=5)
 
             today_str = now_et.strftime("%Y-%m-%d")
@@ -400,7 +403,8 @@ class ScheduledTasks:
         try:
             if not get_market_hours().is_market_open():
                 return
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return
 
         if self._follower_last_signal_at is None:

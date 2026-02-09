@@ -70,7 +70,8 @@ def _is_command_handler_running() -> bool:
         pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)  # Check if process exists
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
         return False
 
 
@@ -143,7 +144,8 @@ class MarketAgentTelegramNotifier:
         """Load latest Telegram preferences from disk (safe, small IO)."""
         try:
             return TelegramPrefs(state_dir=self.state_dir)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             # Fall back to the instance prefs (best-effort).
             return self.prefs
 
@@ -171,19 +173,23 @@ class MarketAgentTelegramNotifier:
         signal_type = str(signal.get("type") or "unknown").replace("_", " ").title()
         try:
             entry_price = float(signal.get("entry_price") or 0.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             entry_price = 0.0
         try:
             stop_loss = float(signal.get("stop_loss") or 0.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             stop_loss = 0.0
         try:
             take_profit = float(signal.get("take_profit") or 0.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             take_profit = 0.0
         try:
             confidence = float(signal.get("confidence") or 0.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             confidence = 0.0
         signal_id = str(signal.get("signal_id") or "")
 
@@ -584,7 +590,8 @@ class MarketAgentTelegramNotifier:
             # Preserve key context from the signal alert (so ENTRY can be canonical without losing info)
             try:
                 confidence = float(signal.get("confidence") or 0.0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 confidence = 0.0
             try:
                 conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
@@ -600,8 +607,8 @@ class MarketAgentTelegramNotifier:
                     message += f"\n{conf_emoji} Conf: {confidence:.0%} {conf_tier}"
                     if session:
                         message += f" | {session}"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             
             # Execution status (for accounts with live execution e.g. MFFU/Tradovate)
             exec_status = signal.get("_execution_status", "")
@@ -837,7 +844,8 @@ class MarketAgentTelegramNotifier:
             if futures_market_open is None:
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     futures_market_open = None
             futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
             futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
@@ -866,7 +874,8 @@ class MarketAgentTelegramNotifier:
             scans_session = status.get("cycle_count_session")
             try:
                 scans_session = int(scans_session) if scans_session is not None else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 scans_session = None
 
             errors = int(status.get("error_count", 0) or 0)
@@ -875,7 +884,8 @@ class MarketAgentTelegramNotifier:
             buffer_target = status.get("buffer_size_target")
             try:
                 buffer_target = int(buffer_target) if buffer_target is not None else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 buffer_target = None
 
             scans_label = f"{scans_session:,} {LABEL_SCANS} (session) / {scans_total:,} (total)" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
@@ -929,8 +939,8 @@ class MarketAgentTelegramNotifier:
                             if bar_time:
                                 age_delta = datetime.now(timezone.utc) - bar_time
                                 data_age_minutes = age_delta.total_seconds() / 60
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                     
                     if is_eth:
                         if data_age_minutes is not None and data_age_minutes > 10:
@@ -987,7 +997,8 @@ class MarketAgentTelegramNotifier:
             if futures_market_open is None:
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     futures_market_open = None
 
             strategy_session_open = status.get("strategy_session_open")
@@ -1010,12 +1021,13 @@ class MarketAgentTelegramNotifier:
                     et_tz = pytz.timezone('US/Eastern')
                     et_time = current_time.astimezone(et_tz)
                     time_str = et_time.strftime("%I:%M %p ET")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     try:
                         if hasattr(current_time, 'strftime'):
                             time_str = current_time.strftime("%H:%M UTC")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
             
             # Build compact message
             futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
@@ -1036,7 +1048,8 @@ class MarketAgentTelegramNotifier:
             scans_session = status.get("cycle_count_session")
             try:
                 scans_session = int(scans_session) if scans_session is not None else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 scans_session = None
 
             signals_generated = int(status.get("signal_count", 0) or 0)
@@ -1049,7 +1062,8 @@ class MarketAgentTelegramNotifier:
             buffer_target = status.get("buffer_size_target")
             try:
                 buffer_target = int(buffer_target) if buffer_target is not None else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 buffer_target = None
 
             scans_part = f"{scans_session:,}/{scans_total:,} {LABEL_SCANS}" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
@@ -1167,8 +1181,8 @@ class MarketAgentTelegramNotifier:
             try:
                 plain_header = f"🐚 PEARL\n{message_type}\n\n" if use_header else ""
                 return await self.telegram.send_message(plain_header + message)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Non-critical: {e}")
             ErrorHandler.handle_telegram_error(e, "send_pearl_notification")
             return False
 
@@ -1210,7 +1224,8 @@ class MarketAgentTelegramNotifier:
                 et_tz = pytz.timezone('US/Eastern')
                 et_time = current_time.astimezone(et_tz)
                 time_str = et_time.strftime("%I:%M %p ET").lstrip("0")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
             latest_price = status.get("latest_price")
@@ -1221,7 +1236,8 @@ class MarketAgentTelegramNotifier:
             if futures_market_open is None:
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     futures_market_open = None
             strategy_session_open = status.get("strategy_session_open")
             
@@ -1240,12 +1256,14 @@ class MarketAgentTelegramNotifier:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         data_age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_age_seconds = None
 
             try:
                 data_stale_threshold_minutes = float(status.get("data_stale_threshold_minutes", 10.0))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_stale_threshold_minutes = 10.0
 
             is_data_stale = False
@@ -1266,7 +1284,8 @@ class MarketAgentTelegramNotifier:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         last_cycle_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 last_cycle_seconds = None
 
             agent_uptime_seconds = None
@@ -1278,7 +1297,8 @@ class MarketAgentTelegramNotifier:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         agent_uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 agent_uptime_seconds = None
 
             # Grace period: treat missing last_successful_cycle as healthy during initial startup.
@@ -1291,11 +1311,13 @@ class MarketAgentTelegramNotifier:
                 else:
                     try:
                         scan_interval = float((status.get("config") or {}).get("scan_interval") or 30.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         scan_interval = 30.0
                     thresh = max(90.0, scan_interval * 2.0)
                     agent_healthy = bool(last_cycle_seconds <= thresh)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 agent_healthy = None
 
             # Gateway status: prefer explicit connection status when present.
@@ -1365,7 +1387,8 @@ class MarketAgentTelegramNotifier:
                             ml_label = mm if mm in ("shadow", "live") else "on"
                         else:
                             ml_label = "off"
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     ml_label = "?"
 
                 lift_progress = ""
@@ -1382,14 +1405,15 @@ class MarketAgentTelegramNotifier:
                             f = lift.get("fail_trades")
                             if p is not None and f is not None:
                                 lift_progress += f" ({int(p)}P/{int(f)}F)"
-                        except Exception:
-                            pass
-                except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     lift_progress = ""
 
                 message += f"\n🧠 ML: Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             # ------------------------------------------------------------------
             # 24h + 72h performance (match /start dashboard semantics)
@@ -1411,7 +1435,8 @@ class MarketAgentTelegramNotifier:
                         perf_trades = json.loads(perf_file.read_text(encoding="utf-8"))
                         if not isinstance(perf_trades, list):
                             perf_trades = []
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         perf_trades = []
 
                 # "24h" section is actually today's UTC trades (legacy label; matches existing dashboard).
@@ -1468,7 +1493,8 @@ class MarketAgentTelegramNotifier:
                             dt = parse_utc_timestamp(ts)
                             if dt >= cutoff:
                                 trades_72h.append(t)
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             continue
                     # Defensive: de-dupe by signal_id to avoid any double-counting if the
                     # performance log ever accumulates duplicate exits.
@@ -1483,8 +1509,8 @@ class MarketAgentTelegramNotifier:
                             by_id[sid] = t  # keep most recent occurrence (append-only)
                         if by_id:
                             trades_72h = list(by_id.values()) + no_id
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                     if trades_72h:
                         pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
                         wins_72h = sum(1 for t in trades_72h if t.get("is_win"))
@@ -1494,8 +1520,8 @@ class MarketAgentTelegramNotifier:
                         pnl_sign_72h = "+" if pnl_72h >= 0 else "-"
                         message += "\n\n*72h:*"
                         message += f"\n{pnl_emoji_72h} {pnl_sign_72h}${abs(pnl_72h):,.2f} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             # Challenge + performance (best-effort; never block dashboard).
             try:
@@ -1503,8 +1529,8 @@ class MarketAgentTelegramNotifier:
                 ct = ChallengeTracker(state_dir=self.state_dir)
                 try:
                     ct.refresh()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # Get unrealized PNL from status if available
                 unrealized_pnl = status.get("active_trades_unrealized_pnl")
@@ -1533,14 +1559,14 @@ class MarketAgentTelegramNotifier:
                                 f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
                                 f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
                             )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # Single canonical challenge block (avoid duplicate "current run" sections).
                 try:
                     message += "\n\n" + ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # Recent exits (compact; match /start dashboard style)
                 try:
@@ -1550,7 +1576,8 @@ class MarketAgentTelegramNotifier:
                         for t in recent_exits[:2]:
                             try:
                                 pnl_val = float(t.get("pnl") or 0.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 pnl_val = 0.0
                             pnl_emoji, pnl_str = format_pnl(pnl_val)
                             dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
@@ -1560,10 +1587,10 @@ class MarketAgentTelegramNotifier:
                             if reason:
                                 line += f" • {reason}"
                             message += line
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             # Support footer (🩺 …) for debugging/sharing (best-effort).
             try:
@@ -1573,12 +1600,14 @@ class MarketAgentTelegramNotifier:
                 ver = None
                 try:
                     ver = get_version("pearlalgo-dev-ai-agents")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     ver = "0.2.2"
                 run_id = None
                 try:
                     run_id = get_run_id()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     run_id = None
 
                 lvl_map = {
@@ -1596,7 +1625,8 @@ class MarketAgentTelegramNotifier:
                         return "?"
                     try:
                         s = float(sec)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         return "?"
                     if s < 60:
                         return f"{int(s)}s"
@@ -1616,8 +1646,8 @@ class MarketAgentTelegramNotifier:
                 stale_flag = "!" if is_data_stale else ""
                 support = f"`🩺 {market_label}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{cycle_str} | run:{rid}`"
                 message += "\n" + support
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             
             # Build main menu buttons (only useful when the command handler is running).
             reply_markup = None
@@ -1629,7 +1659,8 @@ class MarketAgentTelegramNotifier:
                     # Activity label: include active count when meaningful.
                     try:
                         active_cnt = int(status.get("active_trades_count", 0) or 0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         active_cnt = 0
                     activity_label = f"📊 Activity ({active_cnt})" if active_cnt > 0 else "📊 Activity"
 
@@ -1661,7 +1692,8 @@ class MarketAgentTelegramNotifier:
             # Dashboard persistence + pinned behavior.
             try:
                 prefs_live = self._get_prefs()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 prefs_live = self.prefs
 
             bot = getattr(self.telegram, "bot", None)
@@ -1671,7 +1703,8 @@ class MarketAgentTelegramNotifier:
             edit_in_place = bool(getattr(prefs_live, "dashboard_edit_in_place", False)) if prefs_live else False
             try:
                 message_id = prefs_live.get("dashboard_message_id") if prefs_live else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 message_id = None
 
             sent_at = datetime.now(timezone.utc).isoformat()
@@ -1690,8 +1723,8 @@ class MarketAgentTelegramNotifier:
                         prefs_live.set("last_dashboard_sent_at", sent_at)
                         if mid is not None:
                             prefs_live.set("dashboard_message_id", int(mid))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
             # If pinned mode is enabled, attempt to update the prior dashboard message in place.
             if edit_in_place and message_id:
@@ -1709,7 +1742,8 @@ class MarketAgentTelegramNotifier:
                                     media=media,
                                     reply_markup=reply_markup,
                                 )
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Non-critical: {e}")
                             # Fallback: update caption only (keeps previous chart media).
                             try:
                                 await bot.edit_message_caption(
@@ -1719,7 +1753,8 @@ class MarketAgentTelegramNotifier:
                                     parse_mode="MarkdownV2",
                                     reply_markup=reply_markup,
                                 )
-                            except Exception:
+                            except Exception as e:
+                                logger.warning(f"Non-critical: {e}")
                                 # If we can't update media/caption, fall back to sending a new visual dashboard.
                                 raise
                     else:
@@ -1732,7 +1767,8 @@ class MarketAgentTelegramNotifier:
                                 parse_mode="MarkdownV2",
                                 reply_markup=reply_markup,
                             )
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Non-critical: {e}")
                             await bot.edit_message_text(
                                 chat_id=self.chat_id,
                                 message_id=mid,
@@ -1743,21 +1779,22 @@ class MarketAgentTelegramNotifier:
 
                     _persist(mid)
                     return True
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Non-critical: {e}")
                     # If edit fails (message deleted/too old), fall back to sending a new dashboard.
                     try:
                         if prefs_live:
                             prefs_live.set("dashboard_message_id", None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                     # Keep message_id so we can best-effort delete it below.
 
             # Not pinned (or pinned edit failed): keep chat clean by deleting the previous dashboard, if any.
             if message_id:
                 try:
                     await bot.delete_message(chat_id=self.chat_id, message_id=int(message_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Non-critical: {e}")
 
             # Send new dashboard message (photo+caption when chart is provided, otherwise text-only).
             msg_obj = None
@@ -1771,7 +1808,8 @@ class MarketAgentTelegramNotifier:
                             parse_mode="MarkdownV2",
                             reply_markup=reply_markup,
                         )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Non-critical: {e}")
                     # Plain-text fallback if MarkdownV2 caption fails.
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)  # Replace emoji syntax
@@ -1792,7 +1830,8 @@ class MarketAgentTelegramNotifier:
                         parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Non-critical: {e}")
                     # Plain text fallback
                     import re
                     text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
@@ -1842,7 +1881,8 @@ class MarketAgentTelegramNotifier:
             # Reload prefs from disk so snooze set via Telegram UI is respected immediately.
             try:
                 prefs = self._get_prefs()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 prefs = self.prefs
             if not is_critical and prefs and prefs.snooze_noncritical_alerts:
                 logger.info(f"Data quality alert '{alert_type}' suppressed (snoozed)")
@@ -1944,7 +1984,8 @@ class MarketAgentTelegramNotifier:
                         pid = int(pid_file.read_text().strip())
                         os.kill(pid, 0)
                         handler_running = True
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         handler_running = False
 
                 if handler_running:
@@ -1975,7 +2016,8 @@ class MarketAgentTelegramNotifier:
 
                     keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN))])
                     reply_markup = InlineKeyboardMarkup(keyboard)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 reply_markup = None
 
             # Send using send_message (includes retry + dedupe)
@@ -2002,7 +2044,8 @@ class MarketAgentTelegramNotifier:
             try:
                 import os
                 market = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 market = "NQ"
 
             # Current time in ET
@@ -2011,7 +2054,8 @@ class MarketAgentTelegramNotifier:
                 import pytz
                 et_time = current_time.astimezone(pytz.timezone("US/Eastern"))
                 time_str = et_time.strftime("%I:%M %p ET")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 time_str = current_time.strftime("%H:%M UTC")
 
             futures_market_open = config.get("futures_market_open")

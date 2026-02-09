@@ -73,6 +73,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Track open orders for reconciliation
         self._open_orders: Dict[str, Dict[str, Any]] = {}
 
+        # Background reconciliation task
+        self._reconciliation_task: Optional[asyncio.Task] = None
+
         logger.info(
             f"TradovateExecutionAdapter initialized: "
             f"env={self._tv_config.env}, mode={config.mode.value}"
@@ -110,6 +113,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 logger.warning(f"WebSocket start failed (REST-only mode): {e}")
 
             self._connected = True
+
+            # Start background reconciliation (polls orders when WS is down)
+            self._reconciliation_task = asyncio.create_task(
+                self._reconciliation_loop()
+            )
             logger.info(
                 f"Tradovate connected: account={self._client.account_name}, "
                 f"contract={self._contract_symbol}"
@@ -126,6 +134,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
     async def disconnect(self) -> None:
         """Disconnect from Tradovate."""
         self._connected = False
+
+        if self._reconciliation_task and not self._reconciliation_task.done():
+            self._reconciliation_task.cancel()
+            try:
+                await self._reconciliation_task
+            except asyncio.CancelledError:
+                pass
+
         await self._client.disconnect()
         logger.info("Tradovate disconnected")
 
@@ -179,6 +195,18 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             try:
                 symbol = signal.get("symbol", "MNQ")
                 self._contract_symbol = await self._client.resolve_front_month(symbol)
+                # Guard: contract resolution must return a non-empty symbol
+                if not self._contract_symbol:
+                    logger.warning(
+                        f"Contract resolution returned empty result for symbol={symbol}; "
+                        f"cannot place order for signal {signal_id}"
+                    )
+                    return ExecutionResult(
+                        success=False,
+                        status=OrderStatus.ERROR,
+                        signal_id=signal_id,
+                        error_message=f"Contract resolution returned empty for {symbol}",
+                    )
             except Exception as e:
                 return ExecutionResult(
                     success=False,
@@ -194,6 +222,44 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         take_profit = float(signal.get("take_profit", 0))
         position_size = int(signal.get("position_size", 1))
 
+        # Guard: position size must be positive
+        if position_size <= 0:
+            logger.warning(
+                f"Invalid position_size={position_size} for signal {signal_id}; "
+                f"skipping order placement"
+            )
+            return ExecutionResult(
+                success=False,
+                status=OrderStatus.REJECTED,
+                signal_id=signal_id,
+                error_message=f"Invalid position_size: {position_size}",
+            )
+
+        # Guard: stop loss must be on the correct side of entry price
+        if stop_loss > 0 and entry_price > 0:
+            if direction == "long" and stop_loss >= entry_price:
+                logger.warning(
+                    f"Invalid stop_loss for LONG: stop_loss={stop_loss} >= "
+                    f"entry_price={entry_price} for signal {signal_id}; skipping order"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"Stop loss {stop_loss} invalid for LONG entry {entry_price}",
+                )
+            elif direction == "short" and stop_loss <= entry_price:
+                logger.warning(
+                    f"Invalid stop_loss for SHORT: stop_loss={stop_loss} <= "
+                    f"entry_price={entry_price} for signal {signal_id}; skipping order"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"Stop loss {stop_loss} invalid for SHORT entry {entry_price}",
+                )
+
         # Map direction to Tradovate action
         action = "Buy" if direction == "long" else "Sell"
 
@@ -206,6 +272,19 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 tp_price=take_profit if take_profit > 0 else None,
                 sl_price=stop_loss if stop_loss > 0 else None,
             )
+
+            # Guard: verify response is a dict with expected structure
+            if not isinstance(result, dict):
+                logger.warning(
+                    f"Unexpected response type from place_oso: {type(result).__name__} "
+                    f"for signal {signal_id}; expected dict"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.ERROR,
+                    signal_id=signal_id,
+                    error_message=f"Unexpected place_oso response type: {type(result).__name__}",
+                )
 
             order_id = result.get("orderId") or result.get("id")
             if order_id:
@@ -360,6 +439,17 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         event_type = event.get("e")
         data = event.get("d", {})
 
+        # Reconcile orders on WebSocket reconnection
+        if event_type == "ws_reconnected":
+            logger.info(
+                "WebSocket reconnected -- reconciling order status via REST"
+            )
+            try:
+                asyncio.create_task(self._poll_order_status())
+            except Exception as e:
+                logger.error(f"Failed to schedule post-reconnect poll: {e}")
+            return
+
         if event_type == "props" and isinstance(data, dict):
             entity_type = data.get("entityType", "")
             event_action = data.get("eventType", "")
@@ -385,6 +475,73 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     f"netPos={entity.get('netPos')}"
                 )
 
+    # ── REST order reconciliation ─────────────────────────────────────
+
+    async def _poll_order_status(self) -> None:
+        """
+        Poll order status via REST and reconcile with ``_open_orders``.
+
+        Called periodically when the WebSocket is disconnected and once
+        immediately after a successful reconnection.
+        """
+        try:
+            rest_orders = await self._client.get_orders()
+        except Exception as e:
+            logger.error(f"REST order poll failed: {e}")
+            return
+
+        if not isinstance(rest_orders, list):
+            logger.warning(
+                f"Unexpected /order/list response type: {type(rest_orders).__name__}"
+            )
+            return
+
+        # Build a lookup of REST order states keyed by order ID
+        rest_order_map: Dict[str, Dict[str, Any]] = {}
+        for order in rest_orders:
+            oid = str(order.get("id", ""))
+            if oid:
+                rest_order_map[oid] = order
+
+        # Reconcile tracked orders against the REST snapshot
+        for order_id in list(self._open_orders.keys()):
+            rest_order = rest_order_map.get(order_id)
+            if rest_order is None:
+                # Order not in REST list at all -- may have been purged
+                logger.warning(
+                    f"Order {order_id} tracked locally but absent from REST "
+                    f"/order/list; removing from open orders"
+                )
+                self._open_orders.pop(order_id, None)
+                continue
+
+            ord_status = rest_order.get("ordStatus", "")
+            if ord_status in ("Filled", "Cancelled", "Rejected", "Expired"):
+                logger.warning(
+                    f"Order reconciliation: order {order_id} status changed "
+                    f"to {ord_status} (detected via REST poll)"
+                )
+                self._open_orders.pop(order_id, None)
+
+    async def _reconciliation_loop(self) -> None:
+        """
+        Background task that polls order status via REST when the WebSocket
+        feed is disconnected, ensuring no order updates are missed.
+        """
+        while self._connected:
+            try:
+                if not self._client.ws_connected and self._open_orders:
+                    logger.debug(
+                        "WebSocket disconnected -- polling order status via REST"
+                    )
+                    await self._poll_order_status()
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Reconciliation loop error: {e}")
+                await asyncio.sleep(5)
+
     # ── Status ────────────────────────────────────────────────────────
 
     def get_status(self) -> Dict[str, Any]:
@@ -393,6 +550,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             "adapter": "tradovate",
             "connected": self._connected,
             "authenticated": self._client.is_authenticated,
+            "ws_connected": self._client.ws_connected,
             "account": self._client.account_name,
             "account_id": self._client.account_id,
             "contract": self._contract_symbol,

@@ -1019,7 +1019,7 @@ class TestEdgeCases:
     async def test_empty_signal_dict(
         self, state_manager, performance_tracker, notification_queue, order_manager
     ):
-        """Empty signal dict should process without crashing."""
+        """Empty signal dict should be rejected (no entry_price) without crashing."""
         h = SignalHandler(
             state_manager=state_manager,
             performance_tracker=performance_tracker,
@@ -1029,13 +1029,14 @@ class TestEdgeCases:
 
         await h.process_signal({})
 
-        assert h.signal_count == 1
+        # Empty signal has no entry_price, so the guard rejects it
+        assert h.signal_count == 0
         assert h.error_count == 0
 
     async def test_none_entry_price(
         self, state_manager, performance_tracker, notification_queue, order_manager
     ):
-        """Signal with entry_price=None should default to 0.0 and still process."""
+        """Signal with entry_price=None should be rejected by guard clause."""
         h = SignalHandler(
             state_manager=state_manager,
             performance_tracker=performance_tracker,
@@ -1048,7 +1049,8 @@ class TestEdgeCases:
 
         await h.process_signal(signal)
 
-        assert h.signal_count == 1
+        # Guard rejects None entry_price
+        assert h.signal_count == 0
 
     async def test_multiple_signals_accumulate_counters(
         self, state_manager, performance_tracker, notification_queue, order_manager

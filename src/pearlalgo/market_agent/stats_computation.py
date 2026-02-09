@@ -13,11 +13,12 @@ Key functions:
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from pearlalgo.utils.state_io import load_json_file, load_jsonl_file
 
 # ---------------------------------------------------------------------------
 # Simple caching mechanism
@@ -84,38 +85,6 @@ def get_trading_day_start() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# File Loading Helpers
-# ---------------------------------------------------------------------------
-
-def _load_json_file(path: Path) -> Dict[str, Any]:
-    """Load a JSON file, returning empty dict on error."""
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
-    """Load last N lines from a JSONL file."""
-    if not path.exists():
-        return []
-    try:
-        lines = path.read_text(encoding="utf-8").strip().split("\n")
-        result = []
-        for line in lines[-max_lines:]:
-            if line.strip():
-                try:
-                    result.append(json.loads(line))
-                except Exception:
-                    pass
-        return result
-    except Exception:
-        return []
-
-
-# ---------------------------------------------------------------------------
 # Daily Stats Computation
 # ---------------------------------------------------------------------------
 
@@ -170,7 +139,7 @@ def compute_daily_stats(
     daily_losses = 0
 
     try:
-        signals = _load_jsonl_file(signals_file, max_lines=2000)
+        signals = load_jsonl_file(signals_file, max_lines=2000)
         for s in signals:
             if s.get("status") != "exited":
                 continue
@@ -285,7 +254,7 @@ def compute_performance_stats(
     recent_trades_24h: List[Tuple[datetime, bool]] = []
 
     try:
-        data = _load_json_file(performance_file)
+        data = load_json_file(performance_file)
         if not isinstance(data, list):
             data = []
 

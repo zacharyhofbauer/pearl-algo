@@ -8,6 +8,7 @@ Extracted from service.py for better code organization.
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -168,6 +169,49 @@ class SignalHandler:
             signal_id = self.performance_tracker.track_signal_generated(signal)
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
+
+            # Guard: reject signals with NaN or None entry_price
+            raw_entry_price = signal.get("entry_price")
+            if raw_entry_price is None:
+                logger.warning(
+                    f"Rejecting signal {str(signal_id)[:16]}: entry_price is None"
+                )
+                return
+            try:
+                _entry_val = float(raw_entry_price)
+                if math.isnan(_entry_val):
+                    logger.warning(
+                        f"Rejecting signal {str(signal_id)[:16]}: entry_price is NaN"
+                    )
+                    return
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"Rejecting signal {str(signal_id)[:16]}: "
+                    f"entry_price={raw_entry_price!r} is not a valid number"
+                )
+                return
+
+            # Guard: reject signals with timestamps more than 5 minutes in the future
+            _raw_ts = signal.get("timestamp") or signal.get("_timestamp")
+            if _raw_ts is not None:
+                try:
+                    _sig_dt = datetime.fromisoformat(
+                        str(_raw_ts).replace("Z", "+00:00")
+                    )
+                    _now_utc = datetime.now(timezone.utc)
+                    _future_delta = (_sig_dt - _now_utc).total_seconds()
+                    if _future_delta > 300:  # 5 minutes
+                        logger.warning(
+                            f"Rejecting signal {str(signal_id)[:16]}: timestamp "
+                            f"{_raw_ts} is {_future_delta:.0f}s in the future "
+                            f"(max allowed: 300s)"
+                        )
+                        return
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Could not parse signal timestamp {_raw_ts!r} for "
+                        f"signal {str(signal_id)[:16]}: {e}"
+                    )
 
             # Virtual entry: enter immediately at the signal's entry price
             entry_price = self._track_virtual_entry(signal, signal_id)

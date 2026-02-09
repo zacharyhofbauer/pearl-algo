@@ -159,7 +159,8 @@ class OperatorHandler:
 
         try:
             files = sorted([p for p in req_dir.glob("pearl_suggestion_feedback_*.json") if p.is_file()])
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return
 
         if not files:
@@ -168,7 +169,8 @@ class OperatorHandler:
         snap = {}
         try:
             snap = self._get_status_snapshot() or {}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             snap = {}
 
         shadow_context = {

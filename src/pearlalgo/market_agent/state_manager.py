@@ -65,7 +65,8 @@ def _to_json_safe(obj):
     if isinstance(obj, (datetime, date)):
         try:
             return obj.isoformat()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"State operation failed: {e}")
             return str(obj)
 
     # Paths
@@ -80,8 +81,8 @@ def _to_json_safe(obj):
             return obj.item()
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"State operation failed: {e}")
 
     # pandas timestamps/containers
     try:
@@ -96,8 +97,8 @@ def _to_json_safe(obj):
         if isinstance(obj, pd.DataFrame):
             # Signals should not include large dataframes; if they do, keep it bounded.
             return [_to_json_safe(r) for r in obj.to_dict(orient="records")]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"State operation failed: {e}")
 
     # Fallback
     return str(obj)
@@ -138,7 +139,8 @@ class MarketAgentStateManager:
             try:
                 from pearlalgo.config.config_loader import load_service_config
                 service_config = load_service_config(validate=False) or {}
-            except Exception:
+            except Exception as e:
+                logger.warning(f"State operation failed: {e}")
                 service_config = {}
 
         # Optional SQLite dual-write (platform memory). Keep file writes as-is for Telegram/mobile.
@@ -169,6 +171,10 @@ class MarketAgentStateManager:
             signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
         )
 
+        # Signal file rotation settings
+        self._max_signal_lines = signal_settings.get("max_signal_lines", 5000)
+        self._signal_write_count = 0
+
         logger.info(f"MarketAgentStateManager initialized: state_dir={self.state_dir}")
 
     def _is_duplicate_signal(self, signal: Dict, recent_signals: List[Dict]) -> bool:
@@ -192,7 +198,8 @@ class MarketAgentStateManager:
             
         try:
             signal_time = parse_utc_timestamp(signal_timestamp_str)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"State operation failed: {e}")
             return False
 
         for recent_record in recent_signals:
@@ -210,7 +217,8 @@ class MarketAgentStateManager:
                 
             try:
                 recent_time = parse_utc_timestamp(recent_timestamp_str)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"State operation failed: {e}")
                 continue
 
             # Check if same type and direction
@@ -240,6 +248,48 @@ class MarketAgentStateManager:
                 return True
 
         return False
+
+    def _rotate_signals_file(self) -> None:
+        """Rotate signals.jsonl when it exceeds max_signal_lines.
+
+        Keeps the last ``_max_signal_lines`` lines in signals.jsonl and appends
+        the rotated-out (oldest) lines to signals_archive.jsonl in the same
+        directory.  Called under the existing file lock so no concurrent writers
+        can interfere.
+        """
+        try:
+            if not self.signals_file.exists():
+                return
+
+            with open(self.signals_file, "r") as f:
+                lines = f.readlines()
+
+            if len(lines) <= self._max_signal_lines:
+                return
+
+            # Split into archive (oldest) and keep (newest)
+            keep_lines = lines[-self._max_signal_lines:]
+            archive_lines = lines[:-self._max_signal_lines]
+
+            # Append rotated-out lines to archive file
+            archive_file = self.signals_file.parent / "signals_archive.jsonl"
+            with open(archive_file, "a") as f:
+                f.writelines(archive_lines)
+
+            # Rewrite signals file with only kept lines (atomic via tmp + replace)
+            tmp_path = Path(str(self.signals_file) + ".tmp")
+            with open(tmp_path, "w") as f:
+                f.writelines(keep_lines)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.signals_file)
+
+            logger.info(
+                f"Rotated signals.jsonl: archived {len(archive_lines)} lines, "
+                f"kept {len(keep_lines)} lines"
+            )
+        except Exception as e:
+            logger.debug(f"Signals rotation failed (non-fatal): {e}")
 
     def save_signal(self, signal: Dict) -> None:
         """
@@ -303,7 +353,8 @@ class MarketAgentStateManager:
                         is_duplicate = False
                         try:
                             is_duplicate = self._is_duplicate_signal(signal, recent_signals)
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"State operation failed: {e}")
                             is_duplicate = False
                         if is_duplicate:
                             logger.debug(
@@ -351,6 +402,11 @@ class MarketAgentStateManager:
                         # Write signal with lock held
                         with open(self.signals_file, "a") as f:
                             f.write(payload + "\n")
+
+                        # Periodic rotation check (every 100 writes)
+                        self._signal_write_count += 1
+                        if self._signal_write_count % 100 == 0:
+                            self._rotate_signals_file()
                     finally:
                         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
             except Exception as e:
@@ -494,7 +550,8 @@ class MarketAgentStateManager:
                         f.write(json.dumps(record) + "\n")
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"State operation failed: {e}")
             # Fallback: unlocked append
             try:
                 with open(self.events_file, "a") as f:

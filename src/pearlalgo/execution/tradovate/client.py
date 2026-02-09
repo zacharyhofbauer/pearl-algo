@@ -79,6 +79,8 @@ class TradovateClient:
         self._ws_heartbeat_task: Optional[asyncio.Task] = None
         self._ws_listener_task: Optional[asyncio.Task] = None
         self._ws_authorized: bool = False
+        self._ws_connected: bool = False
+        self._max_ws_reconnect_attempts: int = 10
 
         # Callbacks for real-time events
         self._event_handlers: List[Callable[[Dict[str, Any]], None]] = []
@@ -104,6 +106,11 @@ class TradovateClient:
         if not self._access_token or not self._token_expiry:
             return False
         return datetime.now(timezone.utc) < self._token_expiry
+
+    @property
+    def ws_connected(self) -> bool:
+        """Whether the WebSocket is currently connected and authorized."""
+        return self._ws_connected
 
     # ── Connection lifecycle ──────────────────────────────────────────
 
@@ -465,6 +472,11 @@ class TradovateClient:
                     results.append({"error": str(e), "contractId": contract_id})
         return {"positions_liquidated": len(results), "results": results}
 
+    async def get_orders(self) -> List[Dict[str, Any]]:
+        """GET /order/list -- all orders for the authenticated user."""
+        url = f"{self.config.rest_url}/order/list"
+        return await self._get(url)
+
     # ── REST API: Contracts ───────────────────────────────────────────
 
     async def find_contract(self, name: str) -> Dict[str, Any]:
@@ -558,6 +570,19 @@ class TradovateClient:
         if not self._session or not self._access_token:
             raise TradovateAPIError("Must authenticate before starting WebSocket")
 
+        await self._open_ws_connection()
+
+        # Start heartbeat + listener tasks
+        self._ws_heartbeat_task = asyncio.create_task(self._ws_heartbeat_loop())
+        self._ws_listener_task = asyncio.create_task(self._ws_listener_loop())
+
+    async def _open_ws_connection(self) -> None:
+        """
+        Open WebSocket, authorize, and subscribe to user sync.
+
+        This is the low-level connection method used by both initial connect
+        and reconnection.  It does NOT start background tasks.
+        """
         ws_url = self.config.ws_url
         logger.info(f"Connecting to Tradovate WebSocket: {ws_url}")
 
@@ -583,6 +608,7 @@ class TradovateClient:
                     resp = payload[0] if payload else {}
                     if resp.get("s") == 200:
                         self._ws_authorized = True
+                        self._ws_connected = True
                         logger.info("Tradovate WebSocket authorized")
                     else:
                         raise TradovateAuthError(
@@ -593,10 +619,6 @@ class TradovateClient:
         self._ws_request_id += 1
         sync_msg = f"user/syncrequest\n{self._ws_request_id}\n"
         await self._ws.send_str(sync_msg)
-
-        # Start heartbeat + listener tasks
-        self._ws_heartbeat_task = asyncio.create_task(self._ws_heartbeat_loop())
-        self._ws_listener_task = asyncio.create_task(self._ws_listener_loop())
 
     def add_event_handler(self, handler: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback for real-time WebSocket events."""
@@ -614,44 +636,121 @@ class TradovateClient:
                 break
 
     async def _ws_listener_loop(self) -> None:
-        """Listen for WebSocket messages and dispatch to handlers."""
-        while self._ws and not self._ws.closed:
-            try:
-                msg = await self._ws.receive(timeout=10)
+        """Listen for WebSocket messages and dispatch to handlers.
 
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = msg.data
-                    if data.startswith("a"):
-                        try:
-                            payload = json.loads(data[1:])
-                            for item in (payload if isinstance(payload, list) else [payload]):
-                                if isinstance(item, dict):
-                                    for handler in self._event_handlers:
-                                        try:
-                                            handler(item)
-                                        except Exception as e:
-                                            logger.debug(f"WS event handler error: {e}")
-                        except json.JSONDecodeError:
+        Includes automatic reconnection with exponential backoff when the
+        connection drops unexpectedly.
+        """
+        while True:
+            # ── Inner message loop ────────────────────────────────────
+            while self._ws and not self._ws.closed:
+                try:
+                    msg = await self._ws.receive(timeout=10)
+
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        data = msg.data
+                        if data.startswith("a"):
+                            try:
+                                payload = json.loads(data[1:])
+                                for item in (payload if isinstance(payload, list) else [payload]):
+                                    if isinstance(item, dict):
+                                        for handler in self._event_handlers:
+                                            try:
+                                                handler(item)
+                                            except Exception as e:
+                                                logger.debug(f"WS event handler error: {e}")
+                            except json.JSONDecodeError:
+                                pass
+                        elif data.startswith("h"):
+                            # Server heartbeat -- respond with our own
                             pass
-                    elif data.startswith("h"):
-                        # Server heartbeat -- respond with our own
-                        pass
 
-                elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
-                    logger.warning("Tradovate WebSocket closed")
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
+                        logger.warning("Tradovate WebSocket closed")
+                        break
+
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        logger.error(f"Tradovate WebSocket error: {self._ws.exception()}")
+                        break
+
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    return  # Full exit, no reconnection
+                except Exception as e:
+                    logger.error(f"WS listener error: {e}")
                     break
 
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error(f"Tradovate WebSocket error: {self._ws.exception()}")
-                    break
+            # ── Reconnection logic ────────────────────────────────────
+            self._ws_connected = False
+            self._ws_authorized = False
 
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"WS listener error: {e}")
-                break
+            # Cancel the heartbeat task (it references the dead connection)
+            if self._ws_heartbeat_task and not self._ws_heartbeat_task.done():
+                self._ws_heartbeat_task.cancel()
+                try:
+                    await self._ws_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Close the old socket if still lingering
+            if self._ws and not self._ws.closed:
+                try:
+                    await self._ws.close()
+                except Exception:
+                    pass
+            self._ws = None
+
+            delay = 1.0
+            max_delay = 60.0
+            reconnected = False
+
+            for attempt in range(1, self._max_ws_reconnect_attempts + 1):
+                logger.info(
+                    f"WebSocket reconnect attempt {attempt}/"
+                    f"{self._max_ws_reconnect_attempts} in {delay:.1f}s"
+                )
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    return
+
+                try:
+                    await self._open_ws_connection()
+
+                    # Restart heartbeat for the new connection
+                    self._ws_heartbeat_task = asyncio.create_task(
+                        self._ws_heartbeat_loop()
+                    )
+
+                    reconnected = True
+                    logger.info(
+                        f"WebSocket reconnected successfully on attempt {attempt}"
+                    )
+
+                    # Notify handlers of reconnection
+                    for handler in self._event_handlers:
+                        try:
+                            handler({"e": "ws_reconnected"})
+                        except Exception:
+                            pass
+                    break  # Back to outer loop -> inner message loop
+
+                except asyncio.CancelledError:
+                    return
+                except Exception as e:
+                    logger.warning(
+                        f"WebSocket reconnect attempt {attempt} failed: {e}"
+                    )
+                    delay = min(delay * 2, max_delay)
+
+            if not reconnected:
+                logger.error(
+                    f"WebSocket reconnection failed after "
+                    f"{self._max_ws_reconnect_attempts} attempts"
+                )
+                self._ws_connected = False
+                return
 
     async def _close_websocket(self) -> None:
         """Close WebSocket connection and cancel tasks."""
@@ -667,6 +766,7 @@ class TradovateClient:
             await self._ws.close()
         self._ws = None
         self._ws_authorized = False
+        self._ws_connected = False
 
     # ── HTTP helpers ──────────────────────────────────────────────────
 

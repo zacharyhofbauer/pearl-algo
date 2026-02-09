@@ -13,6 +13,9 @@ from pearlalgo.analytics.doctor_report import (
     build_doctor_rollup,
     format_doctor_rollup_text,
 )
+from pearlalgo.analytics.session_analytics import (
+    compute_session_analytics,
+)
 
 __all__ = [
     "TradeRecord",
@@ -20,4 +23,5 @@ __all__ = [
     "build_report",
     "build_doctor_rollup",
     "format_doctor_rollup_text",
+    "compute_session_analytics",
 ]

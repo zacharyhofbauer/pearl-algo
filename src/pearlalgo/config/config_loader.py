@@ -34,6 +34,7 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 from __future__ import annotations
 
 import contextlib
+import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -64,6 +65,12 @@ _SERVICE_CONFIG_OVERRIDE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     default=None,
 )
 
+# ── mtime-based config cache ────────────────────────────────────────────────
+# Avoids re-parsing YAML on every call when the config file hasn't changed.
+_config_cache: Optional[Dict[str, Any]] = None
+_config_cache_mtime: float = 0.0
+_config_cache_path: Optional[str] = None
+
 
 @contextlib.contextmanager
 def service_config_override(overrides: Dict[str, Any]):
@@ -81,6 +88,26 @@ def service_config_override(overrides: Dict[str, Any]):
             _SERVICE_CONFIG_OVERRIDE.reset(token)
         except Exception:
             _SERVICE_CONFIG_OVERRIDE.set(None)
+
+
+def _resolve_config_path(config_path: Optional[Path] = None) -> str:
+    """Resolve the effective config file path for mtime-based caching."""
+    if config_path is not None:
+        return str(Path(config_path).resolve())
+    project_root = Path(__file__).parent.parent.parent.parent
+    return str((project_root / "config" / "config.yaml").resolve())
+
+
+def clear_config_cache() -> None:
+    """Clear the mtime-based config cache.
+
+    Call this in tests or whenever you need to force a full reload
+    on the next ``load_service_config()`` call.
+    """
+    global _config_cache, _config_cache_mtime, _config_cache_path
+    _config_cache = None
+    _config_cache_mtime = 0.0
+    _config_cache_path = None
 
 
 # Delegate to adapters module for strategy config building
@@ -353,6 +380,8 @@ def load_service_config(
     Load service configuration from config.yaml.
 
     Uses the unified config loader with environment variable substitution.
+    Results are cached at the module level based on the config file's mtime,
+    so repeated calls are nearly free when the file hasn't been modified.
 
     Args:
         config_path: Path to config.yaml (defaults to config/config.yaml)
@@ -362,6 +391,25 @@ def load_service_config(
     Returns:
         Dictionary with service configuration sections merged with defaults
     """
+    global _config_cache, _config_cache_mtime, _config_cache_path
+
+    effective_path = _resolve_config_path(config_path)
+    override = _SERVICE_CONFIG_OVERRIDE.get()
+
+    # ── mtime-based cache (skip when per-call override is active) ──────────
+    if override is None:
+        try:
+            current_mtime = os.path.getmtime(effective_path)
+            if (
+                _config_cache is not None
+                and _config_cache_path == effective_path
+                and _config_cache_mtime == current_mtime
+            ):
+                return _config_cache
+        except OSError:
+            # Config file doesn't exist – fall through to normal load
+            pass
+
     # Load raw config using unified loader
     config_data = load_config_yaml(config_path)
 
@@ -384,7 +432,6 @@ def load_service_config(
 
     # Apply optional in-process overrides (best-effort).
     # This allows experiments/backtests to tweak config without editing files.
-    override = _SERVICE_CONFIG_OVERRIDE.get()
     if override:
         try:
             _deep_merge_dict(result, override)
@@ -403,7 +450,19 @@ def load_service_config(
     result["virtual_pnl_notify_entry"] = bool(vp_cfg.get("notify_entry", False))
     result["virtual_pnl_notify_exit"] = bool(vp_cfg.get("notify_exit", False))
     result["virtual_pnl_tiebreak"] = vp_cfg.get("intrabar_tiebreak", "stop_loss")
-    return ConfigView(result)
+
+    result_view = ConfigView(result)
+
+    # ── Update mtime cache (only when no override is active) ───────────────
+    if override is None:
+        try:
+            _config_cache_mtime = os.path.getmtime(effective_path)
+        except OSError:
+            _config_cache_mtime = 0.0
+        _config_cache_path = effective_path
+        _config_cache = result_view
+
+    return result_view
 
 
 def parse_market_hours_overrides(

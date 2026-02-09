@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-import fcntl
 import json
 import signal
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,6 +19,7 @@ import pandas as pd
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
+from pearlalgo.market_agent.stats_computation import get_trading_day_start
 
 from pearlalgo.config.config_loader import load_service_config, parse_market_hours_overrides
 from pearlalgo.config.config_view import ConfigView
@@ -51,6 +51,7 @@ from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
 from pearlalgo.market_agent.order_manager import OrderManager
 from pearlalgo.market_agent.signal_handler import SignalHandler
+from pearlalgo.market_agent.signal_forwarder import SignalForwarder
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -127,16 +128,10 @@ def get_trading_day_date() -> date:
 
     Example: At 5pm ET on Jan 29, returns Jan 28 (still in Jan 28's trading session).
              At 7pm ET on Jan 29, returns Jan 29 (now in Jan 29's trading session).
-    """
-    et_tz = ZoneInfo("America/New_York")
-    now_et = datetime.now(et_tz)
 
-    if now_et.hour < 18:
-        # Before 6pm ET - still in previous day's trading session
-        return (now_et - timedelta(days=1)).date()
-    else:
-        # After 6pm ET - in current day's trading session
-        return now_et.date()
+    Delegates to stats_computation.get_trading_day_start() for the 6pm ET logic.
+    """
+    return get_trading_day_start().date()
 
 
 class MarketAgentService:
@@ -257,16 +252,11 @@ class MarketAgentService:
         # ==========================================================================
         # SIGNAL FORWARDING (inception -> MFFU)
         # ==========================================================================
-        # Writer mode: inception writes signals to shared file after processing.
-        # Follower mode: MFFU reads from shared file instead of strategy.analyze().
         sf_cfg = service_config.get("signal_forwarding", {}) or {}
-        self._signal_forwarding_enabled = bool(sf_cfg.get("enabled", False))
-        self._signal_forwarding_mode = str(sf_cfg.get("mode", "off")).strip().lower()
-        self._signal_follower_mode = self._signal_forwarding_enabled and self._signal_forwarding_mode == "follower"
-        self._signal_writer_mode = self._signal_forwarding_enabled and self._signal_forwarding_mode == "writer"
-        self._shared_signals_path = Path(sf_cfg.get("shared_file", "data/shared_signals.jsonl"))
-        self._shared_signals_max_lines = int(sf_cfg.get("max_lines", 500))
-        self._shared_signals_processed_keys: set = set()
+        self.signal_forwarder = SignalForwarder(config=sf_cfg)
+        # Keep convenience aliases used throughout service & sub-modules
+        self._signal_follower_mode = self.signal_forwarder.follower_mode
+        self._signal_writer_mode = self.signal_forwarder.writer_mode
 
         # Follower heartbeat: warn if no signals arrive during market hours
         self._follower_last_signal_at: Optional[datetime] = None
@@ -276,22 +266,16 @@ class MarketAgentService:
         if self._signal_follower_mode:
             logger.info(
                 f"Signal forwarding: FOLLOWER mode | "
-                f"shared_file={self._shared_signals_path} | "
+                f"shared_file={self.signal_forwarder.shared_signals_path} | "
                 f"heartbeat_timeout={self._follower_heartbeat_timeout_minutes}m | "
                 f"strategy.analyze() will be SKIPPED -- reading from inception"
             )
-            # Clear stale signals on startup to prevent replaying old signals
-            try:
-                if self._shared_signals_path.exists():
-                    self._shared_signals_path.unlink()
-                    logger.info("Cleared stale shared_signals.jsonl on follower startup")
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+            self.signal_forwarder.clear_stale_signals()
         elif self._signal_writer_mode:
             logger.info(
                 f"Signal forwarding: WRITER mode | "
-                f"shared_file={self._shared_signals_path} | "
-                f"max_lines={self._shared_signals_max_lines}"
+                f"shared_file={self.signal_forwarder.shared_signals_path} | "
+                f"max_lines={self.signal_forwarder._max_lines}"
             )
 
         # Track config flags that are currently non-enforced (warn-only telemetry)
@@ -476,7 +460,8 @@ class MarketAgentService:
             st = ml_cfg.get("shadow_threshold", None)
             if st is not None:
                 self._ml_shadow_threshold = float(st)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._ml_shadow_threshold = None
         # Default safe: do NOT allow live blocking until we have evaluated lift.
         self._ml_blocking_allowed: bool = False
@@ -488,12 +473,14 @@ class MarketAgentService:
         try:
             self._ml_size_multiplier_min = float(ml_cfg.get("size_multiplier_min", 1.0) or 1.0)
             self._ml_size_multiplier_max = float(ml_cfg.get("size_multiplier_max", 1.5) or 1.5)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._ml_size_multiplier_min = 1.0
             self._ml_size_multiplier_max = 1.5
         try:
             self._ml_size_threshold = float(ml_cfg.get("high_probability", 0.7) or 0.7)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._ml_size_threshold = 0.7
 
         # ML signal filter (shadow-only measurement by default; never blocks unless explicitly enabled elsewhere)
@@ -562,23 +549,27 @@ class MarketAgentService:
             self._telegram_ui_compact_metrics_enabled = bool(
                 telegram_ui_settings.get("compact_metrics_enabled", True)
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._telegram_ui_compact_metrics_enabled = True
         try:
             self._telegram_ui_show_progress_bars = bool(
                 telegram_ui_settings.get("show_progress_bars", False)
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._telegram_ui_show_progress_bars = False
         try:
             self._telegram_ui_show_volume_metrics = bool(
                 telegram_ui_settings.get("show_volume_metrics", True)
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             self._telegram_ui_show_volume_metrics = True
         try:
             w = int(telegram_ui_settings.get("compact_metric_width", 10) or 10)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             w = 10
         self._telegram_ui_compact_metric_width = max(5, min(20, w))
 
@@ -950,12 +941,14 @@ class MarketAgentService:
             # Gates (explicit so startup never shows UNKNOWN).
             try:
                 config_dict["futures_market_open"] = bool(get_market_hours().is_market_open())
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 config_dict["futures_market_open"] = None
             try:
                 from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 config_dict["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 config_dict["strategy_session_open"] = None
 
             try:
@@ -1232,7 +1225,9 @@ class MarketAgentService:
                             self.pause_reason = "connection_failures"
 
                         # MFFU follower: still read shared signals on connection error
-                        await self._process_forwarded_signals(market_data)
+                        await self.signal_forwarder.process_forwarded_signals(
+                            self._signal_handler, self._sync_signal_handler_counters, market_data,
+                        )
                         await self._sleep_until_next_cycle()
                         continue
 
@@ -1293,7 +1288,9 @@ class MarketAgentService:
                     else:
                         await self._sleep_until_next_cycle()
                     # MFFU follower: still read shared signals on data fetch error
-                    await self._process_forwarded_signals()
+                    await self.signal_forwarder.process_forwarded_signals(
+                        self._signal_handler, self._sync_signal_handler_counters,
+                    )
                     continue
 
                 if market_data["df"].empty:
@@ -1330,7 +1327,9 @@ class MarketAgentService:
                     self.cycle_count += 1
                     
                     # MFFU follower: still read shared signals when data is empty
-                    await self._process_forwarded_signals(market_data)
+                    await self.signal_forwarder.process_forwarded_signals(
+                        self._signal_handler, self._sync_signal_handler_counters, market_data,
+                    )
                     await self._sleep_until_next_cycle()
                     continue
 
@@ -1387,13 +1386,13 @@ class MarketAgentService:
                             _market_open_for_signals = bool(get_market_hours().is_market_open())
                         except Exception as e:
                             logger.warning(f"Critical path error: {e}", exc_info=True)
-                        signals = self._read_shared_signals() if _market_open_for_signals else []
+                        signals = self.signal_forwarder.read_shared_signals() if _market_open_for_signals else []
                         if signals:
                             self._follower_last_signal_at = datetime.now(timezone.utc)
                             self._follower_heartbeat_warned = False
                             logger.info(
                                 f"MFFU: Read {len(signals)} forwarded signal(s) "
-                                f"from {self._shared_signals_path.name}"
+                                f"from {self.signal_forwarder.shared_signals_path.name}"
                             )
                     else:
                         # Normal mode: run pearl_bot_auto strategy
@@ -1434,7 +1433,8 @@ class MarketAgentService:
                 futures_market_open = False
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Market hours check failed in run loop: {e}")
                     futures_market_open = False
                 logger.info(
                     "Cycle completed",
@@ -1506,7 +1506,7 @@ class MarketAgentService:
                         if self._signal_writer_mode:
                             bar_ts = signal.get("_bar_timestamp")
                             if bar_ts and self._signal_handler.last_signal_id_prefix:
-                                self._write_shared_signal(signal, self._signal_handler.last_signal_id_prefix, bar_ts)
+                                self.signal_forwarder.write_shared_signal(signal, self._signal_handler.last_signal_id_prefix, bar_ts)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
@@ -1669,7 +1669,8 @@ class MarketAgentService:
             raw_ts = signal.get("timestamp")
             if raw_ts:
                 dt_utc = parse_utc_timestamp(str(raw_ts))
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse signal timestamp for context features: {e}")
             dt_utc = None
         if dt_utc is None:
             dt_utc = datetime.now(timezone.utc)
@@ -1712,9 +1713,9 @@ class MarketAgentService:
             minutes_to_end = int((session_end - et_dt).total_seconds() / 60)
             is_first_hour = 0 <= minutes_since_session_open < 60
             is_last_hour = 0 <= minutes_to_end < 60
-        except Exception:
+        except Exception as e:
             # Keep safe defaults
-            pass
+            logger.warning(f"Failed to compute market session context: {e}")
 
         # Regime + volatility from signal context (if present)
         regime = signal.get("regime", {}) or {}
@@ -1786,15 +1787,18 @@ class MarketAgentService:
         max_contracts = int(cfg.get("max_conf_contracts", high_contracts) or high_contracts)
         try:
             conf = float(signal.get("confidence") or 0.0)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse signal confidence for position sizing: {e}")
             conf = 0.0
         try:
             high_th = float(cfg.get("high_conf_threshold", 0.8) or 0.8)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse high confidence threshold: {e}")
             high_th = 0.8
         try:
             max_th = float(cfg.get("max_conf_threshold", 0.9) or 0.9)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse max confidence threshold: {e}")
             max_th = 0.9
 
         size = base_contracts
@@ -1818,11 +1822,13 @@ class MarketAgentService:
         # Clamp to risk min/max
         try:
             min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse min position size from risk settings: {e}")
             min_size = 1
         try:
             max_size = int(self._risk_settings.get("max_position_size", size) or size)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse max position size from risk settings: {e}")
             max_size = size
 
         size = max(min_size, min(max_size, size))
@@ -1836,7 +1842,8 @@ class MarketAgentService:
         pred = signal.get("_ml_prediction") or {}
         try:
             win_prob = float(pred.get("win_probability"))
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse ML win probability for sizing: {e}")
             return
 
         base_size = self._compute_base_position_size(signal)
@@ -1847,17 +1854,20 @@ class MarketAgentService:
         )
         try:
             adjusted = int(round(base_size * float(multiplier)))
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to apply ML size multiplier: {e}")
             adjusted = base_size
 
         # Clamp to risk min/max
         try:
             min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse min position size for ML sizing: {e}")
             min_size = 1
         try:
             max_size = int(self._risk_settings.get("max_position_size", adjusted) or adjusted)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse max position size for ML sizing: {e}")
             max_size = adjusted
 
         adjusted = max(min_size, min(max_size, adjusted))
@@ -1914,7 +1924,8 @@ class MarketAgentService:
         # Consider only recently tracked signals for performance; active trades should be among them.
         try:
             recent = self.state_manager.get_recent_signals(limit=300)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to retrieve recent signals for trade exits: {e}")
             return
 
         # Precompute bar arrays once (vectorized) for all signals
@@ -1930,7 +1941,8 @@ class MarketAgentService:
             
             bar_highs = df["high"].fillna(df.get("close", 0)).astype(float).values
             bar_lows = df["low"].fillna(df.get("close", 0)).astype(float).values
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to compute bar arrays for trade exits: {e}")
             return
 
         exited_this_cycle: set[str] = set()
@@ -1958,7 +1970,8 @@ class MarketAgentService:
                 try:
                     stop = float(sig.get("stop_loss") or 0.0)
                     target = float(sig.get("take_profit") or 0.0)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to parse stop/target for virtual trade exit: {e}")
                     continue
                 if stop <= 0 or target <= 0:
                     continue
@@ -2195,7 +2208,8 @@ class MarketAgentService:
                                             f"{'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f}) | "
                                             f"Expected WR: {expected_wr:.0%}"
                                         )
-                                    except Exception:
+                                    except Exception as e:
+                                        logger.warning(f"Failed to log detailed learning metrics: {e}")
                                         # Log basic learning info if detailed metrics unavailable
                                         logger.info(
                                             f"🧠 Learning: {signal_type} -> "
@@ -2230,7 +2244,8 @@ class MarketAgentService:
                                 hold_mins = perf.get("hold_duration_minutes")
                                 try:
                                     hold_mins = float(hold_mins) if hold_mins is not None else None
-                                except Exception:
+                                except Exception as e:
+                                    logger.warning(f"Failed to parse hold minutes for trade exit: {e}")
                                     hold_mins = None
 
                                 logger.info(
@@ -2320,7 +2335,8 @@ class MarketAgentService:
                                 logger.info(f"Streak alert sent: {self._streak_type} x{self._streak_count}")
                         except Exception as streak_err:
                             logger.debug(f"Could not send streak alert: {streak_err}")
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to process virtual trade exit: {e}")
                 continue
 
     def _get_status_snapshot(self) -> Dict[str, Any]:
@@ -2471,7 +2487,8 @@ class MarketAgentService:
                             if last_dt:
                                 elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60.0
                                 due = elapsed >= interval_min
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             due = True
                     if due:
                         review = self._build_pearl_review_message(state)
@@ -2541,68 +2558,64 @@ class MarketAgentService:
             daily_pnl = 0.0
             
             try:
-                perf_file = self.state_manager.state_dir / "performance.json"
-                if perf_file.exists():
-                    perf_trades = json.loads(perf_file.read_text(encoding="utf-8"))
-                    if not isinstance(perf_trades, list):
-                        perf_trades = []
-                    
-                    # Today's trades
-                    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
-                    
-                    # De-duplicate by signal_id to avoid double-counting
-                    try:
-                        by_id = {}
-                        no_id = []
-                        for t in today_trades:
-                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
-                            if not sid:
-                                no_id.append(t)
-                                continue
-                            by_id[sid] = t  # keep most recent occurrence
-                        if by_id:
-                            today_trades = list(by_id.values()) + no_id
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                    
-                    # Calculate daily P&L from actual trades (not state which may be stale)
-                    if today_trades:
-                        daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades)
-                    
-                    # Calculate streak
-                    if today_trades:
-                        sorted_trades = sorted(today_trades, key=lambda t: str(t.get("exit_time", "") or ""), reverse=True)
-                        streak = 0
-                        streak_type = None
-                        for t in sorted_trades:
-                            is_win = t.get("is_win", False)
-                            if streak_type is None:
-                                streak_type = "W" if is_win else "L"
-                                streak = 1
-                            elif (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
-                                streak += 1
+                perf_trades = self.performance_tracker.load_performance_data()
+
+                # Today's trades
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
+
+                # De-duplicate by signal_id to avoid double-counting
+                try:
+                    by_id = {}
+                    no_id = []
+                    for t in today_trades:
+                        sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                        if not sid:
+                            no_id.append(t)
+                            continue
+                        by_id[sid] = t  # keep most recent occurrence
+                    if by_id:
+                        today_trades = list(by_id.values()) + no_id
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
+
+                # Calculate daily P&L from actual trades (not state which may be stale)
+                if today_trades:
+                    daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades)
+
+                # Calculate streak
+                if today_trades:
+                    sorted_trades = sorted(today_trades, key=lambda t: str(t.get("exit_time", "") or ""), reverse=True)
+                    streak = 0
+                    streak_type = None
+                    for t in sorted_trades:
+                        is_win = t.get("is_win", False)
+                        if streak_type is None:
+                            streak_type = "W" if is_win else "L"
+                            streak = 1
+                        elif (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
+                            streak += 1
+                        else:
+                            break
+                    if streak >= 2:
+                        streak_icon = "🔥" if streak_type == "W" else "❄️"
+                        streak_word = "wins" if streak_type == "W" else "losses"
+                        streak_info = f"{streak_icon} Streak: {streak} {streak_word} in a row"
+
+                # Time since last trade
+                if perf_trades:
+                    last_trade = max(perf_trades, key=lambda t: str(t.get("exit_time", "") or ""), default=None)
+                    if last_trade and last_trade.get("exit_time"):
+                        try:
+                            last_exit = datetime.fromisoformat(str(last_trade["exit_time"]).replace("Z", "+00:00"))
+                            mins_ago = (datetime.now(timezone.utc) - last_exit).total_seconds() / 60
+                            if mins_ago > 60:
+                                hours = int(mins_ago / 60)
+                                time_since_trade = f"⏰ Last Trade: {hours}h ago"
                             else:
-                                break
-                        if streak >= 2:
-                            streak_icon = "🔥" if streak_type == "W" else "❄️"
-                            streak_word = "wins" if streak_type == "W" else "losses"
-                            streak_info = f"{streak_icon} Streak: {streak} {streak_word} in a row"
-                    
-                    # Time since last trade
-                    if perf_trades:
-                        last_trade = max(perf_trades, key=lambda t: str(t.get("exit_time", "") or ""), default=None)
-                        if last_trade and last_trade.get("exit_time"):
-                            try:
-                                last_exit = datetime.fromisoformat(str(last_trade["exit_time"]).replace("Z", "+00:00"))
-                                mins_ago = (datetime.now(timezone.utc) - last_exit).total_seconds() / 60
-                                if mins_ago > 60:
-                                    hours = int(mins_ago / 60)
-                                    time_since_trade = f"⏰ Last Trade: {hours}h ago"
-                                else:
-                                    time_since_trade = f"⏰ Last Trade: {int(mins_ago)}m ago"
-                            except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                time_since_trade = f"⏰ Last Trade: {int(mins_ago)}m ago"
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
             
@@ -2661,7 +2674,8 @@ class MarketAgentService:
                 lines.append(f"💬 {insight}")
 
             return "\n".join(lines)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
     
     def _generate_pearl_insight(
@@ -2706,7 +2720,8 @@ class MarketAgentService:
                 return "Multiple losses in a row. Consider taking a break."
             else:
                 return "All systems normal. Scanning for opportunities..."
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return "All systems normal."
 
     async def _check_dashboard(
@@ -2729,9 +2744,9 @@ class MarketAgentService:
             prefs = TelegramPrefs(state_dir=self.state_manager.state_dir)
             if not prefs.get("interval_notifications", True):
                 return  # Notifications disabled
-        except Exception:
+        except Exception as e:
             # If we can't load prefs, default to enabled
-            pass
+            logger.debug(f"Non-critical: {e}")
 
         now = datetime.now(timezone.utc)
 
@@ -2873,7 +2888,8 @@ class MarketAgentService:
                 active = []
                 try:
                     recent_signals = self.state_manager.get_recent_signals(limit=300)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     recent_signals = []
                 for rec in recent_signals:
                     if isinstance(rec, dict) and rec.get("status") == "entered":
@@ -2886,7 +2902,8 @@ class MarketAgentService:
                 if latest_price is not None and len(active) > 0:
                     try:
                         current_price = float(latest_price)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         current_price = None
                     if current_price and current_price > 0:
                         total_upnl = 0.0
@@ -2895,17 +2912,20 @@ class MarketAgentService:
                             direction = str(sig.get("direction") or "long").lower()
                             try:
                                 entry_price = float(sig.get("entry_price") or 0.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 entry_price = 0.0
                             if entry_price <= 0:
                                 continue
                             try:
                                 tick_value = float(sig.get("tick_value") or 2.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 tick_value = 2.0
                             try:
                                 position_size = float(sig.get("position_size") or 1.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 position_size = 1.0
 
                             pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
@@ -2939,9 +2959,9 @@ class MarketAgentService:
                         status["recent_exits"] = exited
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
-            except Exception:
+            except Exception as e:
                 # Never let optional PnL UI break dashboard delivery.
-                pass
+                logger.debug(f"Non-critical: {e}")
             
             # Get recent closes for sparkline
             recent_closes = self._get_recent_closes(market_data)
@@ -2976,9 +2996,9 @@ class MarketAgentService:
                             timeframe_minutes=tf_min,
                             data_fresh=status.get("data_fresh"),
                         )
-            except Exception:
+            except Exception as e:
                 # Never let optional observability break the dashboard.
-                pass
+                logger.debug(f"Non-critical: {e}")
             
             await self.notification_queue.enqueue_dashboard(status, chart_path=chart_path, priority=Priority.LOW)
         except Exception as e:
@@ -3036,12 +3056,14 @@ class MarketAgentService:
                     return None
                 try:
                     tsx = pd.Timestamp(x)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     return None
                 try:
                     if tsx.tzinfo is not None:
                         tsx = tsx.tz_convert("UTC").tz_localize(None)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     # If tz_convert fails, fall back to stripping tz
                     try:
                         tsx = tsx.tz_localize(None)
@@ -3057,7 +3079,8 @@ class MarketAgentService:
             # Pull recent signals (append-only), filter to entered/exited within the window.
             try:
                 recent = self.state_manager.get_recent_signals(limit=500)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 recent = []
 
             symbol_norm = str(getattr(self.config, "symbol", "MNQ") or "MNQ").upper()
@@ -3110,7 +3133,8 @@ class MarketAgentService:
             # Keep only the most recent N to avoid chart clutter.
             trades = trades[-20:]
             return trades
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return []
     
     def _compute_mtf_trends(self, market_data: Optional[Dict] = None) -> dict:
@@ -3201,7 +3225,8 @@ class MarketAgentService:
         futures_open = False
         try:
             futures_open = bool(get_market_hours().is_market_open())
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Market hours check failed in MTF trends: {e}")
             # If market hours check fails, assume open (conservative)
             futures_open = True
         
@@ -3223,14 +3248,16 @@ class MarketAgentService:
                         bar_time = raw_ts
                     if bar_time and bar_time.tzinfo is None:
                         bar_time = bar_time.replace(tzinfo=timezone.utc)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse bar timestamp in MTF trends: {e}")
             bar_time = None
         
         session_open = False
         try:
             from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             session_open = check_trading_session(bar_time, self.config) if bar_time else False
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Session check failed in MTF trends: {e}")
             # If session check fails, assume closed (conservative)
             session_open = False
         
@@ -3323,7 +3350,8 @@ class MarketAgentService:
             
             delta = datetime.now(timezone.utc) - last_signal_dt
             return round(delta.total_seconds() / 60.0, 2)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     def _get_quiet_reason(
@@ -3524,424 +3552,6 @@ class MarketAgentService:
             )
             self._last_trading_day = today
 
-    async def _check_morning_briefing(self) -> None:
-        """
-        Send morning briefing at 6:30 AM ET.
-
-        Automatically sends once per day with:
-        - Overnight session recap (if any trades)
-        - Current P&L status
-        - Key price levels
-        - Market sentiment snapshot
-        """
-        if not self.telegram_notifier or not self.telegram_notifier.enabled:
-            return
-
-        try:
-            # Check if AI briefings are enabled in config
-            briefing_config = self._service_config.get("ai_briefings", {})
-            if not briefing_config.get("enabled", True):
-                return
-
-            # Get configured time (default 6:30 AM ET)
-            morning_time_str = str(briefing_config.get("morning_time", "06:30"))
-            try:
-                morning_hour, morning_minute = map(int, morning_time_str.split(":"))
-            except Exception:
-                morning_hour, morning_minute = 6, 30
-
-            # Get current time in ET
-            now_utc = datetime.now(timezone.utc)
-            try:
-                et_tz = ZoneInfo("America/New_York")
-                now_et = now_utc.astimezone(et_tz)
-            except Exception:
-                from datetime import timedelta
-                now_et = now_utc - timedelta(hours=5)
-
-            et_hour = now_et.hour
-            et_minute = now_et.minute
-            today_str = now_et.strftime("%Y-%m-%d")
-
-            # Check if already sent today
-            if self._morning_briefing_sent_date == today_str:
-                return
-
-            # Send in a 10-minute window around configured time
-            if not (et_hour == morning_hour and morning_minute <= et_minute <= morning_minute + 10):
-                return
-
-            # Mark as sent for today
-            self._morning_briefing_sent_date = today_str
-
-            # Gather overnight/previous session data
-            perf_file = self.performance_tracker.performance_file
-            overnight_trades = []
-            if perf_file.exists():
-                try:
-                    perf_data = json.loads(perf_file.read_text(encoding="utf-8"))
-                    if isinstance(perf_data, list):
-                        trades = perf_data
-                    elif isinstance(perf_data, dict):
-                        trades = perf_data.get("trades", []) or []
-                    else:
-                        trades = []
-
-                    # Filter overnight trades (6 PM yesterday to 6:30 AM today)
-                    yesterday = (now_et - timedelta(days=1)).strftime("%Y-%m-%d")
-                    for t in trades:
-                        exit_time = t.get("exit_time", "")
-                        if exit_time:
-                            # Check if trade was overnight session
-                            if exit_time[:10] == today_str or exit_time[:10] == yesterday:
-                                overnight_trades.append(t)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
-            # Get current state for P&L
-            state = self.state_manager.load_state()
-            daily_pnl = float(state.get("daily_pnl", 0) or 0)
-            session_pnl = float(state.get("session_pnl", 0) or 0)
-
-            # Build briefing message
-            day_name = now_et.strftime("%A")
-            date_str = now_et.strftime("%b %d")
-
-            acct_label = getattr(self.telegram_notifier, "account_label", None)
-            acct_tag = f"[{acct_label}] " if acct_label else ""
-            msg_parts = [f"{acct_tag}Good morning! {day_name}, {date_str}"]
-
-            # Overnight recap
-            if overnight_trades:
-                overnight_pnl = sum(t.get("pnl", 0) for t in overnight_trades)
-                overnight_wins = sum(1 for t in overnight_trades if t.get("is_win"))
-                overnight_losses = len(overnight_trades) - overnight_wins
-                pnl_sign = "+" if overnight_pnl >= 0 else ""
-                msg_parts.append(
-                    f"Overnight: {len(overnight_trades)} trades ({overnight_wins}W/{overnight_losses}L), {pnl_sign}${overnight_pnl:.0f}"
-                )
-            else:
-                msg_parts.append("Overnight: No trades")
-
-            # Current P&L status
-            if daily_pnl != 0 or session_pnl != 0:
-                pnl_to_show = daily_pnl if daily_pnl != 0 else session_pnl
-                pnl_sign = "+" if pnl_to_show >= 0 else ""
-                pnl_emoji = "green" if pnl_to_show >= 0 else "red"
-                msg_parts.append(f"Session P&L: {pnl_sign}${pnl_to_show:.0f}")
-
-            # Try to add AI-generated insight
-            try:
-                from pearlalgo.ai.chat import get_ai_chat
-
-                ai_config = service_config.get("ai_chat", {})
-                ai_chat = get_ai_chat(config=ai_config)
-                if ai_chat.enabled:
-                    context = {
-                        "daily_pnl": daily_pnl,
-                        "session_pnl": session_pnl,
-                        "overnight_trades": len(overnight_trades),
-                        "recent_trades": [
-                            {"pnl": t.get("pnl", 0), "direction": t.get("direction", "")}
-                            for t in overnight_trades[-5:]
-                        ],
-                    }
-                    insight = await ai_chat.generate_insight("morning_briefing", context)
-                    if insight:
-                        msg_parts.append(f"\n{insight}")
-            except Exception as e:
-                logger.debug(f"Could not generate morning AI insight: {e}")
-
-            msg = "\n".join(msg_parts)
-
-            asyncio.create_task(
-                self.notification_queue.enqueue_raw_message(
-                    msg, parse_mode=None, dedupe=False, priority=Priority.MEDIUM
-                )
-            )
-            logger.info(f"Morning briefing sent for {today_str}")
-
-        except Exception as e:
-            logger.debug(f"Could not send morning briefing: {e}")
-
-    async def _check_market_close_summary(self) -> None:
-        """
-        Send daily performance summary at safety close (3:55 PM ET).
-        
-        Automatically sends once per day when the time hits 3:55-4:05 PM ET.
-        """
-        if not self.telegram_notifier or not self.telegram_notifier.enabled:
-            return
-        
-        try:
-            # Get current time in ET
-            now_utc = datetime.now(timezone.utc)
-            try:
-                import pytz
-                et_tz = pytz.timezone("US/Eastern")
-                now_et = now_utc.astimezone(et_tz)
-            except Exception:
-                # Fallback: UTC-5 approximation
-                from datetime import timedelta
-                now_et = now_utc - timedelta(hours=5)
-            
-            et_hour = now_et.hour
-            et_minute = now_et.minute
-            today_str = now_et.strftime("%Y-%m-%d")
-            
-            # Check if already sent today
-            if self._daily_summary_sent_date == today_str:
-                return
-            
-            # Send between 3:55 PM and 4:05 PM ET (safety close window)
-            if not ((et_hour == 15 and et_minute >= 55) or (et_hour == 16 and et_minute <= 5)):
-                return
-            
-            # Mark as sent for today
-            self._daily_summary_sent_date = today_str
-
-            # Account label prefix for multi-account setups
-            acct_label = getattr(self.telegram_notifier, "account_label", None)
-            acct_prefix = f"[{acct_label}] " if acct_label else ""
-            is_mffu = acct_label == "MFFU"
-
-            # Gather today's performance data — use Tradovate fills for MFFU
-            today_trades: list = []
-            if is_mffu:
-                today_trades = self._get_tradovate_today_trades(today_str)
-
-            if not today_trades:
-                # Fall back to performance.json (Inception or MFFU with no fills)
-                perf_file = self.performance_tracker.performance_file
-                if perf_file.exists():
-                    perf_data = json.loads(perf_file.read_text(encoding="utf-8"))
-                    if isinstance(perf_data, list):
-                        trades = perf_data
-                    elif isinstance(perf_data, dict):
-                        trades = perf_data.get("trades", []) or []
-                    else:
-                        trades = []
-                    today_trades = [
-                        t for t in trades
-                        if t.get("exit_time", "")[:10] == today_str
-                    ]
-
-            if not today_trades:
-                # No trades today - send brief note
-                msg = (
-                    f"{acct_prefix}📊 *Daily Summary* • {now_et.strftime('%b %d')}\n\n"
-                    "No trades today.\n"
-                    "_Session safety close at 3:55 PM ET_"
-                )
-            else:
-                # Calculate metrics
-                total_pnl = sum(t.get("pnl", 0) for t in today_trades)
-                wins = sum(1 for t in today_trades if t.get("is_win"))
-                losses = len(today_trades) - wins
-                win_rate = (wins / len(today_trades) * 100) if today_trades else 0
-
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                pnl_sign = "+" if total_pnl >= 0 else ""
-
-                # Analyze what worked vs didn't
-                long_trades = [t for t in today_trades if t.get("direction", "").lower() == "long"]
-                short_trades = [t for t in today_trades if t.get("direction", "").lower() == "short"]
-                long_pnl = sum(t.get("pnl", 0) for t in long_trades)
-                short_pnl = sum(t.get("pnl", 0) for t in short_trades)
-
-                msg_parts = [
-                    f"{acct_prefix}📊 *Daily Summary* • {now_et.strftime('%b %d')}\n",
-                    f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}",
-                    f"📈 *Trades:* {len(today_trades)} ({wins}W/{losses}L)",
-                    f"🎯 *Win Rate:* {win_rate:.0f}%",
-                ]
-
-                # Add direction breakdown if both directions traded
-                if long_trades and short_trades:
-                    long_sign = "+" if long_pnl >= 0 else ""
-                    short_sign = "+" if short_pnl >= 0 else ""
-                    msg_parts.append(
-                        f"↗️ Longs: {long_sign}${long_pnl:.0f} • ↘️ Shorts: {short_sign}${short_pnl:.0f}"
-                    )
-
-                # MFFU challenge context (profit target remaining, drawdown)
-                if is_mffu:
-                    try:
-                        ch_file = self.state_manager.state_dir / "challenge_state.json"
-                        if ch_file.exists():
-                            ch_data = json.loads(ch_file.read_text(encoding="utf-8"))
-                            mffu_cfg = ch_data.get("mffu", {}) or ch_data.get("config", {}) or {}
-                            current = ch_data.get("current_attempt", {}) or {}
-                            profit_target = float(mffu_cfg.get("profit_target", 3000))
-                            cum_pnl = float(current.get("cumulative_pnl", 0))
-                            remaining = profit_target - cum_pnl
-                            hwm = float(current.get("equity_hwm", 0))
-                            drawdown_limit = float(mffu_cfg.get("max_drawdown", 2000))
-                            starting_bal = float(mffu_cfg.get("starting_balance", 50000))
-                            trail_floor = hwm - drawdown_limit if hwm > 0 else starting_bal - drawdown_limit
-                            msg_parts.append("")
-                            msg_parts.append(f"🏆 *Challenge:* ${remaining:,.0f} to target")
-                            if hwm > 0:
-                                msg_parts.append(f"📉 *Trail Floor:* ${trail_floor:,.0f}")
-                    except Exception as ch_err:
-                        logger.debug(f"Could not add challenge context to daily summary: {ch_err}")
-
-                # Try to add AI-generated insight
-                try:
-                    briefing_config = self._service_config.get("ai_briefings", {})
-                    if briefing_config.get("enabled", True):
-                        from pearlalgo.ai.chat import get_ai_chat
-
-                        ai_config = self._service_config.get("ai_chat", {})
-                        ai_chat = get_ai_chat(config=ai_config)
-                        if ai_chat.enabled:
-                            context = {
-                                "daily_pnl": total_pnl,
-                                "wins_today": wins,
-                                "losses_today": losses,
-                                "win_rate": win_rate,
-                                "long_pnl": long_pnl,
-                                "short_pnl": short_pnl,
-                                "recent_trades": [
-                                    {
-                                        "pnl": t.get("pnl", 0),
-                                        "direction": t.get("direction", ""),
-                                        "type": t.get("type", ""),
-                                        "is_win": t.get("is_win", False),
-                                    }
-                                    for t in today_trades
-                                ],
-                            }
-                            insight = await ai_chat.generate_insight("eod_summary", context)
-                            if insight:
-                                msg_parts.append(f"\n💡 {insight}")
-                except Exception as e:
-                    logger.debug(f"Could not generate EOD AI insight: {e}")
-
-                msg_parts.append("\n_Session safety close at 3:55 PM ET_")
-                msg = "\n".join(msg_parts)
-
-            asyncio.create_task(
-                self.notification_queue.enqueue_raw_message(
-                    msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM
-                )
-            )
-            logger.info(f"Daily summary sent for {today_str}")
-            
-        except Exception as e:
-            logger.debug(f"Could not send daily summary: {e}")
-
-    def _get_tradovate_today_trades(self, today_str: str) -> list:
-        """Reconstruct today's closed trades from Tradovate fills (FIFO matching).
-
-        Returns a list of dicts with keys: pnl, is_win, direction, type.
-        Empty list if no fills file or no trades today.
-        """
-        try:
-            fills_file = self.state_manager.state_dir / "tradovate_fills.json"
-            if not fills_file.exists():
-                return []
-            fills = json.loads(fills_file.read_text(encoding="utf-8"))
-            if not isinstance(fills, list) or not fills:
-                return []
-
-            # FIFO matching: pair buy/sell fills into round-trip trades
-            open_queue: list = []  # (action, price, qty, timestamp)
-            trades: list = []
-            point_value = 2.0  # MNQ $2/point
-
-            for f in fills:
-                action = str(f.get("action") or f.get("Action") or "").lower()  # "buy" or "sell"
-                price = float(f.get("price") or f.get("Price") or 0)
-                qty = int(f.get("qty") or f.get("Qty") or 0)
-                ts = str(f.get("timestamp") or f.get("Timestamp") or "")
-                if not action or not price or not qty:
-                    continue
-
-                remaining = qty
-                while remaining > 0 and open_queue:
-                    oq_action, oq_price, oq_qty, oq_ts = open_queue[0]
-                    # Opposite side closes
-                    if oq_action == action:
-                        break
-                    match_qty = min(remaining, oq_qty)
-                    if oq_action == "buy":
-                        pnl = (price - oq_price) * match_qty * point_value
-                        direction = "long"
-                    else:
-                        pnl = (oq_price - price) * match_qty * point_value
-                        direction = "short"
-                    trades.append({
-                        "pnl": round(pnl, 2),
-                        "is_win": pnl > 0,
-                        "direction": direction,
-                        "type": "tradovate_fill",
-                        "exit_time": ts,
-                    })
-                    remaining -= match_qty
-                    if oq_qty > match_qty:
-                        open_queue[0] = (oq_action, oq_price, oq_qty - match_qty, oq_ts)
-                    else:
-                        open_queue.pop(0)
-
-                if remaining > 0:
-                    open_queue.append((action, price, remaining, ts))
-
-            # Filter to today
-            today_trades = [
-                t for t in trades
-                if t.get("exit_time", "")[:10] == today_str
-            ]
-            return today_trades
-        except Exception as e:
-            logger.debug(f"Could not reconstruct Tradovate trades for daily summary: {e}")
-            return []
-
-    async def _check_follower_heartbeat(self) -> None:
-        """Check if signal forwarding is stale in follower mode.
-
-        Sends a one-time Telegram warning if no signals arrive within the
-        configured timeout during market hours.  Resets when signals resume.
-        Only active in follower mode; writer/normal mode is a no-op.
-        """
-        if not self._signal_follower_mode:
-            return
-
-        # Only check during market hours
-        try:
-            if not get_market_hours().is_market_open():
-                return
-        except Exception:
-            return
-
-        # First signal hasn't arrived yet — use service start time as baseline
-        if self._follower_last_signal_at is None:
-            self._follower_last_signal_at = datetime.now(timezone.utc)
-            return
-
-        gap_minutes = (datetime.now(timezone.utc) - self._follower_last_signal_at).total_seconds() / 60
-        if gap_minutes < self._follower_heartbeat_timeout_minutes:
-            return  # Still within tolerance
-
-        if self._follower_heartbeat_warned:
-            return  # Already warned, don't spam
-
-        self._follower_heartbeat_warned = True
-        msg = (
-            f"⚠️ *Signal Forwarding Stale*\n\n"
-            f"No forwarded signals received in `{int(gap_minutes)}` minutes.\n"
-            f"Inception may have stopped writing to `shared_signals.jsonl`.\n\n"
-            f"Check Inception agent status: `./pearl.sh agent status`"
-        )
-        logger.warning(f"Follower heartbeat: no signals for {int(gap_minutes)}m (timeout={self._follower_heartbeat_timeout_minutes}m)")
-        try:
-            if self.telegram_notifier.enabled and self.telegram_notifier.telegram:
-                await self.notification_queue.enqueue_risk_warning(
-                    msg, risk_status="WARNING", priority=Priority.HIGH,
-                )
-        except Exception as e:
-            logger.debug(f"Follower heartbeat notification failed: {e}")
-
     async def _check_execution_health(self) -> None:
         """
         Check execution adapter connection health and send alerts on state changes.
@@ -4040,7 +3650,8 @@ class MarketAgentService:
                 mtime = datetime.fromtimestamp(flag_file.stat().st_mtime, tz=timezone.utc)
                 age_seconds = (datetime.now(timezone.utc) - mtime).total_seconds()
                 return age_seconds > FLAG_TTL_SECONDS
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to determine flag staleness in execution control: {e}")
                 # If we can't determine age, treat as stale for safety
                 return True
         
@@ -4277,177 +3888,6 @@ class MarketAgentService:
         except Exception as e:
             logger.error(f"Error checking execution control flags: {e}", exc_info=True)
 
-    async def _process_grade_request(self, grade_file: Path) -> None:
-        """Process a grade request from Telegram /grade command.
-        
-        The grade request contains:
-        - signal_id: The signal to grade
-        - signal_type: The type of signal (for learning)
-        - is_win: Whether it was a win
-        - pnl: Optional P&L value
-        - force: Whether to apply even if signal already exited
-        """
-        try:
-            with open(grade_file, "r") as f:
-                grade_req = json.load(f)
-            
-            signal_id = grade_req.get("signal_id", "")
-            signal_type = grade_req.get("signal_type", "unknown")
-            is_win = grade_req.get("is_win", False)
-            pnl = grade_req.get("pnl")
-            force = grade_req.get("force", False)
-            
-            logger.info(f"Processing grade request: {signal_id} -> {'win' if is_win else 'loss'} (force={force})")
-            
-            # Check if signal already has an exit recorded
-            signals_file = self.state_manager.signals_file
-            already_exited = False
-            if signals_file.exists():
-                with open(signals_file, "r") as f:
-                    for line in f:
-                        try:
-                            record = json.loads(line.strip())
-                            if record.get("signal_id") == signal_id:
-                                already_exited = record.get("status") == "exited"
-                                break
-                        except json.JSONDecodeError:
-                            continue
-            
-            # Apply to learning if: not already exited, or force is True
-            applied = False
-            if self.bandit_policy is not None:
-                if not already_exited or force:
-                    self.bandit_policy.record_outcome(
-                        signal_id=signal_id,
-                        signal_type=signal_type,
-                        is_win=is_win,
-                        pnl=pnl or 0.0,
-                    )
-                    applied = True
-                    logger.info(f"Grade applied to learning: {signal_type} {'win' if is_win else 'loss'}")
-                else:
-                    logger.info(f"Grade skipped (already exited, force=False): {signal_id}")
-            
-            # Update feedback.jsonl to mark as applied
-            feedback_file = self.state_manager.state_dir / "feedback.jsonl"
-            if feedback_file.exists():
-                try:
-                    # Read all feedback, update the matching one
-                    updated_lines = []
-                    with open(feedback_file, "r") as f:
-                        for line in f:
-                            try:
-                                rec = json.loads(line.strip())
-                                if rec.get("signal_id") == signal_id and not rec.get("applied_to_learning"):
-                                    rec["applied_to_learning"] = applied
-                                    rec["applied_at"] = datetime.now(timezone.utc).isoformat()
-                                updated_lines.append(json.dumps(rec))
-                            except json.JSONDecodeError:
-                                updated_lines.append(line.strip())
-                    with open(feedback_file, "w") as f:
-                        f.write("\n".join(updated_lines) + "\n")
-                except Exception as e:
-                    logger.warning(f"Could not update feedback file: {e}")
-            
-            # Notify via Telegram (through notification queue)
-            try:
-                if applied:
-                    await self.notification_queue.enqueue_raw_message(
-                        f"✅ *Grade Applied*\n\n"
-                        f"Signal: `{signal_id[:25]}...`\n"
-                        f"Type: `{signal_type}`\n"
-                        f"Outcome: {'Win' if is_win else 'Loss'}\n"
-                        f"Applied to learning policy.",
-                        parse_mode="Markdown",
-                        priority=Priority.NORMAL,
-                    )
-                else:
-                    await self.notification_queue.enqueue_raw_message(
-                        f"ℹ️ *Grade Logged*\n\n"
-                        f"Signal: `{signal_id[:25]}...`\n"
-                        f"Already exited - feedback logged but not applied.\n"
-                        f"_Use `force` to override._",
-                        parse_mode="Markdown",
-                        priority=Priority.NORMAL,
-                    )
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-            
-        except Exception as e:
-            logger.error(f"Error processing grade request: {e}", exc_info=True)
-        finally:
-            # Always clean up the request file
-            grade_file.unlink(missing_ok=True)
-
-    async def _process_operator_requests(self, state_dir: Path) -> None:
-        """
-        Process operator request files written by the web API server.
-
-        This is intentionally **shadow-only** feedback collection and MUST NOT
-        affect live trading decisions.
-
-        Currently supported request types:
-        - pearl_suggestion_feedback_*.json: Accept/dismiss the active Pearl suggestion
-          (updates `PearlShadowTracker` metrics).
-        """
-        req_dir = Path(state_dir) / "operator_requests"
-        if not req_dir.exists():
-            return
-
-        try:
-            files = sorted([p for p in req_dir.glob("pearl_suggestion_feedback_*.json") if p.is_file()])
-        except Exception:
-            return
-
-        if not files:
-            return
-
-        # Build a lightweight context snapshot for resolution metrics.
-        snap = {}
-        try:
-            snap = self._get_status_snapshot() or {}
-        except Exception:
-            snap = {}
-
-        shadow_context = {
-            "daily_pnl": snap.get("daily_pnl", 0),
-            "wins_today": snap.get("wins_today", 0),
-            "losses_today": snap.get("losses_today", 0),
-            "active_positions": snap.get("active_trades_count", 0) or 0,
-        }
-
-        for fp in files[:50]:
-            try:
-                raw = fp.read_text(encoding="utf-8")
-                rec = json.loads(raw) if raw else {}
-                if not isinstance(rec, dict):
-                    continue
-
-                if str(rec.get("type") or "") != "pearl_suggestion_feedback":
-                    continue
-
-                action = str(rec.get("action") or "").strip().lower()
-                suggestion_id = str(rec.get("suggestion_id") or "").strip()
-                if not action or not suggestion_id:
-                    continue
-
-                if action == "accept":
-                    self.shadow_tracker.mark_followed(suggestion_id, shadow_context)
-                    logger.info(f"[Pearl] Suggestion accepted (shadow): {suggestion_id}")
-                elif action == "dismiss":
-                    self.shadow_tracker.mark_dismissed(suggestion_id, shadow_context)
-                    logger.info(f"[Pearl] Suggestion dismissed (shadow): {suggestion_id}")
-                else:
-                    logger.warning(f"[Pearl] Unknown suggestion feedback action: {action}")
-            except Exception as e:
-                logger.warning(f"[Pearl] Failed to process operator request {fp.name}: {e}")
-            finally:
-                # Always remove requests (prevents double-processing on restart).
-                try:
-                    fp.unlink(missing_ok=True)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
     def get_status(self) -> Dict:
         """Get current service status."""
         uptime = None
@@ -4496,14 +3936,16 @@ class MarketAgentService:
         futures_market_open = None
         try:
             futures_market_open = bool(get_market_hours().is_market_open())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             futures_market_open = None
 
         strategy_session_open = None
         try:
             from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             strategy_session_open = check_trading_session(datetime.now(timezone.utc), self.config)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             strategy_session_open = None
 
         return {
@@ -4677,7 +4119,8 @@ class MarketAgentService:
         """
         try:
             lim = max(1, int(limit or 2000))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             lim = 2000
 
         try:
@@ -4686,7 +4129,8 @@ class MarketAgentService:
                 return []
             if not Path(path).exists():
                 return []
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return []
 
         # Stop-loss ATR multiplier used to derive ATR from stop distance (best-effort).
@@ -4694,7 +4138,8 @@ class MarketAgentService:
             stop_mult = float(self.config.get("stop_loss_atr_mult", 3.5) or 3.5)
             if stop_mult <= 0:
                 stop_mult = 3.5
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             stop_mult = 3.5
 
         samples = deque(maxlen=lim)
@@ -4706,7 +4151,8 @@ class MarketAgentService:
                         continue
                     try:
                         rec = json.loads(line)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         continue
                     if not isinstance(rec, dict):
                         continue
@@ -4729,11 +4175,13 @@ class MarketAgentService:
                     # Core features we can reliably reconstruct
                     try:
                         confidence = float(sig.get("confidence") or 0.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         confidence = 0.0
                     try:
                         rr = float(sig.get("risk_reward") or 0.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         rr = 0.0
 
                     # Derive ATR from stop distance (best-effort; consistent with how stops are constructed).
@@ -4743,7 +4191,8 @@ class MarketAgentService:
                         stop = float(sig.get("stop_loss") or 0.0)
                         if entry > 0 and stop > 0 and stop_mult > 0:
                             atr_val = abs(entry - stop) / stop_mult
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         atr_val = 0.0
 
                     # Volatility ratio (if present via market_regime); else neutral.
@@ -4752,7 +4201,8 @@ class MarketAgentService:
                         mr = sig.get("market_regime") or {}
                         if isinstance(mr, dict) and mr.get("volatility_ratio") is not None:
                             vol_ratio = float(mr.get("volatility_ratio") or 1.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         vol_ratio = 1.0
 
                     # Optional regime dict (used for one-hot context features in MLSignalFilter)
@@ -4769,11 +4219,13 @@ class MarketAgentService:
                                     vb = "low"
                                 elif float(vol_ratio) > 1.5:
                                     vb = "high"
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 vb = "normal"
                             regime_dict["volatility"] = vb
                             regime_dict["session"] = str(mr.get("session") or "")
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         regime_dict = {}
 
                     sample = {
@@ -4795,7 +4247,8 @@ class MarketAgentService:
                         sample["regime"] = regime_dict
 
                     samples.append(sample)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return []
 
         return list(samples)
@@ -4850,14 +4303,16 @@ class MarketAgentService:
             try:
                 if feats.get("ml_pass_threshold") is not None:
                     thr = float(feats.get("ml_pass_threshold") or 0.0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 thr = None
             if thr is None:
                 try:
                     st = getattr(self, "_ml_shadow_threshold", None)
                     if getattr(self, "_ml_filter_mode", "shadow") == "shadow" and st is not None:
                         thr = float(st)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     thr = None
 
             pass_flag = True
@@ -4866,13 +4321,15 @@ class MarketAgentService:
                 try:
                     p = float(feats.get("ml_win_probability", 0.0) or 0.0)
                     pass_flag = p >= float(thr)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     pass_flag = True
             else:
                 # Fallback to stored boolean flag if probability/threshold missing.
                 try:
                     pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     pass_flag = True
 
             if pass_flag:
@@ -4916,7 +4373,8 @@ class MarketAgentService:
                 try:
                     if bool(t.get("is_win", False)):
                         wins += 1
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     continue
             return wins / max(1, len(xs))
 
@@ -4925,7 +4383,8 @@ class MarketAgentService:
             for t in xs:
                 try:
                     vals.append(float(t.get("pnl", 0.0) or 0.0))
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     continue
             return float(sum(vals) / max(1, len(vals))) if vals else 0.0
 
@@ -5006,7 +4465,8 @@ class MarketAgentService:
         """Return active virtual trades (signals.jsonl status=entered)."""
         try:
             recent_signals = self.state_manager.get_recent_signals(limit=limit)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to retrieve active virtual trades: {e}")
             return []
         active: list[dict] = []
         for rec in recent_signals:
@@ -5023,7 +4483,8 @@ class MarketAgentService:
             try:
                 cached = getattr(self.data_fetcher, "_last_market_data", None) or {}
                 latest_bar = cached.get("latest_bar")
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to resolve latest bar data: {e}")
                 latest_bar = None
         if not isinstance(latest_bar, dict):
             return {"close": None, "bid": None, "ask": None, "source": None}
@@ -5032,7 +4493,8 @@ class MarketAgentService:
             try:
                 out = float(v)
                 return out if out > 0 else None
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to parse latest price: {e}")
                 return None
 
         close_px = _f(latest_bar.get("close"))
@@ -5050,7 +4512,8 @@ class MarketAgentService:
         """Return auto-flat reason if daily/Friday/weekend rule should trigger."""
         try:
             tz = ZoneInfo(self._auto_flat_timezone)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse auto-flat timezone: {e}")
             tz = ZoneInfo("America/New_York")
 
         local_now = now_utc.astimezone(tz)
@@ -5267,13 +4730,10 @@ class MarketAgentService:
 
     def _clear_close_all_flag(self) -> None:
         """Clear close_all_requested flags in state.json (best-effort)."""
-        state_file = getattr(self.state_manager, "state_file", None)
-        if not state_file or not Path(state_file).exists():
-            return
         try:
-            raw = Path(state_file).read_text(encoding="utf-8")
-            state = json.loads(raw) if raw else {}
-        except Exception:
+            state = self.state_manager.load_state()
+        except Exception as e:
+            logger.warning(f"Failed to load state for close-all flag: {e}")
             state = {}
         if not isinstance(state, dict):
             return
@@ -5281,31 +4741,25 @@ class MarketAgentService:
             state.pop("close_all_requested", None)
             state.pop("close_all_requested_time", None)
             try:
-                Path(state_file).write_text(json.dumps(state, indent=2), encoding="utf-8")
+                self.state_manager.save_state(state)
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
     def _get_close_signals_requested(self) -> list:
         """Get list of signal_ids requested for close from state.json."""
-        state_file = getattr(self.state_manager, "state_file", None)
-        if not state_file or not Path(state_file).exists():
-            return []
         try:
-            raw = Path(state_file).read_text(encoding="utf-8")
-            state = json.loads(raw) if raw else {}
+            state = self.state_manager.load_state()
             return list(state.get("close_signals_requested", []))
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to retrieve close signals requested: {e}")
             return []
 
     def _clear_close_signals_requested(self, signal_ids: list = None) -> None:
         """Clear specific signal close requests or all of them from state.json."""
-        state_file = getattr(self.state_manager, "state_file", None)
-        if not state_file or not Path(state_file).exists():
-            return
         try:
-            raw = Path(state_file).read_text(encoding="utf-8")
-            state = json.loads(raw) if raw else {}
-        except Exception:
+            state = self.state_manager.load_state()
+        except Exception as e:
+            logger.warning(f"Failed to load state for close signals: {e}")
             state = {}
         if not isinstance(state, dict):
             return
@@ -5323,21 +4777,19 @@ class MarketAgentService:
                 state.pop("close_signals_requested_time", None)
 
         try:
-            Path(state_file).write_text(json.dumps(state, indent=2), encoding="utf-8")
+            self.state_manager.save_state(state)
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
 
     async def _handle_close_all_requests(self, market_data: Dict) -> None:
         """Handle manual close-all flag, individual close requests, and auto-flat rules."""
-        state_file = getattr(self.state_manager, "state_file", None)
         manual_requested = False
-        if state_file and Path(state_file).exists():
-            try:
-                raw = Path(state_file).read_text(encoding="utf-8")
-                state = json.loads(raw) if raw else {}
-                manual_requested = bool(state.get("close_all_requested", False))
-            except Exception:
-                manual_requested = False
+        try:
+            state = self.state_manager.load_state()
+            manual_requested = bool(state.get("close_all_requested", False))
+        except Exception as e:
+            logger.warning(f"Failed to load state for close-all flag: {e}")
+            manual_requested = False
 
         if manual_requested:
             logger.warning("Close-all flag detected - flattening virtual trades")
@@ -5406,7 +4858,8 @@ class MarketAgentService:
         # Auto-flat rules (daily + Friday + weekend safety)
         try:
             market_open = bool(get_market_hours().is_market_open())
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Market hours check failed in close-all handler: {e}")
             market_open = None
         now = datetime.now(timezone.utc)
         reason = self._auto_flat_due(now, market_open=market_open)
@@ -5419,7 +4872,8 @@ class MarketAgentService:
                     try:
                         local_now = now.astimezone(ZoneInfo(self._auto_flat_timezone))
                         self._auto_flat_last_dates[reason] = local_now.date()
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"Failed to record auto-flat date: {e}")
                         self._auto_flat_last_dates[reason] = now.date()
 
                     # MFFU: update EOD high-water mark after session close flatten
@@ -5429,168 +4883,9 @@ class MarketAgentService:
                         except Exception as e:
                             logger.debug(f"Could not update MFFU EOD HWM: {e}")
 
-    # ==========================================================================
-    # SIGNAL FORWARDING: Inception -> MFFU via shared JSONL file
-    # ==========================================================================
-
-    def _write_shared_signal(self, signal: Dict, signal_id: str, bar_timestamp: str) -> None:
-        """
-        Write a signal to the shared JSONL file for the MFFU agent to read.
-
-        Called by inception (writer mode) after signal_handler.process_signal()
-        and signal_id assignment.  Non-fatal: errors are logged but never crash
-        the inception agent.
-        """
-        try:
-            self._shared_signals_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Build a JSON-safe copy of the signal (strip internal/non-serializable keys)
-            safe_signal: Dict[str, Any] = {}
-            for k, v in signal.items():
-                if k.startswith("_"):
-                    continue  # skip internal metadata keys
-                try:
-                    json.dumps(v)
-                    safe_signal[k] = v
-                except (TypeError, ValueError):
-                    safe_signal[k] = str(v)
-
-            record = {
-                "signal_id": signal_id,
-                "bar_timestamp": bar_timestamp,
-                "timestamp": get_utc_timestamp(),
-                "signal": safe_signal,
-            }
-
-            lock_path = Path(str(self._shared_signals_path) + ".lock")
-            with open(lock_path, "w") as lock:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-                try:
-                    # Append the new record
-                    with open(self._shared_signals_path, "a") as f:
-                        f.write(json.dumps(record) + "\n")
-
-                    # Rotate if file exceeds max_lines
-                    try:
-                        with open(self._shared_signals_path, "r") as f:
-                            lines = f.readlines()
-                        if len(lines) > self._shared_signals_max_lines:
-                            keep = lines[-self._shared_signals_max_lines :]
-                            with open(self._shared_signals_path, "w") as f:
-                                f.writelines(keep)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")  # rotation failure is non-critical
-                finally:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-            logger.debug(
-                f"Shared signal written: {signal_id[:16]} | "
-                f"bar={bar_timestamp} | direction={signal.get('direction')}"
-            )
-        except Exception as e:
-            logger.debug(f"Could not write shared signal (non-critical): {e}")
-
-    def _read_shared_signals(self) -> list[Dict]:
-        """
-        Read new signals from the shared JSONL file (MFFU follower mode).
-
-        Deduplicates by ``(direction, bar_timestamp)`` so the same EMA cross
-        signal is processed at most once per bar per direction, regardless of
-        how many cycles the inception agent emits it.
-
-        Returns:
-            List of signal dicts ready for ``_process_signal()``.
-        """
-        if not self._shared_signals_path.exists():
-            return []
-
-        new_signals: list[Dict] = []
-        try:
-            lock_path = Path(str(self._shared_signals_path) + ".lock")
-            with open(lock_path, "w") as lock:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_SH)  # shared (read) lock
-                try:
-                    with open(self._shared_signals_path, "r") as f:
-                        lines = f.readlines()
-                finally:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.debug(f"Shared signal: skipping malformed JSON line")
-                    continue
-
-                sig = record.get("signal")
-                if not isinstance(sig, dict):
-                    continue
-
-                direction = str(sig.get("direction") or "")
-                bar_ts = str(record.get("bar_timestamp") or "")
-                if not direction or not bar_ts:
-                    continue
-
-                dedup_key = (direction, bar_ts)
-                if dedup_key in self._shared_signals_processed_keys:
-                    continue
-
-                self._shared_signals_processed_keys.add(dedup_key)
-                # Ensure position_size defaults to 1 (strategy doesn't always set it)
-                if not sig.get("position_size"):
-                    sig["position_size"] = 1
-                new_signals.append(sig)
-
-            # Prevent unbounded memory growth: cap the dedup set
-            if len(self._shared_signals_processed_keys) > 2000:
-                # Keep only the keys we just added (recent enough)
-                recent_keys = {(str(s.get("direction")), str(s.get("_bar_timestamp", "")))
-                               for s in new_signals}
-                self._shared_signals_processed_keys = recent_keys
-
-        except Exception as e:
-            logger.warning(f"Error reading shared signals: {e}")
-
-        return new_signals
-
-    async def _process_forwarded_signals(
-        self, market_data: Optional[Dict] = None
-    ) -> None:
-        """
-        Read and process forwarded signals from inception (MFFU follower mode).
-
-        Called in the main loop's early-exit paths (connection error, fetch
-        exception, empty data) so the MFFU agent never misses a signal even
-        when its own IBKR data connection is broken.
-        """
-        if not self._signal_follower_mode:
-            return
-        # Never process signals when market is closed
-        try:
-            if not get_market_hours().is_market_open():
-                return
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-        try:
-            forwarded = self._read_shared_signals()
-            if not forwarded:
-                return
-            logger.info(
-                f"MFFU: Processing {len(forwarded)} forwarded signal(s) from inception"
-            )
-            buffer: Optional[Any] = None
-            if isinstance(market_data, dict):
-                _df = market_data.get("df")
-                if _df is not None and not getattr(_df, "empty", True):
-                    buffer = _df
-            for sig in forwarded:
-                await self._signal_handler.process_signal(sig, buffer_data=buffer)
-                self._sync_signal_handler_counters()
-        except Exception as e:
-            logger.warning(f"MFFU signal forwarding error: {e}")
+    # Signal forwarding methods now live in SignalForwarder (signal_forwarder.py).
+    # Call sites use self.signal_forwarder.write_shared_signal / read_shared_signals /
+    # process_forwarded_signals.
 
     def _save_state(self) -> None:
         """Save current service state."""
@@ -5632,9 +4927,9 @@ class MarketAgentService:
                         latest_bar[k] = v.item()
                     else:
                         latest_bar[k] = v
-        except Exception:
+        except Exception as e:
             # Never let status persistence fail due to optional metadata.
-            pass
+            logger.warning(f"Failed to merge optional metadata into state: {e}")
 
         # Get run_id for log correlation (if set by logging_config)
         run_id = None
@@ -5649,7 +4944,8 @@ class MarketAgentService:
         try:
             from importlib.metadata import version as get_version
             version = get_version("pearlalgo-dev-ai-agents")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             version = "0.2.3"  # Fallback to known version
 
         # Market + trading bot identity for multi-market observability (Telegram/UI/ops)
@@ -5658,7 +4954,8 @@ class MarketAgentService:
             import os
 
             market_label = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             market_label = "NQ"
 
         state = {
@@ -5779,7 +5076,8 @@ class MarketAgentService:
         try:
             from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             state["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to determine strategy session state: {e}")
             state["strategy_session_open"] = None
 
         # Compute market regime from buffer data (best-effort)
@@ -5799,7 +5097,8 @@ class MarketAgentService:
             else:
                 state["regime"] = None
                 state["regime_timestamp"] = None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to parse regime state for persistence: {e}")
             state["regime"] = None
             state["regime_timestamp"] = None
 
@@ -5860,7 +5159,8 @@ class MarketAgentService:
                         existing_ids.add(nf["id"])
                 fills_file.write_text(json.dumps(existing_fills))
                 state["tradovate_fills"] = existing_fills
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to merge tradovate fills into state: {e}")
                 state["tradovate_fills"] = new_fills
 
             # Override virtual trade counts with real broker data
@@ -5968,13 +5268,15 @@ class MarketAgentService:
                 try:
                     if isinstance(latest_bar, dict):
                         latest_price = latest_bar.get("close")
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to get latest bar for PnL computation: {e}")
                     latest_price = None
 
                 if latest_price is not None and len(active) > 0:
                     try:
                         current_price = float(latest_price)
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"Failed to parse current price for PnL computation: {e}")
                         current_price = None
 
                     if current_price and current_price > 0:
@@ -5984,26 +5286,29 @@ class MarketAgentService:
                             direction = str(sig.get("direction") or "long").lower()
                             try:
                                 entry_price = float(sig.get("entry_price") or 0.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.warning(f"Failed to parse entry price for PnL computation: {e}")
                                 entry_price = 0.0
                             if entry_price <= 0:
                                 continue
                             try:
                                 tick_value = float(sig.get("tick_value") or 2.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.warning(f"Failed to parse tick value for PnL computation: {e}")
                                 tick_value = 2.0
                             try:
                                 position_size = float(sig.get("position_size") or 1.0)
-                            except Exception:
+                            except Exception as e:
+                                logger.warning(f"Failed to parse position size for PnL computation: {e}")
                                 position_size = 1.0
 
                             pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
                             total_upnl += float(pnl_pts) * float(tick_value) * float(position_size)
 
                         state["active_trades_unrealized_pnl"] = float(total_upnl)
-        except Exception:
+        except Exception as e:
             # Never allow optional UI fields to break state persistence.
-            pass
+            logger.warning(f"Failed to compute unrealized PnL for state: {e}")
 
         self.state_manager.save_state(state)
 
@@ -6059,7 +5364,8 @@ class MarketAgentService:
             from pearlalgo.utils.market_hours import get_market_hours
 
             is_market_open = bool(get_market_hours().is_market_open())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             # Fail quiet to avoid spam outside market hours if market-hours util breaks
             is_market_open = False
 

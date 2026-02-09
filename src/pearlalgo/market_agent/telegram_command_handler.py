@@ -92,6 +92,9 @@ from pearlalgo.utils.pearl_suggestions import (
 )
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
+from pearlalgo.market_agent.stats_computation import get_trading_day_start
+from pearlalgo.market_agent.telegram_formatters import TelegramFormattersMixin
+from pearlalgo.utils.retry import async_retry_with_backoff
 
 # Optional: Knowledge / RAG retriever (used for code context during diagnostics).
 try:
@@ -120,27 +123,7 @@ except ImportError:
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
 
-def get_trading_day_start() -> datetime:
-    """
-    Get the start of the current trading day (6pm ET).
-
-    Futures trading day runs from 6pm ET to 6pm ET next day.
-    Returns datetime in UTC for comparison with trade timestamps.
-    """
-    et_tz = ZoneInfo("America/New_York")
-    now_et = datetime.now(et_tz)
-
-    if now_et.hour < 18:
-        # Before 6pm ET - trading day started yesterday at 6pm
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        # After 6pm ET - trading day started today at 6pm
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
-
-    return trading_day_start.astimezone(timezone.utc)
-
-
-class TelegramCommandHandler:
+class TelegramCommandHandler(TelegramFormattersMixin):
     """Full-featured command handler for PEARLalgo trading system."""
 
     def __init__(
@@ -334,7 +317,8 @@ class TelegramCommandHandler:
             data_age_minutes = None
             try:
                 thr = float(state.get("data_stale_threshold_minutes") or 10.0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 thr = 10.0
             try:
                 latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
@@ -345,7 +329,8 @@ class TelegramCommandHandler:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         data_age_minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_age_minutes = None
 
             should_check_data = not (futures_market_open is False and strategy_session_open is False)
@@ -367,7 +352,8 @@ class TelegramCommandHandler:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         cycle_age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 cycle_age_sec = None
 
             cycle_thr = 120.0
@@ -376,7 +362,8 @@ class TelegramCommandHandler:
                 interval = cm.get("current_interval_seconds")
                 if interval:
                     cycle_thr = max(120.0, float(interval) * 4.0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 cycle_thr = 120.0
 
             if agent_running and cycle_age_sec is not None:
@@ -388,8 +375,8 @@ class TelegramCommandHandler:
             if sc:
                 gw_status = sc.get_gateway_status() or {}
                 gateway_running = bool(gw_status.get("process_running")) and bool(gw_status.get("port_listening"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         # ─────────────────────────────────────────────────────────────────
         # Dynamic labels with live status indicators
@@ -461,7 +448,8 @@ class TelegramCommandHandler:
                     chart_age_label = f"({stale_warning}{int(age_seconds / 60)}m)"
                 else:
                     chart_age_label = f"({stale_warning}{int(age_seconds / 3600)}h)"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             chart_age_label = ""
         
         chart_button_label = f"🔄📈{chart_age_label}" if chart_age_label else "🔄📈"
@@ -550,8 +538,8 @@ class TelegramCommandHandler:
                         suggestion_state["gateway_running"] = bool(
                             gw_status.get("process_running") and gw_status.get("port_listening")
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # Data freshness
                 try:
@@ -559,8 +547,8 @@ class TelegramCommandHandler:
                     thr = state.get("data_stale_threshold_minutes", 10)
                     suggestion_state["data_age_minutes"] = float(data_age or 0)
                     suggestion_state["data_stale"] = float(data_age or 0) > float(thr or 10)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # P&L and performance
                 suggestion_state["daily_pnl"] = float(state.get("daily_pnl", 0) or 0)
@@ -576,8 +564,8 @@ class TelegramCommandHandler:
                 try:
                     uptime_sec = state.get("agent_uptime_seconds", 0)
                     suggestion_state["agent_uptime_hours"] = float(uptime_sec or 0) / 3600.0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
                 # Risk telemetry
                 try:
@@ -586,8 +574,8 @@ class TelegramCommandHandler:
                     suggestion_state["risk_session_pnl"] = float(cb.get("session_pnl", 0.0) or 0.0)
                     suggestion_state["risk_would_block_total"] = int(cb.get("would_block_total", 0) or 0)
                     suggestion_state["risk_mode"] = str(cb.get("mode", "unknown") or "unknown")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
             return engine.generate_suggestion(
                 suggestion_state,
@@ -761,8 +749,8 @@ class TelegramCommandHandler:
             # Send typing indicator
             try:
                 await update.message.chat.send_action("typing")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             # Get AI response
             response = await ai_chat.chat(user_message, context=context_data)
@@ -970,7 +958,8 @@ class TelegramCommandHandler:
             return None
         try:
             return json.loads(metrics_files[0].read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     def _read_strategy_selection(self) -> Optional[dict]:
@@ -985,7 +974,8 @@ class TelegramCommandHandler:
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         try:
             return json.loads(candidates[0].read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1003,8 +993,8 @@ class TelegramCommandHandler:
         if not await self._check_authorized(update):
             try:
                 await query.edit_message_text("❌ Unauthorized access")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             return
         
         # Resolve legacy callbacks to canonical form (backward compatibility)
@@ -1013,8 +1003,8 @@ class TelegramCommandHandler:
             logger.error("Received empty callback data")
             try:
                 await query.answer("❌ Invalid button action", show_alert=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             return
             
         callback_data = resolve_callback(raw_callback)
@@ -1029,8 +1019,8 @@ class TelegramCommandHandler:
             logger.error(f"Failed to parse callback '{callback_data}': {e}", exc_info=True)
             try:
                 await query.answer("❌ Error parsing button action", show_alert=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             return
         
         logger.debug(f"Parsed callback: type={callback_type}, action={action}, param={param}")
@@ -1083,7 +1073,7 @@ class TelegramCommandHandler:
                     keyboard = [self._nav_back_row()]
                     error_msg = f"❌ Error: {str(e)[:100]}"
                     await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                except Exception:
+                except Exception as e:
                     # If we can't even send error message, at least log it
                     logger.error(f"Failed to send error message to user: {e}")
 
@@ -1107,16 +1097,16 @@ class TelegramCommandHandler:
             if parse_mode and "markdown" in str(parse_mode).lower():
                 text = self._with_support_footer(text)
                 text = sanitize_telegram_markdown(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         # Photo messages can't be edited via edit_message_text. For menu screens,
         # replace the dashboard photo with a text-only message.
         if message and getattr(message, "photo", None):
             try:
                 await message.delete()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             try:
                 if not getattr(message, "chat", None):
                     raise RuntimeError("Missing chat context for photo replacement")
@@ -1126,7 +1116,8 @@ class TelegramCommandHandler:
                         reply_markup=reply_markup,
                         parse_mode=parse_mode,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     # Fallback: strip Markdown formatting to avoid parse errors.
                     plain = str(text).replace("*", "").replace("_", "").replace("`", "")
                     await message.chat.send_message(
@@ -1158,8 +1149,8 @@ class TelegramCommandHandler:
                 try:
                     if message:
                         await message.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 try:
                     if not message or not getattr(message, "chat", None):
                         raise RuntimeError("Missing chat context for replacement message")
@@ -1169,7 +1160,8 @@ class TelegramCommandHandler:
                             reply_markup=reply_markup,
                             parse_mode=parse_mode
                         )
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         plain = str(text).replace("*", "").replace("_", "").replace("`", "")
                         await message.chat.send_message(
                             text=plain,
@@ -1191,37 +1183,40 @@ class TelegramCommandHandler:
         retries: int = 2,
         delay: float = 1.0,
     ) -> None:
-        """Retry transient Telegram API calls (timeouts, bad gateway)."""
-        last_exc: Optional[Exception] = None
-        for attempt in range(int(retries)):
+        """Retry transient Telegram API calls (timeouts, bad gateway).
+
+        Uses shared async_retry_with_backoff for the retry/backoff loop,
+        with Telegram-specific error classification: only network-level
+        transient errors are retried; "message is not modified" is treated
+        as success to avoid churn.
+        """
+
+        _RETRYABLE_TOKENS = (
+            "timed out", "timeout", "bad gateway",
+            "network", "connection", "readtimeout",
+        )
+
+        class _RetryableTelegramError(Exception):
+            """Wrapper for Telegram errors eligible for retry."""
+
+        @async_retry_with_backoff(
+            max_retries=int(retries),
+            initial_delay=float(delay),
+            exceptions=(_RetryableTelegramError,),
+        )
+        async def _attempt() -> None:
             try:
                 await func()
-                return
             except Exception as e:
-                last_exc = e
                 err_str = str(e).lower()
                 # Treat "not modified" as success to avoid churn.
                 if "message is not modified" in err_str:
                     return
-                retryable = any(
-                    token in err_str
-                    for token in (
-                        "timed out",
-                        "timeout",
-                        "bad gateway",
-                        "network",
-                        "connection",
-                        "readtimeout",
-                    )
-                )
-                if not retryable or attempt >= int(retries) - 1:
-                    raise
-                try:
-                    await asyncio.sleep(float(delay) * float(attempt + 1))
-                except Exception:
-                    pass
-        if last_exc:
-            raise last_exc
+                if any(tok in err_str for tok in _RETRYABLE_TOKENS):
+                    raise _RetryableTelegramError(str(e)) from e
+                raise
+
+        await _attempt()
 
     async def _handle_menu_action(self, query: CallbackQuery, action: str) -> None:
         """Handle menu button actions."""
@@ -1271,8 +1266,8 @@ class TelegramCommandHandler:
         try:
             active_state = self._read_state() or {}
             active_symbol = str(active_state.get("symbol") or active_symbol)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         lines = [
             "🌐 *Markets*",
@@ -1289,7 +1284,8 @@ class TelegramCommandHandler:
             try:
                 if sc is not None:
                     running = bool((sc.get_agent_status(market=market) or {}).get("running"))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 running = False
 
             state = None
@@ -1297,7 +1293,8 @@ class TelegramCommandHandler:
                 state_file = self._state_dir_path_for_market(market) / "state.json"
                 if state_file.exists():
                     state = json.loads(state_file.read_text(encoding="utf-8"))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 state = None
 
             symbol = default_symbols.get(market, market)
@@ -1380,7 +1377,8 @@ class TelegramCommandHandler:
                                     "edit_message_media",
                                     lambda: _edit_media(caption_md_v2, "MarkdownV2"),
                                 )
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 # Fallback: update media without MarkdownV2 parsing.
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
@@ -1404,8 +1402,8 @@ class TelegramCommandHandler:
                             # Message doesn't have photo, delete and send new one with photo
                             try:
                                 await query.message.delete()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                             # Send new message with photo
                             try:
                                 async def _send_photo(caption: str, parse_mode: Optional[str]) -> None:
@@ -1421,7 +1419,8 @@ class TelegramCommandHandler:
                                     "send_photo",
                                     lambda: _send_photo(caption_md_v2, "MarkdownV2"),
                                 )
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                                 caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1440,8 +1439,8 @@ class TelegramCommandHandler:
                                 )
                             try:
                                 await query.answer()  # Acknowledge the callback
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                     except Exception as e:
                         logger.error(f"Error showing chart: {e}", exc_info=True)
                         # Fallback to text only
@@ -1450,15 +1449,16 @@ class TelegramCommandHandler:
                             # If we have a photo message, delete it first
                             try:
                                 await message.delete()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                             try:
                                 await message.chat.send_message(
                                     text=text_md_v2,
                                     reply_markup=reply_markup,
                                     parse_mode="MarkdownV2"
                                 )
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 import re
                                 text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                                 text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1471,7 +1471,8 @@ class TelegramCommandHandler:
                         else:
                             try:
                                 await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 import re
                                 text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                                 text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1483,15 +1484,16 @@ class TelegramCommandHandler:
                         # If we have a photo message, delete it first
                         try:
                             await message.delete()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                         try:
                             await message.chat.send_message(
                                 text=text_md_v2,
                                 reply_markup=reply_markup,
                                 parse_mode="MarkdownV2"
                             )
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             import re
                             text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                             text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1504,7 +1506,8 @@ class TelegramCommandHandler:
                     else:
                         try:
                             await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             import re
                             text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                             text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1527,8 +1530,8 @@ class TelegramCommandHandler:
             if message and message.photo:
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 await message.chat.send_message(text=text, reply_markup=reply_markup)
                 await query.answer()
             else:
@@ -1544,8 +1547,8 @@ class TelegramCommandHandler:
                 # Need to delete photo message and send text message
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 # Send new text message
                 keyboard = self._get_main_menu_keyboard()
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1631,7 +1634,8 @@ class TelegramCommandHandler:
                         "reply_photo",
                         lambda: _reply_photo(caption_md_v2, "MarkdownV2"),
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                     caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1656,7 +1660,8 @@ class TelegramCommandHandler:
                         reply_markup=reply_markup,
                         parse_mode="MarkdownV2"
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     import re
                     text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                     text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1729,7 +1734,8 @@ class TelegramCommandHandler:
                             reply_markup=reply_markup,
                             parse_mode="MarkdownV2"
                         )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     # Fallback
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
@@ -1750,7 +1756,8 @@ class TelegramCommandHandler:
                         reply_markup=reply_markup,
                         parse_mode="MarkdownV2"
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     import re
                     text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                     text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1803,7 +1810,8 @@ class TelegramCommandHandler:
         chart_exists = False
         try:
             chart_exists = telegram_chart.exists()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             chart_exists = False
 
         # Fast path: if we have a chart and refresh is disabled, return it.
@@ -1822,27 +1830,31 @@ class TelegramCommandHandler:
                 latest_bar_ts = parse_utc_timestamp(str(ts_raw))
                 if latest_bar_ts and latest_bar_ts.tzinfo is None:
                     latest_bar_ts = latest_bar_ts.replace(tzinfo=timezone.utc)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             latest_bar_ts = None
 
         # Only try to refresh when data appears fresh; avoid needless work in closed/paused markets.
         data_is_fresh = False
         try:
             thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             thr_min = 10.0
         if latest_bar_ts:
             try:
                 age_min = (datetime.now(timezone.utc) - latest_bar_ts).total_seconds() / 60.0
                 data_is_fresh = (thr_min <= 0) or (age_min <= thr_min)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_is_fresh = False
 
         prev_mtime = None
         try:
             if chart_exists:
                 prev_mtime = float(telegram_chart.stat().st_mtime)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             prev_mtime = None
 
         # Always capture if missing, optionally refresh when stale.
@@ -1854,7 +1866,8 @@ class TelegramCommandHandler:
                 # (90s buffer avoids regenerating on every minor state write.)
                 if (latest_bar_ts - chart_mtime).total_seconds() > 90.0:
                     should_refresh = True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 should_refresh = False
 
         # Basic rate-limit (prevents rapid refresh spam unless forced).
@@ -1863,8 +1876,8 @@ class TelegramCommandHandler:
                 age_sec = (datetime.now(timezone.utc) - datetime.fromtimestamp(float(prev_mtime), tz=timezone.utc)).total_seconds()
                 if age_sec < 10.0:
                     should_refresh = False
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         if should_refresh:
             try:
@@ -1893,7 +1906,8 @@ class TelegramCommandHandler:
         # Agent running (best-effort). When agent is off, connection/data are not meaningful.
         try:
             agent_running = bool(self._is_agent_process_running())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             agent_running = False
 
         # Determine status indicators
@@ -1908,7 +1922,8 @@ class TelegramCommandHandler:
                 gw = sc.get_gateway_status() or {}
                 gw_ok = bool(gw.get("process_running")) and bool(gw.get("port_listening"))
                 gw_status = "🟢" if gw_ok else "🔴"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             # keep unknown
             pass
         
@@ -1936,7 +1951,8 @@ class TelegramCommandHandler:
             # Staleness override: mark Data degraded if latest bar is older than the threshold.
             try:
                 thr = float(state.get("data_stale_threshold_minutes") or 10.0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 thr = 10.0
             try:
                 ts = None
@@ -1953,8 +1969,8 @@ class TelegramCommandHandler:
                             # If we don't have an explicit connection state, don't show green when data is stale.
                             if "connection_status" not in state and conn_status == "🟢":
                                 conn_status = "🟡"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
         
         lines = [
             "🛡️ *Health*",
@@ -1986,7 +2002,8 @@ class TelegramCommandHandler:
         state = None
         try:
             state = self._read_state()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state = None
         if not isinstance(state, dict):
             state = {}
@@ -2013,20 +2030,23 @@ class TelegramCommandHandler:
                     dt = dt.replace(tzinfo=timezone.utc)
                 if dt:
                     data_age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             data_age_min = None
 
         # Threshold (minutes) for marking data stale.
         try:
             data_stale_threshold_min = float(state.get("data_stale_threshold_minutes") or 10.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             data_stale_threshold_min = 10.0
 
         # Service status (best-effort)
         agent_running = False
         try:
             agent_running = bool(self._is_agent_process_running())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             agent_running = False
 
         gateway_status = None
@@ -2035,7 +2055,8 @@ class TelegramCommandHandler:
             fn = getattr(sc, "get_gateway_status", None)
             if callable(fn):
                 gateway_status = fn() or {}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             gateway_status = None
 
         symbol = str(state.get("symbol") or "MNQ")
@@ -2121,7 +2142,8 @@ class TelegramCommandHandler:
                     state_dir=Path(self.state_dir),
                     enabled=True,
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 return None
 
         if action == "tests":
@@ -2155,8 +2177,8 @@ class TelegramCommandHandler:
                     prefs.disable_snooze()
                 else:
                     prefs.enable_snooze(hours=1.0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             await self._show_ui_doctor(query)
             return
 
@@ -2165,16 +2187,16 @@ class TelegramCommandHandler:
                 cur = bool(prefs.get("dashboard_edit_in_place", False))
                 prefs.set("dashboard_edit_in_place", not cur)
                 prefs.set("dashboard_message_id", None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             await self._show_ui_doctor(query)
             return
 
         if action == "reset_pinned":
             try:
                 prefs.set("dashboard_message_id", None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             await self._show_ui_doctor(query)
             return
 
@@ -2189,7 +2211,8 @@ class TelegramCommandHandler:
         # Real state (if available) for tests.
         try:
             state = self._read_state()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state = None
         if not isinstance(state, dict):
             state = {}
@@ -2331,8 +2354,8 @@ class TelegramCommandHandler:
                             by_id[sid] = t  # keep most recent occurrence
                         if by_id:
                             today_trades_list = list(by_id.values()) + no_id
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                     
                     if today_trades_list:
                         # Fallback for basic metrics
@@ -2465,7 +2488,8 @@ class TelegramCommandHandler:
                         if not label or not cb:
                             continue
                         row.append(InlineKeyboardButton(label, callback_data=cb))
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         continue
                 if row:
                     keyboard.append(row)
@@ -2525,8 +2549,8 @@ class TelegramCommandHandler:
             if mode:
                 lines.append("")
                 lines.append(f"Mode: `{mode}` | Would-block signals: `{would_block}`")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         keyboard = [
             [InlineKeyboardButton("🔄 Refresh", callback_data="action:risk_report")],
@@ -2548,7 +2572,8 @@ class TelegramCommandHandler:
             if not files:
                 return None
             return json.loads(files[-1].read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     async def _show_analytics_menu(self, query: CallbackQuery) -> None:
@@ -2560,7 +2585,8 @@ class TelegramCommandHandler:
             try:
                 from zoneinfo import ZoneInfo
                 et_tz = ZoneInfo("America/New_York")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 # Fallback (no DST) — still safer than crashing
                 et_tz = timezone(timedelta(hours=-5))
             
@@ -2596,7 +2622,8 @@ class TelegramCommandHandler:
                             if dt.tzinfo is None:
                                 dt = dt.replace(tzinfo=timezone.utc)
                             return dt
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             return None
 
                     # De-dupe by signal_id to prevent any double-counting in analytics
@@ -2668,8 +2695,8 @@ class TelegramCommandHandler:
                             else:
                                 session_stats[session_name]['losses'] += 1
                             session_stats[session_name]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                     
                     lines.append("*📅 Session Performance:*")
                     session_order = ['overnight', 'premarket', 'morning', 'midday', 'afternoon', 'close']
@@ -2708,8 +2735,8 @@ class TelegramCommandHandler:
                             else:
                                 hour_stats[et_hour]['losses'] += 1
                             hour_stats[et_hour]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                     
                     # Find best and worst hours
                     hours_with_data = [(h, d) for h, d in hour_stats.items() if d['wins'] + d['losses'] >= 5]
@@ -3014,8 +3041,8 @@ class TelegramCommandHandler:
             if sc is not None:
                 agent_status = sc.get_agent_status(market=self.active_market) or {}
                 agent_running = bool(agent_status.get("running"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
@@ -3032,8 +3059,8 @@ class TelegramCommandHandler:
                 gw_status = sc.get_gateway_status() or {}
                 gateway_running = bool(gw_status.get("process_running"))
                 gateway_port = bool(gw_status.get("port_listening"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         
         # Clean, compact system status
         gw_status_txt = "🟢 ON" if (gateway_running and gateway_port) else "🔴 OFF"
@@ -3415,8 +3442,8 @@ class TelegramCommandHandler:
                     current = prefs.get(pref_key)
                     if isinstance(current, bool):
                         prefs.set(pref_key, not current)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 await self._show_settings_menu(query)
                 return
             
@@ -3775,8 +3802,8 @@ class TelegramCommandHandler:
                 # Force recapture the Live Main Chart screenshot.
                 try:
                     await query.answer("⏳ Refreshing chart...")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 await self._show_main_menu_with_chart(query, force_chart_refresh=True)
             elif action_type == "toggle_chart":
                 # Toggle chart display
@@ -3922,8 +3949,8 @@ class TelegramCommandHandler:
                             _st = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
                             if _st and str(_st).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                                 _use_mffu_tracker = True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
 
                     if _use_mffu_tracker:
                         from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
@@ -4234,7 +4261,8 @@ class TelegramCommandHandler:
         message_md_v2 = convert_to_markdown_v2_with_pearl(message_md)
         try:
             await message_obj.reply_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             import re
             plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
             plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -4268,7 +4296,8 @@ class TelegramCommandHandler:
                 et_tz = pytz.timezone('US/Eastern')
                 et_time = current_time.astimezone(et_tz)
                 time_str = et_time.strftime("%I:%M %p ET").lstrip('0')
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
             # Service status - use live process check, not stale state file
@@ -4285,7 +4314,8 @@ class TelegramCommandHandler:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         agent_uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 agent_uptime_seconds = None
             
             # Gateway status
@@ -4303,7 +4333,8 @@ class TelegramCommandHandler:
                         gateway_unknown = False
                 else:
                     gateway_unknown = True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 gateway_unknown = True
             
             # Market gates
@@ -4346,7 +4377,8 @@ class TelegramCommandHandler:
                         px = latest_bar.get("close")
                         try:
                             current_price = float(px) if px is not None else None
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                             current_price = None
 
                         if current_price and current_price > 0:
@@ -4356,17 +4388,20 @@ class TelegramCommandHandler:
                                 direction = str(sig.get("direction") or "long").lower()
                                 try:
                                     entry_price = float(sig.get("entry_price") or 0.0)
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug(f"Non-critical: {e}")
                                     entry_price = 0.0
                                 if entry_price <= 0:
                                     continue
                                 try:
                                     tick_value = float(sig.get("tick_value") or 2.0)
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug(f"Non-critical: {e}")
                                     tick_value = 2.0
                                 try:
                                     position_size = float(sig.get("position_size") or 1.0)
-                                except Exception:
+                                except Exception as e:
+                                    logger.debug(f"Non-critical: {e}")
                                     position_size = 1.0
 
                                 pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
@@ -4376,12 +4411,14 @@ class TelegramCommandHandler:
 
                     if not active_trades_price_source:
                         active_trades_price_source = data_level
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     active_trades_count = 0
 
             try:
                 active_trades_count = int(active_trades_count or 0)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 active_trades_count = 0
 
             # Raw data age (seconds) for footer (even if we suppress stale warnings elsewhere).
@@ -4390,7 +4427,8 @@ class TelegramCommandHandler:
                 m = state.get("latest_bar_age_minutes")
                 if m is not None:
                     data_age_seconds = float(m) * 60.0
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_age_seconds = None
             
             # Data age (read threshold from config)
@@ -4403,8 +4441,8 @@ class TelegramCommandHandler:
                         config = yaml.safe_load(f) or {}
                         data_config = config.get("data", {})
                         data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             
             data_age_minutes = None
             if latest_bar and isinstance(latest_bar, dict):
@@ -4449,7 +4487,8 @@ class TelegramCommandHandler:
                     data_stale = None
                 else:
                     data_stale = (float(data_age_seconds) / 60.0) > float(data_stale_threshold_minutes)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 data_stale = None
             
             # Buy/Sell pressure
@@ -4468,8 +4507,8 @@ class TelegramCommandHandler:
                         if hasattr(last_cycle_dt, 'tzinfo') and last_cycle_dt.tzinfo is None:
                             last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
                         last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
             # Agent health (process may be up, but we also want to know if it's cycling).
             agent_healthy: bool | None = None
@@ -4485,10 +4524,12 @@ class TelegramCommandHandler:
                         interval = cm.get("current_interval_seconds")
                         if interval:
                             cycle_thr = max(120.0, float(interval) * 4.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         cycle_thr = 120.0
                     agent_healthy = float(last_cycle_seconds) <= float(cycle_thr)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 agent_healthy = None
             
             # Challenge tracker for inception is disabled (MFFU has its own tracker).
@@ -4508,7 +4549,8 @@ class TelegramCommandHandler:
                         _skip_inception_challenge = False
                 else:
                     _skip_inception_challenge = True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 _skip_inception_challenge = True
 
             if not _skip_inception_challenge:
@@ -4558,8 +4600,8 @@ class TelegramCommandHandler:
                     _stage = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
                     if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                         _acct_label = "MFFU"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
@@ -4639,8 +4681,8 @@ class TelegramCommandHandler:
                                 by_id[sid] = t  # keep most recent occurrence
                             if by_id:
                                 today_trades_list = list(by_id.values()) + no_id
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                         
                         if today_trades_list:
                             # Basic metrics (fallback if not in state)
@@ -4742,7 +4784,8 @@ class TelegramCommandHandler:
                                 dt = parse_utc_timestamp(ts)
                                 if dt >= cutoff:
                                     trades_72h.append(t)
-                            except Exception:
+                            except Exception as e:
+                                logger.debug(f"Non-critical: {e}")
                                 continue
 
                         # Defensive: de-dupe by signal_id to avoid any double-counting if the
@@ -4758,8 +4801,8 @@ class TelegramCommandHandler:
                                 by_id[sid] = t  # keep most recent occurrence (append-only)
                             if by_id:
                                 trades_72h = list(by_id.values()) + no_id
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
 
                         if trades_72h:
                             pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
@@ -4833,7 +4876,8 @@ class TelegramCommandHandler:
                 for t in recent_exits[:2]:
                     try:
                         pnl_val = float(t.get("pnl") or 0.0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         pnl_val = 0.0
                     pnl_emoji, pnl_str = format_pnl(pnl_val)
                     dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
@@ -4855,10 +4899,10 @@ class TelegramCommandHandler:
                                     et_exit = exit_time.astimezone(et_tz)
                                     time_label = et_exit.strftime("%I:%M %p").lstrip("0")
                                     message += f" • {time_label}"
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                except Exception as e:
+                                    logger.debug(f"Non-critical: {e}")
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
             
             # "Current Position" section removed from main dashboard - available in Activity tab
             # The header already shows "X Active | $Y.YY" which provides quick visibility
@@ -4932,7 +4976,8 @@ class TelegramCommandHandler:
             message_md_v2 = convert_to_markdown_v2_with_pearl(message_md)
             try:
                 await query.edit_message_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 import re
                 plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
                 plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -4972,8 +5017,8 @@ class TelegramCommandHandler:
                 pnl_emoji = "💰" if upnl >= 0 else "📉"
                 pnl_sign = "+" if upnl >= 0 else ""
                 lines.append(f"{pnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         lines.append("")
         lines.append("_Virtual trades are simulated (not broker positions)._")
@@ -4990,8 +5035,8 @@ class TelegramCommandHandler:
                 if entry_price:
                     try:
                         lines.append(f"   Entry: ${float(entry_price):,.2f}")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
 
         lines.append("")
         if not recent_10:
@@ -5014,7 +5059,8 @@ class TelegramCommandHandler:
                     try:
                         ts = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
                         time_str = ts.strftime("%H:%M") if hasattr(ts, "strftime") else str(timestamp)[:5]
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         time_str = str(timestamp)[:5] if timestamp else ""
 
                 status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡", "cancelled": "❌"}.get(
@@ -5026,8 +5072,8 @@ class TelegramCommandHandler:
                 if entry_price:
                     try:
                         line += f"  ${float(entry_price):,.2f}"
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                 if time_str:
                     line += f" @ {time_str}"
                 if pnl is not None and status == "exited":
@@ -5035,8 +5081,8 @@ class TelegramCommandHandler:
                         pnl_val = float(pnl)
                         pe = "🟢" if pnl_val >= 0 else "🔴"
                         line += f" | {pe} ${pnl_val:+.2f}"
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
 
                 lines.append(line)
                 lines.append(f"   `{signal_id_short}`")
@@ -5196,8 +5242,8 @@ class TelegramCommandHandler:
             if chart_row:
                 keyboard = [chart_row] + keyboard
                 reply_markup = InlineKeyboardMarkup(keyboard)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         
         # Format signal details
         text = self._format_signal_detail(signal)
@@ -5212,8 +5258,8 @@ class TelegramCommandHandler:
         if kind_norm not in {"entry", "exit"}:
             try:
                 await query.answer("❌ Unknown chart type", show_alert=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
             return
 
         # Look up the full signal record by prefix
@@ -5271,7 +5317,8 @@ class TelegramCommandHandler:
                             media=InputMediaPhoto(media=f, caption=caption_md, parse_mode="Markdown"),
                             reply_markup=reply_markup,
                         )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
                     with open(chart_path, "rb") as f:
                         await query.edit_message_media(
@@ -5282,8 +5329,8 @@ class TelegramCommandHandler:
                 try:
                     if message is not None:
                         await message.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                 try:
                     with open(chart_path, "rb") as f:
                         await query.message.chat.send_photo(
@@ -5292,7 +5339,8 @@ class TelegramCommandHandler:
                             reply_markup=reply_markup,
                             parse_mode="Markdown",
                         )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
                     with open(chart_path, "rb") as f:
                         await query.message.chat.send_photo(
@@ -5303,8 +5351,8 @@ class TelegramCommandHandler:
                         )
             try:
                 await query.answer()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
         except Exception as e:
             logger.warning(f"Error showing trade chart: {e}")
             keyboard = [
@@ -5354,148 +5402,6 @@ class TelegramCommandHandler:
             logger.warning(f"Error finding signal by prefix: {e}")
             return None
 
-    def _format_signal_detail(self, signal: dict) -> str:
-        """
-        Format a signal as a detailed view.
-        
-        Args:
-            signal: Signal dictionary
-            
-        Returns:
-            Formatted markdown string
-        """
-        signal_id = signal.get("signal_id", "")
-        symbol = signal.get("symbol", "MNQ")
-        signal_type = safe_label(signal.get("type", "unknown"))
-        status = signal.get("status", "unknown")
-        direction = signal.get("direction", "long")
-        
-        # Format with helpers
-        dir_emoji, dir_label = format_signal_direction(direction)
-        
-        # Check if exited with P&L
-        pnl = signal.get("pnl")
-        is_win = pnl > 0 if pnl is not None else None
-        status_emoji, status_label = format_signal_status(status, is_win)
-        
-        # Prices
-        entry_price = signal.get("entry_price", 0)
-        stop_loss = signal.get("stop_loss", 0)
-        take_profit = signal.get("take_profit", 0)
-        exit_price = signal.get("exit_price")
-        
-        # Confidence
-        confidence = signal.get("confidence", 0)
-        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
-        
-        # Timing
-        timestamp = signal.get("timestamp", "")
-        entry_time = signal.get("entry_time", "")
-        exit_time = signal.get("exit_time", "")
-        
-        # Build message
-        lines = [
-            "🔍 *Trade Detail*",
-            "",
-            f"*{symbol} {dir_emoji} {dir_label}* | {signal_type}",
-            f"{status_emoji} Status: *{status_label}*",
-            "",
-        ]
-        
-        # Trade Plan
-        lines.append("*Trade Plan:*")
-        if entry_price:
-            lines.append(f"  Entry: ${entry_price:.2f}")
-        if stop_loss:
-            stop_dist = abs(entry_price - stop_loss) if entry_price else 0
-            lines.append(f"  Stop: ${stop_loss:.2f} ({stop_dist:.1f} pts)")
-        if take_profit:
-            tp_dist = abs(take_profit - entry_price) if entry_price else 0
-            lines.append(f"  TP: ${take_profit:.2f} ({tp_dist:.1f} pts)")
-        
-        # R:R
-        if entry_price and stop_loss and take_profit:
-            if dir_label == "LONG":
-                risk = entry_price - stop_loss
-                reward = take_profit - entry_price
-            else:
-                risk = stop_loss - entry_price
-                reward = entry_price - take_profit
-            if risk > 0:
-                rr = reward / risk
-                lines.append(f"  R:R: {rr:.1f}:1")
-        
-        # Exit info
-        if exit_price is not None:
-            lines.append("")
-            lines.append("*Exit:*")
-            lines.append(f"  Price: ${exit_price:.2f}")
-            if pnl is not None:
-                pnl_emoji, pnl_str = format_pnl(pnl)
-                lines.append(f"  P&L: {pnl_emoji} {pnl_str}")
-            exit_reason = signal.get("exit_reason", "")
-            if exit_reason:
-                lines.append(f"  Reason: {safe_label(exit_reason)}")
-        
-        # Confidence
-        lines.append("")
-        lines.append(f"{conf_emoji} Confidence: {confidence:.0%} ({conf_tier})")
-        
-        # Timing
-        lines.append("")
-        lines.append("*Timing:*")
-        if timestamp:
-            age = format_time_ago(timestamp)
-            lines.append(f"  Generated: {age or timestamp}")
-        if entry_time:
-            age = format_time_ago(entry_time)
-            lines.append(f"  Entered: {age or entry_time}")
-        if exit_time:
-            age = format_time_ago(exit_time)
-            lines.append(f"  Exited: {age or exit_time}")
-        
-        # Expanded context (check user preference)
-        prefs = TelegramPrefs(state_dir=self.state_dir)
-        if prefs.signal_detail_expanded:
-            # Show regime and MTF context
-            regime = signal.get("regime", {})
-            mtf = signal.get("mtf_analysis", {})
-            
-            if regime or mtf:
-                lines.append("")
-                lines.append("*Context:*")
-                if regime:
-                    r_regime = regime.get("regime", "")
-                    r_volatility = regime.get("volatility", "")
-                    r_session = regime.get("session", "")
-                    if r_regime:
-                        lines.append(f"  Regime: {safe_label(r_regime)}")
-                    if r_volatility:
-                        lines.append(f"  Volatility: {safe_label(r_volatility)}")
-                    if r_session:
-                        lines.append(f"  Session: {safe_label(r_session)}")
-                if mtf:
-                    alignment = mtf.get("alignment", "")
-                    if alignment:
-                        mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
-                        lines.append(f"  MTF: {mtf_emoji} {safe_label(alignment)}")
-            
-            # Reason
-            reason = signal.get("reason", "")
-            if reason:
-                lines.append("")
-                lines.append("*Reason:*")
-                # Truncate long reasons
-                if len(reason) > 200:
-                    reason = reason[:197] + "..."
-                lines.append(f"  {safe_label(reason)}")
-        
-        # Signal ID footer
-        lines.append("")
-        lines.append(f"`ID: {signal_id[:24]}...`")
-        
-        return "\n".join(lines)
-
     async def _handle_performance_metrics(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display performance metrics from performance.json."""
         text = "📈 *Performance Metrics*\n\n"
@@ -5523,8 +5429,8 @@ class TelegramCommandHandler:
                                     dt = dt.replace(tzinfo=timezone.utc)
                                 if dt >= cutoff_7d:
                                     trades_7d.append(t)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Non-critical: {e}")
                     
                     if trades_7d:
                         total_trades = len(trades_7d)
@@ -5619,8 +5525,8 @@ class TelegramCommandHandler:
                         signal_time = parse_utc_timestamp(ts) if isinstance(ts, str) else ts
                         if signal_time >= trading_day_start:
                             today_signals.append(s)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
         
         if today_signals:
             # Count stats
@@ -5794,7 +5700,8 @@ class TelegramCommandHandler:
             if state_file.exists():
                 try:
                     state = json.loads(state_file.read_text(encoding="utf-8"))
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     state = {}
             
             # Update trading_bot settings
@@ -5897,7 +5804,8 @@ class TelegramCommandHandler:
                     try:
                         size_kb = lf.stat().st_size / 1024
                         text += f"  • `{lf.name}` ({size_kb:.1f} KB)\n"
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
                         text += f"  • `{lf.name}`\n"
                 
                 text += f"\n*Location:* `{log_dir.absolute()}`\n"
@@ -6073,8 +5981,8 @@ class TelegramCommandHandler:
                     _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
                     if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                         is_mffu = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         if is_mffu:
             # MFFU uses Tradovate WebSocket, not IBKR Gateway
@@ -6105,8 +6013,8 @@ class TelegramCommandHandler:
                     gw_proc = bool(gw_status.get("process_running", False))
                     gw_port = bool(gw_status.get("port_listening", False))
                     gw_unknown = False
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
             gw_ok = gw_proc and gw_port
 
@@ -6155,7 +6063,8 @@ class TelegramCommandHandler:
                 elif data_fresh is False:
                     conn_label = "DEGRADED (stale data)"
                     conn_emoji = "🟡"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             conn_label = "UNKNOWN"
             conn_emoji = "⚪"
 
@@ -6193,7 +6102,8 @@ class TelegramCommandHandler:
         # Use persisted threshold from state.json (set by agent from config); fall back to default.
         try:
             data_stale_threshold_minutes = float(state.get("data_stale_threshold_minutes") or 10.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             data_stale_threshold_minutes = 10.0
         
         latest_bar = state.get("latest_bar", {}) or {}
@@ -6201,7 +6111,8 @@ class TelegramCommandHandler:
         # Guard agent process check with try/except like other Health code.
         try:
             agent_running = bool(self._is_agent_process_running())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             agent_running = False
         
         paused = bool(state.get("paused", False))
@@ -6228,7 +6139,8 @@ class TelegramCommandHandler:
                             bar_time = bar_time.replace(tzinfo=timezone.utc)
                         age_seconds = (datetime.now(timezone.utc) - bar_time).total_seconds()
                         age_minutes = age_seconds / 60.0
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     age_minutes = None
             
             if age_minutes is not None:
@@ -6278,7 +6190,8 @@ class TelegramCommandHandler:
                 try:
                     conn_diag, _ = connection_status_to_label(raw_conn)
                     conn_diag = conn_diag.lower()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     conn_diag = "unknown"
                 
                 text += "\n🔍 *Diagnostics:*\n"
@@ -6374,25 +6287,7 @@ class TelegramCommandHandler:
     # ---------------------------------------------------------------------
     # Support footer (copy/paste diagnostics)
     # ---------------------------------------------------------------------
-
-    def _format_support_duration(self, seconds: float | None) -> str:
-        """Compact duration like 12s / 3m / 1h43m."""
-        try:
-            if seconds is None:
-                return "?"
-            s = float(seconds)
-            if s < 0:
-                return "?"
-        except Exception:
-            return "?"
-
-        if s < 60:
-            return f"{int(s)}s"
-        if s < 3600:
-            return f"{int(s // 60)}m"
-        hours = int(s // 3600)
-        mins = int((s % 3600) // 60)
-        return f"{hours}h{mins}m"
+    # _format_support_duration is inherited from TelegramFormattersMixin
 
     def _get_chart_url(self) -> str | None:
         """Get the public chart URL if configured."""
@@ -6409,7 +6304,8 @@ class TelegramCommandHandler:
                 state = self._read_state()
             if not isinstance(state, dict):
                 state = {}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state = {}
 
         # Market + symbol (best-effort)
@@ -6421,7 +6317,8 @@ class TelegramCommandHandler:
         # Agent running (process check)
         try:
             agent_running = bool(self._is_agent_process_running())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             agent_running = False
 
         # Gateway status (process + port)
@@ -6433,7 +6330,8 @@ class TelegramCommandHandler:
                 proc = bool(gs.get("process_running"))
                 port = bool(gs.get("port_listening"))
                 gw = "OK" if (proc and port) else "OFF"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             gw = "?"
 
         # Data age + level
@@ -6441,7 +6339,8 @@ class TelegramCommandHandler:
         age_sec = None
         try:
             thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             thr_min = None
         try:
             latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
@@ -6453,7 +6352,8 @@ class TelegramCommandHandler:
                     dt = dt.replace(tzinfo=timezone.utc)
                 if dt:
                     age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             age_sec = None
 
         # Last cycle age
@@ -6466,7 +6366,8 @@ class TelegramCommandHandler:
                     dt = dt.replace(tzinfo=timezone.utc)
                 if dt:
                     cycle_sec = (datetime.now(timezone.utc) - dt).total_seconds()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             cycle_sec = None
 
         lvl_map = {
@@ -6491,7 +6392,8 @@ class TelegramCommandHandler:
             should_check_data = (not paused) and not (futures_open is False and session_open is False)
             if should_check_data and thr_min and age_sec is not None and float(age_sec) / 60.0 > float(thr_min):
                 stale_flag = "!"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             stale_flag = ""
 
         a = "ON" if agent_running else "OFF"
@@ -6527,7 +6429,8 @@ class TelegramCommandHandler:
                             session_str = f" | 🚫{short_session}"
                     else:
                         session_str = f" | 📍{short_session}"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             session_str = ""
         
         # Keep this short; it's intended to be pasted into chat for support.
@@ -6543,7 +6446,8 @@ class TelegramCommandHandler:
         footer = ""
         try:
             footer = self._build_support_footer(state)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             footer = ""
         if not footer:
             return base
@@ -6563,7 +6467,8 @@ class TelegramCommandHandler:
 
         try:
             max_len = int(max_chars)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             max_len = 0
 
         if max_len <= 0 or len(candidate) <= max_len:
@@ -6611,23 +6516,23 @@ class TelegramCommandHandler:
             parse_mode = kwargs.get("parse_mode")
             if parse_mode and "markdown" in str(parse_mode).lower():
                 msg = self._with_support_footer(msg)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         try:
             query = getattr(update, "callback_query", None)
             if query is not None and callable(getattr(query, "edit_message_text", None)):
                 await query.edit_message_text(msg, **kwargs)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         try:
             message = getattr(update, "message", None)
             if message is not None and callable(getattr(message, "reply_text", None)):
                 await message.reply_text(msg, **kwargs)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         # Fallback to bot.send_message
         try:
@@ -6638,8 +6543,8 @@ class TelegramCommandHandler:
                     or getattr(self, "chat_id", None)
                 )
                 await bot.send_message(chat_id=chat_id, text=msg, **kwargs)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
     async def _check_authorized(self, update: Any) -> bool:
         """Return True if update comes from the configured chat_id."""
@@ -6659,8 +6564,8 @@ class TelegramCommandHandler:
         try:
             if callable(getattr(query, "answer", None)):
                 await query.answer()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
         if not await self._check_authorized(update):
             if callable(getattr(query, "edit_message_text", None)):
@@ -6675,7 +6580,8 @@ class TelegramCommandHandler:
         if data.startswith("strategy_review:variant_weeks:"):
             try:
                 weeks = int(data.split(":")[-1])
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 weeks = 1
 
             user_data = getattr(context, "user_data", None)
@@ -6684,8 +6590,8 @@ class TelegramCommandHandler:
             else:
                 try:
                     context.user_data = {"strategy_review_variant_weeks": weeks}
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
 
             render = getattr(self, "_render_strategy_review_cached", None)
             if callable(render):
@@ -6704,15 +6610,16 @@ class TelegramCommandHandler:
             fn = getattr(sc, "is_agent_process_running", None)
             if callable(fn):
                 return bool(fn())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         return False
 
     def _get_current_time_str(self) -> str:
         """Return a short time string for status output."""
         try:
             return datetime.now(timezone.utc).strftime("%H:%M UTC")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return ""
 
     def _compute_state_stale_threshold(self, _state: dict) -> float:
@@ -6725,13 +6632,14 @@ class TelegramCommandHandler:
             v = state.get("latest_price")
             if v is not None:
                 return float(v)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
         try:
             bar = state.get("latest_bar") or {}
             v = bar.get("close")
             return float(v) if v is not None else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     def _extract_data_age_minutes(self, state: dict) -> Optional[float]:
@@ -6745,7 +6653,8 @@ class TelegramCommandHandler:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     async def _handle_status(self, update: Any, context: Any) -> None:
@@ -6757,15 +6666,16 @@ class TelegramCommandHandler:
         state = None
         try:
             state = self._read_state()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state = None
 
         symbol = "MNQ"
         if isinstance(state, dict):
             try:
                 symbol = str(state.get("symbol") or symbol)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
 
         time_str = self._get_current_time_str()
 
@@ -6799,7 +6709,8 @@ class TelegramCommandHandler:
 
         try:
             state_dir = getattr(self, "state_dir", None) or ensure_state_dir(None)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state_dir = Path("data/agent_state/NQ")
 
         signals_file = get_signals_file(Path(state_dir))
@@ -6810,7 +6721,8 @@ class TelegramCommandHandler:
         raw_lines = []
         try:
             raw_lines = signals_file.read_text(encoding="utf-8").splitlines()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             raw_lines = []
 
         signals = []
@@ -6820,7 +6732,8 @@ class TelegramCommandHandler:
                 continue
             try:
                 signals.append(json.loads(line))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 continue
 
         if not signals:
@@ -6833,7 +6746,8 @@ class TelegramCommandHandler:
         for s in shown:
             try:
                 direction = format_signal_direction(str(s.get("direction") or s.get("signal", {}).get("direction") or ""))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
                 direction = ""
             typ = str(s.get("type") or s.get("signal", {}).get("type") or s.get("signal_type") or "signal")
             price = s.get("entry_price") or s.get("signal", {}).get("entry_price")
@@ -6856,7 +6770,8 @@ class TelegramCommandHandler:
         try:
             fn = getattr(tracker, "get_performance_metrics", None)
             metrics = fn() if callable(fn) else {}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             metrics = {}
 
         total_signals = int(metrics.get("total_signals", 0) or 0)
@@ -6889,7 +6804,8 @@ class TelegramCommandHandler:
                     wr = float((v or {}).get("win_rate", 0.0) or 0.0)
                     pnl = float((v or {}).get("total_pnl", 0.0) or 0.0)
                     lines.append(f"• {safe_label(str(k))}: {c} • {wr:.0%} • {format_pnl(pnl)}")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
                     continue
 
         msg = "\n".join(lines)
@@ -6937,7 +6853,8 @@ class TelegramCommandHandler:
         """Return a minimal 'Back to Menu' InlineKeyboardMarkup."""
         try:
             return InlineKeyboardMarkup([self._nav_back_row()])
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return None
 
     def _is_path_blocked(self, rel_path: str) -> bool:
@@ -7006,7 +6923,8 @@ class TelegramCommandHandler:
             return prefs
         try:
             prefs = TelegramPrefs(state_dir=getattr(self, "state_dir", None))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             prefs = TelegramPrefs()
         self.prefs = prefs
         return prefs
@@ -7057,14 +6975,16 @@ class TelegramCommandHandler:
         try:
             root = Path(getattr(self, "_repo_root"))
             return root.resolve()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             return Path(__file__).resolve().parent.parent.parent.parent
 
     def _get_reports_dir(self) -> Path:
         """Directory where Telegram backtest reports are stored (shared with report viewer)."""
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state_dir = Path("data/agent_state/NQ")
         return state_dir.parent / "reports"
 
@@ -7175,7 +7095,8 @@ class TelegramCommandHandler:
 
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state_dir = Path("data/agent_state/NQ")
 
         reports_dir = state_dir.parent / "reports"
@@ -7214,7 +7135,8 @@ class TelegramCommandHandler:
 
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
             state_dir = Path("data/agent_state/NQ")
 
         report_dir = state_dir.parent / "reports" / str(report_name)

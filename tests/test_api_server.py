@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -639,3 +639,297 @@ class TestAuthDisabledPassthrough:
     def test_performance_accessible_without_key(self, client, _patch_globals):
         resp = client.get("/api/performance-summary")
         assert resp.status_code == 200
+
+
+# =========================================================================
+# 9. POST /api/close-all-trades Tests
+# =========================================================================
+
+
+class TestCloseAllTrades:
+    """Tests for POST /api/close-all-trades (flag-file approach)."""
+
+    def test_close_all_creates_flag_file(self, auth_client, _patch_globals_auth, state_dir):
+        """Successful request creates close_all_request.flag in state dir."""
+        resp = auth_client.post(
+            "/api/close-all-trades",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 202
+        flag_file = state_dir / "close_all_request.flag"
+        assert flag_file.exists(), "close_all_request.flag was not created"
+
+    def test_close_all_flag_contains_valid_json_with_timestamp(
+        self, auth_client, _patch_globals_auth, state_dir,
+    ):
+        """Flag file contains valid JSON with requested_at timestamp and source."""
+        auth_client.post(
+            "/api/close-all-trades",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        flag_file = state_dir / "close_all_request.flag"
+        content = json.loads(flag_file.read_text())
+        assert "requested_at" in content
+        # Verify timestamp is parseable ISO format
+        datetime.fromisoformat(content["requested_at"])
+        assert content["source"] == "web"
+
+    def test_close_all_returns_202(self, auth_client, _patch_globals_auth):
+        """Endpoint returns HTTP 202 Accepted with ok=True."""
+        resp = auth_client.post(
+            "/api/close-all-trades",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["ok"] is True
+        assert "message" in body
+
+    def test_close_all_rejects_unauthenticated(self, auth_client, _patch_globals_auth):
+        """Unauthenticated request is rejected (401) when auth is enabled."""
+        resp = auth_client.post("/api/close-all-trades")
+        assert resp.status_code == 401
+
+
+# =========================================================================
+# 10. POST /api/close-trade Tests
+# =========================================================================
+
+
+class TestCloseTrade:
+    """Tests for POST /api/close-trade (operator-request file approach)."""
+
+    def test_close_trade_creates_request_file(
+        self, auth_client, _patch_globals_auth, state_dir,
+    ):
+        """Successful request creates a file in operator_requests directory."""
+        resp = auth_client.post(
+            "/api/close-trade",
+            json={"signal_id": "sig_001"},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 202
+        req_dir = state_dir / "operator_requests"
+        assert req_dir.exists(), "operator_requests directory was not created"
+        files = list(req_dir.glob("close_trade_*.json"))
+        assert len(files) == 1, f"Expected 1 request file, found {len(files)}"
+
+    def test_close_trade_file_contains_signal_id_and_action(
+        self, auth_client, _patch_globals_auth, state_dir,
+    ):
+        """Request file contains the signal_id, action, and timestamp."""
+        auth_client.post(
+            "/api/close-trade",
+            json={"signal_id": "sig_XYZ"},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        req_dir = state_dir / "operator_requests"
+        files = list(req_dir.glob("close_trade_*.json"))
+        content = json.loads(files[0].read_text())
+        assert content["action"] == "close_trade"
+        assert content["signal_id"] == "sig_XYZ"
+        assert "requested_at" in content
+        assert content["source"] == "web"
+
+    def test_close_trade_returns_202_with_signal_id(self, auth_client, _patch_globals_auth):
+        """Endpoint returns 202 Accepted with signal_id echoed back."""
+        resp = auth_client.post(
+            "/api/close-trade",
+            json={"signal_id": "sig_001"},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["signal_id"] == "sig_001"
+
+    def test_close_trade_missing_signal_id_returns_422(
+        self, auth_client, _patch_globals_auth,
+    ):
+        """Request without signal_id in body returns 422."""
+        resp = auth_client.post(
+            "/api/close-trade",
+            json={},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 422
+        assert "signal_id" in resp.json()["detail"].lower()
+
+    def test_close_trade_empty_signal_id_returns_422(
+        self, auth_client, _patch_globals_auth,
+    ):
+        """Request with blank/whitespace signal_id returns 422."""
+        resp = auth_client.post(
+            "/api/close-trade",
+            json={"signal_id": "   "},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 422
+
+
+# =========================================================================
+# 11. POST /api/kill-switch Tests
+# =========================================================================
+
+
+class TestKillSwitch:
+    """Tests for POST /api/kill-switch (flag-file approach)."""
+
+    def test_kill_switch_creates_flag_file(
+        self, auth_client, _patch_globals_auth, state_dir,
+    ):
+        """Successful request creates kill_request.flag in state dir."""
+        resp = auth_client.post(
+            "/api/kill-switch",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 200
+        kill_file = state_dir / "kill_request.flag"
+        assert kill_file.exists(), "kill_request.flag was not created"
+
+    def test_kill_switch_flag_contains_valid_json(
+        self, auth_client, _patch_globals_auth, state_dir,
+    ):
+        """Kill flag file contains valid JSON with timestamp and source."""
+        auth_client.post(
+            "/api/kill-switch",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        kill_file = state_dir / "kill_request.flag"
+        content = json.loads(kill_file.read_text())
+        assert "requested_at" in content
+        datetime.fromisoformat(content["requested_at"])
+        assert content["source"] == "web"
+
+    def test_kill_switch_returns_200_with_ok(self, auth_client, _patch_globals_auth):
+        """Endpoint returns 200 with ok=True and a message."""
+        resp = auth_client.post(
+            "/api/kill-switch",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert "message" in body
+
+    def test_kill_switch_rejects_unauthenticated(self, auth_client, _patch_globals_auth):
+        """Unauthenticated request is rejected (401) when auth is enabled."""
+        resp = auth_client.post("/api/kill-switch")
+        assert resp.status_code == 401
+
+    def test_kill_switch_returns_500_when_state_dir_none(self, client):
+        """Returns 500 when state directory is not configured."""
+        with (
+            patch.object(api_mod, "_state_dir", None),
+            patch.object(api_mod, "_auth_enabled", True),
+            patch.object(api_mod, "_api_keys", {VALID_API_KEY}),
+            patch.object(api_mod, "_operator_enabled", False),
+        ):
+            resp = client.post(
+                "/api/kill-switch",
+                headers={"X-API-Key": VALID_API_KEY},
+            )
+            assert resp.status_code == 500
+            assert "not configured" in resp.json()["detail"].lower()
+
+
+# =========================================================================
+# 12. WebSocket Broadcast Tests
+# =========================================================================
+
+
+class TestWebSocketBroadcast:
+    """Tests for the ConnectionManager broadcast mechanism."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_sends_to_all_connected_clients(self):
+        """broadcast() calls send_json on every active connection."""
+        manager = api_mod.ConnectionManager()
+        ws1 = AsyncMock()
+        ws2 = AsyncMock()
+        ws3 = AsyncMock()
+        manager.active_connections = [ws1, ws2, ws3]
+
+        msg = {"type": "state_update", "data": {"running": True}}
+        await manager.broadcast(msg)
+
+        ws1.send_json.assert_called_once_with(msg)
+        ws2.send_json.assert_called_once_with(msg)
+        ws3.send_json.assert_called_once_with(msg)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_cleans_up_disconnected_clients(self):
+        """Connections that raise during send_json are removed from active list."""
+        manager = api_mod.ConnectionManager()
+        ws_good = AsyncMock()
+        ws_bad = AsyncMock()
+        ws_bad.send_json.side_effect = RuntimeError("Connection closed")
+        manager.active_connections = [ws_good, ws_bad]
+
+        msg = {"type": "state_update", "data": {}}
+        await manager.broadcast(msg)
+
+        assert ws_bad not in manager.active_connections
+        assert ws_good in manager.active_connections
+        assert len(manager.active_connections) == 1
+
+    @pytest.mark.asyncio
+    async def test_broadcast_no_error_when_no_connections(self):
+        """broadcast() with empty connection list returns without error."""
+        manager = api_mod.ConnectionManager()
+        assert manager.active_connections == []
+        # Should not raise
+        await manager.broadcast({"type": "state_update", "data": {}})
+
+    @pytest.mark.asyncio
+    async def test_connect_adds_client_to_active_connections(self):
+        """connect() appends the websocket to active_connections."""
+        manager = api_mod.ConnectionManager()
+        ws = AsyncMock()
+        assert len(manager.active_connections) == 0
+        await manager.connect(ws)
+        assert ws in manager.active_connections
+        assert len(manager.active_connections) == 1
+
+    def test_disconnect_removes_client_from_active_connections(self):
+        """disconnect() removes the websocket from active_connections."""
+        manager = api_mod.ConnectionManager()
+        ws = MagicMock()
+        manager.active_connections = [ws]
+        manager.disconnect(ws)
+        assert ws not in manager.active_connections
+        assert len(manager.active_connections) == 0
+
+    def test_disconnect_is_idempotent(self):
+        """Calling disconnect() twice on the same ws does not raise."""
+        manager = api_mod.ConnectionManager()
+        ws = MagicMock()
+        manager.active_connections = [ws]
+        manager.disconnect(ws)
+        # Second call should be a no-op, not an error
+        manager.disconnect(ws)
+        assert len(manager.active_connections) == 0
+
+    def test_ws_refresh_returns_full_state(self, client, _patch_globals):
+        """Sending 'refresh' text returns a full_refresh JSON message."""
+        with client.websocket_connect("/ws") as ws:
+            # Consume initial state
+            ws.receive_json()
+            # Request full refresh
+            ws.send_text("refresh")
+            refresh = ws.receive_json()
+            assert refresh["type"] == "full_refresh"
+            assert "data" in refresh
+            inner = refresh["data"]
+            assert "running" in inner
+            assert "daily_pnl" in inner
+            assert "performance" in inner
+
+    def test_ws_multiple_ping_pong_keepalive(self, client, _patch_globals):
+        """Multiple consecutive ping messages each return a pong."""
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()  # consume initial state
+            for _ in range(3):
+                ws.send_text("ping")
+                pong = ws.receive_json()
+                assert pong["type"] == "pong"
