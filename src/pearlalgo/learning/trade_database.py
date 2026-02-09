@@ -31,6 +31,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir
 
@@ -164,8 +165,10 @@ class TradeDatabase:
         if self._cached_conn is not None:
             try:
                 self._cached_conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "TradeDatabase.close", e, level="warning", category="sqlite",
+                )
             self._cached_conn = None
     
     def _init_schema(self) -> None:
@@ -215,6 +218,11 @@ class TradeDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_regime_exit ON trades(regime, exit_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_direction_exit ON trades(direction, exit_time)")
+            
+            # Composite indexes for common multi-column query patterns
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_signal_type_entry ON trades(signal_type, entry_time)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_regime_entry ON trades(regime, entry_time)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_direction_win_entry ON trades(direction, is_win, entry_time)")
             
             # Features table (for feature-level analysis)
             cursor.execute("""
@@ -335,7 +343,11 @@ class TradeDatabase:
         """
         try:
             payload_json = json.dumps(payload or {}, ensure_ascii=False)
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "add_signal_event payload serialization", e,
+                level="warning", category="serialization",
+            )
             payload_json = "{}"
 
         with self._get_connection() as conn:
@@ -368,7 +380,10 @@ class TradeDatabase:
         for r in rows:
             try:
                 payload = json.loads(r["payload_json"] or "{}")
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "get_recent_signal_events JSON parse", e, category="serialization",
+                )
                 payload = {}
             out.append(
                 {
@@ -408,7 +423,10 @@ class TradeDatabase:
         for r in rows:
             try:
                 payload = json.loads(r["payload_json"] or "{}")
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "get_signal_events JSON parse", e, category="serialization",
+                )
                 payload = {}
             out.append(
                 {
@@ -440,7 +458,11 @@ class TradeDatabase:
         diag = diagnostics or {}
         try:
             payload_json = json.dumps(diag, ensure_ascii=False)
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "add_cycle_diagnostics payload serialization", e,
+                level="warning", category="serialization",
+            )
             payload_json = "{}"
 
         def _int(key: str) -> Optional[int]:
@@ -449,7 +471,11 @@ class TradeDatabase:
                 if v is None:
                     return None
                 return int(v)
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    f"cycle_diagnostics int conversion for '{key}'", e,
+                    category="serialization",
+                )
                 return None
 
         def _bool_int(key: str) -> Optional[int]:
@@ -458,7 +484,11 @@ class TradeDatabase:
                 if v is None:
                     return None
                 return 1 if bool(v) else 0
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    f"cycle_diagnostics bool conversion for '{key}'", e,
+                    category="serialization",
+                )
                 return None
 
         row = {
@@ -522,6 +552,17 @@ class TradeDatabase:
             cursor.execute(query, params)
             rows = cursor.fetchall()
         return {str(r["status"]): int(r["count"]) for r in rows}
+
+    def get_all_signal_ids(self) -> set:
+        """Get all distinct signal_ids from the signal_events table.
+
+        Used by reconciliation to efficiently batch-check which signals
+        already exist in SQLite without querying per-signal_id.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT signal_id FROM signal_events")
+            return {str(row[0]) for row in cursor.fetchall()}
 
     def get_cycle_diagnostics_aggregate(self, *, from_time: Optional[str] = None) -> Dict[str, Any]:
         """Aggregate per-cycle diagnostics into a single summary dict."""
@@ -1079,21 +1120,21 @@ class TradeDatabase:
         """Get database summary."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
-            cursor.execute("SELECT COUNT(*) FROM trades")
-            total = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT SUM(is_win) FROM trades")
-            wins = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT SUM(pnl) FROM trades")
-            total_pnl = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT COUNT(DISTINCT signal_type) FROM trades")
-            signal_types = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT MIN(entry_time), MAX(entry_time) FROM trades")
-            time_range = cursor.fetchone()
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    COALESCE(SUM(is_win), 0) as wins,
+                    COALESCE(SUM(pnl), 0.0) as total_pnl,
+                    COUNT(DISTINCT signal_type) as signal_types,
+                    MIN(entry_time) as first_trade,
+                    MAX(entry_time) as last_trade
+                FROM trades
+            """)
+            row = cursor.fetchone()
+        
+        total = row["total"]
+        wins = row["wins"]
+        total_pnl = row["total_pnl"]
         
         return {
             "total_trades": total,
@@ -1102,9 +1143,9 @@ class TradeDatabase:
             "win_rate": round(wins / total, 4) if total > 0 else 0,
             "total_pnl": round(total_pnl, 2),
             "avg_pnl": round(total_pnl / total, 2) if total > 0 else 0,
-            "signal_types": signal_types,
-            "first_trade": time_range[0],
-            "last_trade": time_range[1],
+            "signal_types": row["signal_types"],
+            "first_trade": row["first_trade"],
+            "last_trade": row["last_trade"],
         }
 
     def get_trade_summary(self, *, from_exit_time: Optional[str] = None) -> Dict[str, Any]:
@@ -1139,7 +1180,10 @@ class TradeDatabase:
         avg_hold = row["avg_hold"]
         try:
             avg_hold_f = float(avg_hold) if avg_hold is not None else None
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "get_trade_summary avg_hold conversion", e, category="serialization",
+            )
             avg_hold_f = None
 
         return {
@@ -1186,7 +1230,11 @@ class TradeDatabase:
         for r in rows:
             try:
                 features = json.loads(r["features_json"] or "{}")
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "get_recent_trades_by_exit features JSON parse", e,
+                    category="serialization",
+                )
                 features = {}
             if not isinstance(features, dict):
                 features = {}

@@ -17,6 +17,7 @@ import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Any
 
+from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.telegram_alerts import (
     sanitize_telegram_markdown,
@@ -235,13 +236,13 @@ class TelegramFormattersMixin:
 
         lines.append("")
         if entry_price:
-            lines.append(f"📥 Entry: ${float(entry_price):,.2f}")
+            lines.append(f"📥 Entry: {fmt_currency(entry_price)}")
         if exit_price:
-            lines.append(f"📤 Exit: ${float(exit_price):,.2f}")
+            lines.append(f"📤 Exit: {fmt_currency(exit_price)}")
         if stop_loss:
-            lines.append(f"🛑 Stop: ${float(stop_loss):,.2f}")
+            lines.append(f"🛑 Stop: {fmt_currency(stop_loss)}")
         if take_profit:
-            lines.append(f"🎯 Target: ${float(take_profit):,.2f}")
+            lines.append(f"🎯 Target: {fmt_currency(take_profit)}")
 
         # P&L if exited
         pnl = signal.get("pnl")
@@ -323,10 +324,9 @@ class TelegramFormattersMixin:
         win_rate = (wins / total * 100) if total > 0 else 0
 
         pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-        pnl_sign = "+" if total_pnl >= 0 else ""
 
         lines.append(f"Total: {total} | {wins}W/{losses}L | {win_rate:.0f}% WR")
-        lines.append(f"P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
+        lines.append(f"P&L: {pnl_emoji} {fmt_currency(total_pnl, show_sign=True)}")
         lines.append("")
 
         # Recent trades (last 5)
@@ -369,8 +369,7 @@ class TelegramFormattersMixin:
 
         # Daily P&L
         pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-        pnl_sign = "+" if daily_pnl >= 0 else ""
-        lines.append(f"*Today:* {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+        lines.append(f"*Today:* {pnl_emoji} {fmt_currency(daily_pnl, show_sign=True)}")
 
         # Trades
         if daily_trades > 0:
@@ -384,8 +383,7 @@ class TelegramFormattersMixin:
             lines.append(f"📈 Open: {open_positions} position(s)")
             if unrealized_pnl != 0:
                 unreal_emoji = "🟢" if unrealized_pnl >= 0 else "🔴"
-                unreal_sign = "+" if unrealized_pnl >= 0 else ""
-                lines.append(f"Unrealized: {unreal_emoji} {unreal_sign}${abs(unrealized_pnl):.2f}")
+                lines.append(f"Unrealized: {unreal_emoji} {fmt_currency(unrealized_pnl, show_sign=True)}")
 
         return "\n".join(lines)
 
@@ -487,10 +485,9 @@ class TelegramFormattersMixin:
         # Balance and progress
         pnl = balance - starting_balance
         pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-        pnl_sign = "+" if pnl >= 0 else ""
 
-        lines.append(f"Balance: ${balance:,.2f}")
-        lines.append(f"P&L: {pnl_emoji} {pnl_sign}${abs(pnl):.2f}")
+        lines.append(f"Balance: {fmt_currency(balance)}")
+        lines.append(f"P&L: {pnl_emoji} {fmt_currency(pnl, show_sign=True)}")
         lines.append("")
 
         # Targets

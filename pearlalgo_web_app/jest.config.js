@@ -20,6 +20,11 @@ const customJestConfig = {
     'hooks/**/*.{ts,tsx}',
     '!**/*.d.ts',
   ],
+  coverageThreshold: {
+    global: {
+      lines: 40,
+    },
+  },
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

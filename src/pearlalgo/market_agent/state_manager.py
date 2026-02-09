@@ -574,6 +574,71 @@ class MarketAgentStateManager:
 
         return signals
 
+    def get_recent_signals_tail(self, max_lines: int = 1000) -> List[Dict]:
+        """Read only the LAST *max_lines* of signals.jsonl by seeking from the end.
+
+        This is an efficient alternative to reading the entire file when only
+        recent signals are needed (e.g., ``get_performance_metrics`` with a
+        7-day window).  It seeks to the end of the file and reads backwards in
+        chunks until enough newlines are found, then parses only those lines.
+
+        Args:
+            max_lines: Maximum number of trailing lines to read and parse.
+
+        Returns:
+            List of parsed signal dictionaries (oldest first within the tail).
+        """
+        if not self.signals_file.exists():
+            return []
+
+        signals: List[Dict] = []
+        chunk_size = 8192  # 8 KB chunks for backward reading
+
+        try:
+            with open(self.signals_file, "rb") as f:
+                # Seek to end to get file size
+                f.seek(0, 2)
+                file_size = f.tell()
+
+                if file_size == 0:
+                    return []
+
+                # Read backwards in chunks to collect enough lines
+                remaining = file_size
+                tail_bytes = b""
+                lines_found = 0
+
+                while remaining > 0 and lines_found <= max_lines:
+                    read_size = min(chunk_size, remaining)
+                    remaining -= read_size
+                    f.seek(remaining)
+                    chunk = f.read(read_size)
+                    tail_bytes = chunk + tail_bytes
+                    # Count newlines in the chunk to estimate progress
+                    lines_found = tail_bytes.count(b"\n")
+
+                # Decode and split into lines
+                text = tail_bytes.decode("utf-8", errors="replace")
+                all_lines = text.splitlines()
+
+                # Take only the last max_lines
+                tail_lines = all_lines[-max_lines:] if len(all_lines) > max_lines else all_lines
+
+                for line in tail_lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        record = json.loads(stripped)
+                        signals.append(record)
+                    except json.JSONDecodeError:
+                        continue
+
+        except Exception as e:
+            logger.error(f"Error tail-reading signals: {e}")
+
+        return signals
+
     def invalidate_signals_cache(self) -> None:
         """Force the next ``get_recent_signals`` call to read from disk."""
         self._signals_cache = None
@@ -715,3 +780,107 @@ class MarketAgentStateManager:
         except Exception as e:
             logger.error(f"Error loading state: {e}", exc_info=True)
             return {}
+
+    # ------------------------------------------------------------------
+    # JSON ↔ SQLite Reconciliation
+    # ------------------------------------------------------------------
+
+    def reconcile_signals(self, trade_db=None, threshold: int = 10) -> Dict:
+        """Reconcile signals between JSON (primary) and SQLite (secondary) stores.
+
+        Compares the number of signals in ``signals.jsonl`` against the
+        ``signal_events`` table in SQLite.  When the JSON count exceeds the
+        SQLite count by more than *threshold*, the missing signals are replayed
+        from JSON into SQLite via ``trade_db.add_signal_event()``.
+
+        Args:
+            trade_db: Optional :class:`TradeDatabase` instance.  Falls back to
+                ``self._trade_db`` when *None*.
+            threshold: Minimum divergence before replay is triggered (default 10).
+
+        Returns:
+            Dict with keys ``json_count``, ``sqlite_count``, ``divergence``,
+            ``replayed``, and ``errors``.
+        """
+        result: Dict = {
+            "json_count": 0,
+            "sqlite_count": 0,
+            "divergence": 0,
+            "replayed": 0,
+            "errors": 0,
+        }
+
+        try:
+            db = trade_db or self._trade_db
+            if db is None:
+                logger.info("Signal reconciliation skipped: no SQLite database available")
+                return result
+
+            # 1. Count JSON signals (line count in signals.jsonl)
+            json_count = self.get_signal_count()
+            result["json_count"] = json_count
+
+            # 2. Count SQLite signal events (total across all statuses)
+            counts_by_status = db.get_signal_event_counts()
+            sqlite_count = sum(counts_by_status.values())
+            result["sqlite_count"] = sqlite_count
+
+            divergence = json_count - sqlite_count
+            result["divergence"] = divergence
+
+            if divergence <= threshold:
+                logger.info(
+                    f"Signal reconciliation OK: json={json_count}, sqlite={sqlite_count}, "
+                    f"divergence={divergence} (threshold={threshold})"
+                )
+                return result
+
+            # 3. Divergence exceeds threshold -- replay missing signals
+            logger.info(
+                f"Signal reconciliation: divergence={divergence} exceeds threshold={threshold}, "
+                "replaying missing signals from JSON to SQLite"
+            )
+
+            # Batch-load existing signal_ids from SQLite for efficient lookup
+            existing_ids = db.get_all_signal_ids()
+
+            replayed = 0
+            errors = 0
+
+            if self.signals_file.exists():
+                with open(self.signals_file, "r") as f:
+                    for line in f:
+                        try:
+                            record = json.loads(line.strip())
+                            signal_id = record.get("signal_id", "")
+                            if not signal_id:
+                                continue
+                            if signal_id in existing_ids:
+                                continue
+                            # Replay this signal into SQLite
+                            db.add_signal_event(
+                                signal_id=signal_id,
+                                status=record.get("status", "generated"),
+                                timestamp=record.get("timestamp", ""),
+                                payload=record,
+                            )
+                            replayed += 1
+                        except json.JSONDecodeError:
+                            errors += 1
+                        except Exception as e:
+                            errors += 1
+                            logger.debug(f"Reconciliation replay error for signal: {e}")
+
+            result["replayed"] = replayed
+            result["errors"] = errors
+
+            logger.info(
+                f"Signal reconciliation complete: json={json_count}, sqlite={sqlite_count}, "
+                f"replayed={replayed}, errors={errors}"
+            )
+
+        except Exception as e:
+            logger.error(f"Signal reconciliation failed: {e}", exc_info=True)
+            result["errors"] = result.get("errors", 0) + 1
+
+        return result

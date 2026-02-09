@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
@@ -54,6 +55,9 @@ from pearlalgo.market_agent.operator_handler import OperatorHandler
 from pearlalgo.market_agent.order_manager import OrderManager
 from pearlalgo.market_agent.signal_handler import SignalHandler
 from pearlalgo.market_agent.signal_forwarder import SignalForwarder
+from pearlalgo.market_agent.signal_orchestrator import SignalOrchestrator
+from pearlalgo.market_agent.execution_orchestrator import ExecutionOrchestrator
+from pearlalgo.market_agent.observability_orchestrator import ObservabilityOrchestrator
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -900,6 +904,32 @@ class MarketAgentService(ServiceNotificationsMixin):
         # Handler error_count starts at 0; service error_count includes non-signal errors
         self._prev_sh_error_count = 0
 
+        # ------------------------------------------------------------------
+        # Orchestrators (Arch-2 decomposition: thin delegation layer)
+        # ------------------------------------------------------------------
+        self.signal_orchestrator = SignalOrchestrator(
+            signal_handler=self._signal_handler,
+            order_manager=self._order_manager,
+            state_manager=self.state_manager,
+            signal_forwarder=self.signal_forwarder,
+            ml_signal_filter=self._ml_signal_filter,
+            bandit_policy=self.bandit_policy,
+            ml_filter_enabled=self._ml_filter_enabled,
+            ml_filter_mode=self._ml_filter_mode,
+        )
+        self.execution_orchestrator = ExecutionOrchestrator(
+            virtual_trade_manager=self.virtual_trade_manager,
+            order_manager=self._order_manager,
+            state_manager=self.state_manager,
+            execution_adapter=self.execution_adapter,
+        )
+        self.observability_orchestrator = ObservabilityOrchestrator(
+            performance_tracker=self.performance_tracker,
+            notification_queue=self.notification_queue,
+            telegram_notifier=self.telegram_notifier,
+            state_manager=self.state_manager,
+        )
+
         logger.info("MarketAgentService initialized")
 
     async def start(self) -> None:
@@ -1125,6 +1155,9 @@ class MarketAgentService(ServiceNotificationsMixin):
 
             # Check signal forwarding heartbeat (follower mode only)
             await self.scheduled_tasks.check_follower_heartbeat()
+
+            # Prune old signals from signals.jsonl (once per day)
+            await self.scheduled_tasks.check_signal_pruning()
 
             # Adaptive cadence: compute effective interval for this cycle (includes velocity mode)
             if self._adaptive_cadence_enabled:
@@ -1479,7 +1512,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                                 await self.notification_queue.enqueue_raw_message(
                                     f"📈 Swing Trade Detected: {signal_type} {signal_direction}\n"
                                     f"Confidence: {signal.get('confidence', 0):.1%}\n"
-                                    f"Target: ${signal.get('take_profit', 0):.2f}",
+                                    f"Target: {fmt_currency(signal.get('take_profit', 0))}",
                                     priority=Priority.NORMAL,
                                 )
                             except Exception as e:
@@ -2206,7 +2239,6 @@ class MarketAgentService(ServiceNotificationsMixin):
             status_line = " • ".join(status_parts)
             
             # P&L summary (plain text)
-            pnl_sign = "+" if daily_pnl >= 0 else "-"
             pnl_icon = "📈" if daily_pnl > 0 else ("📉" if daily_pnl < 0 else "➖")
             trades_today = len(today_trades)
             wins_today = sum(1 for t in today_trades if t.get("is_win"))
@@ -2219,7 +2251,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             if trades_today > 0:
                 lines.append("")
                 trades_word = "trade" if trades_today == 1 else "trades"
-                pnl_line = f"{pnl_icon} Today: {pnl_sign}${abs(daily_pnl):,.2f} ({trades_today} {trades_word}, {wr_today:.0f}% WR)"
+                pnl_line = f"{pnl_icon} Today: {fmt_currency(daily_pnl, show_sign=True)} ({trades_today} {trades_word}, {wr_today:.0f}% WR)"
                 lines.append(pnl_line)
             
             # Add streak if notable
@@ -3684,6 +3716,10 @@ class MarketAgentService(ServiceNotificationsMixin):
 
         return list(samples)
 
+    async def _build_ml_training_trades_from_signals_async(self, *, limit: int = 2000) -> list[dict]:
+        """Async wrapper for _build_ml_training_trades_from_signals() – runs file I/O in a thread."""
+        return await asyncio.to_thread(self._build_ml_training_trades_from_signals, limit=limit)
+
     def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
         """
         Compute shadow A/B lift for ML gating:
@@ -4069,7 +4105,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     f"🚫 *Close All Trades Executed*\n\n"
                     f"Reason: `{reason}`\n"
                     f"Closed: `{closed_count}`\n"
-                    f"Total P&L: `${total_pnl:,.2f}`"
+                    f"Total P&L: `{fmt_currency(total_pnl)}`"
                 )
                 await self.notification_queue.enqueue_raw_message(
                     msg, parse_mode="Markdown", dedupe=False,
@@ -4145,7 +4181,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     logger.debug(f"Non-critical: {e}")
 
         if closed_ids:
-            logger.info(f"Closed {len(closed_ids)} specific positions: {closed_ids}, P&L: ${total_pnl:.2f}")
+            logger.info(f"Closed {len(closed_ids)} specific positions: {closed_ids}, P&L: {fmt_currency(total_pnl)}")
 
             # Best-effort: update active trades count in state
             try:

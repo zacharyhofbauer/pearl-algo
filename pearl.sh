@@ -139,16 +139,23 @@ check_telegram_status() {
 }
 
 check_chart_status() {
-    # Check if API server and Next.js are running
+    # Check if API server and Next.js are running (standalone or dev)
     local api_running=$(pgrep -f "api_server.py" &>/dev/null && echo "yes" || echo "no")
-    local chart_running=$(pgrep -f "next" &>/dev/null && echo "yes" || echo "no")
-    
-    if [ "$api_running" = "yes" ] && [ "$chart_running" = "yes" ]; then
-        echo -e "${GREEN}●${NC} Web App - API + Web running"
+    local chart_running="no"
+    if pgrep -f "next dev" &>/dev/null; then
+        chart_running="dev"
+    elif pgrep -f "next-server" &>/dev/null; then
+        chart_running="prod"
+    fi
+
+    if [ "$api_running" = "yes" ] && [ "$chart_running" != "no" ]; then
+        local mode_label=""
+        [ "$chart_running" = "prod" ] && mode_label=" (production)" || mode_label=" (dev)"
+        echo -e "${GREEN}●${NC} Web App - API + Web running${mode_label}"
     elif [ "$api_running" = "yes" ]; then
         echo -e "${YELLOW}●${NC} Web App - API only"
         return 1
-    elif [ "$chart_running" = "yes" ]; then
+    elif [ "$chart_running" != "no" ]; then
         echo -e "${YELLOW}●${NC} Web App - Web only (no API)"
         return 1
     else
@@ -239,7 +246,7 @@ show_quick_status() {
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local mffu_pid_file="$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid"
     local mffu_status=$([ -f "$mffu_pid_file" ] && kill -0 "$(cat "$mffu_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
-    local chart_status=$(pgrep -f "api_server.py" &>/dev/null && pgrep -f "next" &>/dev/null && echo "✅" || echo "❌")
+    local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
     
     echo -e "PEARL: GW $gw_status | Agent $agent_status | MFFU $mffu_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
@@ -303,13 +310,44 @@ start_chart() {
     fi
 
     # Start web interface (only if not already running)
-    if ! pgrep -f "next-server" &>/dev/null; then
-        # Ensure NEXT_PUBLIC_API_KEY is set from secrets
+    if ! pgrep -f "next-server" &>/dev/null && ! pgrep -f "server\.js.*$CHART_PORT" &>/dev/null; then
         export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
         cd "$CHART_DIR"
-        nohup npx next dev -p "$CHART_PORT" > "$LOG_DIR/web_app.log" 2>&1 &
+
+        # Auto-build if no production build exists
+        if [ ! -f ".next/BUILD_ID" ]; then
+            echo "   No build found — building..."
+            npm run build >> "$LOG_DIR/web_app_build.log" 2>&1
+            if [ $? -ne 0 ]; then
+                echo -e "   ${RED}Build failed!${NC} Check logs/web_app_build.log"
+                cd "$SCRIPT_DIR"
+                return 1
+            fi
+            echo "   Build complete."
+        fi
+
+        # Copy static assets into standalone dir (required for standalone output)
+        if [ -d ".next/standalone" ]; then
+            cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
+            cp -r public .next/standalone/public 2>/dev/null || true
+        fi
+
+        # Load .env.local vars (standalone server doesn't auto-read them)
+        if [ -f ".env.local" ]; then
+            set -a
+            source .env.local 2>/dev/null || true
+            set +a
+        fi
+
+        # Use standalone server (production) if available, else fall back to next dev
+        if [ -f ".next/standalone/server.js" ]; then
+            PORT="$CHART_PORT" HOSTNAME="0.0.0.0" nohup node .next/standalone/server.js > "$LOG_DIR/web_app.log" 2>&1 &
+            echo "   Chart web started (port $CHART_PORT, production)"
+        else
+            nohup npx next dev -p "$CHART_PORT" > "$LOG_DIR/web_app.log" 2>&1 &
+            echo "   Chart web started (port $CHART_PORT, dev mode)"
+        fi
         cd "$SCRIPT_DIR"
-        echo "   Chart web started (port $CHART_PORT)"
     else
         echo "   Chart web already running"
     fi
@@ -317,6 +355,28 @@ start_chart() {
     echo "   URL: http://localhost:$CHART_PORT"
     echo "   Public: https://pearlalgo.io"
     echo ""
+}
+
+build_chart() {
+    echo -e "${CYAN}▶ Building Web App...${NC}"
+    local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"
+    local LOG_DIR="$SCRIPT_DIR/logs"
+    cd "$CHART_DIR"
+    export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
+    npm run build > "$LOG_DIR/web_app_build.log" 2>&1
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        # Copy static assets into standalone dir
+        if [ -d ".next/standalone" ]; then
+            cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
+            cp -r public .next/standalone/public 2>/dev/null || true
+        fi
+        echo -e "   ${GREEN}Build successful${NC}"
+    else
+        echo -e "   ${RED}Build failed!${NC} Check logs/web_app_build.log"
+    fi
+    cd "$SCRIPT_DIR"
+    return $rc
 }
 
 start_tunnel() {
@@ -419,7 +479,17 @@ stop_chart() {
         kill "$pid" 2>/dev/null && echo "   Stopped API server (PID $pid)"
     done
     pkill -f "next-server" 2>/dev/null || true
-    pkill -f "next dev" 2>/dev/null && echo "   Stopped web app" || echo "   Web app not running"
+    pkill -f "next dev" 2>/dev/null || true
+    pkill -f "server\.js.*standalone" 2>/dev/null || true
+    # Wait a moment and verify
+    sleep 1
+    if pgrep -f "next-server|next dev|standalone/server" &>/dev/null; then
+        echo "   Force killing lingering processes..."
+        pkill -9 -f "next-server" 2>/dev/null || true
+        pkill -9 -f "next dev" 2>/dev/null || true
+        pkill -9 -f "server\.js.*standalone" 2>/dev/null || true
+    fi
+    echo "   Stopped web app"
     echo ""
 }
 
@@ -565,8 +635,19 @@ handle_chart() {
             sleep 2
             start_chart
             ;;
+        build)
+            load_env_files
+            build_chart
+            ;;
+        deploy)
+            # Build + restart in one command (the safe workflow)
+            load_env_files
+            build_chart && { stop_chart; sleep 2; start_chart; }
+            ;;
         *)
             echo "Unknown chart command: $subcmd"
+            echo "  Usage: ./pearl.sh chart <start|stop|restart|status|build|deploy>"
+            echo "  deploy = build + restart (recommended after code changes)"
             ;;
     esac
 }
@@ -671,7 +752,7 @@ show_help() {
     echo "  agent <start|stop|status>      Control Market Agent (Inception)"
     echo "  mffu <start|stop|status|restart|api|logs>  Control MFFU Eval"
     echo "  telegram <start|stop|status>   Control Telegram Handler"
-    echo "  chart <start|stop|status>      Control Web App (pearlalgo.io)"
+    echo "  chart <start|stop|status|build|deploy>  Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
     echo ""
     echo -e "${CYAN}Options:${NC}"
@@ -685,7 +766,8 @@ show_help() {
     echo "  ./pearl.sh start --market ES        # Start for ES market"
     echo "  ./pearl.sh start --no-chart         # Start without Web App"
     echo "  ./pearl.sh restart                  # Restart everything"
-    echo "  ./pearl.sh chart restart            # Restart just Web App"
+    echo "  ./pearl.sh chart deploy             # Build + restart (after code changes)"
+    echo "  ./pearl.sh chart restart            # Restart just Web App (uses existing build)"
     echo "  ./pearl.sh tunnel status            # Check tunnel + public access"
     echo "  ./pearl.sh tunnel logs              # View tunnel logs"
     echo "  ./pearl.sh status                   # Check all services"

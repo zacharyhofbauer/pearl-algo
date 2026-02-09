@@ -630,7 +630,12 @@ class MLSignalFilter:
             return "simple_gbm"
     
     def _predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict probabilities using the appropriate model."""
+        """Predict probabilities using the appropriate model.
+
+        NOTE: This may be CPU-bound for large models.  When called from an
+        async context, prefer wrapping in ``asyncio.loop.run_in_executor``
+        to avoid blocking the event loop.
+        """
         if self._calibrated_model is not None:
             proba = self._calibrated_model.predict_proba(X)
         elif self._model is not None:
@@ -639,6 +644,22 @@ class MLSignalFilter:
             raise ValueError("No model available")
         
         return proba[:, 1]  # Return P(win)
+
+    async def should_execute_async(
+        self,
+        signal: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> Tuple[bool, "MLPrediction"]:
+        """Async version of :meth:`should_execute`.
+
+        Runs the CPU-bound model inference in a thread-pool executor so
+        it does not block the async event loop.
+        """
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.should_execute, signal, context,
+        )
     
     def _extract_features_from_trades(
         self,

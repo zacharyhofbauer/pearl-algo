@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 const COOKIE_NAME = 'pearl_webapp_auth'
 
 function isAuthEnabled(): boolean {
-  return (process.env.PEARL_WEBAPP_AUTH_ENABLED || 'false').toLowerCase() === 'true'
+  return (process.env.PEARL_WEBAPP_AUTH_ENABLED || 'true').toLowerCase() === 'true'
 }
 
 function getPasscode(): string {

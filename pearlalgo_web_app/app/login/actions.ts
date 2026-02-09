@@ -7,7 +7,7 @@ import { redirect } from 'next/navigation'
 const COOKIE_NAME = 'pearl_webapp_auth'
 
 function isAuthEnabled(): boolean {
-  return (process.env.PEARL_WEBAPP_AUTH_ENABLED || 'false').toLowerCase() === 'true'
+  return (process.env.PEARL_WEBAPP_AUTH_ENABLED || 'true').toLowerCase() === 'true'
 }
 
 function sha256Hex(value: string): string {
@@ -33,11 +33,15 @@ export async function login(formData: FormData): Promise<void> {
   }
 
   const token = sha256Hex(expectedPasscode)
+  // Session TTL: 7 days (configurable via env). Prevents indefinite sessions.
+  const sessionTtlHours = parseInt(process.env.PEARL_WEBAPP_SESSION_TTL_HOURS || '168', 10)
+  const maxAgeSeconds = sessionTtlHours * 60 * 60
   cookies().set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
+    maxAge: maxAgeSeconds,
   })
 
   redirect(next || '/')

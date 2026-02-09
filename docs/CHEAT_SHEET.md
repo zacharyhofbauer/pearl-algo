@@ -26,10 +26,15 @@
 ./pearl.sh mffu start|stop|restart|status  # MFFU Eval
 ./pearl.sh telegram start|stop|status
 ./pearl.sh chart start|stop|status         # Web app (pearlalgo.io)
+./pearl.sh chart deploy                    # Build + restart (after code changes)
+./pearl.sh chart build                     # Build only (no restart)
 ./pearl.sh tunnel start|stop|status        # Cloudflare tunnel
 ```
 
-**After any code change:** `./scripts/lifecycle/mffu_eval.sh restart --background` for MFFU, `./pearl.sh restart` for inception.
+**After any code change:**
+- Web app (frontend): `./pearl.sh chart deploy` (builds + restarts in production mode)
+- MFFU (backend): `./scripts/lifecycle/mffu_eval.sh restart --background`
+- Inception: `./pearl.sh restart`
 
 ---
 

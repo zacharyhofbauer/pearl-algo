@@ -13,6 +13,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 
+from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 
 from pearlalgo.utils.error_handler import ErrorHandler
@@ -217,11 +218,11 @@ class MarketAgentTelegramNotifier:
         acct_prefix = f"[{self.account_label}] " if self.account_label else ""
 
         # Line 1: Direction + symbol + entry price
-        message = f"{test_label}{acct_prefix}{dir_emoji} *{dir_label} {symbol}* ${entry_price:,.2f}\n"
+        message = f"{test_label}{acct_prefix}{dir_emoji} *{dir_label} {symbol}* {fmt_currency(entry_price)}\n"
 
         # Line 2: SL / TP / R:R (all on one line)
         if stop_loss > 0 and take_profit > 0:
-            message += f"SL ${stop_loss:,.2f} | TP ${take_profit:,.2f} | R:R {rr:.1f}\n"
+            message += f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {rr:.1f}\n"
 
         # Line 3: Size + confidence + signal type
         position_size = signal.get("position_size") or 1
@@ -565,16 +566,16 @@ class MarketAgentTelegramNotifier:
             # Entry notification (compact, no redundant "Position ACTIVE" line)
             acct_prefix = f"[{self.account_label}] " if self.account_label else ""
             message = f"{acct_prefix}✅ *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
-            message += f"Entry: ${entry_price:.2f}"
+            message += f"Entry: {fmt_currency(entry_price)}"
             if risk_reward > 0:
                 message += f" • R:R {risk_reward:.1f}:1"
             message += "\n"
             if stop_loss:
                 stop_dist = abs(entry_price - stop_loss)
-                message += f"Stop: ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
+                message += f"Stop: {fmt_currency(stop_loss)} ({stop_dist:.1f} pts)\n"
             if take_profit:
                 tp_dist = abs(take_profit - entry_price)
-                message += f"TP: ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
+                message += f"TP: {fmt_currency(take_profit)} ({tp_dist:.1f} pts)\n"
             
             # Size + Risk (compact single line, only if available)
             position_size = signal.get("position_size")
@@ -700,7 +701,7 @@ class MarketAgentTelegramNotifier:
 
             exit_icons = {"stop_loss": "SL", "take_profit": "TP", "manual": "Manual", "expired": "Expired", "trailing_stop": "Trail"}
             reason_short = exit_icons.get(exit_reason.lower(), exit_reason_display)
-            message += f"${entry_price:,.2f} -> ${exit_price:,.2f}{hold_str} | {reason_short}"
+            message += f"{fmt_currency(entry_price)} -> {fmt_currency(exit_price)}{hold_str} | {reason_short}"
             
             # Send message - no inline buttons, all actions accessible via /start menu
             # Exit notifications are high-signal; never dedupe.
@@ -762,8 +763,8 @@ class MarketAgentTelegramNotifier:
         acct_tag = f"[{self.account_label}] " if self.account_label else ""
         dir_short = direction if direction else "?"
         message = (
-            f"{acct_tag}{dir_short} MNQ ${entry_price:.2f}\n"
-            f"SL ${stop_loss:.2f} | TP ${take_profit:.2f} | R:R {risk_reward:.1f}\n"
+            f"{acct_tag}{dir_short} MNQ {fmt_currency(entry_price)}\n"
+            f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {risk_reward:.1f}\n"
             f"{confidence:.0%} | {signal_type} | {reason}"
         )
         return message.strip()
@@ -1037,7 +1038,7 @@ class MarketAgentTelegramNotifier:
             message = f"💓 *Heartbeat* {time_str}\n\n"
             
             if latest_price:
-                message += f"💰 ${latest_price:,.2f} ({symbol})\n"
+                message += f"💰 {fmt_currency(latest_price)} ({symbol})\n"
             else:
                 message += f"📊 *Symbol:* {symbol}\n"
 
@@ -1471,13 +1472,12 @@ class MarketAgentTelegramNotifier:
 
                 if daily_trades > 0 or daily_pnl != 0:
                     pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if daily_pnl >= 0 else "-"
                     win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
                     streak_str = ""
                     if current_streak >= 3 and streak_type:
                         streak_str = f" • {'🔥' if streak_type == 'win' else '❄️'}{current_streak}{'W' if streak_type == 'win' else 'L'}"
                     message += "\n\n*24h:*"
-                    message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                    message += f"\n{pnl_emoji} {fmt_currency(daily_pnl, show_sign=True)} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
 
                 # Rolling 72h
                 if perf_trades:
@@ -1517,9 +1517,8 @@ class MarketAgentTelegramNotifier:
                         losses_72h = int(len(trades_72h) - int(wins_72h or 0))
                         wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
                         pnl_emoji_72h = "🟢" if pnl_72h >= 0 else "🔴"
-                        pnl_sign_72h = "+" if pnl_72h >= 0 else "-"
                         message += "\n\n*72h:*"
-                        message += f"\n{pnl_emoji_72h} {pnl_sign_72h}${abs(pnl_72h):,.2f} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
+                        message += f"\n{pnl_emoji_72h} {fmt_currency(pnl_72h, show_sign=True)} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
@@ -1556,7 +1555,7 @@ class MarketAgentTelegramNotifier:
                             total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
                             message += "\n\n*30d Performance:*"
                             message += (
-                                f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
+                                f"\n{total_emoji} *Total:* {fmt_currency(total_pnl_all)} "
                                 f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
                             )
                 except Exception as e:
@@ -2320,9 +2319,9 @@ class MarketAgentTelegramNotifier:
             direction_text = "UP" if price_change_pct > 0 else "DOWN"
             
             message = f"{direction} *Price Alert: {symbol}*\n\n"
-            message += f"*Price:* ${current_price:,.2f}\n"
-            message += f"*Change:* {direction_text} {abs(price_change_pct):.2f}% (${abs(current_price - previous_price):,.2f})\n"
-            message += f"*Previous:* ${previous_price:,.2f}\n"
+            message += f"*Price:* {fmt_currency(current_price)}\n"
+            message += f"*Change:* {direction_text} {abs(price_change_pct):.2f}% ({fmt_currency(abs(current_price - previous_price))})\n"
+            message += f"*Previous:* {fmt_currency(previous_price)}\n"
             
             if alert_type == "significant_move":
                 if abs(price_change_pct) > 1.0:

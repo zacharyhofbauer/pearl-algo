@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 from pearlalgo.market_agent.notification_queue import Priority
 from pearlalgo.market_agent.state_reader import StateReader
 
@@ -54,6 +57,16 @@ class ScheduledTasks:
         # De-duplication dates (one-shot per calendar day)
         self._morning_briefing_sent_date: Optional[str] = None
         self._daily_summary_sent_date: Optional[str] = None
+
+        # Reconciliation interval (every 6 hours)
+        self._last_reconciliation_time: Optional[datetime] = None
+        self._reconciliation_interval_hours: int = 6
+
+        # Signal pruning (once per day)
+        self._last_pruning_date: Optional[str] = None
+        self._signal_retention_days: int = int(
+            service_config.get("signals", {}).get("retention_days", 90)
+        )
 
     # ------------------------------------------------------------------
     # Public: called by service each cycle
@@ -434,3 +447,135 @@ class ScheduledTasks:
                 )
         except Exception as e:
             logger.debug(f"Follower heartbeat notification failed: {e}")
+
+    # ------------------------------------------------------------------
+    # JSON ↔ SQLite Signal Reconciliation
+    # ------------------------------------------------------------------
+
+    async def check_reconciliation(self) -> None:
+        """Run signal reconciliation between JSON and SQLite stores every 6 hours.
+
+        Non-blocking: errors are caught and logged without crashing the service.
+        The reconciliation itself is offloaded to a thread to avoid blocking the
+        event loop during file reads and SQLite queries.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+
+            # Throttle: skip if less than _reconciliation_interval_hours since last run
+            if self._last_reconciliation_time is not None:
+                elapsed_hours = (now - self._last_reconciliation_time).total_seconds() / 3600
+                if elapsed_hours < self._reconciliation_interval_hours:
+                    return
+
+            self._last_reconciliation_time = now
+
+            # Run reconciliation in a thread to avoid blocking the event loop
+            result = await asyncio.to_thread(self.state_manager.reconcile_signals)
+
+            replayed = result.get("replayed", 0)
+            errors = result.get("errors", 0)
+
+            if replayed > 0 or errors > 0:
+                logger.info(
+                    f"Scheduled reconciliation: json={result.get('json_count', 0)}, "
+                    f"sqlite={result.get('sqlite_count', 0)}, "
+                    f"replayed={replayed}, errors={errors}"
+                )
+        except Exception as e:
+            logger.debug(f"Scheduled reconciliation error: {e}")
+
+    # ------------------------------------------------------------------
+    # Signal History Pruning
+    # ------------------------------------------------------------------
+
+    async def check_signal_pruning(self) -> None:
+        """Prune signals older than retention period from signals.jsonl.
+
+        Runs once per calendar day (UTC).  Archived signals are backed up to
+        ``signals_pruned_<date>.jsonl`` before removal so nothing is lost.
+        The write is atomic (temp file + ``os.replace``) to avoid corruption.
+
+        Non-blocking: the file I/O is offloaded to a thread.
+        """
+        try:
+            now_utc = datetime.now(timezone.utc)
+            today_str = now_utc.strftime("%Y-%m-%d")
+
+            # Once-per-day guard
+            if self._last_pruning_date == today_str:
+                return
+            self._last_pruning_date = today_str
+
+            signals_file = self.state_manager.signals_file
+            if not signals_file.exists():
+                return
+
+            # Offload the (potentially blocking) file read/write to a thread
+            removed, kept = await asyncio.to_thread(
+                self._prune_signals_file, signals_file, now_utc
+            )
+
+            if removed > 0:
+                logger.info(
+                    f"Signal pruning complete: removed {removed}, kept {kept} "
+                    f"(retention={self._signal_retention_days} days)"
+                )
+                # Invalidate caches after pruning
+                self.state_manager.invalidate_signals_cache()
+                # Reset incremental signal count so it re-counts on next access
+                self.state_manager._signal_count = None
+            else:
+                logger.debug(
+                    f"Signal pruning: nothing to prune ({kept} signals all within retention)"
+                )
+
+        except Exception as e:
+            logger.debug(f"Signal pruning error: {e}")
+
+    def _prune_signals_file(self, signals_file: Path, now_utc: datetime) -> tuple:
+        """Synchronous helper: read, filter, back up, and rewrite signals.jsonl.
+
+        Returns:
+            Tuple of (removed_count, kept_count).
+        """
+        cutoff = now_utc - timedelta(days=self._signal_retention_days)
+
+        keep_lines: list[str] = []
+        prune_lines: list[str] = []
+
+        with open(signals_file, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                    timestamp_str = record.get("timestamp", "")
+                    if timestamp_str:
+                        signal_time = parse_utc_timestamp(timestamp_str)
+                        if signal_time < cutoff:
+                            prune_lines.append(line)
+                            continue
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    # Malformed lines are kept to avoid silent data loss
+                    pass
+                keep_lines.append(line)
+
+        if not prune_lines:
+            return 0, len(keep_lines)
+
+        # Archive pruned signals to a backup file before removing
+        backup_file = signals_file.parent / f"signals_pruned_{now_utc.strftime('%Y%m%d')}.jsonl"
+        with open(backup_file, "a", encoding="utf-8") as f:
+            f.writelines(prune_lines)
+
+        # Atomic rewrite: temp file + os.replace
+        tmp_path = Path(str(signals_file) + ".prune_tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.writelines(keep_lines)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, signals_file)
+
+        return len(prune_lines), len(keep_lines)

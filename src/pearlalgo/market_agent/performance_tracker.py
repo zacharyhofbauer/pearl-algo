@@ -6,6 +6,7 @@ Tracks signal performance and calculates metrics.
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import json
 import os
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import (
     ensure_state_dir,
@@ -257,14 +259,20 @@ class PerformanceTracker:
                             try:
                                 sig["stop_loss"] = float(stop_loss)
                                 record["stop_loss_updated_at"] = updated_at.isoformat()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ErrorHandler.log_and_continue(
+                                    "update_signal_prices stop_loss conversion", e,
+                                    level="warning", category="file_io",
+                                )
                         if take_profit is not None:
                             try:
                                 sig["take_profit"] = float(take_profit)
                                 record["take_profit_updated_at"] = updated_at.isoformat()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ErrorHandler.log_and_continue(
+                                    "update_signal_prices take_profit conversion", e,
+                                    level="warning", category="file_io",
+                                )
                         record["price_update_source"] = str(source)
                         record["signal"] = sig
                         updated = True
@@ -296,14 +304,22 @@ class PerformanceTracker:
                         try:
                             if tmp_path and os.path.exists(tmp_path):
                                 os.unlink(tmp_path)
-                        except Exception:
-                            pass
-                        logger.debug(f"Could not write signals file atomically: {e}")
+                        except Exception as cleanup_e:
+                            ErrorHandler.log_and_continue(
+                                "update_signal_prices temp file cleanup", cleanup_e,
+                                category="file_io",
+                            )
+                        ErrorHandler.log_and_continue(
+                            "update_signal_prices atomic write", e,
+                            level="warning", category="file_io",
+                        )
                 finally:
                     # Release lock
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.debug(f"Could not update signal prices: {e}")
+            ErrorHandler.log_and_continue(
+                "update_signal_prices", e, level="warning", category="file_io",
+            )
 
     def track_exit(
         self,
@@ -341,11 +357,17 @@ class PerformanceTracker:
         # pnl = points * $/point * contracts
         try:
             tick_value = float(signal.get("tick_value") or 2.0)  # $ per point (MNQ default)
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "track_exit tick_value conversion", e, level="warning", category="serialization",
+            )
             tick_value = 2.0
         try:
             position_size = float(signal.get("position_size") or 1.0)
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "track_exit position_size conversion", e, level="warning", category="serialization",
+            )
             position_size = 1.0
 
         if direction == "long":
@@ -413,7 +435,10 @@ class PerformanceTracker:
                         regime_val = reg.get("regime")
                     elif isinstance(reg, str):
                         regime_val = reg
-                except Exception:
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "track_exit regime extraction", e, category="sqlite",
+                    )
                     regime_val = None
 
                 # Extract numeric features if present
@@ -426,9 +451,12 @@ class PerformanceTracker:
                                 fv = float(v)
                                 if fv == fv:  # not NaN
                                     features[str(k)] = fv
-                            except Exception:
+                            except (TypeError, ValueError):
                                 continue
-                except Exception:
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "track_exit feature extraction", e, level="warning", category="sqlite",
+                    )
                     features = {}
 
                 # Attach ML prediction fields (for shadow A/B lift measurement).
@@ -438,40 +466,54 @@ class PerformanceTracker:
                     if isinstance(ml_pred, dict):
                         try:
                             features["ml_win_probability"] = float(ml_pred.get("win_probability", 0.0) or 0.0)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            ErrorHandler.log_and_continue(
+                                "track_exit ml_win_probability", e, category="sqlite",
+                            )
                         # Use shadow lift flag when available (separate threshold for measurement only).
                         shadow_pf = signal.get("_ml_shadow_pass_filter", None)
                         shadow_thr = signal.get("_ml_shadow_threshold", None)
                         if shadow_pf is not None:
                             try:
                                 features["ml_pass_filter"] = 1.0 if bool(shadow_pf) else 0.0
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ErrorHandler.log_and_continue(
+                                    "track_exit ml_pass_filter", e, category="sqlite",
+                                )
                             try:
                                 if shadow_thr is not None:
                                     features["ml_pass_threshold"] = float(shadow_thr)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ErrorHandler.log_and_continue(
+                                    "track_exit ml_pass_threshold", e, category="sqlite",
+                                )
                         else:
                             try:
                                 features["ml_pass_filter"] = 1.0 if bool(ml_pred.get("pass_filter", True)) else 0.0
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ErrorHandler.log_and_continue(
+                                    "track_exit ml_pass_filter fallback", e, category="sqlite",
+                                )
                         try:
                             features["ml_fallback_used"] = 1.0 if bool(ml_pred.get("fallback_used", False)) else 0.0
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            ErrorHandler.log_and_continue(
+                                "track_exit ml_fallback_used", e, category="sqlite",
+                            )
                         # Confidence level bucket (low/medium/high) -> numeric (0/1/2) for easy aggregation.
                         try:
                             level = str(ml_pred.get("confidence_level", "") or "").lower()
                             level_map = {"low": 0.0, "medium": 1.0, "high": 2.0}
                             if level in level_map:
                                 features["ml_confidence_level"] = float(level_map[level])
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                        except Exception as e:
+                            ErrorHandler.log_and_continue(
+                                "track_exit ml_confidence_level", e, category="sqlite",
+                            )
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "track_exit ML prediction features", e, level="warning", category="sqlite",
+                    )
 
                 # Use async queue if available (injected from service.py), else blocking write
                 if self._async_sqlite_queue is not None:
@@ -524,7 +566,9 @@ class PerformanceTracker:
                         features=features or None,
                     )
         except Exception as e:
-            logger.debug(f"Could not write trade to SQLite: {e}")
+            ErrorHandler.log_and_continue(
+                "track_exit SQLite dual-write", e, level="warning", category="sqlite",
+            )
 
         return performance
 
@@ -744,15 +788,20 @@ class PerformanceTracker:
                         try:
                             if tmp_path and os.path.exists(tmp_path):
                                 os.unlink(tmp_path)
-                        except Exception:
-                            pass
+                        except Exception as cleanup_e:
+                            ErrorHandler.log_and_continue(
+                                "_update_signal_status temp file cleanup", cleanup_e,
+                                category="file_io",
+                            )
                         logger.error(f"Error writing signals file atomically: {e}")
                         return
                 finally:
                     # Release lock
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.error(f"Error updating signal status: {e}")
+            ErrorHandler.log_and_continue(
+                "_update_signal_status", e, level="error", category="file_io",
+            )
             return
 
         # Dual-write signal event into SQLite (append-only event log)
@@ -766,7 +815,10 @@ class PerformanceTracker:
                     payload=updated_record if isinstance(updated_record, dict) else {"signal_id": signal_id, "status": status, **(data or {})},
                 )
         except Exception as e:
-            logger.debug(f"Could not write signal event to SQLite: {e}")
+            ErrorHandler.log_and_continue(
+                "_update_signal_status SQLite dual-write", e,
+                level="warning", category="sqlite",
+            )
 
     def load_performance_data(self) -> list:
         """Load all performance records from ``performance.json``.
@@ -809,4 +861,40 @@ class PerformanceTracker:
                 json.dump(performances, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving performance record: {e}")
+
+    # ------------------------------------------------------------------
+    # Async wrappers – run blocking file I/O in a thread to avoid
+    # stalling the async event loop.
+    # ------------------------------------------------------------------
+
+    async def _update_signal_status_async(self, signal_id: str, status: str, data: Dict) -> None:
+        """Async wrapper for _update_signal_status() – runs file I/O in a thread."""
+        return await asyncio.to_thread(self._update_signal_status, signal_id, status, data)
+
+    async def update_signal_prices_async(
+        self,
+        signal_id: str,
+        *,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        updated_at: Optional[datetime] = None,
+        source: str = "trade_manager",
+    ) -> None:
+        """Async wrapper for update_signal_prices() – runs file I/O in a thread."""
+        return await asyncio.to_thread(
+            self.update_signal_prices,
+            signal_id,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            updated_at=updated_at,
+            source=source,
+        )
+
+    async def get_performance_metrics_async(self, days: Optional[int] = None) -> Dict:
+        """Async wrapper for get_performance_metrics() – runs file I/O in a thread."""
+        return await asyncio.to_thread(self.get_performance_metrics, days)
+
+    async def _save_performance_async(self, performance: Dict) -> None:
+        """Async wrapper for _save_performance() – runs file I/O in a thread."""
+        return await asyncio.to_thread(self._save_performance, performance)
 

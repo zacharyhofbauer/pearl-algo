@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import pandas as pd
 
+from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp
 
@@ -155,7 +156,7 @@ class SignalHandler:
             # ==========================================================================
             # ML FILTER (shadow): attach prediction for later analytics/lift measurement
             # ==========================================================================
-            self._apply_ml_filter(signal)
+            await self._apply_ml_filter(signal)
 
             # ==========================================================================
             # ML OPPORTUNITY SIZING (shadow-safe): adjust size/priority within risk gates
@@ -163,7 +164,9 @@ class SignalHandler:
             try:
                 self.order_manager.apply_ml_opportunity_sizing(signal)
             except Exception as e:
-                logger.debug(f"ML sizing adjustment failed (non-fatal): {e}")
+                ErrorHandler.log_and_continue(
+                    "ML opportunity sizing adjustment", e, category="ml_filter",
+                )
 
             # Track signal generation
             signal_id = self.performance_tracker.track_signal_generated(signal)
@@ -263,8 +266,11 @@ class SignalHandler:
             for rec in recent_signals:
                 if isinstance(rec, dict) and rec.get("status") == "entered":
                     active_positions.append(rec)
-        except Exception:
-            pass
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "circuit_breaker active positions fetch", e,
+                level="warning", category="circuit_breaker",
+            )
 
         # Get market data for volatility filter
         market_data = {}
@@ -279,8 +285,10 @@ class SignalHandler:
                         "atr_current": atr_current,
                         "atr_average": atr_average,
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "circuit_breaker ATR calculation", e, category="circuit_breaker",
+                )
 
         # Check if signal should be allowed
         cb_decision = self.trading_circuit_breaker.should_allow_signal(
@@ -325,7 +333,7 @@ class SignalHandler:
 
         return True
 
-    def _apply_ml_filter(self, signal: Dict) -> None:
+    async def _apply_ml_filter(self, signal: Dict) -> None:
         """Apply ML filter prediction (shadow mode - never blocks)."""
         try:
             if not self._ml_filter_enabled or self._ml_signal_filter is None:
@@ -348,17 +356,23 @@ class SignalHandler:
                                 vol_bucket = "high"
                             else:
                                 vol_bucket = "normal"
-                    except Exception:
+                    except Exception as e:
+                        ErrorHandler.log_and_continue(
+                            "ML filter volatility bucket", e, category="ml_filter",
+                        )
                         vol_bucket = ""
                     ctx["regime"] = {
                         "regime": regime_type,
                         "volatility": vol_bucket,
                         "session": str(mr.get("session") or ""),
                     }
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "ML filter regime mapping", e, category="ml_filter",
+                )
                 ctx = {}
 
-            _should_exec, pred = self._ml_signal_filter.should_execute(signal, ctx)
+            _should_exec, pred = await self._ml_signal_filter.should_execute_async(signal, ctx)
             try:
                 signal["_ml_prediction"] = pred.to_dict()
                 pass_for_lift = bool(_should_exec)
@@ -371,13 +385,21 @@ class SignalHandler:
                             self._ml_shadow_threshold
                         )
                         signal["_ml_shadow_threshold"] = float(self._ml_shadow_threshold)
-                except Exception:
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "ML shadow threshold evaluation", e, category="ml_filter",
+                    )
                     pass_for_lift = bool(_should_exec)
                 signal["_ml_shadow_pass_filter"] = bool(pass_for_lift)
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "ML prediction serialization", e, category="ml_filter",
+                )
                 signal["_ml_prediction"] = None
         except Exception as e:
-            logger.debug(f"ML prediction failed (non-fatal): {e}")
+            ErrorHandler.log_and_continue(
+                "ML prediction (non-fatal)", e, category="ml_filter",
+            )
 
     def _track_virtual_entry(self, signal: Dict, signal_id: str) -> float:
         """Track virtual entry for the signal. Returns entry price."""
@@ -424,7 +446,10 @@ class SignalHandler:
         if policy_decision:
             try:
                 signal["_policy"] = policy_decision.to_dict()
-            except Exception:
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "bandit policy serialization", e, category="ml_filter",
+                )
                 signal["_policy"] = None
             signal["_policy_execute"] = policy_decision.execute
             signal["_policy_score"] = policy_decision.sampled_score
@@ -443,13 +468,22 @@ class SignalHandler:
                 ctx_decision = self.contextual_policy.decide(signal, ctx_features)
                 try:
                     signal["_context_features"] = ctx_features.to_dict()
-                except Exception:
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "contextual features serialization", e, category="ml_filter",
+                    )
                     signal["_context_features"] = None
                 try:
                     signal["_policy_ctx"] = ctx_decision.to_dict()
-                except Exception:
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "contextual policy serialization", e, category="ml_filter",
+                    )
                     signal["_policy_ctx"] = None
         except Exception as e:
+            ErrorHandler.log_and_continue(
+                "contextual policy evaluation", e, level="warning", category="ml_filter",
+            )
             signal["_policy_ctx"] = {"error": str(e)[:120]}
 
     def _build_context_features_for_signal(self, signal: Dict) -> Optional[Any]:
@@ -466,16 +500,20 @@ class SignalHandler:
             # Try to get session from signal
             try:
                 session = str(signal.get("_session") or signal.get("session") or "unknown")
-            except Exception:
-                pass
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "context features session extraction", e, category="ml_filter",
+                )
 
             # Try to get regime from signal
             try:
                 mr = signal.get("market_regime") or {}
                 if isinstance(mr, dict):
                     regime = str(mr.get("regime") or "unknown")
-            except Exception:
-                pass
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "context features regime extraction", e, category="ml_filter",
+                )
 
             # Try to get time bucket from signal
             try:
@@ -489,8 +527,10 @@ class SignalHandler:
                         time_bucket = "midday"
                     else:
                         time_bucket = "afternoon"
-            except Exception:
-                pass
+            except Exception as e:
+                ErrorHandler.log_and_continue(
+                    "context features time bucket extraction", e, category="ml_filter",
+                )
 
             return self._context_features_class(
                 session=session,
@@ -577,7 +617,10 @@ class SignalHandler:
         try:
             if bool(signal.get("_ml_priority") == "critical"):
                 entry_priority = Priority.CRITICAL
-        except Exception:
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "entry notification priority check", e, category="ml_filter",
+            )
             entry_priority = Priority.HIGH
 
         queued = await self.notification_queue.enqueue_entry(

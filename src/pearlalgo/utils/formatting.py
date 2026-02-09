@@ -9,7 +9,9 @@ display values without worrying about edge cases.
 from __future__ import annotations
 
 import math
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 
 def fmt_price(value: Any, default: str = "N/A") -> str:
@@ -248,3 +250,43 @@ def fmt_pct_direct(
         return f"{float_val:.{decimals}f}%"
     except (ValueError, TypeError):
         return default
+
+
+# =============================================================================
+# Time formatting
+# =============================================================================
+
+
+def fmt_time_et(dt: Optional[datetime], fallback: str = "N/A") -> str:
+    """Format a datetime as Eastern Time (e.g., '10:35 AM ET').
+
+    Falls back to UTC format if timezone conversion fails,
+    then to *fallback* if all formatting fails.
+
+    Args:
+        dt: A datetime object (may be None or timezone-naive/aware)
+        fallback: String to return if *dt* is None or formatting fails
+
+    Returns:
+        Formatted time string (e.g., "10:35 AM ET") or fallback
+
+    Example:
+        >>> from datetime import datetime, timezone
+        >>> fmt_time_et(datetime(2024, 1, 15, 15, 35, tzinfo=timezone.utc))
+        '10:35 AM ET'
+        >>> fmt_time_et(None)
+        'N/A'
+    """
+    if dt is None:
+        return fallback
+    try:
+        et_tz = ZoneInfo("US/Eastern")
+        et_time = dt.astimezone(et_tz)
+        return et_time.strftime("%I:%M %p ET")
+    except Exception:
+        try:
+            if hasattr(dt, "strftime"):
+                return dt.strftime("%H:%M UTC")
+        except Exception:
+            pass
+    return fallback

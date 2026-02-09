@@ -81,6 +81,9 @@ class VirtualTradeManager:
         self._last_streak_alert_count: int = 0
         self._streak_alert_threshold: int = streak_alert_threshold
 
+        # Exit notification dedup — prevent duplicate Telegram messages for the same signal
+        self._notified_exits: set = set()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -348,28 +351,11 @@ class VirtualTradeManager:
                 logger.debug(f"Could not record challenge trade: {challenge_err}")
 
         # --- MFFU tracker ---
-        if self._mffu_tracker is not None:
-            try:
-                from datetime import date as _date_cls
-                mffu_result = self._mffu_tracker.record_trade(
-                    pnl=pnl_value, is_win=is_win, trade_date=_date_cls.today().isoformat(),
-                )
-                if mffu_result.get("triggered"):
-                    mffu_outcome = mffu_result.get("outcome", "")
-                    mffu_attempt = mffu_result.get("attempt", {})
-                    logger.info(
-                        f"MFFU attempt #{mffu_attempt.get('attempt_id', 0)} ended: "
-                        f"{mffu_outcome.upper()} | PnL: ${mffu_attempt.get('pnl', 0):.2f}"
-                    )
-                    if mffu_outcome == "fail" and self.execution_adapter is not None:
-                        try:
-                            self.execution_adapter.disarm()
-                            asyncio.create_task(self.execution_adapter.flatten_all_positions())
-                            logger.warning("MFFU FAIL: execution disarmed + positions flattened")
-                        except Exception as e:
-                            logger.warning(f"Critical path error: {e}", exc_info=True)
-            except Exception as mffu_err:
-                logger.debug(f"Could not record MFFU trade: {mffu_err}")
+        # DISABLED: Virtual trade P&L does NOT match actual Tradovate fills.
+        # The MFFU challenge state is now driven by Tradovate equity (in the
+        # API server / service polling), not by virtual signal P&L.
+        # Feeding virtual P&L here caused false pass/fail triggers.
+        # See: api_server.py _get_challenge_status() for actual MFFU tracking.
 
         # --- Bandit policy ---
         if self.bandit_policy is not None:
@@ -427,6 +413,11 @@ class VirtualTradeManager:
         """Send Telegram exit notification if configured."""
         from pearlalgo.market_agent.notification_queue import Priority
 
+        # Dedup: skip if we already sent a notification for this signal
+        if sig_id in self._notified_exits:
+            logger.debug(f"Exit notification already sent for {sig_id[:16]}, skipping duplicate")
+            return
+
         try:
             notifier_available = (
                 self.telegram_notifier is not None
@@ -439,6 +430,11 @@ class VirtualTradeManager:
                     hold_mins = float(hold_mins) if hold_mins is not None else None
                 except Exception:
                     hold_mins = None
+
+                self._notified_exits.add(sig_id)
+                # Cap dedup set size to prevent unbounded memory growth
+                if len(self._notified_exits) > 500:
+                    self._notified_exits = set(list(self._notified_exits)[-250:])
 
                 asyncio.create_task(
                     self.notification_queue.enqueue_exit(

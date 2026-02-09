@@ -18,7 +18,7 @@ import json
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -588,3 +588,66 @@ class TestToJsonSafe:
         result = _to_json_safe({1, 2, 3})
         assert isinstance(result, list)
         assert sorted(result) == [1, 2, 3]
+
+
+# ===================================================================
+# Dual-write failure resilience
+# ===================================================================
+
+class TestDualWriteFailure:
+    """Tests for dual-write behavior when SQLite fails but JSON succeeds.
+
+    The save_signal() method writes to JSON first, then optionally to SQLite.
+    When SQLite fails, the signal must still be persisted to JSON and a warning
+    must be logged about the divergence.
+    """
+
+    @staticmethod
+    def _make_sqlite_enabled_manager(state_dir: Path) -> MarketAgentStateManager:
+        """Create a state manager with SQLite dual-write enabled via mock."""
+        sm = _make_state_manager(state_dir)
+        sm._sqlite_enabled = True
+        sm._trade_db = MagicMock()
+        sm._async_sqlite_queue = None  # Use blocking write path
+        return sm
+
+    def test_json_persists_when_sqlite_fails(self, tmp_path: Path) -> None:
+        """Signal is persisted to JSON even when SQLite write raises."""
+        sm = self._make_sqlite_enabled_manager(tmp_path)
+        sm._trade_db.add_signal_event.side_effect = RuntimeError("SQLite disk error")
+
+        sig = _make_signal(signal_id="dw_json_ok")
+        sm.save_signal(sig)
+
+        assert sm.signals_file.exists()
+        lines = sm.signals_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["signal_id"] == "dw_json_ok"
+        assert record["status"] == "generated"
+
+    def test_warning_logged_on_sqlite_divergence(self, tmp_path: Path) -> None:
+        """Warning is logged when SQLite write fails after JSON write succeeds."""
+        sm = self._make_sqlite_enabled_manager(tmp_path)
+        sm._trade_db.add_signal_event.side_effect = RuntimeError("DB locked")
+
+        sig = _make_signal(signal_id="dw_warn")
+        with patch("pearlalgo.market_agent.state_manager.logger") as mock_logger:
+            sm.save_signal(sig)
+
+        warning_calls = mock_logger.warning.call_args_list
+        assert any("Dual-write divergence" in str(c) for c in warning_calls), \
+            f"Expected 'Dual-write divergence' warning, got: {warning_calls}"
+
+    def test_json_data_complete_after_sqlite_error(self, tmp_path: Path) -> None:
+        """All signals are complete in JSON even with continuous SQLite failures."""
+        sm = self._make_sqlite_enabled_manager(tmp_path)
+        sm._trade_db.add_signal_event.side_effect = RuntimeError("SQLite crash")
+
+        for i in range(5):
+            sm.save_signal(_make_signal(signal_id=f"dw_multi_{i}"))
+
+        lines = sm.signals_file.read_text().strip().splitlines()
+        assert len(lines) == 5
+        signal_ids = [json.loads(line)["signal_id"] for line in lines]
+        assert signal_ids == [f"dw_multi_{i}" for i in range(5)]

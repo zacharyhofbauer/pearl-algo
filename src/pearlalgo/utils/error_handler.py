@@ -164,6 +164,7 @@ class ErrorHandler:
         error: Exception,
         level: str = "debug",
         extra: Optional[Dict] = None,
+        category: Optional[str] = None,
     ) -> None:
         """
         Log an error and continue execution (don't re-raise).
@@ -181,10 +182,14 @@ class ErrorHandler:
             error: Exception that occurred
             level: Log level - "debug", "info", "warning", or "error"
             extra: Optional extra context for structured logging
+            category: Optional category for filtering (e.g., "sqlite", "telegram",
+                      "ml_filter", "serialization", "file_io")
         """
         message = f"{operation} failed: {error}"
         extra = extra or {}
         extra["error_type"] = type(error).__name__
+        if category:
+            extra["error_category"] = category
 
         if level == "debug":
             logger.debug(message, extra=extra)

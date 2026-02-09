@@ -298,3 +298,127 @@ class TestAsyncSQLiteQueueOperations:
 
         # Should not raise
         queue_obj._execute_write(write)
+
+
+class TestQueueFullScenarios:
+    """Tests for queue-full behavior with different priority levels.
+
+    Validates that:
+    - LOW priority writes are dropped immediately when the queue is full
+    - HIGH priority writes block and succeed once the worker drains space
+    - Priority ordering is respected (HIGH before MEDIUM before LOW)
+    - MEDIUM priority writes are dropped after the 0.1s timeout
+    """
+
+    def test_low_priority_dropped_when_queue_full(self) -> None:
+        """LOW priority write is dropped immediately when queue is full."""
+        mock_db = MagicMock()
+        queue_obj = AsyncSQLiteQueue(trade_db=mock_db, max_queue_size=5)
+        queue_obj._running = True  # Simulate running without starting worker
+
+        # Fill queue completely
+        for i in range(5):
+            queue_obj._queue.put_nowait(
+                QueuedWrite(priority=WritePriority.LOW, operation="filler", kwargs={"i": i})
+            )
+
+        assert queue_obj._queue.full()
+        drops_before = queue_obj._total_drops
+
+        result = queue_obj.enqueue(
+            "add_cycle_diagnostics", priority=WritePriority.LOW, cycle_id=99,
+        )
+
+        assert result is False
+        assert queue_obj._total_drops == drops_before + 1
+
+    def test_high_priority_blocks_when_queue_full(self) -> None:
+        """HIGH priority write succeeds after worker drains space from full queue."""
+        mock_db = MagicMock()
+        queue_obj = AsyncSQLiteQueue(trade_db=mock_db, max_queue_size=5)
+        queue_obj._running = True  # Simulate running without starting worker
+
+        # Fill queue completely
+        for i in range(5):
+            queue_obj._queue.put_nowait(
+                QueuedWrite(
+                    priority=WritePriority.LOW,
+                    operation="add_cycle_diagnostics",
+                    kwargs={"i": i},
+                )
+            )
+        assert queue_obj._queue.full()
+
+        # Simulate a worker draining one item after a short delay
+        def drain_one():
+            time.sleep(0.2)
+            try:
+                queue_obj._queue.get_nowait()
+            except queue.Empty:
+                pass
+
+        drain_thread = threading.Thread(target=drain_one)
+        drain_thread.start()
+
+        # HIGH priority enqueue will block until drain_thread frees space
+        result = queue_obj.enqueue(
+            "add_trade", priority=WritePriority.HIGH, signal_id="urgent",
+        )
+        drain_thread.join(timeout=2.0)
+
+        assert result is True
+        assert queue_obj._total_high_priority_writes == 1
+
+    def test_priority_ordering_under_contention(self) -> None:
+        """HIGH priority writes are processed before MEDIUM and LOW by the worker."""
+        mock_db = MagicMock()
+        processed_order: list[str] = []
+
+        mock_db.add_trade.side_effect = lambda **kw: processed_order.append(kw.get("tag", ""))
+        mock_db.add_signal_event.side_effect = lambda **kw: processed_order.append(kw.get("tag", ""))
+        mock_db.add_cycle_diagnostics.side_effect = lambda **kw: processed_order.append(kw.get("tag", ""))
+
+        queue_obj = AsyncSQLiteQueue(trade_db=mock_db, max_queue_size=10)
+
+        # Enqueue in deliberately wrong order: LOW, MEDIUM, HIGH
+        queue_obj._queue.put_nowait(
+            QueuedWrite(priority=WritePriority.LOW, operation="add_cycle_diagnostics", kwargs={"tag": "low"})
+        )
+        queue_obj._queue.put_nowait(
+            QueuedWrite(priority=WritePriority.MEDIUM, operation="add_signal_event", kwargs={"tag": "medium"})
+        )
+        queue_obj._queue.put_nowait(
+            QueuedWrite(priority=WritePriority.HIGH, operation="add_trade", kwargs={"tag": "high"})
+        )
+
+        # Drain in priority order (simulating worker behavior)
+        while not queue_obj._queue.empty():
+            write = queue_obj._queue.get_nowait()
+            queue_obj._execute_write(write)
+
+        assert processed_order[0] == "high", f"Expected HIGH first, got: {processed_order}"
+
+    def test_medium_priority_dropped_after_timeout_when_queue_full(self) -> None:
+        """MEDIUM priority write is dropped after the 0.1s timeout when queue is full."""
+        mock_db = MagicMock()
+        queue_obj = AsyncSQLiteQueue(trade_db=mock_db, max_queue_size=5)
+        queue_obj._running = True  # Simulate running without starting worker
+
+        # Fill queue completely
+        for i in range(5):
+            queue_obj._queue.put_nowait(
+                QueuedWrite(priority=WritePriority.LOW, operation="filler", kwargs={"i": i})
+            )
+        assert queue_obj._queue.full()
+        drops_before = queue_obj._total_drops
+
+        start = time.monotonic()
+        result = queue_obj.enqueue(
+            "add_signal_event", priority=WritePriority.MEDIUM, signal_id="med_1",
+        )
+        elapsed = time.monotonic() - start
+
+        assert result is False
+        assert queue_obj._total_drops == drops_before + 1
+        # Should have waited approximately 0.1s before dropping
+        assert elapsed >= 0.08, f"Expected ~0.1s wait, got {elapsed:.3f}s"
