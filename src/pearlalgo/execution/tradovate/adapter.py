@@ -320,7 +320,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 )
 
         except TradovateAPIError as e:
-            logger.error(f"Tradovate order failed: {e}")
+            logger.error(f"Tradovate order failed: {e}", exc_info=True)
             return ExecutionResult(
                 success=False,
                 status=OrderStatus.ERROR,
@@ -402,7 +402,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 signal_id="kill_flatten",
             )]
         except Exception as e:
-            logger.error(f"Tradovate flatten failed: {e}")
+            logger.error(f"Tradovate flatten failed: {e}", exc_info=True)
             return [ExecutionResult(
                 success=False, status=OrderStatus.ERROR,
                 signal_id="kill_flatten", error_message=str(e),
@@ -429,7 +429,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 ))
             return positions
         except Exception as e:
-            logger.error(f"Failed to get Tradovate positions: {e}")
+            logger.error(f"Failed to get Tradovate positions: {e}", exc_info=True)
             return []
 
     # ── WebSocket event handler ───────────────────────────────────────
@@ -487,7 +487,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         try:
             rest_orders = await self._client.get_orders()
         except Exception as e:
-            logger.error(f"REST order poll failed: {e}")
+            logger.error(f"REST order poll failed: {e}", exc_info=True)
             return
 
         if not isinstance(rest_orders, list):
@@ -539,7 +539,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Reconciliation loop error: {e}")
+                logger.error(f"Reconciliation loop error: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
     # ── Status ────────────────────────────────────────────────────────
@@ -584,7 +584,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             result["initial_margin"] = snap.get("initialMargin", 0.0)
             result["maintenance_margin"] = snap.get("maintenanceMargin", 0.0)
         except Exception as e:
-            logger.debug(f"Tradovate balance query failed: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
 
         try:
             tv_positions = await self._client.get_positions()
@@ -602,7 +602,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             result["positions"] = positions
             result["position_count"] = len(positions)
         except Exception as e:
-            logger.debug(f"Tradovate positions query failed: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
             result["positions"] = []
             result["position_count"] = 0
 
@@ -622,7 +622,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 })
             result["fills"] = fills
         except Exception as e:
-            logger.debug(f"Tradovate fills query failed: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
             result["fills"] = []
 
         result["account"] = self._client.account_name

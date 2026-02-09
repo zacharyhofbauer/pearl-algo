@@ -10,33 +10,17 @@ Simple and intuitive nested button menu system.
 
 Module Architecture:
 --------------------
-This module has been partially decomposed into mixins for improved maintainability:
+This module is decomposed into mixins composed via multiple inheritance:
 
-- telegram_keyboards.py: TelegramKeyboardsMixin - Keyboard building utilities
-- telegram_state_queries.py: TelegramStateQueriesMixin - State reading and metrics
 - telegram_formatters.py: TelegramFormattersMixin - Message formatting utilities
-- telegram_handlers.py: TelegramHandlersMixin - Action handler utilities
+- telegram_config_commands.py: TelegramConfigCommandsMixin - Configuration commands
+- telegram_status_commands.py: TelegramStatusCommandsMixin - Status commands
+- telegram_trade_commands.py: TelegramTradeCommandsMixin - Trade commands
+- telegram_performance_commands.py: TelegramPerformanceCommandsMixin - Performance/analytics
+- telegram_state_queries.py: TelegramStateQueriesMixin - State reading and metrics
 
-These mixins can be composed into TelegramCommandHandler via multiple inheritance:
-
-    class TelegramCommandHandler(
-        TelegramKeyboardsMixin,
-        TelegramStateQueriesMixin,
-        TelegramFormattersMixin,
-        TelegramHandlersMixin,
-    ):
-        ...
-
-Current Status:
-- The mixin modules are created and provide reusable utilities
-- The main class still contains the full implementation for stability
-- Gradual migration to mixins can be done as needed
-
-Why Mixins:
-- Smaller, focused modules are easier to test and maintain
-- Clear separation of concerns (keyboards, state, formatting, handling)
-- No breaking changes to existing API
-- Can be adopted incrementally
+The main class focuses on routing (_handle_action, _handle_menu_action) and orchestration,
+while domain logic lives in the mixins.
 """
 
 from __future__ import annotations
@@ -94,6 +78,11 @@ from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
 from pearlalgo.market_agent.telegram_formatters import TelegramFormattersMixin
+from pearlalgo.market_agent.telegram_config_commands import TelegramConfigCommandsMixin
+from pearlalgo.market_agent.telegram_status_commands import TelegramStatusCommandsMixin
+from pearlalgo.market_agent.telegram_trade_commands import TelegramTradeCommandsMixin
+from pearlalgo.market_agent.telegram_state_queries import TelegramStateQueriesMixin
+from pearlalgo.market_agent.telegram_performance_commands import TelegramPerformanceCommandsMixin
 from pearlalgo.utils.retry import async_retry_with_backoff
 
 # Optional: Knowledge / RAG retriever (used for code context during diagnostics).
@@ -123,7 +112,14 @@ except ImportError:
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
 
-class TelegramCommandHandler(TelegramFormattersMixin):
+class TelegramCommandHandler(
+    TelegramConfigCommandsMixin,
+    TelegramStatusCommandsMixin,
+    TelegramTradeCommandsMixin,
+    TelegramPerformanceCommandsMixin,
+    TelegramStateQueriesMixin,
+    TelegramFormattersMixin,
+):
     """Full-featured command handler for PEARLalgo trading system."""
 
     def __init__(
@@ -164,7 +160,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     connection_pool_size=8,
                 )
             except Exception as e:
-                logger.debug(f"Could not configure Telegram HTTPXRequest: {e}")
+                logger.debug(f"Could not configure Telegram HTTPXRequest: {e}", exc_info=True)
 
         builder = Application.builder().token(bot_token).post_init(self._post_init)
         if request is not None:
@@ -214,7 +210,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 BotCommand("pearl", "Chat with Pearl AI"),
             ])
         except Exception as e:
-            logger.debug(f"Could not set bot commands: {e}")
+            logger.debug(f"Could not set bot commands: {e}", exc_info=True)
 
         # Skip auto-dashboard on startup - user uses /start for full dashboard
         # This keeps startup clean and gives user control
@@ -318,7 +314,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 thr = float(state.get("data_stale_threshold_minutes") or 10.0)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 thr = 10.0
             try:
                 latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
@@ -330,7 +326,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if dt:
                         data_age_minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 data_age_minutes = None
 
             should_check_data = not (futures_market_open is False and strategy_session_open is False)
@@ -353,7 +349,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if dt:
                         cycle_age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 cycle_age_sec = None
 
             cycle_thr = 120.0
@@ -363,7 +359,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if interval:
                     cycle_thr = max(120.0, float(interval) * 4.0)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 cycle_thr = 120.0
 
             if agent_running and cycle_age_sec is not None:
@@ -376,7 +372,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 gw_status = sc.get_gateway_status() or {}
                 gateway_running = bool(gw_status.get("process_running")) and bool(gw_status.get("port_listening"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         # ─────────────────────────────────────────────────────────────────
         # Dynamic labels with live status indicators
@@ -449,7 +445,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 else:
                     chart_age_label = f"({stale_warning}{int(age_seconds / 3600)}h)"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             chart_age_label = ""
         
         chart_button_label = f"🔄📈{chart_age_label}" if chart_age_label else "🔄📈"
@@ -539,7 +535,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             gw_status.get("process_running") and gw_status.get("port_listening")
                         )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
                 # Data freshness
                 try:
@@ -548,7 +544,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     suggestion_state["data_age_minutes"] = float(data_age or 0)
                     suggestion_state["data_stale"] = float(data_age or 0) > float(thr or 10)
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
                 # P&L and performance
                 suggestion_state["daily_pnl"] = float(state.get("daily_pnl", 0) or 0)
@@ -565,7 +561,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     uptime_sec = state.get("agent_uptime_seconds", 0)
                     suggestion_state["agent_uptime_hours"] = float(uptime_sec or 0) / 3600.0
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
                 # Risk telemetry
                 try:
@@ -575,14 +571,14 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     suggestion_state["risk_would_block_total"] = int(cb.get("would_block_total", 0) or 0)
                     suggestion_state["risk_mode"] = str(cb.get("mode", "unknown") or "unknown")
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
             return engine.generate_suggestion(
                 suggestion_state,
                 prefs.get_pearl_prefs(),
             )
         except Exception as e:
-            logger.debug(f"Could not generate Pearl suggestion: {e}")
+            logger.debug(f"Could not generate Pearl suggestion: {e}", exc_info=True)
             return None
 
     # =========================================================================
@@ -750,7 +746,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await update.message.chat.send_action("typing")
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
             # Get AI response
             response = await ai_chat.chat(user_message, context=context_data)
@@ -818,7 +814,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         context["worst_signal_type"] = worst
 
         except Exception as e:
-            logger.debug(f"Error building AI context: {e}")
+            logger.debug(f"Error building AI context: {e}", exc_info=True)
 
         return context
 
@@ -894,89 +890,10 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-    def _read_state(self) -> Optional[dict]:
-        """Read current state from state.json."""
-        state_file = get_state_file(self.state_dir)
-        if not state_file.exists():
-            return None
-        try:
-            return json.loads(state_file.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"Failed to read state file: {e}")
-            return None
-
-    def _read_recent_signals(self, limit: int = 10) -> list:
-        """Read recent signals from signals.jsonl."""
-        signals_file = get_signals_file(self.state_dir)
-        if not signals_file.exists():
-            return []
-        try:
-            signals = []
-            with open(signals_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            rec = json.loads(line)
-                            # Normalize for UI: many handlers expect direction/type/etc at top-level,
-                            # but the JSONL stores these under rec["signal"].
-                            if isinstance(rec, dict):
-                                sig = rec.get("signal", {})
-                                if isinstance(sig, dict):
-                                    for k in (
-                                        "direction",
-                                        "type",
-                                        "symbol",
-                                        "timeframe",
-                                        "entry_price",
-                                        "stop_loss",
-                                        "take_profit",
-                                        "confidence",
-                                        "risk_reward",
-                                        "reason",
-                                    ):
-                                        if rec.get(k) is None and sig.get(k) is not None:
-                                            rec[k] = sig.get(k)
-                            signals.append(rec)
-                        except json.JSONDecodeError:
-                            continue
-            # Return most recent signals first
-            return signals[-limit:] if len(signals) > limit else signals
-        except Exception as e:
-            logger.warning(f"Failed to read signals file: {e}")
-            return []
-
-    def _read_latest_metrics(self) -> Optional[dict]:
-        if not self.exports_dir.exists():
-            return None
-        metrics_files = sorted(
-            self.exports_dir.glob("performance_*_metrics.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if not metrics_files:
-            return None
-        try:
-            return json.loads(metrics_files[0].read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return None
-
-    def _read_strategy_selection(self) -> Optional[dict]:
-        if not self.exports_dir.exists():
-            return None
-        candidates = list(self.exports_dir.glob("strategy_selection_*.json"))
-        if not candidates:
-            latest = self.exports_dir / "strategy_selection_latest.json"
-            candidates = [latest] if latest.exists() else []
-        if not candidates:
-            return None
-        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        try:
-            return json.loads(candidates[0].read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return None
+    # _read_state inherited from TelegramStateQueriesMixin
+    # _read_recent_signals inherited from TelegramStateQueriesMixin
+    # _read_latest_metrics inherited from TelegramStateQueriesMixin
+    # _read_strategy_selection inherited from TelegramStateQueriesMixin
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle button callback queries."""
@@ -994,7 +911,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.edit_message_text("❌ Unauthorized access")
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             return
         
         # Resolve legacy callbacks to canonical form (backward compatibility)
@@ -1004,7 +921,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.answer("❌ Invalid button action", show_alert=True)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             return
             
         callback_data = resolve_callback(raw_callback)
@@ -1020,7 +937,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.answer("❌ Error parsing button action", show_alert=True)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             return
         
         logger.debug(f"Parsed callback: type={callback_type}, action={action}, param={param}")
@@ -1098,7 +1015,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 text = self._with_support_footer(text)
                 text = sanitize_telegram_markdown(text)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         # Photo messages can't be edited via edit_message_text. For menu screens,
         # replace the dashboard photo with a text-only message.
@@ -1106,7 +1023,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await message.delete()
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             try:
                 if not getattr(message, "chat", None):
                     raise RuntimeError("Missing chat context for photo replacement")
@@ -1117,7 +1034,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         parse_mode=parse_mode,
                     )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     # Fallback: strip Markdown formatting to avoid parse errors.
                     plain = str(text).replace("*", "").replace("_", "").replace("`", "")
                     await message.chat.send_message(
@@ -1150,7 +1067,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if message:
                         await message.delete()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 try:
                     if not message or not getattr(message, "chat", None):
                         raise RuntimeError("Missing chat context for replacement message")
@@ -1161,7 +1078,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             parse_mode=parse_mode
                         )
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         plain = str(text).replace("*", "").replace("_", "").replace("`", "")
                         await message.chat.send_message(
                             text=plain,
@@ -1267,7 +1184,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             active_state = self._read_state() or {}
             active_symbol = str(active_state.get("symbol") or active_symbol)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         lines = [
             "🌐 *Markets*",
@@ -1285,7 +1202,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if sc is not None:
                     running = bool((sc.get_agent_status(market=market) or {}).get("running"))
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 running = False
 
             state = None
@@ -1294,7 +1211,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if state_file.exists():
                     state = json.loads(state_file.read_text(encoding="utf-8"))
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 state = None
 
             symbol = default_symbols.get(market, market)
@@ -1378,7 +1295,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                     lambda: _edit_media(caption_md_v2, "MarkdownV2"),
                                 )
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                                 # Fallback: update media without MarkdownV2 parsing.
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
@@ -1403,7 +1320,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             try:
                                 await query.message.delete()
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                             # Send new message with photo
                             try:
                                 async def _send_photo(caption: str, parse_mode: Optional[str]) -> None:
@@ -1420,7 +1337,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                     lambda: _send_photo(caption_md_v2, "MarkdownV2"),
                                 )
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                                 caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1440,7 +1357,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             try:
                                 await query.answer()  # Acknowledge the callback
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                     except Exception as e:
                         logger.error(f"Error showing chart: {e}", exc_info=True)
                         # Fallback to text only
@@ -1450,7 +1367,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             try:
                                 await message.delete()
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                             try:
                                 await message.chat.send_message(
                                     text=text_md_v2,
@@ -1458,7 +1375,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                     parse_mode="MarkdownV2"
                                 )
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                                 import re
                                 text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                                 text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1472,7 +1389,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             try:
                                 await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                                 import re
                                 text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                                 text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1485,7 +1402,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         try:
                             await message.delete()
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
                         try:
                             await message.chat.send_message(
                                 text=text_md_v2,
@@ -1493,7 +1410,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                 parse_mode="MarkdownV2"
                             )
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
                             import re
                             text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                             text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1507,7 +1424,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         try:
                             await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
                             import re
                             text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                             text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1531,7 +1448,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 try:
                     await message.delete()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 await message.chat.send_message(text=text, reply_markup=reply_markup)
                 await query.answer()
             else:
@@ -1548,7 +1465,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 try:
                     await message.delete()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 # Send new text message
                 keyboard = self._get_main_menu_keyboard()
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1635,7 +1552,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         lambda: _reply_photo(caption_md_v2, "MarkdownV2"),
                     )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                     caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1661,7 +1578,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         parse_mode="MarkdownV2"
                     )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     import re
                     text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                     text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1688,7 +1605,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 )
                 await message_obj.chat.send_message(pearl_msg, reply_markup=pearl_keyboard, parse_mode="MarkdownV2")
             except Exception as e:
-                logger.debug(f"Could not send Pearl notification: {e}")
+                logger.debug(f"Could not send Pearl notification: {e}", exc_info=True)
 
     async def _send_startup_dashboard(self) -> None:
         """Send visual dashboard on startup (programmatic trigger)."""
@@ -1735,7 +1652,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             parse_mode="MarkdownV2"
                         )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     # Fallback
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
@@ -1757,7 +1674,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         parse_mode="MarkdownV2"
                     )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     import re
                     text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
                     text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -1783,7 +1700,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         parse_mode="MarkdownV2",
                     )
                 except Exception as e:
-                    logger.debug(f"Could not send Pearl notification: {e}")
+                    logger.debug(f"Could not send Pearl notification: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"Error sending startup dashboard: {e}", exc_info=True)
@@ -1811,7 +1728,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             chart_exists = telegram_chart.exists()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             chart_exists = False
 
         # Fast path: if we have a chart and refresh is disabled, return it.
@@ -1831,7 +1748,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if latest_bar_ts and latest_bar_ts.tzinfo is None:
                     latest_bar_ts = latest_bar_ts.replace(tzinfo=timezone.utc)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             latest_bar_ts = None
 
         # Only try to refresh when data appears fresh; avoid needless work in closed/paused markets.
@@ -1839,14 +1756,14 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             thr_min = 10.0
         if latest_bar_ts:
             try:
                 age_min = (datetime.now(timezone.utc) - latest_bar_ts).total_seconds() / 60.0
                 data_is_fresh = (thr_min <= 0) or (age_min <= thr_min)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 data_is_fresh = False
 
         prev_mtime = None
@@ -1854,7 +1771,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if chart_exists:
                 prev_mtime = float(telegram_chart.stat().st_mtime)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             prev_mtime = None
 
         # Always capture if missing, optionally refresh when stale.
@@ -1867,7 +1784,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if (latest_bar_ts - chart_mtime).total_seconds() > 90.0:
                     should_refresh = True
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 should_refresh = False
 
         # Basic rate-limit (prevents rapid refresh spam unless forced).
@@ -1877,7 +1794,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if age_sec < 10.0:
                     should_refresh = False
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
         if should_refresh:
             try:
@@ -1885,7 +1802,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if captured and captured.exists():
                     return captured
             except Exception as e:
-                logger.debug(f"Live chart screenshot capture failed: {e}")
+                logger.debug(f"Live chart screenshot capture failed: {e}", exc_info=True)
 
         return telegram_chart if telegram_chart.exists() else None
 
@@ -1907,7 +1824,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             agent_running = bool(self._is_agent_process_running())
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             agent_running = False
 
         # Determine status indicators
@@ -1923,7 +1840,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 gw_ok = bool(gw.get("process_running")) and bool(gw.get("port_listening"))
                 gw_status = "🟢" if gw_ok else "🔴"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             # keep unknown
             pass
         
@@ -1952,7 +1869,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 thr = float(state.get("data_stale_threshold_minutes") or 10.0)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 thr = 10.0
             try:
                 ts = None
@@ -1970,7 +1887,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             if "connection_status" not in state and conn_status == "🟢":
                                 conn_status = "🟡"
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
         
         lines = [
             "🛡️ *Health*",
@@ -2003,7 +1920,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state = self._read_state()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state = None
         if not isinstance(state, dict):
             state = {}
@@ -2031,14 +1948,14 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if dt:
                     data_age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             data_age_min = None
 
         # Threshold (minutes) for marking data stale.
         try:
             data_stale_threshold_min = float(state.get("data_stale_threshold_minutes") or 10.0)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             data_stale_threshold_min = 10.0
 
         # Service status (best-effort)
@@ -2046,7 +1963,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             agent_running = bool(self._is_agent_process_running())
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             agent_running = False
 
         gateway_status = None
@@ -2056,7 +1973,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if callable(fn):
                 gateway_status = fn() or {}
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             gateway_status = None
 
         symbol = str(state.get("symbol") or "MNQ")
@@ -2143,7 +2060,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     enabled=True,
                 )
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 return None
 
         if action == "tests":
@@ -2178,7 +2095,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 else:
                     prefs.enable_snooze(hours=1.0)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             await self._show_ui_doctor(query)
             return
 
@@ -2188,7 +2105,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 prefs.set("dashboard_edit_in_place", not cur)
                 prefs.set("dashboard_message_id", None)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             await self._show_ui_doctor(query)
             return
 
@@ -2196,7 +2113,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 prefs.set("dashboard_message_id", None)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             await self._show_ui_doctor(query)
             return
 
@@ -2212,7 +2129,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state = self._read_state()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state = None
         if not isinstance(state, dict):
             state = {}
@@ -2355,7 +2272,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         if by_id:
                             today_trades_list = list(by_id.values()) + no_id
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                     
                     if today_trades_list:
                         # Fallback for basic metrics
@@ -2390,7 +2307,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             if drawdown > max_drawdown:
                                 max_drawdown = drawdown
             except Exception as e:
-                logger.debug(f"Could not compute extended metrics in activity menu: {e}")
+                logger.debug(f"Could not compute extended metrics in activity menu: {e}", exc_info=True)
             
             signals = self._read_recent_signals(limit=10)
             recent_count = len(signals) if signals else 0
@@ -2489,7 +2406,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             continue
                         row.append(InlineKeyboardButton(label, callback_data=cb))
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         continue
                 if row:
                     keyboard.append(row)
@@ -2550,7 +2467,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 lines.append("")
                 lines.append(f"Mode: `{mode}` | Would-block signals: `{would_block}`")
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         keyboard = [
             [InlineKeyboardButton("🔄 Refresh", callback_data="action:risk_report")],
@@ -2563,387 +2480,13 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             parse_mode="Markdown",
         )
 
-    def _load_latest_incident_report(self) -> Optional[dict]:
-        try:
-            exports_dir = self.state_dir / "exports"
-            if not exports_dir.exists():
-                return None
-            files = sorted(exports_dir.glob("incident_report_*.json"), key=lambda p: p.stat().st_mtime)
-            if not files:
-                return None
-            return json.loads(files[-1].read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return None
+    # _load_latest_incident_report inherited from TelegramStateQueriesMixin
 
-    async def _show_analytics_menu(self, query: CallbackQuery) -> None:
-        """Show performance analytics with session and hourly breakdown."""
-        try:
-            from datetime import datetime, timezone, timedelta
-            from collections import defaultdict
-            import json
-            try:
-                from zoneinfo import ZoneInfo
-                et_tz = ZoneInfo("America/New_York")
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                # Fallback (no DST) — still safer than crashing
-                et_tz = timezone(timedelta(hours=-5))
-            
-            lines = ["🔬 *Performance Analytics*", ""]
-            
-            # Load all trades from performance.json
-            perf_file = self.state_dir / "performance.json"
-            if not perf_file.exists():
-                lines.append("No performance data available yet.")
-                lines.append("Start trading to see analytics.")
-            else:
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
-                
-                if not all_trades:
-                    lines.append("No trades recorded yet.")
-                else:
-                    # Defensive: perf file should be a list; tolerate bad shapes.
-                    if not isinstance(all_trades, list):
-                        all_trades = []
+    # _show_analytics_menu moved to TelegramPerformanceCommandsMixin
 
-                    def _parse_dt(val) -> datetime | None:
-                        if not val:
-                            return None
-                        try:
-                            s = str(val).strip().replace("Z", "+00:00")
-                            # Strip fractional seconds when offset is present (fromisoformat can be finicky)
-                            if "." in s and "+" in s:
-                                parts = s.split("+", 1)
-                                base = parts[0].split(".", 1)[0]
-                                s = base + "+" + parts[1]
-                            dt = datetime.fromisoformat(s)
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=timezone.utc)
-                            return dt
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                            return None
 
-                    # De-dupe by signal_id to prevent any double-counting in analytics
-                    # if the performance log ever accumulates duplicate exits.
-                    by_id: dict[str, dict] = {}
-                    no_id: list[dict] = []
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        sid = str(t.get("signal_id") or "").strip()
-                        if not sid:
-                            no_id.append(t)
-                            continue
-                        prev = by_id.get(sid)
-                        if prev is None:
-                            by_id[sid] = t
-                            continue
-                        dt_new = _parse_dt(t.get("exit_time") or t.get("entry_time"))
-                        dt_old = _parse_dt(prev.get("exit_time") or prev.get("entry_time"))
-                        if dt_old is None and dt_new is not None:
-                            by_id[sid] = t
-                        elif dt_old is not None and dt_new is not None and dt_new > dt_old:
-                            by_id[sid] = t
-                    all_trades = list(by_id.values()) + no_id
+    # _show_performance_menu moved to TelegramPerformanceCommandsMixin
 
-                    total_trades = len(all_trades)
-                    total_wins = sum(1 for t in all_trades if isinstance(t, dict) and t.get("is_win"))
-                    total_pnl = sum(float((t or {}).get("pnl", 0) or 0) for t in all_trades if isinstance(t, dict))
-                    overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
-                    
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji} ${total_pnl:,.2f}")
-                    lines.append("")
-                    
-                    # Session breakdown
-                    sessions = {
-                        'overnight': (18, 4),      # 6PM - 4AM ET
-                        'premarket': (4, 6),       # 4AM - 6AM ET
-                        'morning': (6, 10),        # 6AM - 10AM ET
-                        'midday': (10, 14),        # 10AM - 2PM ET
-                        'afternoon': (14, 17),     # 2PM - 5PM ET
-                        'close': (17, 18),         # 5PM - 6PM ET
-                    }
-                    
-                    session_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        time_str = t.get("exit_time") or t.get("entry_time")
-                        dt = _parse_dt(time_str)
-                        if dt is None:
-                            continue
-                        try:
-                            et_hour = int(dt.astimezone(et_tz).hour)
-                            
-                            session_name = 'other'
-                            for sname, (start, end) in sessions.items():
-                                if start > end:  # overnight wraps
-                                    if et_hour >= start or et_hour < end:
-                                        session_name = sname
-                                        break
-                                elif start <= et_hour < end:
-                                    session_name = sname
-                                    break
-                            
-                            if t.get("is_win"):
-                                session_stats[session_name]['wins'] += 1
-                            else:
-                                session_stats[session_name]['losses'] += 1
-                            session_stats[session_name]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                    
-                    lines.append("*📅 Session Performance:*")
-                    session_order = ['overnight', 'premarket', 'morning', 'midday', 'afternoon', 'close']
-                    for sname in session_order:
-                        data = session_stats[sname]
-                        count = data['wins'] + data['losses']
-                        if count > 0:
-                            wr = (data['wins'] / count * 100)
-                            pnl = data['pnl']
-                            emoji = "🟢" if pnl >= 0 else "🔴"
-                            # Highlight best/worst sessions
-                            if wr >= 55:
-                                indicator = "✅"
-                            elif wr <= 30:
-                                indicator = "⚠️"
-                            else:
-                                indicator = "•"
-                            lines.append(f"{indicator} {sname.title()}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
-                    
-                    lines.append("")
-                    
-                    # Top hours
-                    hour_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        time_str = t.get("exit_time") or t.get("entry_time")
-                        dt = _parse_dt(time_str)
-                        if dt is None:
-                            continue
-                        try:
-                            et_hour = int(dt.astimezone(et_tz).hour)
-                            
-                            if t.get("is_win"):
-                                hour_stats[et_hour]['wins'] += 1
-                            else:
-                                hour_stats[et_hour]['losses'] += 1
-                            hour_stats[et_hour]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                    
-                    # Find best and worst hours
-                    hours_with_data = [(h, d) for h, d in hour_stats.items() if d['wins'] + d['losses'] >= 5]
-                    if hours_with_data:
-                        # Sort by P&L
-                        sorted_hours = sorted(hours_with_data, key=lambda x: x[1]['pnl'], reverse=True)
-                        
-                        lines.append("*⏰ Best Hours (ET):*")
-                        for h, data in sorted_hours[:3]:
-                            count = data['wins'] + data['losses']
-                            wr = (data['wins'] / count * 100) if count > 0 else 0
-                            pnl = data['pnl']
-                            if pnl > 0:
-                                lines.append(f"🔥 {h:02d}:00: {wr:.0f}% WR | +${pnl:,.0f}")
-                        
-                        lines.append("")
-                        lines.append("*⏰ Worst Hours (ET):*")
-                        for h, data in sorted_hours[-3:]:
-                            count = data['wins'] + data['losses']
-                            wr = (data['wins'] / count * 100) if count > 0 else 0
-                            pnl = data['pnl']
-                            if pnl < 0:
-                                lines.append(f"❄️ {h:02d}:00: {wr:.0f}% WR | -${abs(pnl):,.0f}")
-                    
-                    # Hold duration insight
-                    lines.append("")
-                    duration_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        hold_mins = t.get("hold_duration_minutes", 0) or 0
-                        if hold_mins < 30:
-                            bucket = 'Quick (<30m)'
-                        elif hold_mins < 60:
-                            bucket = 'Medium (30-60m)'
-                        else:
-                            bucket = 'Long (60m+)'
-                        
-                        if t.get("is_win"):
-                            duration_stats[bucket]['wins'] += 1
-                        else:
-                            duration_stats[bucket]['losses'] += 1
-                        duration_stats[bucket]['pnl'] += float(t.get("pnl", 0) or 0)
-                    
-                    lines.append("*⏱️ Hold Duration:*")
-                    for bucket in ['Quick (<30m)', 'Medium (30-60m)', 'Long (60m+)']:
-                        data = duration_stats[bucket]
-                        count = data['wins'] + data['losses']
-                        if count > 0:
-                            wr = (data['wins'] / count * 100)
-                            pnl = data['pnl']
-                            emoji = "🟢" if pnl >= 0 else "🔴"
-                            lines.append(f"• {bucket}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
-            
-            text = "\n".join(lines)
-            
-            keyboard = [
-                [
-                    InlineKeyboardButton("🔄 Refresh", callback_data="menu:analytics"),
-                ],
-                [
-                    InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity"),
-                    self._nav_back_row()[0],
-                ],
-            ]
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
-            
-        except Exception as e:
-            logger.error(f"Error in _show_analytics_menu: {e}", exc_info=True)
-            keyboard = [
-                [InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity")],
-                self._nav_back_row(),
-            ]
-            await self._safe_edit_or_send(
-                query, 
-                f"🔬 Analytics\n\n❌ Error loading analytics: {str(e)[:100]}", 
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-
-    async def _show_performance_menu(self, query: CallbackQuery) -> None:
-        """Show performance submenu with trends, comparisons, and insights."""
-        try:
-            # Get comprehensive performance data
-            state = self._read_state()
-            metrics = self._read_latest_metrics()
-            
-            # Build rich performance overview
-            lines = ["💎 *Performance Dashboard*", ""]
-            
-            # Today's Performance
-            if state:
-                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
-                daily_trades = state.get("daily_trades", 0) or 0
-                daily_wins = state.get("daily_wins", 0) or 0
-                daily_losses = state.get("daily_losses", 0) or 0
-                
-                lines.append("*Today:*")
-                if daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if daily_pnl >= 0 else ""
-                    # Add trend indicator
-                    trend = "↗️" if daily_pnl > 0 else "↘️" if daily_pnl < 0 else "→"
-                    lines.append(f"{pnl_emoji} P&L: {trend} {pnl_sign}${abs(daily_pnl):.2f}")
-                else:
-                    lines.append("• P&L: $0.00")
-                
-                if daily_trades > 0:
-                    win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
-                    wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                    lines.append(f"• Trades: {daily_trades} ({daily_wins}W/{daily_losses}L)")
-                    lines.append(f"• Win Rate: {wr_emoji} {win_rate:.0f}%")
-                lines.append("")
-            
-            # Overall Performance (if metrics available)
-            if metrics:
-                total_trades = metrics.get("exited_signals", 0)
-                total_pnl = float(metrics.get("total_pnl", 0.0) or 0.0)
-                win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
-                
-                lines.append("*Overall:*")
-                lines.append(f"• Total Trades: {total_trades}")
-                if total_pnl != 0:
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if total_pnl >= 0 else ""
-                    lines.append(f"• Total P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
-                if total_trades > 0:
-                    wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                    lines.append(f"• Win Rate: {wr_emoji} {win_rate:.1f}%")
-                lines.append("")
-            
-            # Smart insights
-            insights = []
-            if state:
-                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
-                if daily_pnl < 0 and abs(daily_pnl) > 100:
-                    insights.append("⚠️ *Alert:* Significant daily loss - consider reviewing strategy")
-                elif daily_pnl > 200:
-                    insights.append("✨ *Great:* Strong daily performance!")
-            
-            if metrics:
-                win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
-                if win_rate < 40:
-                    insights.append("💡 *Tip:* Win rate below 40% - review signal quality")
-                elif win_rate > 60:
-                    insights.append("🎯 *Excellent:* Win rate above 60%!")
-            
-            if insights:
-                lines.extend(insights)
-                lines.append("")
-            
-            lines.append("*Select a report:*")
-            
-            # Build dynamic button labels
-            daily_pnl_label = "📊 Daily Summary"
-            pnl_overview_label = "💰 P&L Overview"
-            metrics_label = "📈 Performance Metrics"
-            
-            if state:
-                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
-                if daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if daily_pnl >= 0 else ""
-                    daily_pnl_label = f"📊 Daily {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
-                    pnl_overview_label = f"💰 P&L {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
-            
-            if metrics:
-                total_trades = metrics.get("exited_signals", 0)
-                metrics_label = f"📈 Metrics • {total_trades} Trades"
-            
-            keyboard = [
-                # Row 1: Core Metrics
-                [
-                    InlineKeyboardButton(metrics_label, callback_data="action:performance_metrics"),
-                    InlineKeyboardButton(pnl_overview_label, callback_data="action:pnl_overview"),
-                ],
-                # Row 2: Time-based Reports
-                [
-                    InlineKeyboardButton(daily_pnl_label, callback_data="action:daily_summary"),
-                    InlineKeyboardButton("📉 Weekly Summary", callback_data="action:weekly_summary"),
-                ],
-                # Row 3: Actions
-                [
-                    InlineKeyboardButton("🔄 Reset Stats", callback_data="action:reset_performance"),
-                    InlineKeyboardButton("📋 Export Report", callback_data="action:export_performance"),
-                ],
-                # Row 4: Navigation
-                self._nav_back_row(),
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Error in _show_performance_menu: {e}", exc_info=True)
-            # Fallback to simple menu
-            keyboard = [
-                [
-                    InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics"),
-                    InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview"),
-                ],
-                self._nav_back_row(),
-            ]
-            await self._safe_edit_or_send(
-                query,
-                "💎 Performance\n\nSelect an option:",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
         """Show bot hub menu with trading mode picker and service status."""
@@ -3042,7 +2585,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 agent_status = sc.get_agent_status(market=self.active_market) or {}
                 agent_running = bool(agent_status.get("running"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
         
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
@@ -3060,7 +2603,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 gateway_running = bool(gw_status.get("process_running"))
                 gateway_port = bool(gw_status.get("port_listening"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
         
         # Clean, compact system status
         gw_status_txt = "🟢 ON" if (gateway_running and gateway_port) else "🔴 OFF"
@@ -3256,9 +2799,9 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         if active:
                             tracker.mark_dismissed(active["id"], get_shadow_context())
                     except Exception as e:
-                        logger.debug(f"Shadow tracker dismiss failed: {e}")
+                        logger.debug(f"Shadow tracker dismiss failed: {e}", exc_info=True)
                 except Exception as e:
-                    logger.debug(f"Could not mark suggestion dismissed: {e}")
+                    logger.debug(f"Could not mark suggestion dismissed: {e}", exc_info=True)
 
                 await self._show_main_menu(query)
                 return
@@ -3272,7 +2815,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if active:
                         tracker.mark_followed(active["id"], get_shadow_context())
                 except Exception as e:
-                    logger.debug(f"Shadow tracker follow failed: {e}")
+                    logger.debug(f"Shadow tracker follow failed: {e}", exc_info=True)
 
             # Route Pearl actions to their handlers
             if action == "reconnect_gateway":
@@ -3443,7 +2986,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if isinstance(current, bool):
                         prefs.set(pref_key, not current)
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 await self._show_settings_menu(query)
                 return
             
@@ -3803,7 +3346,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 try:
                     await query.answer("⏳ Refreshing chart...")
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 await self._show_main_menu_with_chart(query, force_chart_refresh=True)
             elif action_type == "toggle_chart":
                 # Toggle chart display
@@ -3950,7 +3493,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             if _st and str(_st).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                                 _use_mffu_tracker = True
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
 
                     if _use_mffu_tracker:
                         from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
@@ -4030,17 +3573,17 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     sc = getattr(self, "service_controller", None)
                     messages = ["🚨 *EMERGENCY STOP EXECUTED*\n"]
 
-                    # First, try to close all positions via state file signal
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        try:
-                            state = json.loads(state_file.read_text(encoding="utf-8"))
-                            state["emergency_stop"] = True
-                            state["emergency_stop_time"] = datetime.now(timezone.utc).isoformat()
-                            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-                            messages.append("✅ Emergency stop signal written to state")
-                        except Exception as e:
-                            messages.append(f"⚠️ Could not write emergency state: {e}")
+                    # Signal emergency stop via flag file (avoids direct state.json write race)
+                    try:
+                        flag_file = self.state_dir / "emergency_stop_request.flag"
+                        flag_payload = {
+                            "requested_at": datetime.now(timezone.utc).isoformat(),
+                            "source": "telegram",
+                        }
+                        flag_file.write_text(json.dumps(flag_payload, indent=2), encoding="utf-8")
+                        messages.append("✅ Emergency stop signal written")
+                    except Exception as e:
+                        messages.append(f"⚠️ Could not write emergency stop flag: {e}")
 
                     # Stop the agent
                     if sc is not None:
@@ -4067,31 +3610,26 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     )
             elif confirm_action == "close_all_trades":
                 try:
-                    # Signal to close all virtual trades via state file
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        state = json.loads(state_file.read_text(encoding="utf-8"))
-                        virtual_count = state.get("active_trades_count", 0) or 0
-                        state["close_all_requested"] = True
-                        state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
-                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                    # Signal to close all virtual trades via flag file
+                    # (avoids direct state.json write race with agent)
+                    flag_file = self.state_dir / "close_all_request.flag"
+                    flag_payload = {
+                        "requested_at": datetime.now(timezone.utc).isoformat(),
+                        "source": "telegram",
+                    }
+                    flag_file.write_text(json.dumps(flag_payload, indent=2), encoding="utf-8")
 
-                        keyboard = [
-                            [InlineKeyboardButton("📊 Check Activity", callback_data="menu:activity")],
-                            self._nav_back_row(),
-                        ]
-                        await query.edit_message_text(
-                            f"✅ Close All Trades Request Sent\n\n"
-                            f"Closing {virtual_count} trade(s) at next opportunity (~5 seconds).\n\n"
-                            "Tap 'Check Activity' to verify positions are closed.",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        logger.info(f"Close all virtual trades ({virtual_count}) requested via Telegram")
-                    else:
-                        await query.edit_message_text(
-                            "❌ State file not found.\n\nIs the agent running?",
-                            reply_markup=reply_markup
-                        )
+                    keyboard = [
+                        [InlineKeyboardButton("📊 Check Activity", callback_data="menu:activity")],
+                        self._nav_back_row(),
+                    ]
+                    await query.edit_message_text(
+                        "✅ Close All Trades Request Sent\n\n"
+                        "Closing trades at next opportunity (~5 seconds).\n\n"
+                        "Tap 'Check Activity' to verify positions are closed.",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    logger.info("Close all virtual trades requested via Telegram")
                 except Exception as e:
                     logger.error(f"Close all trades error: {e}", exc_info=True)
                     await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
@@ -4125,34 +3663,26 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     await query.edit_message_text(f"❌ Error clearing cache: {e}", reply_markup=reply_markup)
             elif confirm_action == "reset_performance":
                 try:
-                    # Reset performance counters in state
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        state = json.loads(state_file.read_text(encoding="utf-8"))
-                        # Reset performance-related fields
-                        state["daily_pnl"] = 0.0
-                        state["daily_trades"] = 0
-                        state["daily_wins"] = 0
-                        state["daily_losses"] = 0
-                        state["performance_reset_time"] = datetime.now(timezone.utc).isoformat()
-                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                    # Reset performance counters via flag file
+                    # (avoids direct state.json write race with agent)
+                    flag_file = self.state_dir / "reset_performance_request.flag"
+                    flag_payload = {
+                        "requested_at": datetime.now(timezone.utc).isoformat(),
+                        "source": "telegram",
+                    }
+                    flag_file.write_text(json.dumps(flag_payload, indent=2), encoding="utf-8")
 
-                        keyboard = [
-                            [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
-                            self._nav_back_row(),
-                        ]
-                        await query.edit_message_text(
-                            "✅ Performance Stats Reset\n\n"
-                            "Daily counters have been reset.\n"
-                            "Trade history is preserved.",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        logger.info("Performance stats reset via Telegram")
-                    else:
-                        await query.edit_message_text(
-                            "❌ State file not found.",
-                            reply_markup=reply_markup
-                        )
+                    keyboard = [
+                        [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
+                        self._nav_back_row(),
+                    ]
+                    await query.edit_message_text(
+                        "✅ Performance Stats Reset\n\n"
+                        "Daily counters will be reset at next cycle (~5 seconds).\n"
+                        "Trade history is preserved.",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    logger.info("Performance stats reset via Telegram")
                 except Exception as e:
                     logger.error(f"Reset performance error: {e}", exc_info=True)
                     await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
@@ -4262,7 +3792,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             await message_obj.reply_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             import re
             plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
             plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -4297,7 +3827,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 et_time = current_time.astimezone(et_tz)
                 time_str = et_time.strftime("%I:%M %p ET").lstrip('0')
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
             # Service status - use live process check, not stale state file
@@ -4315,7 +3845,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if dt:
                         agent_uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 agent_uptime_seconds = None
             
             # Gateway status
@@ -4334,7 +3864,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 else:
                     gateway_unknown = True
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 gateway_unknown = True
             
             # Market gates
@@ -4378,7 +3908,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         try:
                             current_price = float(px) if px is not None else None
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
                             current_price = None
 
                         if current_price and current_price > 0:
@@ -4389,19 +3919,19 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                 try:
                                     entry_price = float(sig.get("entry_price") or 0.0)
                                 except Exception as e:
-                                    logger.debug(f"Non-critical: {e}")
+                                    logger.debug(f"Non-critical: {e}", exc_info=True)
                                     entry_price = 0.0
                                 if entry_price <= 0:
                                     continue
                                 try:
                                     tick_value = float(sig.get("tick_value") or 2.0)
                                 except Exception as e:
-                                    logger.debug(f"Non-critical: {e}")
+                                    logger.debug(f"Non-critical: {e}", exc_info=True)
                                     tick_value = 2.0
                                 try:
                                     position_size = float(sig.get("position_size") or 1.0)
                                 except Exception as e:
-                                    logger.debug(f"Non-critical: {e}")
+                                    logger.debug(f"Non-critical: {e}", exc_info=True)
                                     position_size = 1.0
 
                                 pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
@@ -4412,13 +3942,13 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if not active_trades_price_source:
                         active_trades_price_source = data_level
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     active_trades_count = 0
 
             try:
                 active_trades_count = int(active_trades_count or 0)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 active_trades_count = 0
 
             # Raw data age (seconds) for footer (even if we suppress stale warnings elsewhere).
@@ -4428,7 +3958,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if m is not None:
                     data_age_seconds = float(m) * 60.0
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 data_age_seconds = None
             
             # Data age (read threshold from config)
@@ -4442,7 +3972,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         data_config = config.get("data", {})
                         data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             
             data_age_minutes = None
             if latest_bar and isinstance(latest_bar, dict):
@@ -4472,7 +4002,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                 # Data is fresh, don't show as stale
                                 data_age_minutes = None
                     except Exception as e:
-                        logger.debug(f"Could not calculate data age: {e}")
+                        logger.debug(f"Could not calculate data age: {e}", exc_info=True)
                         pass
 
             # Data stale flag (used for top-line indicators).
@@ -4488,7 +4018,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 else:
                     data_stale = (float(data_age_seconds) / 60.0) > float(data_stale_threshold_minutes)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 data_stale = None
             
             # Buy/Sell pressure
@@ -4508,7 +4038,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
                         last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
             # Agent health (process may be up, but we also want to know if it's cycling).
             agent_healthy: bool | None = None
@@ -4525,11 +4055,11 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         if interval:
                             cycle_thr = max(120.0, float(interval) * 4.0)
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         cycle_thr = 120.0
                     agent_healthy = float(last_cycle_seconds) <= float(cycle_thr)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 agent_healthy = None
             
             # Challenge tracker for inception is disabled (MFFU has its own tracker).
@@ -4550,7 +4080,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 else:
                     _skip_inception_challenge = True
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 _skip_inception_challenge = True
 
             if not _skip_inception_challenge:
@@ -4569,7 +4099,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         unrealized_pnl=unrealized_pnl,
                     )
                 except Exception as e:
-                    logger.debug(f"Challenge tracker skipped: {e}")
+                    logger.debug(f"Challenge tracker skipped: {e}", exc_info=True)
                     challenge_tracker_instance = None
             
             # P&L shown on the "🎯 Active" line should reflect open positions when available.
@@ -4601,7 +4131,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                         _acct_label = "MFFU"
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
@@ -4682,7 +4212,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             if by_id:
                                 today_trades_list = list(by_id.values()) + no_id
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
                         
                         if today_trades_list:
                             # Basic metrics (fallback if not in state)
@@ -4718,7 +4248,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                     max_drawdown = drawdown
                             
                 except Exception as e:
-                    logger.debug(f"Could not compute extended metrics from performance.json: {e}")
+                    logger.debug(f"Could not compute extended metrics from performance.json: {e}", exc_info=True)
                 
                 # Calculate current win/loss streak from today's trades
                 current_streak = 0
@@ -4785,7 +4315,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                 if dt >= cutoff:
                                     trades_72h.append(t)
                             except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
+                                logger.debug(f"Non-critical: {e}", exc_info=True)
                                 continue
 
                         # Defensive: de-dupe by signal_id to avoid any double-counting if the
@@ -4802,7 +4332,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             if by_id:
                                 trades_72h = list(by_id.values()) + no_id
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
 
                         if trades_72h:
                             pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
@@ -4815,10 +4345,10 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             message += "\n\n*72h:*"
                             message += f"\n{pnl_emoji_72h} {pnl_sign_72h}${abs(pnl_72h):,.2f} ({wins_72h}W/{losses_72h}L • {wr_72h:.0f}% WR)"
                 except Exception as e:
-                    logger.debug(f"Could not add 72h performance: {e}")
+                    logger.debug(f"Could not add 72h performance: {e}", exc_info=True)
                     
             except Exception as e:
-                logger.debug(f"Could not add 24h performance: {e}")
+                logger.debug(f"Could not add 24h performance: {e}", exc_info=True)
             
             # 30d performance - moved here to be right after 24h for better mobile layout
             try:
@@ -4840,7 +4370,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
                         )
             except Exception as e:
-                logger.debug(f"Could not load 30d performance: {e}")
+                logger.debug(f"Could not load 30d performance: {e}", exc_info=True)
             
             # Inception 50k Challenge section: only show if challenge.enabled=true
             # (disabled now -- MFFU eval is shown via the MFFU API section below)
@@ -4877,7 +4407,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     try:
                         pnl_val = float(t.get("pnl") or 0.0)
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         pnl_val = 0.0
                     pnl_emoji, pnl_str = format_pnl(pnl_val)
                     dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
@@ -4900,9 +4430,9 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                                     time_label = et_exit.strftime("%I:%M %p").lstrip("0")
                                     message += f" • {time_label}"
                                 except Exception as e:
-                                    logger.debug(f"Non-critical: {e}")
+                                    logger.debug(f"Non-critical: {e}", exc_info=True)
                         except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
+                            logger.debug(f"Non-critical: {e}", exc_info=True)
             
             # "Current Position" section removed from main dashboard - available in Activity tab
             # The header already shows "X Active | $Y.YY" which provides quick visibility
@@ -4977,7 +4507,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.edit_message_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 import re
                 plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
                 plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
@@ -5018,7 +4548,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 pnl_sign = "+" if upnl >= 0 else ""
                 lines.append(f"{pnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
         lines.append("")
         lines.append("_Virtual trades are simulated (not broker positions)._")
@@ -5036,7 +4566,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     try:
                         lines.append(f"   Entry: ${float(entry_price):,.2f}")
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
 
         lines.append("")
         if not recent_10:
@@ -5060,7 +4590,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         ts = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
                         time_str = ts.strftime("%H:%M") if hasattr(ts, "strftime") else str(timestamp)[:5]
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         time_str = str(timestamp)[:5] if timestamp else ""
 
                 status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡", "cancelled": "❌"}.get(
@@ -5073,7 +4603,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     try:
                         line += f"  ${float(entry_price):,.2f}"
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                 if time_str:
                     line += f" @ {time_str}"
                 if pnl is not None and status == "exited":
@@ -5082,7 +4612,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         pe = "🟢" if pnl_val >= 0 else "🔴"
                         line += f" | {pe} ${pnl_val:+.2f}"
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
 
                 lines.append(line)
                 lines.append(f"   `{signal_id_short}`")
@@ -5243,7 +4773,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 keyboard = [chart_row] + keyboard
                 reply_markup = InlineKeyboardMarkup(keyboard)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
         
         # Format signal details
         text = self._format_signal_detail(signal)
@@ -5259,7 +4789,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.answer("❌ Unknown chart type", show_alert=True)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             return
 
         # Look up the full signal record by prefix
@@ -5318,7 +4848,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             reply_markup=reply_markup,
                         )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
                     with open(chart_path, "rb") as f:
                         await query.edit_message_media(
@@ -5330,7 +4860,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if message is not None:
                         await message.delete()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                 try:
                     with open(chart_path, "rb") as f:
                         await query.message.chat.send_photo(
@@ -5340,7 +4870,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                             parse_mode="Markdown",
                         )
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
                     with open(chart_path, "rb") as f:
                         await query.message.chat.send_photo(
@@ -5352,7 +4882,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 await query.answer()
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
         except Exception as e:
             logger.warning(f"Error showing trade chart: {e}")
             keyboard = [
@@ -5366,329 +4896,19 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 parse_mode="Markdown",
             )
 
-    def _find_signal_by_prefix(self, signal_id_prefix: str) -> Optional[dict]:
-        """
-        Find a signal by ID prefix from signals.jsonl.
-        
-        Args:
-            signal_id_prefix: First characters of signal ID
-            
-        Returns:
-            Signal dict if found, None otherwise
-        """
-        try:
-            signals_file = get_signals_file(self.state_dir)
-            if not signals_file.exists():
-                return None
-            
-            # Search backwards (most recent first)
-            matching_signal = None
-            with open(signals_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        signal = json.loads(line)
-                        signal_id = signal.get("signal_id", "")
-                        if signal_id and signal_id.startswith(signal_id_prefix):
-                            matching_signal = signal
-                            # Continue to find the most recent match
-                    except json.JSONDecodeError:
-                        continue
-            
-            return matching_signal
-        except Exception as e:
-            logger.warning(f"Error finding signal by prefix: {e}")
-            return None
+    # _find_signal_by_prefix inherited from TelegramStateQueriesMixin
 
-    async def _handle_performance_metrics(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display performance metrics from performance.json."""
-        text = "📈 *Performance Metrics*\n\n"
-        
-        # Load performance.json for comprehensive metrics
-        try:
-            perf_file = self.state_dir / "performance.json"
-            if perf_file.exists():
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
-                
-                if all_trades:
-                    now = datetime.now(timezone.utc)
-                    
-                    # 7-day metrics
-                    cutoff_7d = now - timedelta(days=7)
-                    trades_7d = []
-                    for t in all_trades:
-                        try:
-                            ts = t.get("exit_time") or t.get("entry_time")
-                            if ts:
-                                ts_str = str(ts).replace('Z', '+00:00')
-                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
-                                if dt.tzinfo is None:
-                                    dt = dt.replace(tzinfo=timezone.utc)
-                                if dt >= cutoff_7d:
-                                    trades_7d.append(t)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                    
-                    if trades_7d:
-                        total_trades = len(trades_7d)
-                        wins = sum(1 for t in trades_7d if t.get('is_win'))
-                        losses = total_trades - wins
-                        total_pnl = sum(float(t.get('pnl', 0) or 0) for t in trades_7d)
-                        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-                        
-                        # Calculate profit factor correctly
-                        winning_trades = [t for t in trades_7d if t.get('is_win')]
-                        losing_trades = [t for t in trades_7d if not t.get('is_win')]
-                        gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
-                        gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
-                        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
-                        
-                        avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
-                        avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
-                        avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
-                        
-                        # Calculate avg hold time
-                        hold_times = []
-                        for t in trades_7d:
-                            hold_mins = t.get('hold_duration_minutes', 0) or 0
-                            if hold_mins > 0:
-                                hold_times.append(hold_mins)
-                        avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
-                        
-                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                        wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                        pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
-                        
-                        text += "*7-Day Summary:*\n"
-                        text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
-                        text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
-                        text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
-                        text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
-                        if profit_factor > 0:
-                            text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
-                        text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
-                        text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
-                        if avg_hold > 0:
-                            text += f"  Avg Hold: {avg_hold:.1f} min\n"
-                    else:
-                        text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
-                    
-                    # All-time summary
-                    text += "\n*All-Time Summary:*\n"
-                    total_all = len(all_trades)
-                    wins_all = sum(1 for t in all_trades if t.get('is_win'))
-                    losses_all = total_all - wins_all
-                    pnl_all = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
-                    wr_all = (wins_all / total_all * 100) if total_all > 0 else 0
-                    
-                    pnl_emoji_all = "🟢" if pnl_all >= 0 else "🔴"
-                    text += f"  Trades: {total_all} ({wins_all}W / {losses_all}L)\n"
-                    text += f"  Win Rate: {wr_all:.1f}%\n"
-                    text += f"  Total P&L: {pnl_emoji_all} ${pnl_all:,.2f}\n"
-                else:
-                    text += "No performance data available yet.\n"
-            else:
-                text += "No performance data available yet.\n"
-        except Exception as e:
-            logger.debug(f"Error loading performance metrics: {e}")
-            text += f"Error loading metrics: {str(e)[:50]}\n"
-        
-        # Navigation
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Refresh", callback_data="action:performance_metrics"),
-                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
-                InlineKeyboardButton("🏠 Menu", callback_data="back"),
-            ],
-        ]
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    # _handle_performance_metrics moved to TelegramPerformanceCommandsMixin
 
-    async def _handle_daily_summary(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display daily trading summary."""
-        state = self._read_state()
-        signals = self._read_recent_signals(limit=50)
-        
-        text = "📊 *Daily Summary*\n\n"
 
-        # Filter signals since 6pm ET (trading day boundary)
-        today_signals = []
-        if signals:
-            trading_day_start = get_trading_day_start()
-            for s in signals:
-                ts = s.get("timestamp", "")
-                if ts:
-                    try:
-                        signal_time = parse_utc_timestamp(ts) if isinstance(ts, str) else ts
-                        if signal_time >= trading_day_start:
-                            today_signals.append(s)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-        
-        if today_signals:
-            # Count stats
-            generated = len([s for s in today_signals if s.get("status") == "generated"])
-            entered = len([s for s in today_signals if s.get("status") == "entered"])
-            exited = len([s for s in today_signals if s.get("status") == "exited"])
-            
-            # Calculate P&L from exited signals
-            total_pnl = sum(float(s.get("pnl", 0) or 0) for s in today_signals if s.get("status") == "exited")
-            wins = len([s for s in today_signals if s.get("status") == "exited" and (s.get("pnl") or 0) > 0])
-            losses = exited - wins
-            
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-            
-            text += "*Today's Activity:*\n"
-            text += f"  Alerts: {len(today_signals)} total\n"
-            text += f"  • Generated: {generated}\n"
-            text += f"  • Active: {entered}\n"
-            text += f"  • Exited: {exited}\n"
-            
-            if exited > 0:
-                text += "\n*Today's P&L:*\n"
-                text += f"  {pnl_emoji} ${total_pnl:,.2f}\n"
-                text += f"  Trades: {wins}W / {losses}L\n"
-        else:
-            text += "No alerts generated today.\n"
-        
-        # Add state info
-        if state:
-            scans = state.get("cycle_count_session", 0) or 0
-            errors = state.get("error_count", 0) or 0
-            text += "\n*Session Activity:*\n"
-            text += f"  Scans: {scans:,}\n"
-            text += f"  Errors: {errors}\n"
-        
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    # _handle_daily_summary moved to TelegramPerformanceCommandsMixin
 
-    async def _handle_weekly_summary(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display weekly trading summary."""
-        state = self._read_state()
-        performance = state.get("performance", {}) if state else {}
-        
-        text = "📉 *Weekly Summary*\n\n"
-        
-        if performance:
-            total_signals = performance.get("total_signals", 0)
-            exited_signals = performance.get("exited_signals", 0)
-            wins = performance.get("wins", 0)
-            losses = performance.get("losses", 0)
-            win_rate = performance.get("win_rate", 0) * 100
-            total_pnl = performance.get("total_pnl", 0)
-            avg_pnl = performance.get("avg_pnl", 0)
-            avg_hold = performance.get("avg_hold_minutes", 0)
-            
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-            
-            text += "*Alert Statistics:*\n"
-            text += f"  Total Generated: {total_signals}\n"
-            text += f"  Completed: {exited_signals}\n"
-            
-            if exited_signals > 0:
-                text += "\n*Trade Performance:*\n"
-                text += f"  Wins: {wins}\n"
-                text += f"  Losses: {losses}\n"
-                text += f"  Win Rate: {win_rate:.1f}%\n"
-                text += "\n*P&L:*\n"
-                text += f"  Total: {pnl_emoji} ${total_pnl:,.2f}\n"
-                text += f"  Average: ${avg_pnl:,.2f}\n"
-                if avg_hold > 0:
-                    text += "\n*Timing:*\n"
-                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
-            else:
-                text += "\nNo completed trades this week.\n"
-        else:
-            text += "No performance data available.\n"
-            text += "\n💡 Performance data is calculated from the last 7 days of trading activity."
-        
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _handle_pnl_overview(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display P&L overview with correct profit factor calculation."""
-        text = "💰 *P&L Overview*\n\n"
-        
-        # Load from performance.json for accurate data
-        try:
-            perf_file = self.state_dir / "performance.json"
-            all_trades = []
-            if perf_file.exists():
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
-            
-            if all_trades:
-                total_pnl = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
-                winning_trades = [t for t in all_trades if t.get('is_win')]
-                losing_trades = [t for t in all_trades if not t.get('is_win')]
-                
-                # Correct profit factor: gross profit / gross loss
-                gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
-                gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
-                profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
-                
-                avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
-                avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
-                
-                largest_win = max((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
-                largest_loss = min((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
-                
-                win_rate = (len(winning_trades) / len(all_trades) * 100) if all_trades else 0
-                
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
-                
-                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
-                text += f"*Trades:* {len(all_trades)} ({len(winning_trades)}W / {len(losing_trades)}L)\n"
-                text += f"*Win Rate:* {wr_emoji} {win_rate:.1f}%\n\n"
-                
-                text += "*Averages:*\n"
-                text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
-                text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n\n"
-                
-                text += "*Extremes:*\n"
-                text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
-                text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n\n"
-                
-                text += "*Risk Metrics:*\n"
-                text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
-                text += f"  Gross Profit: 🟢 ${gross_profit:,.2f}\n"
-                text += f"  Gross Loss: 🔴 ${gross_loss:,.2f}\n"
-                
-                # Calculate max drawdown
-                running_pnl = 0.0
-                peak_pnl = 0.0
-                max_drawdown = 0.0
-                for t in all_trades:
-                    running_pnl += float(t.get('pnl', 0) or 0)
-                    if running_pnl > peak_pnl:
-                        peak_pnl = running_pnl
-                    drawdown = peak_pnl - running_pnl
-                    if drawdown > max_drawdown:
-                        max_drawdown = drawdown
-                
-                if max_drawdown > 0:
-                    dd_emoji = "⚠️" if max_drawdown > 500 else "📉"
-                    text += f"  Max Drawdown: {dd_emoji} ${max_drawdown:,.2f}\n"
-            else:
-                text += "No completed trades to analyze.\n"
-            text += "\n💡 P&L data is calculated from your trading history."
-        except Exception as e:
-            logger.debug(f"Error loading P&L overview: {e}")
-            text += f"Error loading data: {str(e)[:50]}\n"
-        
-        # Navigation
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Refresh", callback_data="action:pnl_overview"),
-                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
-                InlineKeyboardButton("🏠 Menu", callback_data="back"),
-            ],
-        ]
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    # _handle_weekly_summary moved to TelegramPerformanceCommandsMixin
+
+
+    # _handle_pnl_overview moved to TelegramPerformanceCommandsMixin
+
 
     async def _handle_set_trading_mode(self, query: CallbackQuery, mode: str) -> None:
         """Set trading mode (scanner or pearl_bot_auto)."""
@@ -5696,32 +4916,29 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             state_file = self.state_dir / "state.json"
             state = {}
             
-            # Load existing state
-            if state_file.exists():
-                try:
-                    state = json.loads(state_file.read_text(encoding="utf-8"))
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    state = {}
-            
-            # Update trading_bot settings
-            if "trading_bot" not in state:
-                state["trading_bot"] = {}
-            
+            # Write trading mode change request via flag file
+            # (avoids direct state.json write race with agent)
             if mode == "scanner":
-                state["trading_bot"]["enabled"] = False
-                state["trading_bot"]["selected"] = "scanner"
                 mode_label = "🔴 Scanner Only"
                 mode_desc = "Scanning signals only - no execution"
+                mode_enabled = False
+                mode_selected = "scanner"
             else:
-                state["trading_bot"]["enabled"] = True
-                state["trading_bot"]["selected"] = "pearl_bot_auto"
                 mode_label = "🟢 Pearl Bot Auto"
                 mode_desc = "Active trading enabled"
-            
-            # Save state
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            state_file.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+                mode_enabled = True
+                mode_selected = "pearl_bot_auto"
+
+            flag_file = self.state_dir / "trading_mode_request.flag"
+            flag_payload = {
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "source": "telegram",
+                "trading_bot": {
+                    "enabled": mode_enabled,
+                    "selected": mode_selected,
+                },
+            }
+            flag_file.write_text(json.dumps(flag_payload, indent=2), encoding="utf-8")
             
             keyboard = [
                 [InlineKeyboardButton("🤖 Back to Bots", callback_data="menu:bots")],
@@ -5805,7 +5022,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         size_kb = lf.stat().st_size / 1024
                         text += f"  • `{lf.name}` ({size_kb:.1f} KB)\n"
                     except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                         text += f"  • `{lf.name}`\n"
                 
                 text += f"\n*Location:* `{log_dir.absolute()}`\n"
@@ -5982,7 +5199,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
                         is_mffu = True
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
         if is_mffu:
             # MFFU uses Tradovate WebSocket, not IBKR Gateway
@@ -6014,7 +5231,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     gw_port = bool(gw_status.get("port_listening", False))
                     gw_unknown = False
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
             gw_ok = gw_proc and gw_port
 
@@ -6064,7 +5281,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     conn_label = "DEGRADED (stale data)"
                     conn_emoji = "🟡"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             conn_label = "UNKNOWN"
             conn_emoji = "⚪"
 
@@ -6103,7 +5320,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             data_stale_threshold_minutes = float(state.get("data_stale_threshold_minutes") or 10.0)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             data_stale_threshold_minutes = 10.0
         
         latest_bar = state.get("latest_bar", {}) or {}
@@ -6112,7 +5329,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             agent_running = bool(self._is_agent_process_running())
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             agent_running = False
         
         paused = bool(state.get("paused", False))
@@ -6140,7 +5357,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                         age_seconds = (datetime.now(timezone.utc) - bar_time).total_seconds()
                         age_minutes = age_seconds / 60.0
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     age_minutes = None
             
             if age_minutes is not None:
@@ -6191,7 +5408,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     conn_diag, _ = connection_status_to_label(raw_conn)
                     conn_diag = conn_diag.lower()
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     conn_diag = "unknown"
                 
                 text += "\n🔍 *Diagnostics:*\n"
@@ -6217,63 +5434,8 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _handle_export_performance(self, query: CallbackQuery) -> None:
-        """Export performance report."""
-        try:
-            metrics = self._read_latest_metrics()
-            state = self._read_state()
-            
-            if not metrics and not state:
-                keyboard = [self._nav_back_row()]
-                await query.edit_message_text(
-                    "❌ No performance data available to export.",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                return
-            
-            # Build a text summary report
-            lines = [
-                "📋 *Performance Report*",
-                f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
-                "",
-            ]
-            
-            if metrics:
-                lines.extend([
-                    "*Trading Metrics:*",
-                    f"• Total Trades: {metrics.get('exited_signals', 0)}",
-                    f"• Win Rate: {metrics.get('win_rate', 0.0):.1%}",
-                    f"• Total P&L: ${metrics.get('total_pnl', 0.0):,.2f}",
-                    f"• Average P&L: ${metrics.get('avg_pnl', 0.0):,.2f}",
-                    f"• Max Drawdown: ${metrics.get('max_drawdown', 0.0):,.2f}",
-                    "",
-                ])
-            
-            if state:
-                lines.extend([
-                    "*Current Session:*",
-                    f"• Daily P&L: ${state.get('daily_pnl', 0.0):,.2f}",
-                    f"• Daily Trades: {state.get('daily_trades', 0)}",
-                    f"• Open Positions: {state.get('execution', {}).get('positions', 0)}",
-                    "",
-                ])
-            
-            keyboard = [
-                [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
-                self._nav_back_row(),
-            ]
-            await query.edit_message_text(
-                "\n".join(lines),
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Export performance error: {e}", exc_info=True)
-            keyboard = [self._nav_back_row()]
-            await query.edit_message_text(
-                f"❌ Error exporting performance: {e}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+    # _handle_export_performance moved to TelegramPerformanceCommandsMixin
+
 
     def run(self) -> None:
         logger.info("Starting PEARLalgo Telegram Command Handler")
@@ -6305,7 +5467,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if not isinstance(state, dict):
                 state = {}
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state = {}
 
         # Market + symbol (best-effort)
@@ -6318,7 +5480,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             agent_running = bool(self._is_agent_process_running())
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             agent_running = False
 
         # Gateway status (process + port)
@@ -6331,7 +5493,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 port = bool(gs.get("port_listening"))
                 gw = "OK" if (proc and port) else "OFF"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             gw = "?"
 
         # Data age + level
@@ -6340,7 +5502,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             thr_min = None
         try:
             latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
@@ -6353,7 +5515,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if dt:
                     age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             age_sec = None
 
         # Last cycle age
@@ -6367,7 +5529,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 if dt:
                     cycle_sec = (datetime.now(timezone.utc) - dt).total_seconds()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             cycle_sec = None
 
         lvl_map = {
@@ -6393,7 +5555,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if should_check_data and thr_min and age_sec is not None and float(age_sec) / 60.0 > float(thr_min):
                 stale_flag = "!"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             stale_flag = ""
 
         a = "ON" if agent_running else "OFF"
@@ -6430,7 +5592,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     else:
                         session_str = f" | 📍{short_session}"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             session_str = ""
         
         # Keep this short; it's intended to be pasted into chat for support.
@@ -6447,7 +5609,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             footer = self._build_support_footer(state)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             footer = ""
         if not footer:
             return base
@@ -6468,7 +5630,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             max_len = int(max_chars)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             max_len = 0
 
         if max_len <= 0 or len(candidate) <= max_len:
@@ -6517,14 +5679,14 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if parse_mode and "markdown" in str(parse_mode).lower():
                 msg = self._with_support_footer(msg)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
         try:
             query = getattr(update, "callback_query", None)
             if query is not None and callable(getattr(query, "edit_message_text", None)):
                 await query.edit_message_text(msg, **kwargs)
                 return
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         try:
             message = getattr(update, "message", None)
@@ -6532,7 +5694,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 await message.reply_text(msg, **kwargs)
                 return
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         # Fallback to bot.send_message
         try:
@@ -6544,7 +5706,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 )
                 await bot.send_message(chat_id=chat_id, text=msg, **kwargs)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
     async def _check_authorized(self, update: Any) -> bool:
         """Return True if update comes from the configured chat_id."""
@@ -6565,7 +5727,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             if callable(getattr(query, "answer", None)):
                 await query.answer()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         if not await self._check_authorized(update):
             if callable(getattr(query, "edit_message_text", None)):
@@ -6581,7 +5743,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 weeks = int(data.split(":")[-1])
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 weeks = 1
 
             user_data = getattr(context, "user_data", None)
@@ -6591,7 +5753,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                 try:
                     context.user_data = {"strategy_review_variant_weeks": weeks}
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
 
             render = getattr(self, "_render_strategy_review_cached", None)
             if callable(render):
@@ -6603,59 +5765,11 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         if callable(handler):
             await handler(update, context)
 
-    def _is_agent_process_running(self) -> bool:
-        """Best-effort check if agent process is running (patched in tests)."""
-        sc = getattr(self, "service_controller", None)
-        try:
-            fn = getattr(sc, "is_agent_process_running", None)
-            if callable(fn):
-                return bool(fn())
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-        return False
-
-    def _get_current_time_str(self) -> str:
-        """Return a short time string for status output."""
-        try:
-            return datetime.now(timezone.utc).strftime("%H:%M UTC")
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return ""
-
-    def _compute_state_stale_threshold(self, _state: dict) -> float:
-        """Return stale threshold (seconds) for Home Card freshness warning."""
-        return 120.0
-
-    def _extract_latest_price(self, state: dict) -> Optional[float]:
-        """Extract a latest price from the state payload."""
-        try:
-            v = state.get("latest_price")
-            if v is not None:
-                return float(v)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-        try:
-            bar = state.get("latest_bar") or {}
-            v = bar.get("close")
-            return float(v) if v is not None else None
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return None
-
-    def _extract_data_age_minutes(self, state: dict) -> Optional[float]:
-        """Best-effort market-data age in minutes (derived from latest_bar timestamp)."""
-        try:
-            bar = state.get("latest_bar") or {}
-            ts = bar.get("timestamp")
-            if not ts:
-                return None
-            dt = parse_utc_timestamp(str(ts))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return None
+    # _is_agent_process_running inherited from TelegramStateQueriesMixin
+    # _get_current_time_str inherited from TelegramStateQueriesMixin
+    # _compute_state_stale_threshold inherited from TelegramStateQueriesMixin
+    # _extract_latest_price inherited from TelegramStateQueriesMixin
+    # _extract_data_age_minutes inherited from TelegramStateQueriesMixin
 
     async def _handle_status(self, update: Any, context: Any) -> None:
         """Legacy /status handler expected by tests."""
@@ -6667,7 +5781,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state = self._read_state()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state = None
 
         symbol = "MNQ"
@@ -6675,7 +5789,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 symbol = str(state.get("symbol") or symbol)
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
         time_str = self._get_current_time_str()
 
@@ -6710,7 +5824,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state_dir = getattr(self, "state_dir", None) or ensure_state_dir(None)
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state_dir = Path("data/agent_state/NQ")
 
         signals_file = get_signals_file(Path(state_dir))
@@ -6722,7 +5836,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             raw_lines = signals_file.read_text(encoding="utf-8").splitlines()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             raw_lines = []
 
         signals = []
@@ -6733,7 +5847,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 signals.append(json.loads(line))
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 continue
 
         if not signals:
@@ -6747,7 +5861,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             try:
                 direction = format_signal_direction(str(s.get("direction") or s.get("signal", {}).get("direction") or ""))
             except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+                logger.debug(f"Non-critical: {e}", exc_info=True)
                 direction = ""
             typ = str(s.get("type") or s.get("signal", {}).get("type") or s.get("signal_type") or "signal")
             price = s.get("entry_price") or s.get("signal", {}).get("entry_price")
@@ -6771,7 +5885,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             fn = getattr(tracker, "get_performance_metrics", None)
             metrics = fn() if callable(fn) else {}
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             metrics = {}
 
         total_signals = int(metrics.get("total_signals", 0) or 0)
@@ -6805,7 +5919,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
                     pnl = float((v or {}).get("total_pnl", 0.0) or 0.0)
                     lines.append(f"• {safe_label(str(k))}: {c} • {wr:.0%} • {format_pnl(pnl)}")
                 except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
+                    logger.debug(f"Non-critical: {e}", exc_info=True)
                     continue
 
         msg = "\n".join(lines)
@@ -6854,7 +5968,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             return InlineKeyboardMarkup([self._nav_back_row()])
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             return None
 
     def _is_path_blocked(self, rel_path: str) -> bool:
@@ -6924,7 +6038,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             prefs = TelegramPrefs(state_dir=getattr(self, "state_dir", None))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             prefs = TelegramPrefs()
         self.prefs = prefs
         return prefs
@@ -6956,7 +6070,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             self._knowledge_retriever = retriever
             return retriever
         except Exception as e:
-            logger.debug(f"Knowledge retriever unavailable: {e}")
+            logger.debug(f"Knowledge retriever unavailable: {e}", exc_info=True)
             return None
 
     def _get_code_context(self, query: str) -> str:
@@ -6967,7 +6081,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             results = retriever.search(query)
             return retriever.format_context(results)
         except Exception as e:
-            logger.debug(f"Knowledge retrieval failed: {e}")
+            logger.debug(f"Knowledge retrieval failed: {e}", exc_info=True)
             return ""
 
     def _get_repo_root(self) -> Path:
@@ -6976,7 +6090,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
             root = Path(getattr(self, "_repo_root"))
             return root.resolve()
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             return Path(__file__).resolve().parent.parent.parent.parent
 
     def _get_reports_dir(self) -> Path:
@@ -6984,7 +6098,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state_dir = Path("data/agent_state/NQ")
         return state_dir.parent / "reports"
 
@@ -7096,7 +6210,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state_dir = Path("data/agent_state/NQ")
 
         reports_dir = state_dir.parent / "reports"
@@ -7136,7 +6250,7 @@ class TelegramCommandHandler(TelegramFormattersMixin):
         try:
             state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical: {e}", exc_info=True)
             state_dir = Path("data/agent_state/NQ")
 
         report_dir = state_dir.parent / "reports" / str(report_name)

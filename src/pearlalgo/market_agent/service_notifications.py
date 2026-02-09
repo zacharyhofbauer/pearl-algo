@@ -58,9 +58,9 @@ class ServiceNotificationsMixin:
             prefs = TelegramPrefs(state_dir=self.state_manager.state_dir)
             if not prefs.get("interval_notifications", True):
                 return  # Notifications disabled
-        except Exception:
+        except Exception as e:
             # If we can't load prefs, default to enabled
-            pass
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         now = datetime.now(timezone.utc)
 
@@ -84,7 +84,7 @@ class ServiceNotificationsMixin:
                 # Bound chart generation time so the service loop cannot stall indefinitely.
                 chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
             except Exception as e:
-                logger.debug(f"Could not generate dashboard chart: {e}")
+                logger.debug(f"Could not generate dashboard chart: {e}", exc_info=True)
                 chart_path = None
             self.last_dashboard_chart_sent = now
             await self._send_dashboard(
@@ -101,8 +101,8 @@ class ServiceNotificationsMixin:
                     and chart_path.exists()
                 ):
                     chart_path.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}", exc_info=True)
             self.last_status_update = now
         elif text_due:
             # Text-only update (no chart refresh); keep layout identical.
@@ -126,8 +126,8 @@ class ServiceNotificationsMixin:
         exports_dir = self.state_manager.state_dir / "exports"
         try:
             exports_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
         export_path = exports_dir / "dashboard_telegram_latest.png"
         chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
@@ -137,7 +137,7 @@ class ServiceNotificationsMixin:
             if captured and captured.exists():
                 return captured
         except Exception as e:
-            logger.debug(f"Could not capture live chart screenshot: {e}")
+            logger.debug(f"Could not capture live chart screenshot: {e}", exc_info=True)
 
         # Fallback: return whatever exists on disk (may be stale) for resiliency.
         return export_path if export_path.exists() else None
@@ -187,15 +187,15 @@ class ServiceNotificationsMixin:
                     latest_bar = market_data["latest_bar"]
                     if isinstance(latest_bar, dict) and "close" in latest_bar:
                         status["latest_price"] = latest_bar["close"]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
             # Track price source for UI confidence cues (e.g., Level 1 vs historical fallback).
             try:
                 if market_data and isinstance(market_data.get("latest_bar"), dict):
                     status["latest_price_source"] = market_data["latest_bar"].get("_data_level")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}", exc_info=True)
 
             # Active trades + unrealized PnL (virtual lifecycle: status="entered").
             self._add_active_trades_to_status(status, market_data)
@@ -289,11 +289,11 @@ class ServiceNotificationsMixin:
                 exited = list(reversed(exited))[:3]
                 if exited:
                     status["recent_exits"] = exited
-            except Exception:
-                pass
-        except Exception:
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}", exc_info=True)
+        except Exception as e:
             # Never let optional PnL UI break dashboard delivery.
-            pass
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
     def _add_volume_pressure_to_status(
         self: "MarketAgentService",
@@ -325,9 +325,9 @@ class ServiceNotificationsMixin:
                         timeframe_minutes=tf_min,
                         data_fresh=status.get("data_fresh"),
                     )
-        except Exception:
+        except Exception as e:
             # Never let optional observability break the dashboard.
-            pass
+            logger.debug(f"Non-critical: {e}", exc_info=True)
 
     def _get_recent_closes(self: "MarketAgentService", market_data: Optional[Dict] = None) -> list:
         """Extract recent close prices for sparkline."""
@@ -346,7 +346,7 @@ class ServiceNotificationsMixin:
                     closes = df["close"].tail(50).tolist()
                     return [float(c) for c in closes if c is not None]
         except Exception as e:
-            logger.debug(f"Could not get recent closes for sparkline: {e}")
+            logger.debug(f"Could not get recent closes for sparkline: {e}", exc_info=True)
 
         return []
 
@@ -393,8 +393,8 @@ class ServiceNotificationsMixin:
                     # If tz_convert fails, fall back to stripping tz
                     try:
                         tsx = tsx.tz_localize(None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
                 return tsx
 
             tmin_u = _to_utc_naive(tmin)
@@ -516,6 +516,6 @@ class ServiceNotificationsMixin:
                             slope = (closes_1d.iloc[-1] - closes_1d.iloc[0]) / closes_1d.iloc[0] * 100
                             trends["1D"] = float(slope)
         except Exception as e:
-            logger.debug(f"Could not compute MTF trends: {e}")
+            logger.debug(f"Could not compute MTF trends: {e}", exc_info=True)
 
         return trends

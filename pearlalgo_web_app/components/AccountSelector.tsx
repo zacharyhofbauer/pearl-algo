@@ -9,6 +9,7 @@
  * the user explicitly clears it or switches via the header dropdown.
  */
 
+import { useEffect, useRef, useCallback } from 'react'
 import Image from 'next/image'
 
 interface AccountOption {
@@ -46,20 +47,64 @@ interface AccountSelectorProps {
 }
 
 export default function AccountSelector({ onSelect }: AccountSelectorProps) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const firstButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Focus trap: keep focus within the dialog
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'Tab') return
+    const dialog = dialogRef.current
+    if (!dialog) return
+
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    if (focusable.length === 0) return
+
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+  }, [])
+
+  // Auto-focus first option on mount; attach focus trap
+  useEffect(() => {
+    firstButtonRef.current?.focus()
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleKeyDown])
+
   return (
-    <div className="account-selector-overlay">
+    <div
+      className="account-selector-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="account-selector-title"
+      ref={dialogRef}
+    >
       <div className="account-selector-card">
         <div className="account-selector-header">
           <Image src="/pearl-emoji.png" alt="" width={32} height={32} priority />
-          <h2>Select Account</h2>
+          <h2 id="account-selector-title">Select Account</h2>
         </div>
         <p className="account-selector-subtitle">
           Choose which account to view. You can switch anytime using the dropdown in the header bar.
         </p>
-        <div className="account-selector-options">
-          {ACCOUNTS.map((acct) => (
+        <div className="account-selector-options" role="group" aria-label="Account options">
+          {ACCOUNTS.map((acct, idx) => (
             <button
               key={acct.id}
+              ref={idx === 0 ? firstButtonRef : undefined}
               className="account-selector-option"
               onClick={() => {
                 // Persist choice
@@ -69,6 +114,7 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
                 onSelect(acct.param)
               }}
               type="button"
+              aria-label={`${acct.label} — ${acct.description}`}
             >
               <div className="account-selector-option-top">
                 <span className="account-selector-badge" style={{ background: acct.badgeColor }}>

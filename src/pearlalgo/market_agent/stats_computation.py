@@ -167,8 +167,9 @@ def compute_daily_stats(
                     daily_wins += 1
                 else:
                     daily_losses += 1
-    except Exception:
-        pass
+    except Exception as e:
+        from pearlalgo.utils.logger import logger
+        logger.warning(f"Daily stats computation failed: {e}", exc_info=True)
 
     daily_trades = daily_wins + daily_losses
     win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
@@ -284,8 +285,9 @@ def compute_performance_stats(
             # Track for streak calculation
             if exit_time >= cutoffs["24h"]:
                 recent_trades_24h.append((exit_time, is_win))
-    except Exception:
-        pass
+    except Exception as e:
+        from pearlalgo.utils.logger import logger
+        logger.warning(f"Performance stats computation failed: {e}", exc_info=True)
 
     # Calculate win rates
     for period in stats:

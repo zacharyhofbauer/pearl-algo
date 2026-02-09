@@ -375,9 +375,10 @@ export default function TradeDockPanel({
                   className="trade-stats-summary-toggle"
                   onClick={() => setShowPerf(!showPerf)}
                   type="button"
+                  aria-expanded={showPerf}
                 >
                   <span className="trade-stats-summary-label">Performance</span>
-                  <span className="trade-stats-summary-icon">{showPerf ? '▲' : '▼'}</span>
+                  <span className="trade-stats-summary-icon" aria-hidden="true">{showPerf ? '▲' : '▼'}</span>
                 </button>
 
                 {showPerf && (
@@ -411,9 +412,10 @@ export default function TradeDockPanel({
                   className="trade-stats-summary-toggle"
                   onClick={() => setShowSummary(!showSummary)}
                   type="button"
+                  aria-expanded={showSummary}
                 >
                   <span className="trade-stats-summary-label">Trade Stats</span>
-                  <span className="trade-stats-summary-icon">{showSummary ? '▲' : '▼'}</span>
+                  <span className="trade-stats-summary-icon" aria-hidden="true">{showSummary ? '▲' : '▼'}</span>
                 </button>
 
                 {showSummary && (
@@ -540,6 +542,11 @@ export default function TradeDockPanel({
                           <div
                             className={`recent-trade ${isExpanded ? 'expanded' : ''}`}
                             onClick={() => toggleExpand(id)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(id) } }}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isExpanded}
+                            aria-label={`${p.direction.toUpperCase()} ${p.symbol || symbol || ''} opened at ${formatPrice(p.entry_price)}, unrealized ${uUsd === null ? 'unknown' : `$${Math.abs(uUsd).toFixed(2)}`}`}
                           >
                             <div className="trade-left">
                               <span className={`trade-direction-badge ${p.direction}`}>
@@ -560,7 +567,7 @@ export default function TradeDockPanel({
                               </span>
                               <span className="trade-reason-badge reason-open">OPEN</span>
                             </div>
-                            <span className="trade-expand-icon">{isExpanded ? '▲' : '▼'}</span>
+                            <span className="trade-expand-icon" aria-hidden="true">{isExpanded ? '▲' : '▼'}</span>
                           </div>
 
                           {isExpanded && (
@@ -686,6 +693,11 @@ export default function TradeDockPanel({
                         <div
                           className={`recent-trade ${isExpanded ? 'expanded' : ''}`}
                           onClick={() => toggleExpand(id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(id) } }}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
+                          aria-label={`${dir.toUpperCase()} ${t.symbol || symbol || ''} exited at ${formatTime(t.exit_time ?? null)}, P&L ${formatPnL(t.pnl)}`}
                         >
                           <div className="trade-left">
                             <span className={`trade-direction-badge ${dir}`}>{dir.toUpperCase()}</span>
@@ -710,7 +722,7 @@ export default function TradeDockPanel({
                               </span>
                             )}
                           </div>
-                          <span className="trade-expand-icon">{isExpanded ? '▲' : '▼'}</span>
+                          <span className="trade-expand-icon" aria-hidden="true">{isExpanded ? '▲' : '▼'}</span>
                         </div>
 
                         {isExpanded && (

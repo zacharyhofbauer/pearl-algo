@@ -1,0 +1,500 @@
+"""
+Virtual Trade Manager
+
+Manages virtual trade exit processing -- detects when TP/SL is touched on
+active virtual trades and records the outcome across all tracking systems
+(performance tracker, circuit breaker, challenge tracker, learning policies).
+
+Extracted from service.py for better code organization and testability.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+import pandas as pd
+
+from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import parse_utc_timestamp
+
+if TYPE_CHECKING:
+    from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+    from pearlalgo.market_agent.performance_tracker import PerformanceTracker
+    from pearlalgo.market_agent.notification_queue import NotificationQueue
+    from pearlalgo.market_agent.trading_circuit_breaker import TradingCircuitBreaker
+
+
+class VirtualTradeManager:
+    """
+    Processes virtual trade exits by scanning OHLCV bars for TP/SL hits.
+
+    All dependencies are injected via the constructor so the class is
+    independently testable.
+    """
+
+    def __init__(
+        self,
+        *,
+        state_manager: "MarketAgentStateManager",
+        performance_tracker: "PerformanceTracker",
+        notification_queue: "NotificationQueue",
+        # Optional dependencies (set via configure_*)
+        trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
+        telegram_notifier: Optional[Any] = None,
+        execution_adapter: Optional[Any] = None,
+        bandit_policy: Optional[Any] = None,
+        contextual_policy: Optional[Any] = None,
+        challenge_tracker: Optional[Any] = None,
+        mffu_tracker: Optional[Any] = None,
+        # Config values
+        virtual_pnl_enabled: bool = True,
+        virtual_pnl_tiebreak: str = "stop_loss",
+        virtual_pnl_notify_exit: bool = False,
+        symbol: str = "MNQ",
+        streak_alert_threshold: int = 3,
+    ):
+        # Core dependencies
+        self.state_manager = state_manager
+        self.performance_tracker = performance_tracker
+        self.notification_queue = notification_queue
+
+        # Optional dependencies
+        self.trading_circuit_breaker = trading_circuit_breaker
+        self.telegram_notifier = telegram_notifier
+        self.execution_adapter = execution_adapter
+        self.bandit_policy = bandit_policy
+        self.contextual_policy = contextual_policy
+        self._challenge_tracker = challenge_tracker
+        self._mffu_tracker = mffu_tracker
+
+        # Config
+        self._virtual_pnl_enabled = virtual_pnl_enabled
+        self._tiebreak = virtual_pnl_tiebreak
+        self._notify_exit = virtual_pnl_notify_exit
+        self._symbol = symbol
+
+        # Streak tracking
+        self._streak_type: str = "none"
+        self._streak_count: int = 0
+        self._last_streak_alert_count: int = 0
+        self._streak_alert_threshold: int = streak_alert_threshold
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def process_exits(self, market_data: Dict) -> None:
+        """
+        Scan active virtual trades and exit any where TP/SL has been touched.
+
+        This is called once per service cycle.  Uses vectorized pandas
+        operations for O(signals) performance instead of O(signals x bars).
+
+        Args:
+            market_data: Dict containing at minimum ``df`` (OHLCV DataFrame).
+        """
+        if not self._virtual_pnl_enabled:
+            return
+
+        # Get bars DataFrame
+        df = market_data.get("df") if isinstance(market_data, dict) else None
+        if df is None or df.empty:
+            return
+
+        required_cols = {"timestamp", "high", "low"}
+        if not required_cols.issubset(set(df.columns)):
+            return
+
+        # Get recently tracked signals
+        try:
+            recent = self.state_manager.get_recent_signals(limit=300)
+        except Exception as e:
+            logger.warning(f"Failed to retrieve recent signals for trade exits: {e}")
+            return
+
+        # Precompute bar arrays once (vectorized)
+        try:
+            bar_times = pd.to_datetime(df["timestamp"])
+            if bar_times.dt.tz is None:
+                bar_times = bar_times.dt.tz_localize("UTC")
+            else:
+                bar_times = bar_times.dt.tz_convert("UTC")
+            bar_times_arr = bar_times.values
+
+            bar_highs = df["high"].fillna(df.get("close", 0)).astype(float).values
+            bar_lows = df["low"].fillna(df.get("close", 0)).astype(float).values
+        except Exception as e:
+            logger.warning(f"Failed to compute bar arrays for trade exits: {e}")
+            return
+
+        exited_this_cycle: set = set()
+        for rec in recent:
+            try:
+                if not isinstance(rec, dict) or rec.get("status") != "entered":
+                    continue
+                sig_id = str(rec.get("signal_id") or "")
+                if not sig_id or sig_id in exited_this_cycle:
+                    continue
+
+                exit_info = self._check_single_trade_exit(
+                    rec, sig_id, bar_times_arr, bar_highs, bar_lows, df,
+                )
+                if exit_info is None:
+                    continue
+
+                exit_price, exit_reason, exit_bar_ts, sig, direction = exit_info
+                exited_this_cycle.add(sig_id)
+
+                self._record_exit(
+                    sig_id=sig_id,
+                    sig=sig,
+                    direction=direction,
+                    exit_price=exit_price,
+                    exit_reason=exit_reason,
+                    exit_bar_ts=exit_bar_ts,
+                    df=df,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to process virtual trade exit: {e}")
+                continue
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _check_single_trade_exit(
+        self, rec: Dict, sig_id: str,
+        bar_times_arr, bar_highs, bar_lows, df,
+    ) -> Optional[tuple]:
+        """Check if a single active trade should be exited.
+
+        Returns ``(exit_price, exit_reason, exit_bar_ts, sig, direction)``
+        or ``None`` if no exit.
+        """
+        import numpy as _np
+
+        # Parse entry time (UTC)
+        entry_time_str = rec.get("entry_time")
+        entry_time: Optional[datetime] = None
+        if entry_time_str:
+            try:
+                entry_time = parse_utc_timestamp(str(entry_time_str))
+                if entry_time and entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+            except Exception as e:
+                logger.warning(f"Critical path error: {e}", exc_info=True)
+
+        sig = rec.get("signal", {}) or {}
+        direction = str(sig.get("direction") or "long").lower()
+        try:
+            stop = float(sig.get("stop_loss") or 0.0)
+            target = float(sig.get("take_profit") or 0.0)
+        except Exception as e:
+            logger.warning(f"Failed to parse stop/target for virtual trade exit: {e}")
+            return None
+        if stop <= 0 or target <= 0:
+            return None
+
+        # Vectorized hit masks
+        if direction == "short":
+            tp_mask = bar_lows <= target
+            sl_mask = bar_highs >= stop
+        else:
+            tp_mask = bar_highs >= target
+            sl_mask = bar_lows <= stop
+
+        # Mask for bars strictly after entry time
+        if entry_time:
+            entry_ts = pd.Timestamp(entry_time)
+            if entry_ts.tzinfo is None:
+                entry_ts = entry_ts.tz_localize("UTC")
+            else:
+                entry_ts = entry_ts.tz_convert("UTC")
+            entry_ts_np = entry_ts.tz_localize(None).to_datetime64()
+            after_entry_mask = bar_times_arr > entry_ts_np
+        else:
+            after_entry_mask = _np.ones(len(df), dtype=bool)
+
+        valid_mask = (bar_highs > 0) & (bar_lows > 0)
+        exit_mask = (tp_mask | sl_mask) & after_entry_mask & valid_mask
+
+        if not exit_mask.any():
+            return None
+
+        first_exit_idx = exit_mask.argmax()
+        exit_bar_ts_raw = bar_times_arr[first_exit_idx]
+        hit_tp = tp_mask[first_exit_idx]
+        hit_sl = sl_mask[first_exit_idx]
+
+        # Determine exit reason and price
+        if hit_tp and hit_sl:
+            if self._tiebreak == "take_profit":
+                exit_reason = "take_profit"
+                exit_price = target
+            else:
+                exit_reason = "stop_loss"
+                exit_price = stop
+        elif hit_sl:
+            exit_reason = "stop_loss"
+            exit_price = stop
+        elif hit_tp:
+            exit_reason = "take_profit"
+            exit_price = target
+        else:
+            return None
+
+        # Convert numpy datetime64 to python datetime
+        exit_bar_ts: Optional[datetime] = None
+        try:
+            exit_bar_ts = pd.Timestamp(exit_bar_ts_raw).to_pydatetime()
+            if exit_bar_ts and exit_bar_ts.tzinfo is None:
+                exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
+        except Exception as e:
+            logger.warning(f"Critical path error: {e}", exc_info=True)
+
+        logger.info(
+            f"🔍 VIRTUAL EXIT: signal_id={sig_id} | direction={direction.upper()} | "
+            f"entry={sig.get('entry_price', 'N/A')} | exit={exit_price:.2f} | "
+            f"reason={exit_reason} | stop={stop:.2f} | target={target:.2f}"
+        )
+
+        return (exit_price, exit_reason, exit_bar_ts, sig, direction)
+
+    def _record_exit(
+        self,
+        *,
+        sig_id: str,
+        sig: Dict,
+        direction: str,
+        exit_price: float,
+        exit_reason: str,
+        exit_bar_ts: Optional[datetime],
+        df: pd.DataFrame,
+    ) -> None:
+        """Record the exit across all tracking systems."""
+        from pearlalgo.market_agent.notification_queue import Priority, NotificationTier
+
+        perf = self.performance_tracker.track_exit(
+            signal_id=sig_id,
+            exit_price=float(exit_price),
+            exit_reason=str(exit_reason),
+            exit_time=exit_bar_ts,
+        )
+
+        if not perf:
+            return
+
+        pnl_value = float(perf.get("pnl", 0.0))
+        is_win = bool(perf.get("is_win", pnl_value > 0))
+        logger.info(
+            "Virtual exit: %s | %s | exit=%s | pnl=%s",
+            sig_id[:16], exit_reason, f"{exit_price:.2f}", f"{pnl_value:.2f}",
+        )
+
+        # --- Circuit breaker ---
+        if self.trading_circuit_breaker is not None:
+            try:
+                self.trading_circuit_breaker.record_trade_result({
+                    "is_win": is_win,
+                    "pnl": pnl_value,
+                    "exit_time": exit_bar_ts.isoformat() if exit_bar_ts else None,
+                    "exit_reason": exit_reason,
+                })
+            except Exception as cb_err:
+                logger.debug(f"Could not record circuit breaker trade: {cb_err}")
+            try:
+                was_would_block = bool(sig.get("_cb_would_block", False))
+                self.trading_circuit_breaker.record_shadow_outcome(
+                    pnl=pnl_value, is_win=is_win, was_would_block=was_would_block,
+                )
+            except Exception as shadow_err:
+                logger.debug(f"Could not record shadow outcome: {shadow_err}")
+
+        # --- Challenge tracker ---
+        if self._challenge_tracker is not None:
+            try:
+                challenge_result = self._challenge_tracker.record_trade(
+                    pnl=pnl_value, is_win=is_win,
+                )
+                if challenge_result.get("triggered"):
+                    outcome = challenge_result.get("outcome", "")
+                    attempt = challenge_result.get("attempt", {})
+                    logger.info(
+                        f"🏆 Challenge attempt #{attempt.get('attempt_id', 0)} ended: "
+                        f"{outcome.upper()} | Final PnL: ${attempt.get('pnl', 0):.2f}"
+                    )
+                    if self.telegram_notifier and self.telegram_notifier.enabled:
+                        try:
+                            emoji = "🎉" if outcome == "pass" else "❌"
+                            msg = (
+                                f"{emoji} *50k Challenge: {outcome.upper()}*\n\n"
+                                f"Attempt #{attempt.get('attempt_id', 0)} ended\n"
+                                f"Final PnL: `${attempt.get('pnl', 0):,.2f}`\n"
+                                f"Trades: {attempt.get('trades', 0)} | "
+                                f"WR: {attempt.get('win_rate', 0):.0f}%\n\n"
+                                f"_New attempt starting..._"
+                            )
+                            asyncio.create_task(
+                                self.notification_queue.enqueue_raw_message(
+                                    msg, parse_mode="Markdown", dedupe=False,
+                                    priority=Priority.HIGH, tier=NotificationTier.CRITICAL,
+                                )
+                            )
+                        except Exception as tg_err:
+                            logger.debug(f"Could not queue challenge alert: {tg_err}")
+            except Exception as challenge_err:
+                logger.debug(f"Could not record challenge trade: {challenge_err}")
+
+        # --- MFFU tracker ---
+        if self._mffu_tracker is not None:
+            try:
+                from datetime import date as _date_cls
+                mffu_result = self._mffu_tracker.record_trade(
+                    pnl=pnl_value, is_win=is_win, trade_date=_date_cls.today().isoformat(),
+                )
+                if mffu_result.get("triggered"):
+                    mffu_outcome = mffu_result.get("outcome", "")
+                    mffu_attempt = mffu_result.get("attempt", {})
+                    logger.info(
+                        f"MFFU attempt #{mffu_attempt.get('attempt_id', 0)} ended: "
+                        f"{mffu_outcome.upper()} | PnL: ${mffu_attempt.get('pnl', 0):.2f}"
+                    )
+                    if mffu_outcome == "fail" and self.execution_adapter is not None:
+                        try:
+                            self.execution_adapter.disarm()
+                            asyncio.create_task(self.execution_adapter.flatten_all_positions())
+                            logger.warning("MFFU FAIL: execution disarmed + positions flattened")
+                        except Exception as e:
+                            logger.warning(f"Critical path error: {e}", exc_info=True)
+            except Exception as mffu_err:
+                logger.debug(f"Could not record MFFU trade: {mffu_err}")
+
+        # --- Bandit policy ---
+        if self.bandit_policy is not None:
+            try:
+                signal_type = str(sig.get("type") or "unknown")
+                self.bandit_policy.record_outcome(
+                    signal_id=sig_id, signal_type=signal_type,
+                    is_win=is_win, pnl=pnl_value,
+                )
+            except Exception as policy_err:
+                logger.debug(f"Could not record policy outcome: {policy_err}")
+
+        # --- Contextual policy ---
+        if self.contextual_policy is not None:
+            try:
+                from pearlalgo.learning.contextual_bandit import ContextFeatures
+                signal_type = str(sig.get("type") or "unknown")
+                raw_ctx = sig.get("_context_features")
+                if isinstance(raw_ctx, dict):
+                    ctx = ContextFeatures.from_dict(raw_ctx)
+                    self.contextual_policy.record_outcome(
+                        signal_id=sig_id, signal_type=signal_type,
+                        context=ctx, is_win=is_win, pnl=pnl_value,
+                    )
+                    try:
+                        expected_wr = self.contextual_policy.get_expected_win_rate(signal_type, ctx)
+                        logger.info(
+                            f"🧠 Learning: {signal_type} in {ctx.to_dict().get('context_key', 'unknown')} -> "
+                            f"{'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f}) | Expected WR: {expected_wr:.0%}"
+                        )
+                    except Exception:
+                        logger.info(
+                            f"🧠 Learning: {signal_type} -> {'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f})"
+                        )
+            except Exception as ctx_err:
+                logger.debug(f"Could not record contextual policy outcome: {ctx_err}")
+
+        # --- Execution adapter daily PnL ---
+        if self.execution_adapter is not None:
+            try:
+                self.execution_adapter.update_daily_pnl(pnl_value)
+            except Exception as pnl_err:
+                logger.debug(f"Could not update execution daily PnL: {pnl_err}")
+
+        # --- Exit notification ---
+        self._maybe_send_exit_notification(sig_id, sig, exit_price, exit_reason, pnl_value, perf, df)
+
+        # --- Streak alert ---
+        self._update_streak(sig_id, is_win)
+
+    def _maybe_send_exit_notification(
+        self, sig_id: str, sig: Dict, exit_price: float,
+        exit_reason: str, pnl_value: float, perf: Dict, df: pd.DataFrame,
+    ) -> None:
+        """Send Telegram exit notification if configured."""
+        from pearlalgo.market_agent.notification_queue import Priority
+
+        try:
+            notifier_available = (
+                self.telegram_notifier is not None
+                and self.telegram_notifier.enabled
+                and self.telegram_notifier.telegram is not None
+            )
+            if self._virtual_pnl_enabled and self._notify_exit and notifier_available:
+                hold_mins = perf.get("hold_duration_minutes")
+                try:
+                    hold_mins = float(hold_mins) if hold_mins is not None else None
+                except Exception:
+                    hold_mins = None
+
+                asyncio.create_task(
+                    self.notification_queue.enqueue_exit(
+                        signal_id=str(sig_id),
+                        exit_price=float(exit_price),
+                        exit_reason=str(exit_reason),
+                        pnl=float(pnl_value),
+                        signal=sig,
+                        hold_duration_minutes=hold_mins,
+                        buffer_data=df,
+                        priority=Priority.HIGH,
+                    )
+                )
+        except Exception as e:
+            logger.error(f"Could not schedule exit notification for {sig_id[:16]}: {e}", exc_info=True)
+
+    def _update_streak(self, sig_id: str, is_win: bool) -> None:
+        """Track win/loss streaks and send alerts when thresholds are hit."""
+        from pearlalgo.market_agent.notification_queue import Priority
+
+        try:
+            if is_win:
+                if self._streak_type == "win":
+                    self._streak_count += 1
+                else:
+                    self._streak_type = "win"
+                    self._streak_count = 1
+                    self._last_streak_alert_count = 0
+            else:
+                if self._streak_type == "loss":
+                    self._streak_count += 1
+                else:
+                    self._streak_type = "loss"
+                    self._streak_count = 1
+                    self._last_streak_alert_count = 0
+
+            if (
+                self._streak_count >= self._streak_alert_threshold
+                and self._streak_count > self._last_streak_alert_count
+                and self.telegram_notifier
+                and self.telegram_notifier.enabled
+            ):
+                self._last_streak_alert_count = self._streak_count
+                _acct = getattr(self.telegram_notifier, "account_label", None)
+                _atag = f"[{_acct}] " if _acct else ""
+
+                if self._streak_type == "win":
+                    msg = f"{_atag}🔥 *{self._streak_count} Win Streak!*\n\nYou're on fire! Consider:\n• Locking in profits\n• Staying disciplined"
+                else:
+                    msg = f"{_atag}❄️ *{self._streak_count} Loss Streak*\n\nConsider taking a break.\nCircuit breaker is monitoring."
+
+                asyncio.create_task(
+                    self.notification_queue.enqueue_raw_message(
+                        msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM,
+                    )
+                )
+                logger.info(f"Streak alert sent: {self._streak_type} x{self._streak_count}")
+        except Exception as streak_err:
+            logger.debug(f"Could not send streak alert: {streak_err}")

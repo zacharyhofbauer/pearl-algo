@@ -175,7 +175,36 @@ class MarketAgentStateManager:
         self._max_signal_lines = signal_settings.get("max_signal_lines", 5000)
         self._signal_write_count = 0
 
+        # Incremental signal count -- avoids reading entire file to count lines.
+        # Initialised lazily on first access (counts lines once, then increments).
+        self._signal_count: Optional[int] = None
+
+        # Recent signals cache (see get_recent_signals)
+        self._signals_cache: Optional[List[Dict]] = None
+        self._signals_cache_time: float = 0.0
+        self._signals_cache_limit: int = 0
+
         logger.info(f"MarketAgentStateManager initialized: state_dir={self.state_dir}")
+
+    def get_signal_count(self) -> int:
+        """Return the total number of signals in signals.jsonl.
+
+        The count is initialised lazily by reading the file once, then maintained
+        incrementally as signals are written or the file is rotated.  This is O(1)
+        after the first call, avoiding a full file scan on every cycle.
+        """
+        if self._signal_count is None:
+            # First access -- count lines once
+            try:
+                if self.signals_file.exists():
+                    with open(self.signals_file, "r") as f:
+                        self._signal_count = sum(1 for _ in f)
+                else:
+                    self._signal_count = 0
+            except Exception as e:
+                logger.warning(f"Failed to count signals, defaulting to 0: {e}")
+                self._signal_count = 0
+        return self._signal_count
 
     def _is_duplicate_signal(self, signal: Dict, recent_signals: List[Dict]) -> bool:
         """
@@ -284,12 +313,15 @@ class MarketAgentStateManager:
                 os.fsync(f.fileno())
             os.replace(tmp_path, self.signals_file)
 
+            # Update incremental signal count after rotation
+            self._signal_count = len(keep_lines)
+
             logger.info(
                 f"Rotated signals.jsonl: archived {len(archive_lines)} lines, "
                 f"kept {len(keep_lines)} lines"
             )
         except Exception as e:
-            logger.debug(f"Signals rotation failed (non-fatal): {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
 
     def save_signal(self, signal: Dict) -> None:
         """
@@ -345,7 +377,7 @@ class MarketAgentStateManager:
                                         except json.JSONDecodeError:
                                             continue
                             except Exception as e:
-                                logger.debug(f"Error reading signals for duplicate check: {e}")
+                                logger.warning(f"Critical path error: {e}", exc_info=True)
                         
                         # Check for duplicates. IMPORTANT: we still persist the record.
                         # Dropping persistence breaks the virtual trade lifecycle (entered/exited),
@@ -403,6 +435,13 @@ class MarketAgentStateManager:
                         with open(self.signals_file, "a") as f:
                             f.write(payload + "\n")
 
+                        # Maintain incremental signal count
+                        if self._signal_count is not None:
+                            self._signal_count += 1
+
+                        # Invalidate cache so next read picks up the new signal
+                        self._signals_cache = None
+
                         # Periodic rotation check (every 100 writes)
                         self._signal_write_count += 1
                         if self._signal_write_count % 100 == 0:
@@ -434,6 +473,10 @@ class MarketAgentStateManager:
                 with open(self.signals_file, "a") as f:
                     f.write(payload + "\n")
 
+                # Maintain incremental signal count (fallback path)
+                if self._signal_count is not None:
+                    self._signal_count += 1
+
             # Dual-write to SQLite (append-only signal event log, async if enabled)
             try:
                 if self._sqlite_enabled and self._trade_db is not None:
@@ -464,25 +507,63 @@ class MarketAgentStateManager:
         except Exception as e:
             logger.error(f"Error saving signal: {e}", exc_info=True)
 
+    # ---------------------------------------------------------------
+    # Recent signals cache (TTL-based, avoids repeated full-file reads)
+    # ---------------------------------------------------------------
+    _SIGNALS_CACHE_TTL: float = 5.0  # seconds
+
     def get_recent_signals(self, limit: int = 100) -> List[Dict]:
         """
-        Get recent signals.
-        
+        Get recent signals with TTL caching and tail-read optimisation.
+
+        The result is cached for ``_SIGNALS_CACHE_TTL`` seconds so that the
+        5+ callers per service cycle share a single file read.  Tail-reading
+        with ``collections.deque`` avoids loading the entire file.
+
         Args:
             limit: Maximum number of signals to return
-            
+
         Returns:
-            List of signal dictionaries
+            List of signal dictionaries (most recent last)
         """
-        signals = []
+        import time
+
+        now = time.monotonic()
+
+        # Check cache -- cache is valid if within TTL and requested limit is
+        # <= the limit the cache was populated with.
+        if (
+            self._signals_cache is not None
+            and (now - self._signals_cache_time) < self._SIGNALS_CACHE_TTL
+            and limit <= self._signals_cache_limit
+        ):
+            # Return the tail of the cached list
+            return self._signals_cache[-limit:]
+
+        # Cache miss -- read from disk
+        signals = self._read_recent_signals_from_disk(limit)
+
+        # Populate cache
+        self._signals_cache = signals
+        self._signals_cache_time = now
+        self._signals_cache_limit = limit
+
+        return signals
+
+    def _read_recent_signals_from_disk(self, limit: int) -> List[Dict]:
+        """Read last *limit* signals from signals.jsonl using tail-read."""
+        from collections import deque
 
         if not self.signals_file.exists():
-            return signals
+            return []
 
+        signals: List[Dict] = []
         try:
             with open(self.signals_file, "r") as f:
-                lines = f.readlines()
-                for line in lines[-limit:]:
+                # deque with maxlen keeps only the last N lines -- avoids
+                # loading the full file into memory.
+                tail = deque(f, maxlen=limit)
+                for line in tail:
                     try:
                         signal = json.loads(line.strip())
                         signals.append(signal)
@@ -492,6 +573,15 @@ class MarketAgentStateManager:
             logger.error(f"Error reading signals: {e}")
 
         return signals
+
+    def invalidate_signals_cache(self) -> None:
+        """Force the next ``get_recent_signals`` call to read from disk."""
+        self._signals_cache = None
+
+    async def async_get_recent_signals(self, limit: int = 100) -> List[Dict]:
+        """Async wrapper -- offloads the (potentially blocking) file read to a thread."""
+        import asyncio
+        return await asyncio.to_thread(self.get_recent_signals, limit)
 
     # Maximum events.jsonl size before rotation (20 MB)
     _EVENTS_MAX_BYTES: int = 20 * 1024 * 1024
@@ -515,7 +605,7 @@ class MarketAgentStateManager:
                 f"Rotated events.jsonl ({self._EVENTS_MAX_BYTES // (1024*1024)}MB limit) → {backup.name}"
             )
         except Exception as e:
-            logger.debug(f"Events rotation failed (non-fatal): {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
 
     def append_event(
         self,
@@ -557,7 +647,7 @@ class MarketAgentStateManager:
                 with open(self.events_file, "a") as f:
                     f.write(json.dumps(record) + "\n")
             except Exception as e:
-                logger.debug(f"Failed to append event: {e}")
+                logger.warning(f"Critical path error: {e}", exc_info=True)
 
     def get_recent_events(self, limit: int = 200) -> List[Dict[str, Any]]:
         """Get recent events from events.jsonl (best-effort)."""
@@ -601,7 +691,7 @@ class MarketAgentStateManager:
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.error(f"Error saving state: {e}")
+            logger.error(f"Error saving state: {e}", exc_info=True)
 
     def load_state(self) -> Dict:
         """
@@ -623,5 +713,5 @@ class MarketAgentStateManager:
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.error(f"Error loading state: {e}")
+            logger.error(f"Error loading state: {e}", exc_info=True)
             return {}

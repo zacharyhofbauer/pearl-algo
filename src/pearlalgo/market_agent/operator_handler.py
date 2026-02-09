@@ -65,19 +65,16 @@ class OperatorHandler:
 
             logger.info(f"Processing grade request: {signal_id} -> {'win' if is_win else 'loss'} (force={force})")
 
-            # Check if signal already has an exit recorded
-            signals_file = self.state_manager.signals_file
+            # Check if signal already has an exit recorded (via locked read)
             already_exited = False
-            if signals_file.exists():
-                with open(signals_file, "r") as f:
-                    for line in f:
-                        try:
-                            record = json.loads(line.strip())
-                            if record.get("signal_id") == signal_id:
-                                already_exited = record.get("status") == "exited"
-                                break
-                        except json.JSONDecodeError:
-                            continue
+            try:
+                recent_signals = self.state_manager.get_recent_signals(limit=500)
+                for record in recent_signals:
+                    if isinstance(record, dict) and record.get("signal_id") == signal_id:
+                        already_exited = record.get("status") == "exited"
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to check signal exit status: {e}")
 
             # Apply to learning if: not already exited, or force is True
             applied = False

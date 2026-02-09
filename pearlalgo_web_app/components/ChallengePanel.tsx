@@ -73,6 +73,8 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
       width={100}
       height={32}
       className="challenge-sparkline"
+      role="img"
+      aria-label={`Equity sparkline: ${isPositive ? 'trending up' : 'trending down'}`}
     />
   )
 }
@@ -177,7 +179,14 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
               {challenge.drawdown_risk_pct.toFixed(1)}%
             </span>
           </div>
-          <div className="progress-bar">
+          <div
+            className="progress-bar"
+            role="progressbar"
+            aria-valuenow={Math.round(challenge.drawdown_risk_pct)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Drawdown risk: ${challenge.drawdown_risk_pct.toFixed(1)}%`}
+          >
             <div className="progress-segments">
               {[...Array(10)].map((_, i) => (
                 <div
@@ -224,7 +233,14 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         {challenge.outcome === 'active' && challenge.pnl > 0 && (
           <div className="challenge-target-progress">
             <div className="target-progress-container">
-              <div className="target-progress-bar">
+              <div
+                className="target-progress-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(profitProgress)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Profit target progress: ${profitProgress.toFixed(0)}%`}
+              >
                 <div
                   className="target-progress-fill"
                   style={{ width: `${profitProgress}%` }}

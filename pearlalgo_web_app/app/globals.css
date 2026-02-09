@@ -7,8 +7,8 @@
   --bg-elevated: #22222e;  /* New: for elevated surfaces */
   --text-primary: #f0eeeb;  /* Slightly brighter for better contrast */
   --text-secondary: #b0b8c8;  /* Improved contrast: was #a0a8b8 */
-  --text-tertiary: #7a8290;   /* Improved: was #6b7280 */
-  --text-muted: #555a66;      /* New: for very subtle text */
+  --text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on card bg #1a1a24, ~6:1 on #0a0a0f */
+  --text-muted: #6e7380;      /* WCAG AA: ~4.5:1 on #0a0a0f; was #555a66 (~2.8:1 FAIL) */
   --accent-cyan: #00d4ff;
   --accent-green: #00e676;
   --accent-red: #ff5252;
@@ -13730,57 +13730,53 @@ body {
 }
 
 /* ============================================
-   MOBILE ACCESSIBILITY — FOCUS INDICATORS
+   ACCESSIBILITY — FOCUS INDICATORS (ALL VIEWPORTS)
    ============================================ */
-@media (max-width: 768px) {
-  /* Restore visible focus indicators for keyboard/switch users */
-  .pearl-btn:focus-visible,
-  .pearl-dropdown-tab:focus-visible,
-  button:focus-visible,
-  [role="button"]:focus-visible,
-  a:focus-visible,
-  input:focus-visible,
-  select:focus-visible {
-    outline: 2px solid var(--accent-cyan);
-    outline-offset: 2px;
-  }
+/* Visible focus indicators for keyboard/switch users — global, not mobile-only */
+.pearl-btn:focus-visible,
+.pearl-dropdown-tab:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
 
-  /* High contrast focus for destructive buttons */
-  .pearl-btn.destructive:focus-visible,
-  .kill-switch-btn:focus-visible {
-    outline-color: var(--accent-red);
-  }
+/* High contrast focus for destructive buttons */
+.pearl-btn.destructive:focus-visible,
+.kill-switch-btn:focus-visible {
+  outline-color: var(--accent-red);
 }
 
 /* ============================================
-   MOBILE ACCESSIBILITY — COLOR CONTRAST FIXES
+   ACCESSIBILITY — COLOR CONTRAST FIXES (ALL VIEWPORTS)
    ============================================ */
-@media (max-width: 768px) {
-  /* SHADOW badge — improve yellow on dark contrast */
-  .pearl-dropdown-mode.shadow,
-  .mode-badge.shadow {
-    background: rgba(255, 193, 7, 0.2);
-    color: #ffd54f;
-    border-color: rgba(255, 193, 7, 0.4);
-  }
+/* SHADOW badge — improve yellow on dark contrast (was mobile-only, now global) */
+.pearl-dropdown-mode.shadow,
+.mode-badge.shadow {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffd54f;
+  border-color: rgba(255, 193, 7, 0.4);
+}
 
-  /* Status text contrast improvements */
-  .pearl-header-status-text,
-  .status-text-muted {
-    color: rgba(180, 188, 200, 1);
-  }
+/* Status text contrast improvements */
+.pearl-header-status-text,
+.status-text-muted {
+  color: rgba(180, 188, 200, 1);
+}
 
-  /* P&L colors — brighter for dark backgrounds */
-  .pnl-positive,
-  .profit-text,
-  .context-item.pnl.positive .context-value {
-    color: #4ade80;
-  }
-  .pnl-negative,
-  .loss-text,
-  .context-item.pnl.negative .context-value {
-    color: #f87171;
-  }
+/* P&L colors — brighter for dark backgrounds */
+.pnl-positive,
+.profit-text,
+.context-item.pnl.positive .context-value {
+  color: #4ade80;
+}
+.pnl-negative,
+.loss-text,
+.context-item.pnl.negative .context-value {
+  color: #f87171;
 }
 
 /* ============================================

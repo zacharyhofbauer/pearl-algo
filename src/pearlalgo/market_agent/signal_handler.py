@@ -229,7 +229,7 @@ class SignalHandler:
             # ==========================================================================
             # EXECUTION: Place bracket order if execution adapter is enabled + armed
             # ==========================================================================
-            self._execute_signal(signal, policy_decision)
+            await self._execute_signal(signal, policy_decision)
 
             # Queue entry alert to Telegram (non-blocking)
             await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data)
@@ -397,7 +397,7 @@ class SignalHandler:
                     entry_time=datetime.now(timezone.utc),
                 )
         except Exception as e:
-            logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
+            logger.warning(f"Critical path error: {e}", exc_info=True)
         return entry_price
 
     def _apply_bandit_policy(self, signal: Dict) -> Optional[Any]:
@@ -501,7 +501,7 @@ class SignalHandler:
             logger.debug(f"Could not build context features: {e}")
             return None
 
-    def _execute_signal(self, signal: Dict, policy_decision: Optional[Any]) -> None:
+    async def _execute_signal(self, signal: Dict, policy_decision: Optional[Any]) -> None:
         """Execute signal via execution adapter if enabled."""
         execution_result = None
         execution_status = "not_attempted"
@@ -536,9 +536,7 @@ class SignalHandler:
                         )
 
                     # Place bracket order
-                    execution_result = asyncio.get_event_loop().run_until_complete(
-                        self.execution_adapter.place_bracket(signal)
-                    )
+                    execution_result = await self.execution_adapter.place_bracket(signal)
 
                     if execution_result.success:
                         execution_status = "placed"

@@ -77,6 +77,7 @@ from pearlalgo.market_agent.stats_computation import (
     get_trading_day_start as _shared_get_trading_day_start,
 )
 from pearlalgo.utils.state_io import load_json_file as _load_json_file, load_jsonl_file as _load_jsonl_file
+from pearlalgo.market_agent.state_reader import StateReader
 from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tradovate_fills_to_trades
 
 import pandas as pd
@@ -161,13 +162,48 @@ DEFAULT_MARKET = "NQ"
 # ---------------------------------------------------------------------------
 
 # Environment variables for auth:
-# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: false for local)
+# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: true for security)
 # PEARL_API_KEY=<key>          - Set a specific API key (optional, auto-generates if not set)
 # PEARL_API_KEY_FILE=<path>    - Path to file containing API keys (one per line)
+# Set PEARL_API_AUTH_ENABLED=false explicitly to disable (e.g. trusted local dev).
 
-_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "false").lower() == "true"
+_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "true").lower() == "true"
 _api_keys: set = set()
 _api_key_file: Optional[Path] = None
+
+# ---------------------------------------------------------------------------
+# Rate Limiting for Operator Endpoints
+# ---------------------------------------------------------------------------
+
+import collections as _collections
+
+_rate_limit_window: int = 60  # seconds
+_rate_limit_max: int = 5  # max requests per window per endpoint
+_rate_limit_buckets: Dict[str, _collections.deque] = {}
+
+
+def _check_rate_limit(endpoint: str) -> None:
+    """
+    Simple in-memory token bucket rate limiter for operator endpoints.
+
+    Raises HTTPException(429) if the rate limit is exceeded.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    bucket = _rate_limit_buckets.setdefault(endpoint, _collections.deque())
+
+    # Evict expired entries
+    while bucket and bucket[0] < now - _rate_limit_window:
+        bucket.popleft()
+
+    if len(bucket) >= _rate_limit_max:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded for {endpoint}. Max {_rate_limit_max} requests per {_rate_limit_window}s.",
+        )
+
+    bucket.append(now)
 
 # Security schemes
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -964,6 +1000,41 @@ async def strip_path_prefix(request, call_next):
 # Global state
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
+_state_reader: Optional[StateReader] = None
+
+
+def _get_state_reader() -> Optional[StateReader]:
+    """Return the global StateReader, creating it lazily if _state_dir is set."""
+    global _state_reader
+    if _state_reader is None and _state_dir is not None:
+        _state_reader = StateReader(_state_dir)
+    return _state_reader
+
+
+def _read_state_safe() -> Dict[str, Any]:
+    """Read state.json via StateReader (locked) with fallback to direct read."""
+    reader = _get_state_reader()
+    if reader is not None:
+        return reader.read_state()
+    # Fallback: direct read when state_dir not configured
+    if _state_dir is not None:
+        return _load_json_file(_state_dir / "state.json") or {}
+    return {}
+
+
+# Cache of StateReader instances per state_dir (for multi-market helpers)
+_state_reader_cache: Dict[str, StateReader] = {}
+
+
+def _read_state_for_dir(state_dir: Path) -> Dict[str, Any]:
+    """Read state.json via a locked StateReader for the given directory.
+
+    Caches the StateReader per directory to avoid repeated construction.
+    """
+    key = str(state_dir)
+    if key not in _state_reader_cache:
+        _state_reader_cache[key] = StateReader(state_dir)
+    return _state_reader_cache[key].read_state()
 
 # Pearl AI observability for UI heartbeat (updated by broadcast loop)
 _pearl_last_state_seen_time: Optional[str] = None
@@ -1035,7 +1106,7 @@ class ConnectionManager:
                         if st.st_mtime_ns != self._last_state_mtime_ns or st.st_size != self._last_state_size:
                             self._last_state_mtime_ns = st.st_mtime_ns
                             self._last_state_size = st.st_size
-                            self._cached_state = _load_json_file(state_file) or {}
+                            self._cached_state = _read_state_safe()
                     except FileNotFoundError:
                         if self._cached_state:
                             self._cached_state = {}
@@ -1323,8 +1394,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
         # Send initial state immediately (even when agent is stopped,
         # so the dashboard can show challenge / performance data).
         if _state_dir:
-            state_file = _state_dir / "state.json"
-            state = _load_json_file(state_file) or {}
+            state = _read_state_safe()
             # Broadcast if we have agent state OR persistent challenge data
             if state or _get_challenge_status(_state_dir):
                 daily_stats = _compute_daily_stats(_state_dir)
@@ -1391,8 +1461,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                 # Handle request for full state refresh
                 elif data == "refresh":
                     if _state_dir:
-                        state_file = _state_dir / "state.json"
-                        state = _load_json_file(state_file) or {}
+                        state = _read_state_safe()
                         if state or _get_challenge_status(_state_dir):
                             daily_stats = _compute_daily_stats(_state_dir)
                             refresh_data = {
@@ -1554,9 +1623,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     """
     # Check for live Tradovate account data in state.json first
     try:
-        state_file = state_dir / "state.json"
-        if state_file.exists():
-            state_data = json.loads(state_file.read_text()) or {}
+        state_data = _read_state_for_dir(state_dir)
+        if state_data:
             tv = state_data.get("tradovate_account")
             if tv and isinstance(tv, dict) and tv.get("equity"):
                 # Single source of truth: equity - start_balance
@@ -1650,9 +1718,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
 
     # Priority 1: Tradovate live data (MFFU accounts)
     try:
-        state_file = state_dir / "state.json"
-        if state_file.exists():
-            _sd = json.loads(state_file.read_text()) or {}
+        _sd = _read_state_for_dir(state_dir)
+        if _sd:
             tv = _sd.get("tradovate_account")
             if tv and isinstance(tv, dict) and tv.get("equity"):
                 start_balance = _get_start_balance(state_dir)
@@ -1805,9 +1872,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
 def _is_mffu_account(state_dir: Path) -> bool:
     """Check if this state_dir has live Tradovate account data (MFFU mode)."""
     try:
-        state_file = state_dir / "state.json"
-        if state_file.exists():
-            data = json.loads(state_file.read_text()) or {}
+        data = _read_state_for_dir(state_dir)
+        if data:
             tv = data.get("tradovate_account")
             return bool(tv and isinstance(tv, dict) and tv.get("equity"))
     except Exception as e:
@@ -1848,9 +1914,8 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
     tv: Dict[str, Any] = {}
     fills: List[Dict[str, Any]] = []
     try:
-        state_file = state_dir / "state.json"
-        if state_file.exists():
-            data = json.loads(state_file.read_text()) or {}
+        data = _read_state_for_dir(state_dir)
+        if data:
             tv = data.get("tradovate_account") or {}
             fills = data.get("tradovate_fills") or []
     except Exception as e:
@@ -2848,8 +2913,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file) or {}
+    state = _read_state_safe()
 
     if not state:
         # Agent not running / state.json missing -- still serve persistent
@@ -2985,12 +3049,16 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
     """
     Trigger the kill switch (operator action).
 
+    Rate-limited to 5 requests per 60 seconds.
+
     Writes `kill_request.flag` into the active market state directory.
 
     Safety policy:
     - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
     - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
+    _check_rate_limit("kill-switch")
+
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
@@ -3020,6 +3088,8 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
     - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
+    _check_rate_limit("close-all-trades")
+
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
@@ -3054,6 +3124,8 @@ async def close_trade(
     - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
     - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
     """
+    _check_rate_limit("close-trade")
+
     signal_id = str((payload or {}).get("signal_id") or "").strip()
     if not signal_id:
         raise HTTPException(status_code=422, detail="Missing required field: signal_id")
@@ -3132,8 +3204,7 @@ async def pearl_suggestion_accept(
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file)
+    state = _read_state_safe()
 
     suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
     if not suggestion_id:
@@ -3171,8 +3242,7 @@ async def pearl_suggestion_dismiss(
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    state_file = _state_dir / "state.json"
-    state = _load_json_file(state_file)
+    state = _read_state_safe()
 
     suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
     if not suggestion_id:

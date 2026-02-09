@@ -56,8 +56,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
       // Default error UI
       return (
-        <div className="error-boundary-fallback">
-          <div className="error-boundary-icon">⚠️</div>
+        <div className="error-boundary-fallback" role="alert" aria-live="assertive">
+          <div className="error-boundary-icon" aria-hidden="true">⚠️</div>
           <div className="error-boundary-title">
             {this.props.panelName ? `${this.props.panelName} Error` : 'Something went wrong'}
           </div>
@@ -67,6 +67,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <button
             className="error-boundary-retry"
             onClick={this.handleRetry}
+            aria-label={`Retry loading ${this.props.panelName || 'component'}`}
           >
             Try Again
           </button>

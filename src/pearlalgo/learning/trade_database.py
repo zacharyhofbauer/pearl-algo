@@ -652,13 +652,15 @@ class TradeDatabase:
                 features_json, datetime.now(timezone.utc).isoformat(),
             ))
             
-            # Add features to features table for analysis
+            # Add features to features table for analysis (bulk insert)
             if features:
-                for name, value in features.items():
-                    cursor.execute("""
-                        INSERT INTO trade_features (trade_id, feature_name, feature_value)
-                        VALUES (?, ?, ?)
-                    """, (trade_id, name, value))
+                cursor.executemany(
+                    """
+                    INSERT INTO trade_features (trade_id, feature_name, feature_value)
+                    VALUES (?, ?, ?)
+                    """,
+                    [(trade_id, name, value) for name, value in features.items()],
+                )
             
             conn.commit()
         

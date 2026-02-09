@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.market_agent.notification_queue import Priority
+from pearlalgo.market_agent.state_reader import StateReader
 
 if TYPE_CHECKING:
     from pearlalgo.market_agent.notification_queue import NotificationQueue
@@ -274,9 +275,9 @@ class ScheduledTasks:
 
                 if is_mffu:
                     try:
-                        ch_file = self.state_manager.state_dir / "challenge_state.json"
-                        if ch_file.exists():
-                            ch_data = json.loads(ch_file.read_text(encoding="utf-8"))
+                        _reader = StateReader(self.state_manager.state_dir)
+                        ch_data = _reader.read_challenge_state()
+                        if ch_data:
                             mffu_cfg = ch_data.get("mffu", {}) or ch_data.get("config", {}) or {}
                             current = ch_data.get("current_attempt", {}) or {}
                             profit_target = float(mffu_cfg.get("profit_target", 3000))

@@ -124,7 +124,14 @@ export default function MarketContextPanel({ regime, pressure }: MarketContextPa
             <span className="regime-confidence-label">Confidence</span>
             <span className="regime-confidence-value">{confidencePct.toFixed(0)}%</span>
           </div>
-          <div className="regime-confidence-bar">
+          <div
+            className="regime-confidence-bar"
+            role="progressbar"
+            aria-valuenow={Math.round(confidencePct)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Regime confidence: ${confidencePct.toFixed(0)}%`}
+          >
             <div className="regime-confidence-fill" style={{ width: `${confidencePct}%` }} />
           </div>
         </div>

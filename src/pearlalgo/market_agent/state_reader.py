@@ -105,3 +105,17 @@ class StateReader:
         except Exception:
             # Fallback: read without lock (better than no data)
             return load_jsonl_file(path, max_lines=max_lines)
+
+    # ------------------------------------------------------------------
+    # Async wrappers (offload blocking I/O to thread pool)
+    # ------------------------------------------------------------------
+
+    async def async_read_state(self) -> Dict[str, Any]:
+        """Async wrapper for read_state -- avoids blocking the event loop."""
+        import asyncio
+        return await asyncio.to_thread(self.read_state)
+
+    async def async_read_signals(self, max_lines: int = 2000) -> List[Dict[str, Any]]:
+        """Async wrapper for read_signals."""
+        import asyncio
+        return await asyncio.to_thread(self.read_signals, max_lines)

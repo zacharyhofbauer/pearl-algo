@@ -20,12 +20,14 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
 
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.market_agent.signal_handler import SignalHandler
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from tests.mock_data_provider import MockDataProvider
 
@@ -462,3 +464,250 @@ class TestMultiCycleAccumulation:
 
         persisted_types = {r["signal"]["type"] for r in persisted}
         assert persisted_types == {"breakout", "reversal", "vwap_cross"}
+
+
+# ---------------------------------------------------------------------------
+# 5. Signal → Execution Pipeline (mocked dependencies)
+# ---------------------------------------------------------------------------
+
+
+class TestSignalExecutionPipeline:
+    """Integration: signal → execution adapter coordination via SignalHandler.
+
+    Uses MagicMock/AsyncMock for infrastructure dependencies (execution adapter,
+    notification queue, etc.) to isolate the SignalHandler pipeline logic.
+    The actual SignalHandler.process_signal() is exercised end-to-end.
+    """
+
+    @staticmethod
+    def _build_handler(
+        *,
+        execution_adapter=None,
+        ml_signal_filter=None,
+        ml_filter_enabled: bool = False,
+        ml_filter_mode: str = "shadow",
+        trading_circuit_breaker=None,
+    ):
+        """Build a SignalHandler with mocked infrastructure dependencies.
+
+        Returns:
+            Tuple of (handler, state_mgr_mock, perf_tracker_mock,
+                       notif_queue_mock, order_mgr_mock).
+        """
+        state_mgr = MagicMock()
+        state_mgr.get_recent_signals.return_value = []
+
+        perf_tracker = MagicMock()
+        perf_tracker.track_signal_generated.return_value = "test-signal-id-001"
+        perf_tracker.track_entry.return_value = None
+
+        notif_queue = AsyncMock()
+        notif_queue.enqueue_entry.return_value = True
+        notif_queue.enqueue_circuit_breaker.return_value = True
+
+        order_mgr = MagicMock()
+        order_mgr.apply_ml_opportunity_sizing.return_value = None
+
+        handler = SignalHandler(
+            state_manager=state_mgr,
+            performance_tracker=perf_tracker,
+            notification_queue=notif_queue,
+            order_manager=order_mgr,
+            execution_adapter=execution_adapter,
+            ml_signal_filter=ml_signal_filter,
+            ml_filter_enabled=ml_filter_enabled,
+            ml_filter_mode=ml_filter_mode,
+            trading_circuit_breaker=trading_circuit_breaker,
+        )
+
+        return handler, state_mgr, perf_tracker, notif_queue, order_mgr
+
+    # -----------------------------------------------------------------------
+    # 5a. Signal → Execution adapter called with correct parameters
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_check_preconditions_called_with_signal(self) -> None:
+        """check_preconditions is invoked with the signal dict."""
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = MagicMock(execute=True)
+        mock_adapter.place_bracket = AsyncMock(
+            return_value=MagicMock(success=True, parent_order_id="ORD-001"),
+        )
+
+        handler, *_ = self._build_handler(execution_adapter=mock_adapter)
+
+        signal = _make_signal()
+        signal["position_size"] = 1
+        await handler.process_signal(signal)
+
+        mock_adapter.check_preconditions.assert_called_once_with(signal)
+
+    @pytest.mark.asyncio
+    async def test_place_bracket_called_and_status_placed(self) -> None:
+        """place_bracket is called with the signal and _execution_status set to 'placed'."""
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = MagicMock(execute=True)
+        mock_adapter.place_bracket = AsyncMock(
+            return_value=MagicMock(success=True, parent_order_id="ORD-002"),
+        )
+
+        handler, *_ = self._build_handler(execution_adapter=mock_adapter)
+
+        signal = _make_signal(
+            signal_type="breakout",
+            direction="long",
+            entry_price=17500.0,
+            stop_loss=17480.0,
+            take_profit=17550.0,
+        )
+        signal["position_size"] = 1
+        await handler.process_signal(signal)
+
+        mock_adapter.place_bracket.assert_called_once_with(signal)
+        assert signal["_execution_status"] == "placed"
+
+    # -----------------------------------------------------------------------
+    # 5b. Signal → ML filter rejects → No execution
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_ml_filter_live_rejects_no_order_placed(self) -> None:
+        """
+        ML filter in live mode returning should_execute=False annotates the
+        signal with rejection metadata.  Execution adapter preconditions also
+        reject → ``place_bracket`` is never called (no order placed).
+        """
+        # ML filter mock → rejects
+        mock_ml = MagicMock()
+        mock_pred = MagicMock()
+        mock_pred.to_dict.return_value = {
+            "win_probability": 0.30,
+            "pass_filter": False,
+        }
+        mock_pred.win_probability = 0.30
+        mock_ml.should_execute.return_value = (False, mock_pred)
+
+        # Execution adapter mock → preconditions fail
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = MagicMock(
+            execute=False, reason="below_ml_threshold",
+        )
+        mock_adapter.place_bracket = AsyncMock()
+
+        handler, *_ = self._build_handler(
+            execution_adapter=mock_adapter,
+            ml_signal_filter=mock_ml,
+            ml_filter_enabled=True,
+            ml_filter_mode="live",
+        )
+
+        signal = _make_signal()
+        signal["position_size"] = 1
+        await handler.process_signal(signal)
+
+        # ML filter metadata attached
+        assert signal.get("_ml_shadow_pass_filter") is False
+        assert signal.get("_ml_prediction") is not None
+
+        # ML filter was consulted
+        mock_ml.should_execute.assert_called_once()
+
+        # No order was placed
+        mock_adapter.place_bracket.assert_not_called()
+
+        # Execution status reflects the skip
+        assert signal["_execution_status"].startswith("skipped:")
+
+    # -----------------------------------------------------------------------
+    # 5c. Signal → Circuit breaker blocks → No execution
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_blocks_skips_execution(self) -> None:
+        """
+        Circuit breaker returning allowed=False in enforce mode stops the
+        pipeline before the execution adapter is ever consulted.
+        """
+        # Circuit breaker mock → blocks
+        mock_cb = MagicMock()
+        cb_decision = MagicMock()
+        cb_decision.allowed = False
+        cb_decision.reason = "max_consecutive_losses"
+        cb_decision.severity = "warning"
+        cb_decision.details = {"consecutive_losses": 5}
+        cb_decision.to_dict.return_value = {
+            "allowed": False,
+            "reason": "max_consecutive_losses",
+            "severity": "warning",
+            "details": {"consecutive_losses": 5},
+        }
+        mock_cb.should_allow_signal.return_value = cb_decision
+        mock_cb.config = MagicMock()
+        mock_cb.config.mode = "enforce"
+
+        # Execution adapter mock (should never be touched)
+        mock_adapter = MagicMock()
+        mock_adapter.place_bracket = AsyncMock()
+
+        handler, *_ = self._build_handler(
+            execution_adapter=mock_adapter,
+            trading_circuit_breaker=mock_cb,
+        )
+
+        signal = _make_signal()
+        signal["position_size"] = 1
+        await handler.process_signal(signal)
+
+        # Circuit breaker was consulted
+        mock_cb.should_allow_signal.assert_called_once()
+
+        # Execution adapter was NOT consulted (pipeline stopped early)
+        mock_adapter.check_preconditions.assert_not_called()
+        mock_adapter.place_bracket.assert_not_called()
+
+        # Risk warnings attached to signal
+        assert "_risk_warnings" in signal
+        assert len(signal["_risk_warnings"]) == 1
+        assert signal["_risk_warnings"][0]["reason"] == "max_consecutive_losses"
+
+    # -----------------------------------------------------------------------
+    # 5d. Signal → Execution succeeds → State updated
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_execution_success_updates_signal_state(self) -> None:
+        """
+        Successful execution sets ``_execution_status='placed'``,
+        ``_execution_order_id``, and ``track_signal_generated`` is called.
+        """
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = MagicMock(execute=True)
+        mock_adapter.place_bracket = AsyncMock(
+            return_value=MagicMock(
+                success=True,
+                parent_order_id="ORD-100",
+                error_message=None,
+            ),
+        )
+
+        handler, _, mock_perf, _, _ = self._build_handler(
+            execution_adapter=mock_adapter,
+        )
+
+        signal = _make_signal(
+            signal_type="breakout",
+            direction="long",
+            entry_price=17500.0,
+            stop_loss=17480.0,
+            take_profit=17550.0,
+        )
+        signal["position_size"] = 1
+        await handler.process_signal(signal)
+
+        # Execution state
+        assert signal["_execution_status"] == "placed"
+        assert signal["_execution_order_id"] == "ORD-100"
+
+        # Performance tracking was invoked
+        mock_perf.track_signal_generated.assert_called_once()

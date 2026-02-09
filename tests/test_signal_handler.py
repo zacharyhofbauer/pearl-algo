@@ -728,13 +728,15 @@ class TestContextualPolicy:
 class TestExecution:
     """Tests for _execute_signal."""
 
-    def test_no_adapter_marks_not_attempted(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_no_adapter_marks_not_attempted(self, handler, valid_signal):
         """Without an execution adapter, status should be 'not_attempted'."""
-        handler._execute_signal(valid_signal, policy_decision=None)
+        await handler._execute_signal(valid_signal, policy_decision=None)
 
         assert valid_signal["_execution_status"] == "not_attempted"
 
-    def test_precondition_skip(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_precondition_skip(self, handler, valid_signal):
         """When preconditions fail, execution should be skipped with the reason."""
         mock_decision = MagicMock()
         mock_decision.execute = False
@@ -744,59 +746,55 @@ class TestExecution:
         mock_adapter.check_preconditions.return_value = mock_decision
 
         handler.execution_adapter = mock_adapter
-        handler._execute_signal(valid_signal, policy_decision=None)
+        await handler._execute_signal(valid_signal, policy_decision=None)
 
         assert valid_signal["_execution_status"] == "skipped:symbol_not_whitelisted"
 
-    def test_successful_placement(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_successful_placement(self, handler, valid_signal):
         """Successful order placement should set status='placed' and record the order ID."""
         mock_precond = MagicMock(execute=True)
         mock_result = MagicMock(success=True, parent_order_id="order_12345")
 
         mock_adapter = MagicMock()
         mock_adapter.check_preconditions.return_value = mock_precond
-
-        mock_loop = MagicMock()
-        mock_loop.run_until_complete.return_value = mock_result
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
 
         handler.execution_adapter = mock_adapter
-
-        with patch("asyncio.get_event_loop", return_value=mock_loop):
-            handler._execute_signal(valid_signal, policy_decision=None)
+        await handler._execute_signal(valid_signal, policy_decision=None)
 
         assert valid_signal["_execution_status"] == "placed"
         assert valid_signal["_execution_order_id"] == "order_12345"
 
-    def test_placement_failure(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_placement_failure(self, handler, valid_signal):
         """Failed order placement should record the error in status."""
         mock_precond = MagicMock(execute=True)
         mock_result = MagicMock(success=False, error_message="insufficient_margin", parent_order_id=None)
 
         mock_adapter = MagicMock()
         mock_adapter.check_preconditions.return_value = mock_precond
-
-        mock_loop = MagicMock()
-        mock_loop.run_until_complete.return_value = mock_result
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
 
         handler.execution_adapter = mock_adapter
-
-        with patch("asyncio.get_event_loop", return_value=mock_loop):
-            handler._execute_signal(valid_signal, policy_decision=None)
+        await handler._execute_signal(valid_signal, policy_decision=None)
 
         assert valid_signal["_execution_status"] == "place_failed:insufficient_margin"
 
-    def test_execution_error_caught(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_execution_error_caught(self, handler, valid_signal):
         """Exception in execution adapter should be caught and recorded."""
         mock_adapter = MagicMock()
         mock_adapter.check_preconditions.side_effect = ConnectionError("broker disconnect")
 
         handler.execution_adapter = mock_adapter
-        handler._execute_signal(valid_signal, policy_decision=None)
+        await handler._execute_signal(valid_signal, policy_decision=None)
 
         assert "error:" in valid_signal["_execution_status"]
         assert "broker disconnect" in valid_signal["_execution_status"]
 
-    def test_live_policy_blocks_execution(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_live_policy_blocks_execution(self, handler, valid_signal):
         """In live mode, policy.execute=False should skip execution entirely."""
         mock_policy = MagicMock(execute=False, reason="low_score")
         mock_bandit_config = MagicMock(mode="live")
@@ -804,12 +802,13 @@ class TestExecution:
         handler._bandit_config = mock_bandit_config
         handler.execution_adapter = MagicMock()
 
-        handler._execute_signal(valid_signal, policy_decision=mock_policy)
+        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
 
         assert valid_signal["_execution_status"] == "policy_skip:low_score"
         handler.execution_adapter.check_preconditions.assert_not_called()
 
-    def test_live_policy_applies_size_multiplier(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_live_policy_applies_size_multiplier(self, handler, valid_signal):
         """In live mode, position_size should be scaled by the policy multiplier."""
         valid_signal["position_size"] = 4
 
@@ -821,21 +820,19 @@ class TestExecution:
 
         mock_adapter = MagicMock()
         mock_adapter.check_preconditions.return_value = mock_precond
-
-        mock_loop = MagicMock()
-        mock_loop.run_until_complete.return_value = mock_result
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
 
         handler._bandit_config = mock_bandit_config
         handler.execution_adapter = mock_adapter
 
-        with patch("asyncio.get_event_loop", return_value=mock_loop):
-            handler._execute_signal(valid_signal, policy_decision=mock_policy)
+        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
 
         # 4 * 0.5 = 2.0, int(2.0) = 2, max(1, 2) = 2
         assert valid_signal["position_size"] == 2
         assert valid_signal["_execution_status"] == "placed"
 
-    def test_size_multiplier_minimum_clamp(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_size_multiplier_minimum_clamp(self, handler, valid_signal):
         """Position size should never be reduced below 1 by the multiplier."""
         valid_signal["position_size"] = 1
 
@@ -847,15 +844,12 @@ class TestExecution:
 
         mock_adapter = MagicMock()
         mock_adapter.check_preconditions.return_value = mock_precond
-
-        mock_loop = MagicMock()
-        mock_loop.run_until_complete.return_value = mock_result
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
 
         handler._bandit_config = mock_bandit_config
         handler.execution_adapter = mock_adapter
 
-        with patch("asyncio.get_event_loop", return_value=mock_loop):
-            handler._execute_signal(valid_signal, policy_decision=mock_policy)
+        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
 
         # 1 * 0.01 = 0.01, int(0.01) = 0, max(1, 0) = 1
         assert valid_signal["position_size"] == 1
