@@ -85,7 +85,7 @@ export default function SystemHealthPanel({
         {gatewayStatus && (
           <div className="health-section">
             <div className="health-section-header">
-              <span className={`health-dot ${getGatewayStatusClass()}`}></span>
+              <span className={`health-dot ${getGatewayStatusClass()}`} role="status" aria-label={`Gateway: ${gatewayStatus.status}`}></span>
               <span className="health-section-title">Gateway</span>
               <span className={`health-section-status ${gatewayStatus.status}`}>
                 {gatewayStatus.status === 'online' ? 'Online' :
@@ -113,7 +113,7 @@ export default function SystemHealthPanel({
         {connectionHealth && (
           <div className="health-section">
             <div className="health-section-header">
-              <span className={`health-dot ${getConnectionStatusClass()}`}></span>
+              <span className={`health-dot ${getConnectionStatusClass()}`} role="status" aria-label={`Connection: ${connectionHealth.consecutive_errors > 0 ? 'issues' : 'healthy'}`}></span>
               <span className="health-section-title">Connection</span>
               <span className={`health-section-status ${connectionHealth.consecutive_errors > 0 ? 'warning' : 'online'}`}>
                 {connectionHealth.consecutive_errors > 0 ? 'Issues' : 'Healthy'}
@@ -141,7 +141,7 @@ export default function SystemHealthPanel({
         {dataQuality && (
           <div className="health-section">
             <div className="health-section-header">
-              <span className={`health-dot ${getDataQualityClass()}`}></span>
+              <span className={`health-dot ${getDataQualityClass()}`} role="status" aria-label={`Data: ${dataQuality.is_stale ? 'stale' : 'fresh'}`}></span>
               <span className="health-section-title">Data</span>
               <span className={`health-section-status ${dataQuality.is_stale ? (dataQuality.is_expected_stale ? 'warning' : 'offline') : 'online'}`}>
                 {dataQuality.is_stale
@@ -179,7 +179,7 @@ export default function SystemHealthPanel({
         {cadenceMetrics && (
           <div className="health-section">
             <div className="health-section-header">
-              <span className={`health-dot ${dataFresh ? 'fresh' : 'stale'}`}></span>
+              <span className={`health-dot ${dataFresh ? 'fresh' : 'stale'}`} role="status" aria-label={`Cadence: ${dataFresh ? 'fresh' : 'stale'}`}></span>
               <span className="health-section-title">Cadence</span>
               <span className={`health-section-status ${cadenceMetrics.velocity_mode_active ? 'active' : 'online'}`}>
                 {cadenceMetrics.velocity_mode_active ? 'Velocity ON' : 'Normal'}
@@ -235,7 +235,7 @@ export default function SystemHealthPanel({
         {errorSummary && errorSummary.session_error_count > 0 && (
           <div className="health-section error-section">
             <div className="health-section-header">
-              <span className="health-dot stale"></span>
+              <span className="health-dot stale" role="status" aria-label={`Errors: ${errorSummary.session_error_count} in session`}></span>
               <span className="health-section-title">Errors</span>
               <span className="health-section-status offline">
                 Session: {errorSummary.session_error_count}

@@ -55,7 +55,7 @@ node --version  # v20.x.x
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 | **WebSocket Updates** | Real-time state updates via WebSocket (2-second broadcast) |
 | **Error Boundaries** | Graceful component failure handling |
-| **API Authentication** | Optional API key authentication for protected endpoints |
+| **API Authentication** | API key authentication for protected endpoints (enabled by default) |
 | **Passcode Gate** | Optional passcode login screen for shared/public dashboards |
 | **Pearl AI Chat (LLM)** | Optional LLM chat box (local/Ollama + Claude) backed by `/api/pearl/*` |
 
@@ -66,6 +66,9 @@ node --version  # v20.x.x
 ### 1. FastAPI API Server (`scripts/pearlalgo_web_app/api_server.py`)
 - **Port**: 8000 (default)
 - **IBKR Client ID**: 88 (configurable via `IB_CLIENT_ID_LIVE_CHART`)
+- **Auth**: Enabled by default (`PEARL_API_AUTH_ENABLED=true`). Set `PEARL_API_AUTH_ENABLED=false` to disable for local dev.
+- **Rate limiting**: Operator endpoints (`/api/kill-switch`, `/api/close-all-trades`, `/api/close-trade`) are rate-limited to 5 requests per 60 seconds.
+- **State reads**: Uses `StateReader` with shared file locks for safe concurrent reads of `state.json` (prevents torn reads during agent writes).
 - **Endpoints**:
   - `GET /api/candles` - OHLCV candle data
   - `GET /api/indicators` - EMA9, EMA21, VWAP, Bollinger Bands, ATR Bands, Volume Profile

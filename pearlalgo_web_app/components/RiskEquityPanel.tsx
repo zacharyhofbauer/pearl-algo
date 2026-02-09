@@ -288,7 +288,7 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
           <div className="peak-gap-indicator">{formatPnL(equityStats.gapFromPeak)} from peak</div>
         )}
 
-        <div ref={containerRef} className="equity-curve-chart" />
+        <div ref={containerRef} className="equity-curve-chart" role="img" aria-label="Equity curve chart showing account value over time" />
       </div>
     )
   }

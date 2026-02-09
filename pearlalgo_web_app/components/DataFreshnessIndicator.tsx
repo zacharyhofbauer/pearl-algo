@@ -77,7 +77,7 @@ export default function DataFreshnessIndicator({
           label: 'WS',
           className: 'ws-connected',
           icon: (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M13 3L4 14h7l-2 7 9-11h-7l2-7z"/>
             </svg>
           )
@@ -87,7 +87,7 @@ export default function DataFreshnessIndicator({
           label: 'WS',
           className: 'ws-connecting',
           icon: (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin-icon">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin-icon" aria-hidden="true">
               <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity="0.25"/>
               <path d="M21 12a9 9 0 01-9 9"/>
             </svg>
@@ -98,7 +98,7 @@ export default function DataFreshnessIndicator({
           label: 'POLL',
           className: 'ws-disconnected',
           icon: (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="12" cy="12" r="10"/>
               <path d="M2 12h4M18 12h4M12 2v4M12 18v4"/>
             </svg>
@@ -109,7 +109,7 @@ export default function DataFreshnessIndicator({
           label: 'ERR',
           className: 'ws-error',
           icon: (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 2L2 22h20L12 2zm0 6v6m0 4h.01"/>
             </svg>
           )
@@ -142,8 +142,9 @@ export default function DataFreshnessIndicator({
         className={`freshness-compact ${statusClass}`}
         onClick={() => setIsExpanded(!isExpanded)}
         title="Click for details"
+        aria-expanded={isExpanded}
       >
-        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+        <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} role="status" aria-label={`Data ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)} ago`} key={pulseKey}></span>
         <span className="freshness-time-compact">{formatTimeAgo(secondsAgo)}</span>
         {isLoading && <span className="freshness-loading-dot"></span>}
 
@@ -193,8 +194,9 @@ export default function DataFreshnessIndicator({
         <div
           className="freshness-floating-header"
           onClick={() => setIsExpanded(!isExpanded)}
+          aria-expanded={isExpanded}
         >
-          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} key={pulseKey}></span>
+          <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} role="status" aria-label={`Data ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)} ago`} key={pulseKey}></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
           <span className={`freshness-ws-badge ${wsDisplay.className}`}>
@@ -207,8 +209,9 @@ export default function DataFreshnessIndicator({
               onClick={(e) => { e.stopPropagation(); onRefresh(); }}
               disabled={isLoading}
               title="Refresh"
+              aria-label="Refresh data"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
               </svg>
             </button>
@@ -218,8 +221,9 @@ export default function DataFreshnessIndicator({
               className="freshness-action-btn"
               onClick={(e) => { e.stopPropagation(); onFitAll(); }}
               title="Fit All"
+              aria-label="Fit all chart data"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
               </svg>
             </button>
@@ -229,8 +233,9 @@ export default function DataFreshnessIndicator({
               className="freshness-action-btn"
               onClick={(e) => { e.stopPropagation(); onGoLive(); }}
               title="Go Live"
+              aria-label="Scroll to live data"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             </button>
@@ -286,8 +291,9 @@ export default function DataFreshnessIndicator({
           onClick={onRefresh}
           disabled={isLoading}
           title="Force refresh"
+          aria-label="Force refresh data"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>

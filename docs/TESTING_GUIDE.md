@@ -913,6 +913,16 @@ This section summarizes the current test coverage and highlights areas for futur
 - `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
 - `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
 - `test_signal_generation_edge_cases.py` – edge cases for signal generation (NaN, inf, extreme prices, malformed data)
+- `test_service_core.py` – 20 targeted tests for the 5 highest-risk service.py methods (VirtualTradeManager, save_state, init, connection failure, stop)
+- `test_tradovate_client.py` – 22 tests for Tradovate REST/WebSocket client with mocked HTTP responses (auth, token refresh, error handling, rate limiting)
+- `test_ibkr_adapter_unit.py` – 10 tests for IBKR adapter with mocked ib_insync (order placement, position management, error handling, fills)
+- `test_signal_pipeline_integration.py` – signal pipeline integration tests, including 5 execution scenarios (adapter called, ML filter rejects, circuit breaker blocks, execution succeeds)
+
+#### Web app tests under `pearlalgo_web_app/__tests__/`
+
+- `middleware.test.ts` – 22 tests for Next.js authentication middleware (auth bypass, session validation, redirects)
+- `useWebSocket.test.ts` – 32 tests for WebSocket hook (connection, reconnection, message parsing, cleanup)
+- `login-actions.test.ts` – 20 tests for login/logout flow (credentials, cookies, session management)
 
 ### Observed Gaps
 
@@ -925,10 +935,10 @@ These gaps are **observational only** and do not change behavior.
    - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
 
 3. **IBKR connectivity and fallback behavior**
-   - `smoke_test_ibkr.py` tests basic connectivity, but detailed fallback paths (reconnection, data staleness recovery) could use expanded coverage.
+   - `smoke_test_ibkr.py` tests basic connectivity. `test_ibkr_adapter_unit.py` now covers adapter-level order placement, position management, and error handling with mocked ib_insync. Detailed reconnection/staleness recovery paths could use further expansion.
 
 4. **Command handler behavior**
-   - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing but does not yet have automated tests for `/status`, `/signals`, `/performance` command flows.
+   - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing. The handler now uses 6 mixin base classes for code organization, but individual command flow tests are not yet automated.
 
 ### Recently Resolved Gaps
 
@@ -942,6 +952,18 @@ The following gaps have been addressed with explicit test coverage:
 
 3. **Base historical cache** (`test_base_cache.py`)
    - Tests validate cache hit behavior, dataframe shape consistency (no column accumulation), and historical fallback timestamp extraction from both index-based and column-based dataframes.
+
+4. **Service core methods** (`test_service_core.py`)
+   - 20 targeted tests covering VirtualTradeManager (TP/SL hit, tiebreak, empty data), save_state round-trips, service init with various configs, connection failure handling, and graceful shutdown.
+
+5. **Execution clients** (`test_tradovate_client.py`, `test_ibkr_adapter_unit.py`)
+   - 32 tests covering Tradovate REST/WebSocket client (auth, token refresh, order placement, error codes, rate limiting) and IBKR adapter (bracket orders, positions, fills, disconnect handling).
+
+6. **Signal-to-execution pipeline** (`test_signal_pipeline_integration.py`)
+   - Extended with 5 scenarios: execution adapter integration, ML filter rejection, circuit breaker blocking, and full success path with state verification.
+
+7. **Web app auth and real-time** (`middleware.test.ts`, `useWebSocket.test.ts`, `login-actions.test.ts`)
+   - 74 tests covering Next.js authentication middleware, WebSocket hook (connection/reconnection/cleanup), and login/logout flow (credentials, session cookies, open-redirect prevention).
 
 ### Suggested Future Tests
 

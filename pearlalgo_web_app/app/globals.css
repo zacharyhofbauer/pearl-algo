@@ -1,10 +1,13 @@
 /* Pearl Algo Web App - Dark Theme */
 :root {
+  /* Color scheme */
+  color-scheme: dark;
+
   /* Core Colors */
   --bg-primary: #0a0a0f;
   --bg-secondary: #12121a;
   --bg-card: #1a1a24;
-  --bg-elevated: #22222e;  /* New: for elevated surfaces */
+  --bg-elevated: #22222e;  /* For elevated surfaces */
   --text-primary: #f0eeeb;  /* Slightly brighter for better contrast */
   --text-secondary: #b0b8c8;  /* Improved contrast: was #a0a8b8 */
   --text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on card bg #1a1a24, ~6:1 on #0a0a0f */
@@ -15,7 +18,7 @@
   --accent-yellow: #ffc107;
   --accent-purple: #ab47bc;
   --border-color: #2a2a3a;
-  --border-subtle: #1e1e28;   /* New: for subtle separators */
+  --border-subtle: #1e1e28;   /* For subtle separators */
   --grid-color: #1e222d;
 
   /* Typography Scale */
@@ -35,7 +38,7 @@
   --space-6: 16px;
   --space-7: 24px;
 
-  /* Legacy spacing (kept for compatibility) */
+  /* Legacy spacing (kept for compatibility — prefer --space-* tokens) */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 12px;
@@ -104,11 +107,6 @@
 /* ===================================
    GLOBAL SCROLLBAR STYLING
    =================================== */
-
-/* Color scheme for dark mode */
-:root {
-  color-scheme: dark;
-}
 
 /* Firefox scrollbar */
 * {

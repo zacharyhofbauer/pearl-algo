@@ -204,14 +204,14 @@ tail -f logs/web_app.log           # Next.js
 
 | File | Purpose | Affects |
 |------|---------|---------|
-| `service.py` | Agent orchestrator, signal forwarding, Tradovate polling | Both |
+| `service.py` | Agent orchestrator (inherits `ServiceNotificationsMixin`), signal forwarding, Tradovate polling. Virtual trade exits delegated to `virtual_trade_manager.py` | Both |
 | `mffu_eval_tracker.py` | Challenge state tracking | MFFU |
 | `tradovate/adapter.py` | Execution + `get_account_summary()` | MFFU |
 | `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | MFFU |
 | `trading_circuit_breaker.py` | Risk management + MFFU eval gate | Both |
 | `config_loader.py` | Config loading, signal_forwarding defaults | Both |
 | `mffu_eval.sh` | MFFU lifecycle (port cleanup, restart) | MFFU |
-| `api_server.py` | API server (Tradovate helpers for MFFU) | Dashboard |
+| `api_server.py` | API server (auth enabled by default, rate-limited operator endpoints, uses `StateReader` for locked reads) | Dashboard |
 | `ChallengePanel.tsx` | MFFU eval display | Dashboard |
 | `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
 

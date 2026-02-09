@@ -6,10 +6,13 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: Market Agent Service (one process per market; production trading loop)
 - **Python entry module**: `pearlalgo.market_agent.main`
-- **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService`
+- **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService` (inherits `ServiceNotificationsMixin`)
 - **Supporting modules**:
+  - `pearlalgo.market_agent.virtual_trade_manager` – Virtual trade exit processing (extracted from service.py)
+  - `pearlalgo.market_agent.service_notifications` – Dashboard/chart mixin for MarketAgentService
   - `pearlalgo.market_agent.data_fetcher` – Data fetching and buffer management
-  - `pearlalgo.market_agent.state_manager` – State persistence (JSON/JSONL)
+  - `pearlalgo.market_agent.state_manager` – State persistence (JSON/JSONL, signal cache, incremental count)
+  - `pearlalgo.market_agent.state_reader` – Thread-safe locked reads for external consumers
   - `pearlalgo.market_agent.performance_tracker` – Performance metrics tracking
   - `pearlalgo.market_agent.telegram_notifier` – Telegram notifications
   - `pearlalgo.market_agent.health_monitor` – Health monitoring
@@ -28,6 +31,14 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: Telegram Command Handler (interactive bot commands)
 - **Python entry module**: `pearlalgo.market_agent.telegram_command_handler`
+- **Class**: `TelegramCommandHandler` (inherits from 6 mixin base classes)
+- **Mixin modules**:
+  - `pearlalgo.market_agent.telegram_config_commands` – Config/settings commands
+  - `pearlalgo.market_agent.telegram_status_commands` – System status commands
+  - `pearlalgo.market_agent.telegram_trade_commands` – Trade management commands
+  - `pearlalgo.market_agent.telegram_performance_commands` – Performance/analytics commands
+  - `pearlalgo.market_agent.telegram_state_queries` – State reading utilities
+  - `pearlalgo.market_agent.telegram_formatters` – Message formatting utilities
 - **Shell scripts**:
   - `scripts/telegram/start_command_handler.sh`
   - `scripts/telegram/check_command_handler.sh`

@@ -28,7 +28,7 @@ const ACCOUNTS: AccountOption[] = [
     description: 'Since-inception data collection and monitoring',
     param: null,
     badge: 'LIVE',
-    badgeColor: '#00e676',
+    badgeColor: 'var(--accent-green, #00e676)',
   },
   {
     id: 'mffu_eval',
@@ -36,7 +36,7 @@ const ACCOUNTS: AccountOption[] = [
     description: 'Prop firm evaluation on Tradovate paper',
     param: 'mffu',
     badge: 'EVAL',
-    badgeColor: '#7c4dff',
+    badgeColor: 'var(--accent-purple, #7c4dff)',
   },
 ]
 

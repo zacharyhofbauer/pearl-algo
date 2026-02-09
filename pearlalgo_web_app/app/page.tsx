@@ -821,7 +821,7 @@ function PearlAlgoWebAppInner() {
           variant="floating"
         />
       </div>
-      <div className="chart-container">
+      <div className="chart-container" role="img" aria-label="MNQ candlestick price chart with indicators">
         {chartLoading && (
           <div className="loading-screen">
             <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />

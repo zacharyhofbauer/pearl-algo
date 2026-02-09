@@ -140,7 +140,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
               {mffu && (
                 <span className="challenge-stage-badge" style={{
                   background: mffu.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
-                  color: '#0a0a0a',
+                  color: 'var(--bg-primary, #0a0a0f)',
                   padding: '1px 5px',
                   borderRadius: '3px',
                   fontSize: '9px',

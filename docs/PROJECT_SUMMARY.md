@@ -121,7 +121,7 @@ The MNQ Trading Agent is designed to:
 
 ### 1. Market Agent Service (`src/pearlalgo/market_agent/`)
 
-**Main Service** (`service.py`):
+**Main Service** (`service.py`, inherits `ServiceNotificationsMixin`):
 - 24/7 service loop with adaptive cadence (5s active, 30s idle, 300s market closed; base scan_interval configurable)
 - Circuit breaker (pauses after 10 consecutive errors)
 - Connection failure detection and alerts
@@ -129,6 +129,15 @@ The MNQ Trading Agent is designed to:
 - Periodic status updates and heartbeats
 - Data quality monitoring
 - IB Gateway connection status tracking
+- Delegates virtual trade exit processing to `VirtualTradeManager`
+- Inherits dashboard/chart methods from `ServiceNotificationsMixin`
+
+**Virtual Trade Manager** (`virtual_trade_manager.py`):
+- Processes virtual trade exits by scanning OHLCV bars for TP/SL hits
+- Extracted from `service.py` for testability (~450 lines)
+- Uses vectorized pandas operations for O(signals) performance
+- Records outcomes across all tracking systems (performance, circuit breaker, challenge, learning policies)
+- Dependencies injected via constructor
 
 **Data Fetcher** (`data_fetcher.py`):
 - Fetches historical and latest bar data
@@ -138,9 +147,17 @@ The MNQ Trading Agent is designed to:
 
 **State Manager** (`state_manager.py`):
 - Persists service state to JSON
-- Saves signals to JSONL file
+- Saves signals to JSONL file with TTL-cached reads (5s) and tail-read optimization
+- Incremental signal count tracking (O(1) vs full-file scan)
 - Loads state on startup
 - State directory: `data/agent_state/<MARKET>/`
+- Provides `async_get_recent_signals()` wrapper for async callers
+
+**State Reader** (`state_reader.py`):
+- Thread-safe reads of agent state files using fcntl shared locks
+- Coordinates with state_manager's exclusive write locks to prevent torn reads
+- Used by `api_server.py` and other read-only consumers
+- Provides `async_read_state()` / `async_read_signals()` wrappers
 
 **Performance Tracker** (`performance_tracker.py`):
 - Tracks signal generation → entry → exit lifecycle
@@ -489,12 +506,21 @@ pearlalgo-dev-ai-agents/
 ├── src/pearlalgo/              # Main source code
 │   ├── market_agent/           # Market Agent Service (market-agnostic)
 │   │   ├── main.py             # Entry point
-│   │   ├── service.py          # Main service loop
+│   │   ├── service.py          # Main service loop (inherits ServiceNotificationsMixin)
+│   │   ├── virtual_trade_manager.py  # Virtual trade exit processing (extracted from service.py)
+│   │   ├── service_notifications.py  # Dashboard/chart mixin for MarketAgentService
 │   │   ├── data_fetcher.py     # Data fetching logic
-│   │   ├── state_manager.py    # State persistence
+│   │   ├── state_manager.py    # State persistence (with signal cache + incremental count)
+│   │   ├── state_reader.py     # Thread-safe locked reads (used by api_server)
 │   │   ├── performance_tracker.py  # Performance metrics
 │   │   ├── telegram_notifier.py    # Telegram notifications
-│   │   ├── telegram_command_handler.py  # Interactive Telegram bot commands (separate service)
+│   │   ├── telegram_command_handler.py  # Interactive bot (inherits 6 mixins)
+│   │   ├── telegram_config_commands.py  # Config command mixin
+│   │   ├── telegram_status_commands.py  # Status command mixin
+│   │   ├── telegram_trade_commands.py   # Trade command mixin
+│   │   ├── telegram_performance_commands.py  # Performance/analytics mixin
+│   │   ├── telegram_state_queries.py    # State query mixin
+│   │   ├── telegram_formatters.py       # Formatting mixin
 │   │   ├── live_chart_screenshot.py  # Live chart screenshot export (optional, Telegram)
 │   │   ├── health_monitor.py       # Health monitoring
 │   │   └── challenge_tracker.py    # Challenge tracking
@@ -788,6 +814,9 @@ In practice:
   - `risk.take_profit_risk_reward` → `take_profit_atr_mult` (derived: stop_loss_atr_mult × risk_reward)
 - The Telegram command handler (`pearlalgo.market_agent.telegram_command_handler`) requires Telegram credentials
   in `.env` / environment variables.
+- `TelegramCommandHandler` inherits from 6 mixin classes for code organization:
+  `TelegramConfigCommandsMixin`, `TelegramStatusCommandsMixin`, `TelegramTradeCommandsMixin`,
+  `TelegramPerformanceCommandsMixin`, `TelegramStateQueriesMixin`, `TelegramFormattersMixin`.
 
 ---
 
@@ -1485,6 +1514,14 @@ The system is ready for production use and optimized for prop firm trading with 
   - `test_sparkline.py` - UI rendering utilities
   - `test_logging_config.py` - Logging setup validation
   - `test_retry.py` - Async retry logic
+  - `test_service_core.py` - 20 tests for VirtualTradeManager, save_state, service init, connection failure, stop
+  - `test_tradovate_client.py` - 22 tests for Tradovate REST/WebSocket client (mocked APIs)
+  - `test_ibkr_adapter_unit.py` - 10 tests for IBKR adapter (mocked ib_insync)
+  - `test_signal_pipeline_integration.py` - Extended with 5 execution pipeline scenarios
+- Added web app tests:
+  - `middleware.test.ts` - 22 tests for Next.js auth middleware
+  - `useWebSocket.test.ts` - 32 tests for WebSocket hook
+  - `login-actions.test.ts` - 20 tests for login/logout flow
 
 
 

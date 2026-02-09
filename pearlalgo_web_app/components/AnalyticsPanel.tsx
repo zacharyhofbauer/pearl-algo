@@ -373,12 +373,15 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
   return (
     <DataPanel title="Analytics">
       {/* Tab Navigation */}
-      <div className="analytics-tabs">
+      <div className="analytics-tabs" role="tablist" aria-label="Analytics views">
         {(['sessions', 'hours', 'duration', 'calendar'] as TabType[]).map((tab) => (
           <button
             key={tab}
             className={`analytics-tab ${activeTab === tab ? 'active' : ''}`}
             onClick={() => setActiveTab(tab)}
+            role="tab"
+            aria-selected={activeTab === tab}
+            type="button"
           >
             {getTabLabel(tab)}
           </button>

@@ -108,25 +108,37 @@ python scripts/maintenance/rebuild_sqlite_from_json.py
 
 ## Key Files
 
-- `src/pearlalgo/market_agent/state_manager.py` - JSON state management
+- `src/pearlalgo/market_agent/state_manager.py` - JSON state management (writes with exclusive locks)
+- `src/pearlalgo/market_agent/state_reader.py` - Locked reads for external consumers (shared locks)
 - `src/pearlalgo/learning/trade_database.py` - SQLite operations
 - `src/pearlalgo/storage/async_sqlite_queue.py` - Async write queue
 
 ## Thread Safety
 
 ### state_manager.py
-- Uses file locking for atomic writes
-- Safe for concurrent reads
+- Uses `fcntl.flock(LOCK_EX)` for atomic writes
+- Provides TTL-cached `get_recent_signals()` (5-second cache with `collections.deque` tail-read)
+- Incremental signal count (`get_signal_count()`) avoids full-file scans
+- Provides `async_get_recent_signals()` for callers in async contexts
 - Single writer expected (the agent process)
+
+### state_reader.py
+- Uses `fcntl.flock(LOCK_SH)` shared locks for reads
+- Coordinates with state_manager's exclusive write locks
+- Used by `api_server.py`, `scheduled_tasks.py`, and other read-only consumers
+- Provides `async_read_state()` / `async_read_signals()` wrappers via `asyncio.to_thread()`
 
 ### trade_database.py
 - SQLite with WAL mode for concurrent reads
 - Single writer with connection per operation
 - Async queue serializes writes from main process
+- Feature inserts use `executemany()` for bulk performance
 
 ## Best Practices
 
-1. **Never modify JSON files directly** - Use state_manager methods
+1. **Never modify JSON files directly** - Use state_manager methods for writes, state_reader for reads
 2. **For analytics, prefer SQLite** - Don't parse signals.jsonl manually
 3. **For real-time state, read JSON** - It's always up-to-date
 4. **After crashes, check consistency** - Run integrity check script
+5. **In async contexts, use async wrappers** - `state_reader.async_read_state()`, `state_manager.async_get_recent_signals()`
+6. **Operator actions use flag files** - Telegram and web API write `.flag` files; the agent processes them in the next cycle (avoids direct state.json race conditions)
