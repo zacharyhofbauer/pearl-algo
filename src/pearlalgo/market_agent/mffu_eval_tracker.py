@@ -3,14 +3,14 @@ MFFU 50K Rapid Evaluation Tracker
 
 Tracks challenge state for MyFundedFutures 50K Rapid Plan (Evaluation Stage).
 
-Rules enforced:
+Rules enforced (per official MFFU Rapid 50K rules):
   E1  Profit target:       PnL >= $3,000  -> PASS (if consistency + min days met)
-  E2  Max loss (EOD trail): Balance < drawdown floor -> FAIL
-  E3  EOD HWM update:      At 4:10 PM ET, update high-water mark
-  E4  Drawdown floor lock:  Floor stops trailing once it reaches start_balance + $100
-  E5  Open equity breach:   Unrealized equity < floor -> FAIL (polled externally)
-  E7  Consistency (50%):    No single day > 50% of total profit (delays pass, no breach)
-  E8  Min trading days:     At least 2 days with trades (delays pass)
+  E2  Max loss (EOD):       Balance < floor ($48,000) at EOD -> FAIL
+  E3  Drawdown floor:       EVALUATION: fixed at start_balance - max_loss ($48,000). No trailing.
+                            SIM_FUNDED: intraday trailing from HWM, locks at $100 balance.
+  E4  Open equity breach:   Unrealized equity < floor -> FAIL (polled externally)
+  E5  Consistency (50%):    No single day > 50% of total profit (delays pass, no breach)
+  E6  Min trading days:     At least 2 days with trades (delays pass)
 
 Design:
   - Separate from the existing ChallengeTracker (inception account keeps its own).
@@ -46,9 +46,10 @@ class MFFUEvalConfig:
     profit_target: float = 3_000.0
     max_loss_distance: float = 2_000.0
 
-    # EOD trailing drawdown
+    # EOD trailing drawdown (evaluation); intraday trailing (sim_funded)
     drawdown_type: str = "eod_trailing"
-    drawdown_lock_threshold: float = 50_100.0  # start_balance + 100
+    # Sim funded lock: floor locks at this absolute balance (no lock during evaluation)
+    drawdown_lock_threshold: float = 100.0  # sim_funded only: account must stay above $100
 
     # Contract limits
     max_contracts_mini: int = 5
@@ -324,6 +325,10 @@ class MFFUEvaluationTracker:
         Update the End-of-Day high-water mark (call at 4:10 PM ET).
 
         If eod_balance is not provided, uses starting_balance + pnl.
+
+        EVALUATION: Floor is fixed at start_balance - max_loss ($48,000). No trailing.
+                    HWM is still tracked for stats but does not move the floor.
+        SIM_FUNDED: Floor trails intraday HWM. Locks at $100.
         """
         if self.current_attempt.outcome != "active":
             return
@@ -331,24 +336,27 @@ class MFFUEvaluationTracker:
         if eod_balance is None:
             eod_balance = self.current_attempt.starting_balance + self.current_attempt.pnl
 
+        # Always track HWM for stats/display
         if eod_balance > self.current_attempt.eod_high_water_mark:
             self.current_attempt.eod_high_water_mark = eod_balance
 
-        # Recalculate floor (never decreases)
-        new_floor = self.current_attempt.eod_high_water_mark - self.config.max_loss_distance
-        if new_floor > self.current_attempt.current_drawdown_floor:
-            self.current_attempt.current_drawdown_floor = new_floor
+        # Floor trailing only applies to sim_funded / live (intraday trailing).
+        # During evaluation, floor is fixed at start_balance - max_loss ($48,000).
+        if self.config.stage in ("sim_funded", "live"):
+            new_floor = self.current_attempt.eod_high_water_mark - self.config.max_loss_distance
+            if new_floor > self.current_attempt.current_drawdown_floor:
+                self.current_attempt.current_drawdown_floor = new_floor
 
-        # Check if floor should lock
-        if (
-            not self.current_attempt.drawdown_locked
-            and self.current_attempt.current_drawdown_floor >= self.config.drawdown_lock_threshold
-        ):
-            self.current_attempt.drawdown_locked = True
-            self.current_attempt.current_drawdown_floor = self.config.drawdown_lock_threshold
-            logger.info(
-                f"MFFU drawdown floor LOCKED at ${self.config.drawdown_lock_threshold:.2f}"
-            )
+            # Check if floor should lock at $100
+            if (
+                not self.current_attempt.drawdown_locked
+                and self.current_attempt.current_drawdown_floor >= self.config.drawdown_lock_threshold
+            ):
+                self.current_attempt.drawdown_locked = True
+                self.current_attempt.current_drawdown_floor = self.config.drawdown_lock_threshold
+                logger.info(
+                    f"MFFU drawdown floor LOCKED at ${self.config.drawdown_lock_threshold:.2f}"
+                )
 
         self._save_state()
         logger.info(

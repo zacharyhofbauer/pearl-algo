@@ -46,9 +46,11 @@ Design tokens are CSS custom properties defined in `app/globals.css` that provid
 --bg-primary: #0a0a0f;
 --bg-secondary: #12121a;
 --bg-card: #1a1a24;
---text-primary: #e8e6e3;
---text-secondary: #a0a8b8;
---text-tertiary: #6b7280;
+--bg-elevated: #22222e;
+--text-primary: #f0eeeb;    /* WCAG AA: ~15:1 on bg-primary */
+--text-secondary: #b0b8c8;  /* WCAG AA: ~8.5:1 on bg-primary */
+--text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on bg-card */
+--text-muted: #6e7380;      /* WCAG AA: ~4.5:1 on bg-primary */
 --accent-cyan: #00d4ff;
 --accent-green: #00e676;
 --accent-red: #ff5252;

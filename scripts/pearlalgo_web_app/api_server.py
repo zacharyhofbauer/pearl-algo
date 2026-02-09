@@ -25,7 +25,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1210,8 +1210,9 @@ class ConnectionManager:
                                     "daily_trades": daily_stats["daily_trades"],
                                     "daily_wins": daily_stats["daily_wins"],
                                     "daily_losses": daily_stats["daily_losses"],
-                                    "active_trades_count": state.get("active_trades_count", 0),
-                                    "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+                                    # For MFFU: use Tradovate position count & open PnL
+                                    "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+                                    "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                     "futures_market_open": state.get("futures_market_open", False),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -1407,8 +1408,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "daily_trades": daily_stats["daily_trades"],
                         "daily_wins": daily_stats["daily_wins"],
                         "daily_losses": daily_stats["daily_losses"],
-                        "active_trades_count": state.get("active_trades_count", 0),
-                        "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+                        "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+                        "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                         "data_fresh": state.get("data_fresh", False),
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
@@ -1473,8 +1474,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "daily_trades": daily_stats["daily_trades"],
                                     "daily_wins": daily_stats["daily_wins"],
                                     "daily_losses": daily_stats["daily_losses"],
-                                    "active_trades_count": state.get("active_trades_count", 0),
-                                    "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+                                    "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+                                    "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
@@ -1627,14 +1628,11 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
         if state_data:
             tv = state_data.get("tradovate_account")
             if tv and isinstance(tv, dict) and tv.get("equity"):
-                # Single source of truth: equity - start_balance
                 equity = float(tv.get("equity", 0))
                 open_pnl = round(tv.get("open_pnl", 0.0), 2)
                 pos_count = tv.get("position_count", 0)
-                start_balance = _get_start_balance(state_dir)
-                pnl = round(equity - start_balance, 2)
-                # Trade counts from Tradovate fills (state.json -> persistent file -> fallback)
-                trades, wins, losses = 0, 0, 0
+                # Trade counts from Tradovate fills — filtered to TODAY's trading day
+                trades, wins, losses, daily_pnl = 0, 0, 0, 0.0
                 try:
                     tv_fills = state_data.get("tradovate_fills") or tv.get("fills") or []
                     if not tv_fills:
@@ -1643,13 +1641,36 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                             tv_fills = json.loads(fills_file.read_text()) or []
                     if tv_fills:
                         paired = _tradovate_fills_to_trades(tv_fills)
-                        trades = len(paired)
-                        wins = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
+                        # Derive per-trade commission from equity vs fill P&L gap
+                        total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
+                        start_balance = _get_start_balance(state_dir)
+                        equity_pnl = equity - start_balance
+                        cpt = 0.0  # commission per trade
+                        if len(paired) > 0 and total_fill_pnl > equity_pnl:
+                            cpt = (total_fill_pnl - equity_pnl) / len(paired)
+                        # Filter to today's trading day for accurate daily stats
+                        td_start = _get_trading_day_start()
+                        today_trades = []
+                        for t in paired:
+                            exit_time_str = t.get("exit_time") or ""
+                            if exit_time_str:
+                                try:
+                                    exit_dt = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                                    if exit_dt.tzinfo is None:
+                                        exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                                    if exit_dt >= td_start:
+                                        today_trades.append(t)
+                                except Exception:
+                                    pass
+                        trades = len(today_trades)
+                        wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
                         losses = trades - wins
+                        raw_daily = sum(t.get("pnl", 0) or 0 for t in today_trades)
+                        daily_pnl = round(raw_daily - (trades * cpt), 2)
                 except Exception as e:
                     logger.warning(f"Non-critical: {e}")
                 return {
-                    "daily_pnl": pnl,
+                    "daily_pnl": daily_pnl,
                     "daily_trades": trades,
                     "daily_wins": wins,
                     "daily_losses": losses,
@@ -1665,17 +1686,26 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     result = _shared_compute_daily_stats(state_dir)
 
     # Fallback: if signals.jsonl produced 0 trades (e.g. after a reset) but
-    # challenge_state.json has trade data, use the challenge data so the
-    # dashboard header isn't misleadingly blank.
+    # challenge_state.json has today's trade data, use today's daily PnL.
+    # NOTE: Never use all-time challenge stats as "daily" — that causes
+    # the header to show misleading numbers.
     if result.get("daily_trades", 0) == 0:
         try:
             challenge = _get_challenge_status(state_dir)
             if challenge and challenge.get("trades", 0) > 0:
-                result = dict(result)  # avoid mutating cached dict
-                result["daily_pnl"] = round(challenge.get("pnl", 0.0), 2)
-                result["daily_trades"] = challenge.get("trades", 0)
-                result["daily_wins"] = challenge.get("wins", 0)
-                result["daily_losses"] = challenge.get("trades", 0) - challenge.get("wins", 0)
+                # Use today's date from daily_pnl_by_date if available
+                mffu = challenge.get("mffu") or {}
+                # Read daily breakdown from challenge state file directly
+                ch_file = state_dir / "challenge_state.json"
+                if ch_file.exists():
+                    ch_data = json.loads(ch_file.read_text())
+                    daily_by_date = ch_data.get("current_attempt", {}).get("daily_pnl_by_date", {})
+                    today_key = date.today().isoformat()
+                    if today_key in daily_by_date:
+                        result = dict(result)
+                        result["daily_pnl"] = round(daily_by_date[today_key], 2)
+                        # We don't have per-day W/L in challenge state, so leave trades at 0
+                        # rather than showing misleading all-time counts
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
 
@@ -1729,12 +1759,23 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 # Build a single stat block used for every period
                 tv_stats = {"pnl": pnl, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
                             "tradovate_equity": round(equity, 2), "tradovate_open_pnl": round(open_pnl, 2)}
-                # Use pre-loaded performance data for trade counts
-                if perf_data:
-                    tv_stats["trades"] = len(perf_data)
-                    tv_stats["wins"] = sum(1 for t in perf_data if (t.get("pnl") or 0) > 0)
-                    tv_stats["losses"] = len(perf_data) - tv_stats["wins"]
-                    tv_stats["win_rate"] = round(tv_stats["wins"] / len(perf_data) * 100, 1)
+                # Use Tradovate fills for trade counts (not performance.json which has virtual data)
+                try:
+                    _, tv_fills = _get_tradovate_state(state_dir)
+                    if tv_fills:
+                        paired = _tradovate_fills_to_trades(tv_fills)
+                        tv_stats["trades"] = len(paired)
+                        tv_stats["wins"] = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
+                        tv_stats["losses"] = len(paired) - tv_stats["wins"]
+                        tv_stats["win_rate"] = round(tv_stats["wins"] / len(paired) * 100, 1) if paired else 0.0
+                except Exception as e:
+                    logger.debug(f"Tradovate fills unavailable for trade counts, falling back to performance.json: {e}")
+                    # Fallback to performance.json if Tradovate fills unavailable
+                    if tv_stats["trades"] == 0 and perf_data:
+                        tv_stats["trades"] = len(perf_data)
+                        tv_stats["wins"] = sum(1 for t in perf_data if (t.get("pnl") or 0) > 0)
+                        tv_stats["losses"] = len(perf_data) - tv_stats["wins"]
+                        tv_stats["win_rate"] = round(tv_stats["wins"] / len(perf_data) * 100, 1)
                 return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
@@ -2009,10 +2050,13 @@ def _tradovate_performance_for_period(
     fills: List[Dict[str, Any]],
     start_utc: datetime,
     end_utc: Optional[datetime] = None,
+    commission_per_trade: float = 0.0,
 ) -> Dict[str, Any]:
     """Build performance stats from Tradovate fills filtered to a time range.
 
     Filters completed trades whose exit_time falls within [start_utc, end_utc).
+    commission_per_trade: estimated round-turn commission to deduct per trade
+    (derived from equity vs fill P&L gap).
     """
     trades = _tradovate_fills_to_trades(fills)
     filtered = []
@@ -2033,7 +2077,9 @@ def _tradovate_performance_for_period(
     total = len(filtered)
     wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
     losses = total - wins
-    pnl = round(sum(t.get("pnl") or 0 for t in filtered), 2)
+    raw_pnl = sum(t.get("pnl") or 0 for t in filtered)
+    # Deduct estimated commissions (Tradovate fills don't include fees)
+    pnl = round(raw_pnl - (total * commission_per_trade), 2)
     win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
 
     return {
@@ -2342,8 +2388,33 @@ def _load_performance_data(state_dir: Path) -> Optional[list]:
 
 
 def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
-    """Get equity curve data (cumulative P&L over time) for the mini chart."""
-    data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+    """Get equity curve data (cumulative P&L over time) for the mini chart.
+
+    MFFU accounts use Tradovate fills as the data source (real broker data).
+    Inception accounts use performance.json (virtual trade exits).
+    """
+    # MFFU: use Tradovate fills for equity curve (real broker data)
+    if _is_mffu_account(state_dir):
+        try:
+            _, fills = _get_tradovate_state(state_dir)
+            if fills:
+                paired = _tradovate_fills_to_trades(fills)
+                data = [
+                    {
+                        "exit_time": t.get("close_time") or t.get("exit_time") or t.get("timestamp"),
+                        "pnl": t.get("pnl", 0.0),
+                    }
+                    for t in paired
+                    if t.get("pnl") is not None
+                ]
+            else:
+                data = []
+        except Exception as e:
+            logger.debug(f"Tradovate fills unavailable for equity curve, falling back: {e}")
+            data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+    else:
+        data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+
     if not data:
         return []
 
@@ -2359,7 +2430,7 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
             if not exit_time_str:
                 continue
             try:
-                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
                 if exit_time >= cutoff:
                     trades.append({
                         "time": int(exit_time.timestamp()),
@@ -2954,8 +3025,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "daily_trades": daily_stats["daily_trades"],
         "daily_wins": daily_stats["daily_wins"],
         "daily_losses": daily_stats["daily_losses"],
-        "active_trades_count": state.get("active_trades_count", 0),
-        "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+        # For MFFU: use Tradovate position count & open PnL when available
+        "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+        "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
         "futures_market_open": state.get("futures_market_open", False),
         "data_fresh": state.get("data_fresh", False),
         "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -3395,18 +3467,30 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         ytd_start = _get_year_to_date_start(now)
         all_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
-        # Use fill-based P&L for all periods (consistent realized-only stats)
-        all_fill_stats = _tradovate_performance_for_period(fills, all_start)
-        # Attach live equity for dashboard display
+        # Derive per-trade commission from equity vs fill P&L gap.
+        # Tradovate fills don't include fees, but equity is the ground truth.
+        all_trades_raw = _tradovate_fills_to_trades(fills)
+        total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
+        equity = float(tv.get("equity", 0)) if tv else 0
+        start_balance = _get_start_balance(_state_dir)
+        equity_pnl = equity - start_balance
+        total_trades = len(all_trades_raw)
+        # Commission per trade = (fill P&L - actual equity gain) / trades
+        commission_per_trade = 0.0
+        if total_trades > 0 and total_fill_pnl > equity_pnl:
+            commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+
+        cpt = commission_per_trade  # shorthand
+        all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
         all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
 
         return {
             "as_of": now.isoformat(),
-            "td": _tradovate_performance_for_period(fills, td_start),
-            "yday": _tradovate_performance_for_period(fills, yday_start, yday_end),
-            "wtd": _tradovate_performance_for_period(fills, wtd_start),
-            "mtd": _tradovate_performance_for_period(fills, mtd_start),
-            "ytd": _tradovate_performance_for_period(fills, ytd_start),
+            "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt),
+            "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt),
+            "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt),
+            "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt),
+            "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt),
             "all": all_fill_stats,
         }
 

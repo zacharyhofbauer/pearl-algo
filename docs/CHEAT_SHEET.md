@@ -65,16 +65,19 @@ Every number on the MFFU dashboard comes from Tradovate. No virtual tracking.
 
 | Panel | Source |
 |-------|--------|
-| Header P&L | `tradovate_account.equity - $50K` |
+| Header P&L | Today's FIFO-paired fills (commission-adjusted) |
+| Header W/L | Today's fill wins/losses (filtered to trading day) |
 | Positions | `tradovate get_positions()` |
 | Recent Trades | `tradovate get_fills()` (FIFO paired) |
-| Performance | Tradovate equity |
+| Performance | FIFO-paired fills per period, commission-adjusted against equity |
 | Challenge | Tradovate equity + fills |
 | Risk Metrics | Tradovate fills |
 | Analytics | Tradovate fills |
 | Chart | IBKR (client ID 97) |
 
 Fills persist to `tradovate_fills.json` across sessions (Tradovate clears `/fill/list` daily).
+
+**Commission handling:** Tradovate fills don't include fees. The dashboard derives the per-trade commission from the gap between total fill P&L and actual Tradovate equity, then deducts it from all period summaries so numbers match the broker.
 
 ### Evaluation Rules
 
@@ -83,7 +86,7 @@ Fills persist to `tradovate_fills.json` across sessions (Tradovate clears `/fill
 | Start Balance | $50,000 |
 | Profit Target | $3,000 |
 | Max Loss (EOD trailing) | $2,000 |
-| Drawdown Floor Lock | $50,100 |
+| Drawdown Floor Lock | None (eval has no lock; sim_funded locks at $100) |
 | Max Contracts | 5 mini / 50 micro |
 | Max Positions | 20 |
 | Consistency | 50% (no single day > 50% of profit) |
@@ -161,6 +164,9 @@ First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 | "client id already in use" | Another process holds the IBKR client ID -- restart the conflicting service |
 | MFFU signals on restart | Fixed: shared file cleared on startup + market-closed guard |
 | Fills show 0 after restart | Normal if market closed -- fills persist in `tradovate_fills.json` |
+| Telegram shows wrong attempt # | Fixed: Telegram now uses `MFFUEvaluationTracker` (not `ChallengeTracker`) for MFFU accounts |
+| Header P&L doesn't match Today | Fixed: header now uses today's fill-paired P&L (was using all-time equity delta) |
+| All Time P&L doesn't match Tradovate | Fixed: commission auto-derived from equity vs fill gap and deducted from all periods |
 
 ### Logs
 
@@ -205,13 +211,15 @@ tail -f logs/web_app.log           # Next.js
 | File | Purpose | Affects |
 |------|---------|---------|
 | `service.py` | Agent orchestrator (inherits `ServiceNotificationsMixin`), signal forwarding, Tradovate polling. Virtual trade exits delegated to `virtual_trade_manager.py` | Both |
-| `mffu_eval_tracker.py` | Challenge state tracking | MFFU |
+| `mffu_eval_tracker.py` | Challenge state tracking (eval: fixed floor $48K, no lock; sim_funded: intraday trailing, locks at $100) | MFFU |
 | `tradovate/adapter.py` | Execution + `get_account_summary()` | MFFU |
 | `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | MFFU |
 | `trading_circuit_breaker.py` | Risk management + MFFU eval gate | Both |
 | `config_loader.py` | Config loading, signal_forwarding defaults | Both |
 | `mffu_eval.sh` | MFFU lifecycle (port cleanup, restart) | MFFU |
-| `api_server.py` | API server (auth enabled by default, rate-limited operator endpoints, uses `StateReader` for locked reads) | Dashboard |
+| `api_server.py` | API server (auth, rate-limiting, `StateReader`). Header/performance stats use today's fills with auto-derived commission deduction | Dashboard |
+| `tradovate/utils.py` | FIFO fill pairing for Tradovate trades | MFFU |
+| `telegram_command_handler.py` | Telegram bot commands. Uses `_detect_mffu_account()` to pick correct tracker | Both |
 | `ChallengePanel.tsx` | MFFU eval display | Dashboard |
 | `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
 

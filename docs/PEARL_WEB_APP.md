@@ -54,10 +54,12 @@ node --version  # v20.x.x
 | **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 | **WebSocket Updates** | Real-time state updates via WebSocket (2-second broadcast) |
-| **Error Boundaries** | Graceful component failure handling |
+| **Error Boundaries** | Graceful component failure handling with `role="alert"` |
 | **API Authentication** | API key authentication for protected endpoints (enabled by default) |
 | **Passcode Gate** | Optional passcode login screen for shared/public dashboards |
 | **Pearl AI Chat (LLM)** | Optional LLM chat box (local/Ollama + Claude) backed by `/api/pearl/*` |
+| **Accessibility** | WCAG AA contrast, focus indicators, ARIA roles/labels, keyboard navigation, skip-link, reduced-motion support |
+| **Commission Handling** | MFFU fill P&L auto-adjusted against Tradovate equity to account for broker fees |
 
 ---
 

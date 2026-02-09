@@ -3483,19 +3483,7 @@ class TelegramCommandHandler(
 
             elif confirm_action == "reset_challenge":
                 try:
-                    # Detect MFFU to use the correct tracker
-                    _use_mffu_tracker = False
-                    try:
-                        ch_file = self.state_dir / "challenge_state.json"
-                        if ch_file.exists():
-                            _ch = json.loads(ch_file.read_text())
-                            _st = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
-                            if _st and str(_st).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
-                                _use_mffu_tracker = True
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}", exc_info=True)
-
-                    if _use_mffu_tracker:
+                    if self._detect_mffu_account():
                         from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
                         tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
                         tracker.reset_attempt(reason="telegram_reset")
@@ -5048,31 +5036,72 @@ class TelegramCommandHandler(
         
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
+    def _detect_mffu_account(self) -> bool:
+        """Detect if current account is MFFU (Tradovate-based challenge)."""
+        try:
+            ch_file = self.state_dir / "challenge_state.json"
+            if ch_file.exists():
+                ch = json.loads(ch_file.read_text())
+                _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
+                if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
+                    return True
+        except Exception as e:
+            logger.debug(f"Non-critical MFFU detection: {e}", exc_info=True)
+        return False
+
     async def _show_challenge_menu(self, query: CallbackQuery) -> None:
         """Show challenge submenu with current status and options."""
         try:
-            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-            
-            tracker = ChallengeTracker(state_dir=self.state_dir)
-            tracker.refresh()
-            
-            # Get current attempt performance
-            perf = tracker.get_attempt_performance()
-            pnl = perf.get("total_pnl", 0.0)
-            balance = perf.get("current_balance", 50000.0)
-            trades = perf.get("exited_signals", 0)
-            wins = perf.get("wins", 0)
-            losses = perf.get("losses", 0)
-            wr = perf.get("win_rate", 0.0) * 100
-            progress = perf.get("progress_pct", 0)
-            dd_risk = perf.get("drawdown_risk_pct", 0)
-            attempt_id = tracker.get_display_attempt_id()
-            
-            # Get history summary
-            history = tracker.get_history(limit=100)
-            history = [h for h in history if h.get("outcome") in ("pass", "fail")]
-            total_passes = sum(1 for h in history if h.get("outcome") == "pass")
-            total_fails = sum(1 for h in history if h.get("outcome") == "fail")
+            # Detect MFFU to use the correct tracker (fixes attempt number mismatch)
+            if self._detect_mffu_account():
+                from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
+                mffu_tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
+                mffu_tracker.refresh()
+                a = mffu_tracker.current_attempt
+                pnl = a.pnl
+                balance = a.starting_balance + a.pnl
+                trades = a.trades
+                wins = a.wins
+                losses = a.losses
+                wr = (a.wins / a.trades * 100) if a.trades > 0 else 0.0
+                progress = min(100.0, (a.pnl / mffu_tracker.config.profit_target * 100)) if a.pnl > 0 else 0.0
+                dd_used = max(0.0, a.eod_high_water_mark - balance)
+                dd_risk = min(100.0, (dd_used / mffu_tracker.config.max_loss_distance * 100)) if mffu_tracker.config.max_loss_distance > 0 else 0.0
+                attempt_id = a.attempt_id
+
+                # Get history from MFFU history file
+                history = []
+                try:
+                    if mffu_tracker.history_file.exists():
+                        with open(mffu_tracker.history_file) as f:
+                            history = json.load(f)
+                    history = [h for h in history if h.get("outcome") in ("pass", "fail")]
+                except Exception:
+                    history = []
+                total_passes = sum(1 for h in history if h.get("outcome") == "pass")
+                total_fails = sum(1 for h in history if h.get("outcome") == "fail")
+            else:
+                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+                tracker = ChallengeTracker(state_dir=self.state_dir)
+                tracker.refresh()
+
+                # Get current attempt performance
+                perf = tracker.get_attempt_performance()
+                pnl = perf.get("total_pnl", 0.0)
+                balance = perf.get("current_balance", 50000.0)
+                trades = perf.get("exited_signals", 0)
+                wins = perf.get("wins", 0)
+                losses = perf.get("losses", 0)
+                wr = perf.get("win_rate", 0.0) * 100
+                progress = perf.get("progress_pct", 0)
+                dd_risk = perf.get("drawdown_risk_pct", 0)
+                attempt_id = tracker.get_display_attempt_id()
+
+                # Get history summary
+                history = tracker.get_history(limit=100)
+                history = [h for h in history if h.get("outcome") in ("pass", "fail")]
+                total_passes = sum(1 for h in history if h.get("outcome") == "pass")
+                total_fails = sum(1 for h in history if h.get("outcome") == "fail")
             
             pnl_emoji = "🟢" if pnl >= 0 else "🔴"
             pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
@@ -5121,11 +5150,23 @@ class TelegramCommandHandler(
     async def _show_challenge_history(self, query: CallbackQuery) -> None:
         """Show challenge history - past wins and losses."""
         try:
-            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-            
-            tracker = ChallengeTracker(state_dir=self.state_dir)
-            history = tracker.get_history(limit=20)
-            history = [h for h in history if h.get("outcome") in ("pass", "fail")]
+            # Detect MFFU to read the correct history file
+            if self._detect_mffu_account():
+                from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
+                mffu_tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
+                history = []
+                try:
+                    if mffu_tracker.history_file.exists():
+                        with open(mffu_tracker.history_file) as f:
+                            history = json.load(f)
+                except Exception:
+                    history = []
+                history = [h for h in history if h.get("outcome") in ("pass", "fail")]
+            else:
+                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+                tracker = ChallengeTracker(state_dir=self.state_dir)
+                history = tracker.get_history(limit=20)
+                history = [h for h in history if h.get("outcome") in ("pass", "fail")]
             
             if not history:
                 text = (
@@ -5189,17 +5230,7 @@ class TelegramCommandHandler(
         state = self._read_state() or {}
 
         # Detect MFFU — Tradovate does not use IBKR gateway
-        is_mffu = bool(state.get("tradovate_account"))
-        if not is_mffu:
-            try:
-                ch_file = self.state_dir / "challenge_state.json"
-                if ch_file.exists():
-                    ch = json.loads(ch_file.read_text())
-                    _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
-                    if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
-                        is_mffu = True
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}", exc_info=True)
+        is_mffu = bool(state.get("tradovate_account")) or self._detect_mffu_account()
 
         if is_mffu:
             # MFFU uses Tradovate WebSocket, not IBKR Gateway
