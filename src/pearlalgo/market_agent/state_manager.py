@@ -110,12 +110,18 @@ class MarketAgentStateManager:
     Stores signals, positions, and service state.
     """
 
-    def __init__(self, state_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        state_dir: Optional[Path] = None,
+        service_config: Optional[Dict] = None,
+    ):
         """
         Initialize state manager.
         
         Args:
             state_dir: Directory for state files (default: ./data/agent_state/<MARKET>)
+            service_config: Pre-loaded service config dict. If None, loads from disk
+                            (for backward compatibility with tests and standalone usage).
         """
         # Track whether the caller explicitly provided a state_dir (tests do this via tmp_path).
         # If explicit, ALL persistence (including SQLite) must stay inside that directory to
@@ -127,15 +133,20 @@ class MarketAgentStateManager:
         self.events_file = get_events_file(self.state_dir)
         self.state_file = get_state_file(self.state_dir)
 
+        # Use provided config or load from disk (backward compat)
+        if service_config is None:
+            try:
+                from pearlalgo.config.config_loader import load_service_config
+                service_config = load_service_config(validate=False) or {}
+            except Exception:
+                service_config = {}
+
         # Optional SQLite dual-write (platform memory). Keep file writes as-is for Telegram/mobile.
         self._sqlite_enabled = False
         self._trade_db = None
         if SQLITE_AVAILABLE:
             try:
-                from pearlalgo.config.config_loader import load_service_config
-
-                cfg = load_service_config(validate=False) or {}
-                storage_cfg = cfg.get("storage", {}) or {}
+                storage_cfg = service_config.get("storage", {}) or {}
                 self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
                 if self._sqlite_enabled:
                     # IMPORTANT:
@@ -149,21 +160,14 @@ class MarketAgentStateManager:
                         db_path = Path(str(db_path_raw))
                     self._trade_db = TradeDatabase(db_path)
             except Exception as e:
-                logger.debug(f"SQLite storage not enabled/available: {e}")
+                logger.warning(f"SQLite storage not enabled/available: {e}")
 
         # Load duplicate detection settings from config
-        try:
-            from pearlalgo.config.config_loader import load_service_config
-            cfg = load_service_config(validate=False) or {}
-            signal_settings = cfg.get("signals", {}) or {}
-            self._duplicate_window_seconds = signal_settings.get("duplicate_window_seconds", 120)
-            self._duplicate_price_threshold_pct = (
-                signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
-            )
-        except Exception as e:
-            logger.debug(f"Could not load duplicate detection settings: {e}")
-            self._duplicate_window_seconds = 120
-            self._duplicate_price_threshold_pct = 0.005
+        signal_settings = service_config.get("signals", {}) or {}
+        self._duplicate_window_seconds = signal_settings.get("duplicate_window_seconds", 120)
+        self._duplicate_price_threshold_pct = (
+            signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
+        )
 
         logger.info(f"MarketAgentStateManager initialized: state_dir={self.state_dir}")
 
@@ -398,7 +402,7 @@ class MarketAgentStateManager:
                             payload=signal_record,
                         )
             except Exception as e:
-                logger.debug(f"Could not write signal event to SQLite: {e}")
+                logger.warning(f"Dual-write divergence: signal {signal_id} written to JSON but SQLite write failed: {e}")
             
             logger.debug(f"Saved signal {signal_id} to {self.signals_file}")
         except Exception as e:
@@ -433,6 +437,30 @@ class MarketAgentStateManager:
 
         return signals
 
+    # Maximum events.jsonl size before rotation (20 MB)
+    _EVENTS_MAX_BYTES: int = 20 * 1024 * 1024
+
+    def _rotate_events_file(self) -> None:
+        """Rotate events.jsonl when it exceeds size threshold.
+
+        Keeps one backup (.1) and starts a fresh file.  Called under the
+        existing file lock so no concurrent writers can interfere.
+        """
+        try:
+            if not self.events_file.exists():
+                return
+            if self.events_file.stat().st_size < self._EVENTS_MAX_BYTES:
+                return
+            backup = Path(str(self.events_file) + ".1")
+            if backup.exists():
+                backup.unlink()
+            self.events_file.rename(backup)
+            logger.info(
+                f"Rotated events.jsonl ({self._EVENTS_MAX_BYTES // (1024*1024)}MB limit) → {backup.name}"
+            )
+        except Exception as e:
+            logger.debug(f"Events rotation failed (non-fatal): {e}")
+
     def append_event(
         self,
         event_type: str,
@@ -447,6 +475,7 @@ class MarketAgentStateManager:
         - append-only JSONL
         - best-effort file locking
         - payload is converted to JSON-safe primitives
+        - automatic rotation when file exceeds 20 MB
         """
         record = {
             "timestamp": get_utc_timestamp(),
@@ -460,6 +489,7 @@ class MarketAgentStateManager:
             with open(lock_file, "w") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 try:
+                    self._rotate_events_file()
                     with open(self.events_file, "a") as f:
                         f.write(json.dumps(record) + "\n")
                 finally:

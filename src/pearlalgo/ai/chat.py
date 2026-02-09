@@ -138,7 +138,7 @@ class PearlAIChat:
     def _load_telegram_prompt() -> str:
         """Load Telegram system prompt from registry with inline fallback."""
         try:
-            from pearl_ai.prompts import get_prompt_registry
+            from pearlalgo.pearl_ai.prompts import get_prompt_registry
             registry = get_prompt_registry()
             return registry.get("telegram_chat", fallback=PearlAIChat._TELEGRAM_PROMPT_FALLBACK)
         except Exception:

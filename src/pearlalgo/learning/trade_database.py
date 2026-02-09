@@ -211,6 +211,10 @@ class TradeDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_entry_time ON trades(entry_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_is_win ON trades(is_win)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_pnl ON trades(pnl)")
+            # Indexes for exit_time queries (used by pearl_ai/data_access.py)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_regime_exit ON trades(regime, exit_time)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_direction_exit ON trades(direction, exit_time)")
             
             # Features table (for feature-level analysis)
             cursor.execute("""

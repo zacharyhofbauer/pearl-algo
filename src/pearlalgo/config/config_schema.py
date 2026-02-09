@@ -418,6 +418,7 @@ class MLFilterConfig(BaseModel):
     max_depth: int = Field(default=6, ge=1)
     learning_rate: float = Field(default=0.1, ge=0.01, le=1)
     calibrate_probabilities: bool = True
+    shadow_threshold: Optional[float] = Field(default=None, ge=0, le=1, description="Shadow-mode pass/fail split for lift measurement")
 
 
 class KnowledgeConfig(BaseModel):

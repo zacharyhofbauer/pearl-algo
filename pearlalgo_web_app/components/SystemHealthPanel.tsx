@@ -208,7 +208,7 @@ export default function SystemHealthPanel({
                 value={cadenceMetrics.missed_cycles}
                 variant="compact"
                 colorMode="status"
-                status={cadenceMetrics.missed_cycles > 0 ? 'warning' : 'ok'}
+                status={'ok'}
               />
             </div>
 

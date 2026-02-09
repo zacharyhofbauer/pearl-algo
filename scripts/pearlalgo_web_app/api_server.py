@@ -51,6 +51,13 @@ except ImportError:
 import hashlib
 import secrets
 
+from pearlalgo.market_agent.stats_computation import (
+    compute_daily_stats as _shared_compute_daily_stats,
+    get_trading_day_start as _shared_get_trading_day_start,
+)
+from pearlalgo.utils.state_io import load_json_file as _shared_load_json, load_jsonl_file as _shared_load_jsonl
+from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _shared_tv_fills_to_trades
+
 import pandas as pd
 
 # ---------------------------------------------------------------------------
@@ -280,31 +287,13 @@ def _resolve_state_dir(market: str) -> Path:
 
 
 def _load_json_file(path: Path) -> Dict[str, Any]:
-    """Load a JSON file, returning empty dict on error."""
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return {}
+    """Delegate to shared state_io module."""
+    return _shared_load_json(path)
 
 
-def _load_jsonl_file(path: Path, max_lines: int = 100) -> List[Dict[str, Any]]:
-    """Load last N lines from a JSONL file."""
-    if not path.exists():
-        return []
-    try:
-        lines = path.read_text().strip().split("\n")
-        result = []
-        for line in lines[-max_lines:]:
-            if line.strip():
-                try:
-                    result.append(json.loads(line))
-                except Exception:
-                    pass
-        return result
-    except Exception:
-        return []
+def _load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
+    """Delegate to shared state_io module."""
+    return _shared_load_jsonl(path, max_lines=max_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -896,6 +885,10 @@ class ConnectionManager:
         self._last_state_hash: str = ""
         # Track raw agent state changes separately from Pearl AI feed/chat changes.
         self._last_raw_state_hash: str = ""
+        # File mtime fingerprint to avoid unnecessary disk reads + json.dumps
+        self._last_state_mtime_ns: int = 0
+        self._last_state_size: int = 0
+        self._cached_state: Dict[str, Any] = {}
 
     async def connect(self, websocket: WebSocket):
         """Register a new WebSocket connection (assumes accepted)."""
@@ -935,14 +928,30 @@ class ConnectionManager:
                     # still broadcast challenge/performance data when the agent
                     # is stopped and state.json doesn't exist).
                     state_file = _state_dir / "state.json"
-                    state = _load_json_file(state_file) or {}
+
+                    # Use file mtime + size as a cheap fingerprint to avoid
+                    # unnecessary disk reads and json.dumps serialization.
+                    try:
+                        st = state_file.stat()
+                        if st.st_mtime_ns != self._last_state_mtime_ns or st.st_size != self._last_state_size:
+                            self._last_state_mtime_ns = st.st_mtime_ns
+                            self._last_state_size = st.st_size
+                            self._cached_state = _load_json_file(state_file) or {}
+                    except FileNotFoundError:
+                        if self._cached_state:
+                            self._cached_state = {}
+                            self._last_state_mtime_ns = 0
+                            self._last_state_size = 0
+                    except Exception:
+                        pass
+                    state = self._cached_state
 
                     if state or _get_challenge_status(_state_dir):
                         # Heartbeat: the API server can see agent state
                         _pearl_last_state_seen_time = datetime.now(timezone.utc).isoformat()
 
-                        # Detect raw agent state.json changes
-                        raw_state_hash = str(hash(json.dumps(state, sort_keys=True, default=str)))
+                        # Detect raw agent state.json changes via mtime fingerprint
+                        raw_state_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}"
 
                         # Keep Pearl AI brain in sync ONLY when raw state changes.
                         if raw_state_hash != self._last_raw_state_hash:
@@ -1109,8 +1118,8 @@ def _init_pearl_ai() -> None:
         return
 
     try:
-        from pearl_ai.api_router import create_pearl_router
-        from pearl_ai.brain import PearlBrain
+        from pearlalgo.pearl_ai.api_router import create_pearl_router
+        from pearlalgo.pearl_ai.brain import PearlBrain
 
         claude_key = os.getenv("ANTHROPIC_API_KEY") or None
         ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -1433,39 +1442,17 @@ async def get_candles(
 
 
 def _get_trading_day_start() -> datetime:
-    """
-    Get the start of the current trading day (6pm ET previous calendar day).
-
-    Futures trading day runs from 6pm ET to 6pm ET next day.
-    Example: Trading day "Jan 29" starts at 6pm ET on Jan 28 and ends at 6pm ET on Jan 29.
-    """
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
-    et_tz = ZoneInfo("America/New_York")
-    now_et = datetime.now(et_tz)
-
-    # If before 6pm ET, trading day started yesterday at 6pm
-    # If after 6pm ET, trading day started today at 6pm
-    if now_et.hour < 18:
-        # Before 6pm - use yesterday 6pm as start
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        # After 6pm - use today 6pm as start
-        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
-
-    return trading_day_start.astimezone(timezone.utc)
+    """Delegate to shared stats_computation module (single source of truth)."""
+    return _shared_get_trading_day_start()
 
 
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET.
+    """Compute daily P&L and trade stats.
 
     Priority order for MFFU accounts:
     1. Tradovate live account data (realized PnL from broker)
-    2. Challenge state (trade count / wins)
-    3. signals.jsonl virtual tracking
+    2. Shared stats_computation module (signals.jsonl with caching)
+    3. Challenge state fallback
     """
     # Check for live Tradovate account data in state.json first
     try:
@@ -1515,73 +1502,18 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     except Exception:
         pass
 
-    signals_file = state_dir / "signals.jsonl"
-    if not signals_file.exists():
-        # signals.jsonl missing (e.g. after reset) -- fall back to challenge data
-        empty = {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
-        try:
-            challenge = _get_challenge_status(state_dir)
-            if challenge and challenge.get("trades", 0) > 0:
-                empty["daily_pnl"] = round(challenge.get("pnl", 0.0), 2)
-                empty["daily_trades"] = challenge.get("trades", 0)
-                empty["daily_wins"] = challenge.get("wins", 0)
-                empty["daily_losses"] = challenge.get("trades", 0) - challenge.get("wins", 0)
-        except Exception:
-            pass
-        return empty
+    # Delegate to shared stats_computation module (single source of truth for
+    # signals.jsonl parsing with built-in 5-second TTL cache).
+    result = _shared_compute_daily_stats(state_dir)
 
-    # Get trading day start (6pm ET)
-    trading_day_start = _get_trading_day_start()
-
-    daily_pnl = 0.0
-    daily_wins = 0
-    daily_losses = 0
-
-    try:
-        # Read all signals (we need to check all for today's trades)
-        signals = _load_jsonl_file(signals_file, max_lines=2000)
-        for s in signals:
-            if s.get("status") != "exited":
-                continue
-
-            # Check if trade exited after trading day start (6pm ET)
-            exit_time_str = s.get("exit_time") or s.get("timestamp")
-            if not exit_time_str:
-                continue
-
-            try:
-                # Parse ISO format timestamp
-                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                if exit_time < trading_day_start:
-                    continue
-            except (ValueError, AttributeError):
-                continue
-
-            # Count this trade
-            pnl = s.get("pnl", 0.0)
-            if pnl is not None:
-                daily_pnl += pnl
-                if pnl >= 0:
-                    daily_wins += 1
-                else:
-                    daily_losses += 1
-    except Exception:
-        pass
-
-    result = {
-        "daily_pnl": round(daily_pnl, 2),
-        "daily_trades": daily_wins + daily_losses,
-        "daily_wins": daily_wins,
-        "daily_losses": daily_losses,
-    }
-
-    # Fallback: if signals.jsonl is empty (e.g. after a reset) but
+    # Fallback: if signals.jsonl produced 0 trades (e.g. after a reset) but
     # challenge_state.json has trade data, use the challenge data so the
     # dashboard header isn't misleadingly blank.
-    if result["daily_trades"] == 0:
+    if result.get("daily_trades", 0) == 0:
         try:
             challenge = _get_challenge_status(state_dir)
             if challenge and challenge.get("trades", 0) > 0:
+                result = dict(result)  # avoid mutating cached dict
                 result["daily_pnl"] = round(challenge.get("pnl", 0.0), 2)
                 result["daily_trades"] = challenge.get("trades", 0)
                 result["daily_wins"] = challenge.get("wins", 0)
@@ -1812,12 +1744,33 @@ def _is_mffu_account(state_dir: Path) -> bool:
     return False
 
 
+def _normalize_fill(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a Tradovate fill to consistent snake_case keys.
+
+    Older fills may use camelCase (contractId, orderId) from the raw
+    Tradovate API, while newer fills from the adapter use snake_case.
+    This ensures all downstream code can use a single key format.
+    """
+    return {
+        "id": f.get("id"),
+        "order_id": f.get("order_id") or f.get("orderId"),
+        "contract_id": f.get("contract_id") or f.get("contractId"),
+        "timestamp": f.get("timestamp"),
+        "action": f.get("action"),
+        "qty": f.get("qty", 0),
+        "price": f.get("price", 0.0),
+        "net_pos": f.get("net_pos") if f.get("net_pos") is not None else f.get("netPos"),
+    }
+
+
 def _get_tradovate_state(state_dir: Path) -> tuple:
     """Load tradovate_account and tradovate_fills.
 
     Fills are read from state.json first, then from the persistent
     tradovate_fills.json file (which survives session resets since
     Tradovate's /fill/list clears at end of day).
+
+    All fills are normalized to snake_case keys for consistency.
 
     Returns (tradovate_account_dict, fills_list).
     """
@@ -1841,85 +1794,44 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
         except Exception:
             pass
 
+    # Normalize all fills to snake_case keys
+    fills = [_normalize_fill(f) for f in fills]
+
     return tv, fills
 
 
 def _tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Convert raw Tradovate fills into trade records using FIFO matching.
-
-    Maintains a FIFO queue of open lots.  Each closing fill is matched
-    against the oldest open lot(s) to produce one trade per fill.
-
-    MNQ point value = $2 per point per contract.
-    """
-    if not fills:
-        return []
-
-    POINT_VALUE = 2.0  # MNQ micro
-
-    sorted_fills = sorted(fills, key=lambda f: f.get("timestamp") or "")
-
-    trades: List[Dict[str, Any]] = []
-    # FIFO queue of open lots: [{"price": float, "qty": int, "time": str, "id": str, "side": "Buy"|"Sell"}]
-    open_lots: List[Dict[str, Any]] = []
-
-    for fill in sorted_fills:
-        action = fill.get("action", "")
-        price = float(fill.get("price", 0))
-        remaining = int(fill.get("qty", 1))
-        ts = fill.get("timestamp", "")
-        fill_id = fill.get("id", "")
-
-        # Determine if this fill opens or closes
-        if not open_lots or open_lots[0]["side"] == action:
-            # Same side as existing lots (or no lots) -> opening fill
-            open_lots.append({"price": price, "qty": remaining, "time": ts, "id": fill_id, "side": action})
-            continue
-
-        # Opposite side -> closing fill.  Match FIFO against open lots.
-        while remaining > 0 and open_lots:
-            lot = open_lots[0]
-            match_qty = min(remaining, lot["qty"])
-
-            direction = "long" if lot["side"] == "Buy" else "short"
-            if direction == "long":
-                pnl = round((price - lot["price"]) * match_qty * POINT_VALUE, 2)
-            else:
-                pnl = round((lot["price"] - price) * match_qty * POINT_VALUE, 2)
-
-            trades.append({
-                "signal_id": f"tv_{lot['id']}_{fill_id}",
-                "symbol": "MNQ",
-                "direction": direction,
-                "position_size": match_qty,
-                "entry_time": lot["time"],
-                "entry_price": lot["price"],
-                "exit_time": ts,
-                "exit_price": price,
-                "pnl": pnl,
-                "exit_reason": "take_profit" if pnl > 0 else "stop_loss",
-            })
-
-            remaining -= match_qty
-            lot["qty"] -= match_qty
-            if lot["qty"] <= 0:
-                open_lots.pop(0)
-
-        # If remaining > 0, this fill also opens a new position in the opposite direction
-        if remaining > 0:
-            open_lots.append({"price": price, "qty": remaining, "time": ts, "id": fill_id, "side": action})
-
-    return trades
+    """Delegate to shared tradovate utils module."""
+    return _shared_tv_fills_to_trades(fills)
 
 
 def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Convert tradovate_account positions to the format /api/positions expects."""
+    """Convert tradovate_account positions to the format /api/positions expects.
+
+    When individual position openPnL is 0 but account-level open_pnl is
+    non-zero (common with Tradovate REST), distribute the account open_pnl
+    across positions proportionally by contract count.
+    """
+    raw_positions = [p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0]
+    if not raw_positions:
+        return []
+
+    # Check if position-level open_pnl is missing/zero across all positions
+    account_open_pnl = float(tv.get("open_pnl", 0))
+    sum_pos_pnl = sum(float(p.get("open_pnl", 0)) for p in raw_positions)
+    total_contracts = sum(abs(p.get("net_pos", 0)) for p in raw_positions)
+
+    # Use account-level open_pnl when position-level data is all zeros
+    use_account_pnl = (sum_pos_pnl == 0 and account_open_pnl != 0 and total_contracts > 0)
+
     positions = []
-    for pos in tv.get("positions", []):
+    for pos in raw_positions:
         net_pos = pos.get("net_pos", 0)
-        if net_pos == 0:
-            continue
         direction = "long" if net_pos > 0 else "short"
+        if use_account_pnl:
+            pos_pnl = round(account_open_pnl * abs(net_pos) / total_contracts, 2)
+        else:
+            pos_pnl = pos.get("open_pnl", 0)
         positions.append({
             "signal_id": f"tv_pos_{pos.get('contract_id', '')}",
             "symbol": "MNQ",
@@ -1929,13 +1841,13 @@ def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
             "entry_time": None,
             "stop_loss": None,
             "take_profit": None,
-            "open_pnl": pos.get("open_pnl", 0),
+            "open_pnl": pos_pnl,
         })
     return positions
 
 
 def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any]], state_dir: Path) -> Dict[str, Any]:
-    """Build performance summary from Tradovate data for all time periods."""
+    """Build overall performance summary from Tradovate data (equity-based)."""
     start_balance = 50000.0
     try:
         ch_file = state_dir / "challenge_state.json"
@@ -1963,6 +1875,46 @@ def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any
         "tradovate_equity": round(equity, 2),
     }
     return stats
+
+
+def _tradovate_performance_for_period(
+    fills: List[Dict[str, Any]],
+    start_utc: datetime,
+    end_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Build performance stats from Tradovate fills filtered to a time range.
+
+    Filters completed trades whose exit_time falls within [start_utc, end_utc).
+    """
+    trades = _tradovate_fills_to_trades(fills)
+    filtered = []
+    for t in trades:
+        exit_ts = t.get("exit_time", "")
+        if not exit_ts:
+            continue
+        try:
+            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        if exit_dt < start_utc:
+            continue
+        if end_utc and exit_dt >= end_utc:
+            continue
+        filtered.append(t)
+
+    total = len(filtered)
+    wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
+    losses = total - wins
+    pnl = round(sum(t.get("pnl") or 0 for t in filtered), 2)
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    return {
+        "pnl": pnl,
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+    }
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
@@ -3308,18 +3260,32 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
 
-    # MFFU: single Tradovate-based stats for every period
+    # MFFU: bucket Tradovate fills by time period for proper breakdowns
     if _is_mffu_account(_state_dir):
         tv, fills = _get_tradovate_state(_state_dir)
-        stats = _tradovate_performance_summary(tv, fills, _state_dir)
+        equity_stats = _tradovate_performance_summary(tv, fills, _state_dir)
+
+        now = datetime.now(timezone.utc)
+        td_start = _get_trading_day_start()
+        yday_start, yday_end = _get_previous_trading_day_bounds()
+        wtd_start = _get_trading_week_start(now)
+        mtd_start = _get_month_to_date_start(now)
+        ytd_start = _get_year_to_date_start(now)
+        all_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        # Use fill-based P&L for all periods (consistent realized-only stats)
+        all_fill_stats = _tradovate_performance_for_period(fills, all_start)
+        # Attach live equity for dashboard display
+        all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
+
         return {
-            "as_of": datetime.now(timezone.utc).isoformat(),
-            "td": stats,
-            "yday": {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
-            "wtd": stats,
-            "mtd": stats,
-            "ytd": stats,
-            "all": stats,
+            "as_of": now.isoformat(),
+            "td": _tradovate_performance_for_period(fills, td_start),
+            "yday": _tradovate_performance_for_period(fills, yday_start, yday_end),
+            "wtd": _tradovate_performance_for_period(fills, wtd_start),
+            "mtd": _tradovate_performance_for_period(fills, mtd_start),
+            "ytd": _tradovate_performance_for_period(fills, ytd_start),
+            "all": all_fill_stats,
         }
 
     # Inception: existing performance.json logic

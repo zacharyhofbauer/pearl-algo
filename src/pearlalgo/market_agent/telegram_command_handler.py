@@ -154,7 +154,7 @@ class TelegramCommandHandler:
             raise ImportError("python-telegram-bot required for command handler")
         self.bot_token = bot_token
         self.chat_id = str(chat_id)
-        self._available_markets = ["NQ", "ES", "GC"]
+        self._available_markets = ["NQ", "ES", "GC", "MFFU_EVAL"]
         self.active_market = "NQ"
         self._repo_root = self._get_repo_root()
         self._knowledge_retriever = None
@@ -3913,23 +3913,55 @@ class TelegramCommandHandler:
 
             elif confirm_action == "reset_challenge":
                 try:
-                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-                    challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
-                    new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
-                    keyboard = [
-                        [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
-                        self._nav_back_row(),
-                    ]
-                    await query.edit_message_text(
-                        f"✅ Challenge Reset Complete\n\n"
-                        f"New attempt started: #{new_attempt.attempt_id}\n\n"
-                        f"Starting Balance: ${new_attempt.starting_balance:,.2f}\n"
-                        f"Profit Target: +$3,000\n"
-                        f"Max Drawdown: -$2,000\n\n"
-                        f"Previous attempt saved to history.",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    logger.info(f"Challenge reset via Telegram: new attempt #{new_attempt.attempt_id}")
+                    # Detect MFFU to use the correct tracker
+                    _use_mffu_tracker = False
+                    try:
+                        ch_file = self.state_dir / "challenge_state.json"
+                        if ch_file.exists():
+                            _ch = json.loads(ch_file.read_text())
+                            _st = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
+                            if _st and str(_st).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
+                                _use_mffu_tracker = True
+                    except Exception:
+                        pass
+
+                    if _use_mffu_tracker:
+                        from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
+                        tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
+                        tracker.reset_attempt(reason="telegram_reset")
+                        attempt = tracker.current_attempt
+                        keyboard = [
+                            [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
+                            self._nav_back_row(),
+                        ]
+                        await query.edit_message_text(
+                            f"✅ MFFU Challenge Reset Complete\n\n"
+                            f"New attempt started: #{attempt.attempt_id}\n\n"
+                            f"Starting Balance: $50,000\n"
+                            f"Profit Target: +$3,000\n"
+                            f"Max Drawdown: -$2,000 (EOD trailing)\n\n"
+                            f"Previous attempt saved to history.",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        logger.info(f"MFFU challenge reset via Telegram: attempt #{attempt.attempt_id}")
+                    else:
+                        from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+                        challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
+                        new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
+                        keyboard = [
+                            [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
+                            self._nav_back_row(),
+                        ]
+                        await query.edit_message_text(
+                            f"✅ Challenge Reset Complete\n\n"
+                            f"New attempt started: #{new_attempt.attempt_id}\n\n"
+                            f"Starting Balance: ${new_attempt.starting_balance:,.2f}\n"
+                            f"Profit Target: +$3,000\n"
+                            f"Max Drawdown: -$2,000\n\n"
+                            f"Previous attempt saved to history.",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        logger.info(f"Challenge reset via Telegram: new attempt #{new_attempt.attempt_id}")
                 except Exception as e:
                     logger.error(f"Error resetting challenge: {e}", exc_info=True)
                     await query.edit_message_text(
@@ -6029,35 +6061,66 @@ class TelegramCommandHandler:
     async def _handle_gateway_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display gateway service status (process + port)."""
         # Read state (best-effort; gateway status is still meaningful without state).
-        self._read_state() or {}
-        
-        # Gateway service status (process + port).
-        gw_proc = False
-        gw_port = False
-        gw_unknown = True
-        try:
-            sc = getattr(self, "service_controller", None)
-            if sc:
-                gw_status = sc.get_gateway_status() or {}
-                gw_proc = bool(gw_status.get("process_running", False))
-                gw_port = bool(gw_status.get("port_listening", False))
-                gw_unknown = False
-        except Exception:
-            pass
+        state = self._read_state() or {}
 
-        gw_ok = gw_proc and gw_port
+        # Detect MFFU — Tradovate does not use IBKR gateway
+        is_mffu = bool(state.get("tradovate_account"))
+        if not is_mffu:
+            try:
+                ch_file = self.state_dir / "challenge_state.json"
+                if ch_file.exists():
+                    ch = json.loads(ch_file.read_text())
+                    _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
+                    if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
+                        is_mffu = True
+            except Exception:
+                pass
 
-        text = "🔌 *Gateway Service*\n\n"
-        if gw_unknown:
-            text += "⚪ *Status:* Unknown\n"
-            text += "_Could not query gateway service._\n"
+        if is_mffu:
+            # MFFU uses Tradovate WebSocket, not IBKR Gateway
+            tv = state.get("tradovate_account", {}) or {}
+            tv_connected = bool(tv.get("account_id") or tv.get("net_liq"))
+            text = "🔌 *Tradovate Connection*\n\n"
+            if tv_connected:
+                text += "🟢 *Status:* CONNECTED\n"
+                net_liq = tv.get("net_liq", 0)
+                if net_liq:
+                    text += f"• Net Liq: ${float(net_liq):,.2f}\n"
+                acct_id = tv.get("account_id", "")
+                if acct_id:
+                    text += f"• Account: {acct_id}\n"
+            else:
+                text += "🔴 *Status:* DISCONNECTED\n"
+                text += "_Tradovate WebSocket not connected._\n"
+                text += "\n💡 *Tip:* Check agent logs for Tradovate auth errors.\n"
         else:
-            text += f"{'🟢' if gw_ok else '🔴'} *Status:* {'ONLINE' if gw_ok else 'OFFLINE'}\n"
-            text += f"• Process: {'running' if gw_proc else 'stopped'}\n"
-            text += f"• API port: {'listening' if gw_port else 'closed'}\n"
-            
-            if not gw_ok:
-                text += "\n💡 *Tip:* Use 🎛️ System → Gateway to start/restart.\n"
+            # IBKR Gateway status (process + port).
+            gw_proc = False
+            gw_port = False
+            gw_unknown = True
+            try:
+                sc = getattr(self, "service_controller", None)
+                if sc:
+                    gw_status = sc.get_gateway_status() or {}
+                    gw_proc = bool(gw_status.get("process_running", False))
+                    gw_port = bool(gw_status.get("port_listening", False))
+                    gw_unknown = False
+            except Exception:
+                pass
+
+            gw_ok = gw_proc and gw_port
+
+            text = "🔌 *Gateway Service*\n\n"
+            if gw_unknown:
+                text += "⚪ *Status:* Unknown\n"
+                text += "_Could not query gateway service._\n"
+            else:
+                text += f"{'🟢' if gw_ok else '🔴'} *Status:* {'ONLINE' if gw_ok else 'OFFLINE'}\n"
+                text += f"• Process: {'running' if gw_proc else 'stopped'}\n"
+                text += f"• API port: {'listening' if gw_port else 'closed'}\n"
+
+                if not gw_ok:
+                    text += "\n💡 *Tip:* Use 🎛️ System → Gateway to start/restart.\n"
 
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 

@@ -557,7 +557,8 @@ class MarketAgentTelegramNotifier:
                     risk_reward = reward / risk
             
             # Entry notification (compact, no redundant "Position ACTIVE" line)
-            message = f"✅ *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
+            acct_prefix = f"[{self.account_label}] " if self.account_label else ""
+            message = f"{acct_prefix}✅ *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
             message += f"Entry: ${entry_price:.2f}"
             if risk_reward > 0:
                 message += f" • R:R {risk_reward:.1f}:1"
@@ -602,6 +603,26 @@ class MarketAgentTelegramNotifier:
             except Exception:
                 pass
             
+            # Execution status (for accounts with live execution e.g. MFFU/Tradovate)
+            exec_status = signal.get("_execution_status", "")
+            if exec_status:
+                if not message.endswith("\n"):
+                    message += "\n"
+                if exec_status == "filled" or exec_status.startswith("placed"):
+                    order_id = signal.get("_execution_order_id", "")
+                    message += f"\n✅ Order placed"
+                    if order_id:
+                        message += f" `{order_id}`"
+                elif exec_status.startswith("place_failed"):
+                    reason = exec_status.replace("place_failed:", "", 1)
+                    message += f"\n❌ Order failed: {reason}"
+                elif exec_status.startswith("skipped"):
+                    reason = exec_status.replace("skipped:", "", 1)
+                    message += f"\n⏭ Order skipped: {reason}"
+                elif exec_status.startswith("error"):
+                    reason = exec_status.replace("error:", "", 1)
+                    message += f"\n⚠️ Exec error: {reason}"
+
             # Send message - no inline buttons, all actions accessible via /start menu
             # Entry notifications are high-signal; never dedupe.
             success = await self.telegram.send_message(message, dedupe=False)
