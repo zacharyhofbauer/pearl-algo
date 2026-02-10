@@ -56,7 +56,6 @@ async def _read_json_async(path: Path) -> Any:
 _CANDLE_CACHE_MAX_ENTRIES = 50
 _candle_cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
 _candle_cache_lock = threading.Lock()
-_cache_file: Optional[Path] = None
 
 
 def _candle_cache_get(key: str) -> Optional[List[Dict[str, Any]]]:
@@ -97,11 +96,20 @@ from pearlalgo.market_agent.stats_computation import (
     compute_daily_stats as _shared_compute_daily_stats,
     get_trading_day_start as _shared_get_trading_day_start,
 )
-from pearlalgo.utils.state_io import load_json_file as _load_json_file, load_jsonl_file as _load_jsonl_file
+from pearlalgo.utils.state_io import (
+    load_json_file as _load_json_file,
+    load_jsonl_file as _load_jsonl_file,
+    atomic_write_json as _atomic_write_json,
+)
 from pearlalgo.market_agent.state_reader import StateReader
 from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tradovate_fills_to_trades
 
 import pandas as pd
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +360,7 @@ async def require_operator_or_api_key(
             status_code=401,
             detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
         )
-    if api_key not in _api_keys:
+    if not any(secrets.compare_digest(api_key, k) for k in _api_keys):
         raise HTTPException(status_code=403, detail="Invalid API key.")
 
     return "api_key"
@@ -434,7 +442,7 @@ async def verify_api_key(
             detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
         )
 
-    if api_key not in _api_keys:
+    if not any(secrets.compare_digest(api_key, k) for k in _api_keys):
         raise HTTPException(
             status_code=403,
             detail="Invalid API key.",
@@ -498,39 +506,33 @@ class DataUnavailableError(Exception):
     pass
 
 
-def _get_cache_file() -> Path:
-    """Get the cache file path."""
-    global _cache_file
-    if _cache_file is None:
-        _cache_file = PROJECT_ROOT / "data" / "live_chart_cache.json"
-    return _cache_file
+def _get_candle_cache_dir() -> Path:
+    """Return the directory for per-key candle cache files."""
+    return PROJECT_ROOT / "data"
+
+
+def _per_key_cache_path(key: str) -> Path:
+    """Return the cache file path for a specific candle cache key.
+
+    Each symbol/timeframe/bars combination gets its own file, e.g.
+    ``candle_cache_MNQ_5m_72.json``, avoiding the need to read-modify-write
+    a single monolithic cache file.
+    """
+    return _get_candle_cache_dir() / f"candle_cache_{key}.json"
 
 
 def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
-    """Save candles to cache (memory and disk)."""
+    """Save candles to cache (memory and per-key disk file)."""
     _candle_cache_set(key, candles)
 
-    # Also save to disk for persistence across restarts
+    # Persist to a per-key file for crash-safe restarts
     try:
-        cache_file = _get_cache_file()
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Load existing cache
-        existing = {}
-        if cache_file.exists():
-            try:
-                existing = json.loads(cache_file.read_text())
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-
-        # Update with new data
-        existing[key] = {
+        cache_path = _per_key_cache_path(key)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(cache_path, {
             "candles": candles,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # Keep only last 24 hours of cache entries
-        cache_file.write_text(json.dumps(existing))
+        })
     except Exception as e:
         logger.debug(f"Cache write failures are not critical: {e}")
 
@@ -542,18 +544,16 @@ def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
     if cached_value is not None:
         return cached_value
 
-    # Try disk cache
+    # Try per-key disk cache
     try:
-        cache_file = _get_cache_file()
-        if cache_file.exists():
-            data = json.loads(cache_file.read_text())
-            if key in data:
-                cached = data[key]
-                # Check if cache is less than 24 hours old
-                cache_time = datetime.fromisoformat(cached["timestamp"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
-                    _candle_cache_set(key, cached["candles"])
-                    return cached["candles"]
+        cache_path = _per_key_cache_path(key)
+        if cache_path.exists():
+            data = json.loads(cache_path.read_text())
+            # Check if cache is less than 24 hours old
+            cache_time = datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
+                _candle_cache_set(key, data["candles"])
+                return data["candles"]
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
 
@@ -591,99 +591,16 @@ async def _fetch_candles(
     timeframe: str = "5m",
     bars: int = 72,
     use_cache_fallback: bool = True,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], str]:
     """
-    Fetch OHLCV candles from IBKR.
+    Fetch OHLCV candles from IBKR and return with data source indicator.
 
     If live data is unavailable and use_cache_fallback is True, returns cached data.
 
-    Returns data in TradingView Lightweight Charts format:
-    [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
-    """
-    cache_key = f"{symbol}_{timeframe}_{bars}"
-
-    # Try cache first if provider not available (faster response when market closed)
-    provider = _get_data_provider()
-    if provider is None and use_cache_fallback:
-        cached = _load_candle_cache(cache_key)
-        if cached:
-            return cached
-
-    # Try to fetch live data with timeout
-    if provider is not None:
-        try:
-            # Calculate time range based on bars and timeframe (case-insensitive)
-            tf_lower = timeframe.lower()
-            tf_minutes = {
-                "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
-            }.get(tf_lower, 5)
-
-            end = datetime.now(timezone.utc)
-            start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
-
-            # Run blocking fetch_historical in thread pool with timeout
-            loop = asyncio.get_event_loop()
-            df = await asyncio.wait_for(
-                loop.run_in_executor(
-                    _executor,
-                    partial(
-                        provider.fetch_historical,
-                        symbol=symbol,
-                        start=start,
-                        end=end,
-                        timeframe=timeframe,
-                    )
-                ),
-                timeout=5.0  # 5 second timeout - fail fast if IBKR not responding
-            )
-
-            if df is not None and not df.empty:
-                # Convert to TradingView format
-                candles = []
-                for idx, row in df.tail(bars).iterrows():
-                    ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
-                    # Get volume - try different column name variations
-                    vol = row.get("Volume", row.get("volume", row.get("vol", 0)))
-                    candles.append({
-                        "time": ts,
-                        "open": float(row.get("Open", row.get("open", 0))),
-                        "high": float(row.get("High", row.get("high", 0))),
-                        "low": float(row.get("Low", row.get("low", 0))),
-                        "close": float(row.get("Close", row.get("close", 0))),
-                        "volume": int(vol) if vol else 0,
-                    })
-
-                # Cache successful fetch
-                _save_candle_cache(cache_key, candles)
-                return candles
-        except asyncio.TimeoutError:
-            pass  # Fall through to cache
-        except Exception as e:
-            logger.debug(f"Fall through to cache: {e}")
-
-    # Try cache fallback
-    if use_cache_fallback:
-        cached = _load_candle_cache(cache_key)
-        if cached:
-            return cached
-
-    # No live data and no cache
-    raise DataUnavailableError(
-        f"Market closed - no live data available. Cache not found for {symbol} {timeframe}."
-    )
-
-
-async def _fetch_candles_with_source(
-    symbol: str,
-    timeframe: str = "5m",
-    bars: int = 72,
-    use_cache_fallback: bool = True,
-) -> tuple:
-    """
-    Fetch OHLCV candles and return with data source indicator.
-
     Returns:
-        Tuple of (candles, data_source) where data_source is 'live' or 'cache'
+        Tuple of (candles, data_source) where data_source is ``'live'`` or ``'cache'``.
+        Candles are in TradingView Lightweight Charts format:
+        [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     cache_key = f"{symbol}_{timeframe}_{bars}"
 
@@ -758,244 +675,7 @@ async def _fetch_candles_with_source(
     )
 
 
-def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculate EMA, VWAP, Bollinger Bands, ATR Bands, and Volume Profile from candle data."""
-    if not candles:
-        return {
-            "ema9": [], "ema21": [], "vwap": [],
-            "bollingerBands": [], "atrBands": [], "volumeProfile": None
-        }
-
-    closes = [c["close"] for c in candles]
-    highs = [c["high"] for c in candles]
-    lows = [c["low"] for c in candles]
-    opens = [c["open"] for c in candles]
-    volumes = [c.get("volume", 1000) for c in candles]
-    times = [c["time"] for c in candles]
-
-    # EMA calculation
-    def ema(data, period):
-        result = []
-        multiplier = 2 / (period + 1)
-        ema_val = sum(data[:period]) / period if len(data) >= period else data[0]
-        for i, val in enumerate(data):
-            if i < period - 1:
-                result.append(None)
-            elif i == period - 1:
-                result.append(ema_val)
-            else:
-                ema_val = (val - ema_val) * multiplier + ema_val
-                result.append(ema_val)
-        return result
-
-    ema9 = ema(closes, 9)
-    ema21 = ema(closes, 21)
-
-    # VWAP calculation (simplified - cumulative)
-    vwap = []
-    cum_vol_price = 0
-    cum_vol = 0
-    for i, c in enumerate(candles):
-        typical_price = (highs[i] + lows[i] + closes[i]) / 3
-        cum_vol_price += typical_price * volumes[i]
-        cum_vol += volumes[i]
-        vwap.append(cum_vol_price / cum_vol if cum_vol > 0 else typical_price)
-
-    # Bollinger Bands (20 SMA, 2 std dev)
-    def calculate_bollinger_bands(data, period=20, num_std=2):
-        result = []
-        for i in range(len(data)):
-            if i < period - 1:
-                result.append(None)
-            else:
-                window = data[i - period + 1:i + 1]
-                sma = sum(window) / period
-                variance = sum((x - sma) ** 2 for x in window) / period
-                std = variance ** 0.5
-                result.append({
-                    "upper": sma + (num_std * std),
-                    "middle": sma,
-                    "lower": sma - (num_std * std)
-                })
-        return result
-
-    bb_values = calculate_bollinger_bands(closes)
-
-    # ATR Bands (14-period ATR, 2x multiplier)
-    def calculate_atr_bands(highs, lows, closes, period=14, multiplier=2):
-        # Calculate True Range
-        true_ranges = []
-        for i in range(len(closes)):
-            if i == 0:
-                tr = highs[i] - lows[i]
-            else:
-                tr = max(
-                    highs[i] - lows[i],
-                    abs(highs[i] - closes[i-1]),
-                    abs(lows[i] - closes[i-1])
-                )
-            true_ranges.append(tr)
-
-        # Calculate ATR using EMA
-        atr_values = []
-        atr = 0
-        for i in range(len(closes)):
-            if i < period - 1:
-                atr_values.append(None)
-            elif i == period - 1:
-                atr = sum(true_ranges[:period]) / period
-                atr_values.append(atr)
-            else:
-                atr = ((atr * (period - 1)) + true_ranges[i]) / period
-                atr_values.append(atr)
-
-        # Calculate bands around typical price
-        result = []
-        for i in range(len(closes)):
-            if atr_values[i] is not None:
-                typical_price = (highs[i] + lows[i] + closes[i]) / 3
-                result.append({
-                    "upper": typical_price + (multiplier * atr_values[i]),
-                    "lower": typical_price - (multiplier * atr_values[i]),
-                    "atr": atr_values[i]
-                })
-            else:
-                result.append(None)
-        return result
-
-    atr_bands = calculate_atr_bands(highs, lows, closes)
-
-    # Volume Profile calculation
-    def calculate_volume_profile(candles, num_levels=50, value_area_pct=0.70):
-        if not candles:
-            return None
-
-        max_price = max(highs)
-        min_price = min(lows)
-        price_range = max_price - min_price
-        if price_range == 0:
-            return None
-
-        level_height = price_range / num_levels
-
-        # Initialize levels
-        levels = {}
-        for i in range(num_levels):
-            level_price = min_price + (level_height * i) + (level_height / 2)
-            level_price = round(level_price, 2)
-            levels[level_price] = {"volume": 0, "buyVolume": 0, "sellVolume": 0}
-
-        # Distribute volume to price levels
-        for i, c in enumerate(candles):
-            vol = volumes[i]
-            is_bullish = closes[i] >= opens[i]
-            candle_high = highs[i]
-            candle_low = lows[i]
-
-            for price, level_data in levels.items():
-                if candle_low <= price <= candle_high:
-                    # Distribute volume proportionally
-                    candle_range = candle_high - candle_low
-                    if candle_range > 0:
-                        level_vol = vol / (candle_range / level_height)
-                    else:
-                        level_vol = vol / num_levels
-
-                    level_data["volume"] += level_vol
-                    if is_bullish:
-                        level_data["buyVolume"] += level_vol * 0.6
-                        level_data["sellVolume"] += level_vol * 0.4
-                    else:
-                        level_data["buyVolume"] += level_vol * 0.4
-                        level_data["sellVolume"] += level_vol * 0.6
-
-        # Find POC (Point of Control - highest volume level)
-        poc = min_price
-        max_vol = 0
-        for price, data in levels.items():
-            if data["volume"] > max_vol:
-                max_vol = data["volume"]
-                poc = price
-
-        # Calculate Value Area (70% of volume)
-        total_volume = sum(d["volume"] for d in levels.values())
-        target_volume = total_volume * value_area_pct
-
-        sorted_prices = sorted(levels.keys())
-        poc_index = sorted_prices.index(poc) if poc in sorted_prices else len(sorted_prices) // 2
-
-        cum_volume = levels.get(poc, {}).get("volume", 0)
-        vah_index = poc_index
-        val_index = poc_index
-
-        while cum_volume < target_volume:
-            upper_vol = levels.get(sorted_prices[vah_index + 1], {}).get("volume", 0) if vah_index < len(sorted_prices) - 1 else 0
-            lower_vol = levels.get(sorted_prices[val_index - 1], {}).get("volume", 0) if val_index > 0 else 0
-
-            if upper_vol >= lower_vol and vah_index < len(sorted_prices) - 1:
-                vah_index += 1
-                cum_volume += levels[sorted_prices[vah_index]]["volume"]
-            elif val_index > 0:
-                val_index -= 1
-                cum_volume += levels[sorted_prices[val_index]]["volume"]
-            else:
-                break
-
-        vah = sorted_prices[vah_index] if vah_index < len(sorted_prices) else max_price
-        val = sorted_prices[val_index] if val_index >= 0 else min_price
-
-        # Format levels for response
-        levels_list = [
-            {
-                "price": price,
-                "volume": round(data["volume"]),
-                "buyVolume": round(data["buyVolume"]),
-                "sellVolume": round(data["sellVolume"])
-            }
-            for price, data in levels.items()
-            if data["volume"] > 0
-        ]
-
-        return {
-            "levels": sorted(levels_list, key=lambda x: x["price"]),
-            "poc": round(poc, 2),
-            "vah": round(vah, 2),
-            "val": round(val, 2)
-        }
-
-    volume_profile = calculate_volume_profile(candles)
-
-    # Format Bollinger Bands data
-    bb_data = [
-        {
-            "time": times[i],
-            "upper": round(bb["upper"], 2),
-            "middle": round(bb["middle"], 2),
-            "lower": round(bb["lower"], 2)
-        }
-        for i, bb in enumerate(bb_values) if bb is not None
-    ]
-
-    # Format ATR Bands data
-    atr_data = [
-        {
-            "time": times[i],
-            "upper": round(atr["upper"], 2),
-            "lower": round(atr["lower"], 2),
-            "atr": round(atr["atr"], 2)
-        }
-        for i, atr in enumerate(atr_bands) if atr is not None
-    ]
-
-    # Format for TradingView
-    return {
-        "ema9": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(ema9) if v is not None],
-        "ema21": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(ema21) if v is not None],
-        "vwap": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(vwap)],
-        "bollingerBands": bb_data,
-        "atrBands": atr_data,
-        "volumeProfile": volume_profile,
-    }
+from pearlalgo.api.indicator_service import calculate_indicators as _calculate_indicators  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -1075,6 +755,13 @@ async def strip_path_prefix(request, call_next):
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
 _state_reader: Optional[StateReader] = None
+
+
+def _require_state_dir() -> Path:
+    """Return ``_state_dir`` or raise 500 if not configured."""
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+    return _state_dir
 
 
 def _get_state_reader() -> Optional[StateReader]:
@@ -1216,7 +903,7 @@ class ConnectionManager:
                         if st.st_mtime_ns != self._last_state_mtime_ns or st.st_size != self._last_state_size:
                             self._last_state_mtime_ns = st.st_mtime_ns
                             self._last_state_size = st.st_size
-                            self._cached_state = _read_state_safe()
+                            self._cached_state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
                     except FileNotFoundError:
                         if self._cached_state:
                             self._cached_state = {}
@@ -1242,7 +929,7 @@ class ConnectionManager:
                                     # context the UI sees (daily stats, recent exits, regime, etc).
                                     enriched = dict(state)
                                     try:
-                                        daily_stats = _compute_daily_stats(_state_dir)
+                                        daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
                                         enriched.update({
                                             "daily_pnl": daily_stats.get("daily_pnl"),
                                             "daily_trades": daily_stats.get("daily_trades"),
@@ -1253,7 +940,7 @@ class ConnectionManager:
                                         logger.debug(f"Non-critical: {e}")
 
                                     try:
-                                        enriched["recent_exits"] = _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100)
+                                        enriched["recent_exits"] = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
                                     except Exception as e:
                                         logger.debug(f"Non-critical: {e}")
 
@@ -1310,7 +997,7 @@ class ConnectionManager:
                             self._last_state_hash = combined_hash
 
                             # Build the same response as /api/state (full data for real-time updates)
-                            daily_stats = _compute_daily_stats(_state_dir)
+                            daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
                             broadcast_data = {
                                 "type": "state_update",
                                 "data": {
@@ -1505,10 +1192,11 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
         # Send initial state immediately (even when agent is stopped,
         # so the dashboard can show challenge / performance data).
         if _state_dir:
-            state = _read_state_safe()
+            state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
             # Broadcast if we have agent state OR persistent challenge data
             if state or _get_challenge_status(_state_dir):
-                daily_stats = _compute_daily_stats(_state_dir)
+                daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
+                recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
                 initial_data = {
                     "type": "initial_state",
                     "data": {
@@ -1524,7 +1212,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
                         "challenge": _get_challenge_status(_state_dir),
-                        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
+                        "recent_exits": recent_exits,
                         "performance": _compute_performance_stats(_state_dir),
                         "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                         "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
@@ -1572,9 +1260,10 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                 # Handle request for full state refresh
                 elif data == "refresh":
                     if _state_dir:
-                        state = _read_state_safe()
+                        state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
                         if state or _get_challenge_status(_state_dir):
-                            daily_stats = _compute_daily_stats(_state_dir)
+                            daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
+                            recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
                             refresh_data = {
                                 "type": "full_refresh",
                                 "data": {
@@ -1590,7 +1279,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
                                     "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
+                                    "recent_exits": recent_exits,
                                     "performance": _compute_performance_stats(_state_dir),
                                     "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                                     "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
@@ -1631,11 +1320,6 @@ async def health_check():
 
 def _get_market_status() -> Dict[str, Any]:
     """Get futures market open/closed status and next open time."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
     et_tz = ZoneInfo("America/New_York")
     now_et = datetime.now(et_tz)
     weekday = now_et.weekday()  # 0=Monday, 6=Sunday
@@ -1681,7 +1365,7 @@ def _get_market_status() -> Dict[str, Any]:
 
 
 @app.get("/api/market-status")
-async def get_market_status():
+async def get_market_status(_key: Optional[str] = Depends(verify_api_key)):
     """Get current market open/closed status."""
     return _get_market_status()
 
@@ -1691,6 +1375,7 @@ async def get_candles(
     symbol: str = Query(default="MNQ", description="Symbol to fetch"),
     timeframe: str = Query(default="5m", description="Timeframe (1m, 5m, 15m, 1h)"),
     bars: int = Query(default=72, ge=10, le=500, description="Number of bars"),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """
     Get OHLCV candle data for TradingView Lightweight Charts.
@@ -1703,7 +1388,7 @@ async def get_candles(
     """
     try:
         # Track whether we get cached or live data
-        candles, data_source = await _fetch_candles_with_source(
+        candles, data_source = await _fetch_candles(
             symbol=symbol, timeframe=timeframe, bars=bars, use_cache_fallback=True
         )
         return JSONResponse(
@@ -3111,16 +2796,16 @@ def _get_data_quality(state: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/api/state")
 async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     """Get current agent state with AI status, challenge, performance, and suggestions."""
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
-    state = _read_state_safe()
+    state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
 
     if not state:
         # Agent not running / state.json missing -- still serve persistent
         # data (challenge, performance, daily stats) so the dashboard is not
         # blank when the agent is stopped.
-        daily_stats = _compute_daily_stats(_state_dir)
+        daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
+        recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
         return {
             "running": False,
             "paused": False,
@@ -3135,7 +2820,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "ai_status": None,
             "challenge": _get_challenge_status(_state_dir),
-            "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
+            "recent_exits": recent_exits,
             "performance": _compute_performance_stats(_state_dir),
             "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
             "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
@@ -3144,7 +2829,8 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         }
 
     # Compute daily stats from actual trades
-    daily_stats = _compute_daily_stats(_state_dir)
+    daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
+    recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
 
     # Return relevant fields for live chart
     return {
@@ -3169,7 +2855,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "challenge": _get_challenge_status(_state_dir),
 
         # NEW: Recent exits
-        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
+        "recent_exits": recent_exits,
 
         # NEW: Performance stats
         "performance": _compute_performance_stats(_state_dir),
@@ -3261,12 +2947,11 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
     """
     _check_rate_limit("kill-switch")
 
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    sd = _require_state_dir()
 
     try:
-        _state_dir.mkdir(parents=True, exist_ok=True)
-        kill_file = _state_dir / "kill_request.flag"
+        sd.mkdir(parents=True, exist_ok=True)
+        kill_file = sd / "kill_request.flag"
         payload = {
             "requested_at": datetime.now(timezone.utc).isoformat(),
             "source": "web",
@@ -3299,12 +2984,11 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     """
     _check_rate_limit("close-all-trades")
 
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    sd = _require_state_dir()
 
     try:
-        _state_dir.mkdir(parents=True, exist_ok=True)
-        flag_file = _state_dir / "close_all_request.flag"
+        sd.mkdir(parents=True, exist_ok=True)
+        flag_file = sd / "close_all_request.flag"
         payload = {
             "requested_at": datetime.now(timezone.utc).isoformat(),
             "source": "web",
@@ -3346,8 +3030,7 @@ async def close_trade(
     if not signal_id:
         raise HTTPException(status_code=422, detail="Missing required field: signal_id")
 
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    sd = _require_state_dir()
 
     try:
         req_payload = {
@@ -3356,7 +3039,7 @@ async def close_trade(
             "requested_at": datetime.now(timezone.utc).isoformat(),
             "source": "web",
         }
-        out_path = _write_operator_request(_state_dir, "close_trade", req_payload)
+        out_path = _write_operator_request(sd, "close_trade", req_payload)
         logger.info("close-trade: wrote %s (signal_id=%s)", out_path, signal_id)
         acked = await _wait_for_ack(out_path)
         if acked:
@@ -3446,10 +3129,9 @@ async def pearl_suggestion_accept(
     Writes an operator request file for the agent to consume and apply to the
     shadow tracker (mark_followed).
     """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
-    state = _read_state_safe()
+    state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
 
     suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
     if not suggestion_id:
@@ -3484,10 +3166,9 @@ async def pearl_suggestion_dismiss(
     Writes an operator request file for the agent to consume and apply to the
     shadow tracker (mark_dismissed).
     """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
-    state = _read_state_safe()
+    state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
 
     suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
     if not suggestion_id:
@@ -3561,11 +3242,6 @@ def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime,
 
 def _get_trading_week_start(now_utc: datetime) -> datetime:
     """Start of current futures trading week (Sunday 6pm ET), returned in UTC."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
     et_tz = ZoneInfo("America/New_York")
     now_et = now_utc.astimezone(et_tz)
 
@@ -3592,11 +3268,6 @@ def _get_trading_week_start(now_utc: datetime) -> datetime:
 
 def _get_month_to_date_start(now_utc: datetime) -> datetime:
     """Month-to-date start aligned to futures trading day boundary (6pm ET)."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
     et_tz = ZoneInfo("America/New_York")
     now_et = now_utc.astimezone(et_tz)
     first_day = now_et.replace(day=1, hour=18, minute=0, second=0, microsecond=0)
@@ -3607,11 +3278,6 @@ def _get_month_to_date_start(now_utc: datetime) -> datetime:
 
 def _get_year_to_date_start(now_utc: datetime) -> datetime:
     """Year-to-date start aligned to futures trading day boundary (6pm ET)."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
     et_tz = ZoneInfo("America/New_York")
     now_et = now_utc.astimezone(et_tz)
     jan1_6pm = now_et.replace(month=1, day=1, hour=18, minute=0, second=0, microsecond=0)
@@ -3624,8 +3290,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     """
     Performance summary. MFFU: from Tradovate equity/fills. Inception: from performance.json.
     """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
     # MFFU: bucket Tradovate fills by time period for proper breakdowns
     if _is_mffu_account(_state_dir):
@@ -3668,7 +3333,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         }
 
     # Inception: existing performance.json logic (cached read)
-    cached_perf = _get_cached_performance_data(_state_dir)
+    cached_perf = await asyncio.get_event_loop().run_in_executor(None, _get_cached_performance_data, _state_dir)
     trades = cached_perf.get("trades")
     if trades is None:
         empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
@@ -3702,8 +3367,7 @@ async def get_trades(
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get recent trades. MFFU: from Tradovate fills. Inception: from signals.jsonl."""
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
     # MFFU: reconstruct trades from Tradovate fills
     if _is_mffu_account(_state_dir):
@@ -3755,8 +3419,7 @@ async def get_positions(
     Returns positions for display on chart as price lines.
     MFFU: uses live Tradovate positions instead of virtual signals.jsonl.
     """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
     # MFFU: return live Tradovate positions, enriched with TP/SL from virtual signals
     if _is_mffu_account(_state_dir):
@@ -3830,14 +3493,17 @@ async def get_indicators(
     symbol: str = Query(default="MNQ", description="Symbol"),
     timeframe: str = Query(default="5m", description="Timeframe"),
     bars: int = Query(default=72, ge=10, le=500, description="Number of bars"),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Get technical indicators for overlay.
     
     Returns 503 if real data is unavailable.
     """
     try:
-        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
-        indicators = _calculate_indicators(candles)
+        candles, _source = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+        # Cache indicators by candle fingerprint (last candle time + count)
+        ind_cache_key = f"indicators:{len(candles)}:{candles[-1]['time'] if candles else 0}"
+        indicators = _cached(ind_cache_key, 5.0, _calculate_indicators, candles)
         return JSONResponse(content=indicators)
     except DataUnavailableError as e:
         raise HTTPException(
@@ -3859,8 +3525,7 @@ async def get_markers(
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get trade entry/exit markers for chart overlay with tooltip metadata."""
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=2000)
@@ -3965,8 +3630,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
     Session and time-based performance analytics.
     MFFU: direction breakdown from Tradovate fills. Inception: from performance.json.
     """
-    if _state_dir is None:
-        raise HTTPException(status_code=500, detail="State directory not configured")
+    _require_state_dir()
 
     # MFFU: build full analytics from Tradovate fills
     if _is_mffu_account(_state_dir):
@@ -3981,8 +3645,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
         entered = total + open_count
 
         # Session performance (bucket trades by ET hour)
-        from zoneinfo import ZoneInfo as _ZI
-        _et = _ZI("America/New_York")
+        _et = ZoneInfo("America/New_York")
         _sessions = {
             "overnight": {"start": 18, "end": 4, "name": "Overnight", "pnl": 0.0, "wins": 0, "losses": 0},
             "premarket": {"start": 4, "end": 6, "name": "Premarket", "pnl": 0.0, "wins": 0, "losses": 0},

@@ -21,6 +21,7 @@ from ib_insync import IB
 from pearlalgo.execution.base import (
     ExecutionAdapter,
     ExecutionConfig,
+    ExecutionMode,
     ExecutionResult,
     OrderStatus,
     Position,
@@ -342,11 +343,10 @@ class IBKRExecutionAdapter(ExecutionAdapter):
             )
         
         # In dry_run mode, simulate success without placing orders
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             logger.info(f"DRY_RUN: Would place bracket order for {signal_id}")
-            self._orders_today += 1
             signal_type = signal.get("type", "unknown")
-            self._last_order_time[signal_type] = datetime.now(timezone.utc)
+            self.increment_order_count(signal_type)
             
             return ExecutionResult(
                 success=True,
@@ -400,9 +400,8 @@ class IBKRExecutionAdapter(ExecutionAdapter):
             )
             
             if result.get("success"):
-                self._orders_today += 1
                 signal_type = signal.get("type", "unknown")
-                self._last_order_time[signal_type] = datetime.now(timezone.utc)
+                self.increment_order_count(signal_type)
                 
                 return ExecutionResult(
                     success=True,
@@ -431,7 +430,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
     
     async def cancel_order(self, order_id: str) -> ExecutionResult:
         """Cancel a specific order."""
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             logger.info(f"DRY_RUN: Would cancel order {order_id}")
             return ExecutionResult(
                 success=True,
@@ -483,7 +482,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
         # Disarm immediately
         self.disarm()
         
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             logger.info("DRY_RUN: Would cancel all orders")
             return [ExecutionResult(
                 success=True,
@@ -554,7 +553,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
         # Disarm immediately (safety)
         self.disarm()
 
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             logger.info("DRY_RUN: Would flatten all positions")
             return [ExecutionResult(
                 success=True,
@@ -618,7 +617,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
     
     async def get_positions(self) -> List[Position]:
         """Get current positions."""
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             return list(self._positions.values())
         
         if not self.is_connected():
@@ -655,7 +654,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
     
     async def get_open_orders(self) -> List[Dict]:
         """Get open orders (for status display)."""
-        if self.config.mode.value == "dry_run":
+        if self.config.mode == ExecutionMode.DRY_RUN:
             return []
         
         if not self.is_connected():

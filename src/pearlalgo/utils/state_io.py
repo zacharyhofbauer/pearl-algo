@@ -18,6 +18,10 @@ from typing import Any, Dict, Generator, List
 
 from pearlalgo.utils.paths import get_utc_timestamp
 
+from logging import getLogger as _getLogger
+
+_logger = _getLogger(__name__)
+
 
 def load_json_file(path: Path) -> Dict[str, Any]:
     """Load a JSON file, returning empty dict on error.
@@ -32,7 +36,8 @@ def load_json_file(path: Path) -> Dict[str, Any]:
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        _logger.warning("Failed to load JSON file %s: %s: %s", path, type(e).__name__, e)
         return {}
 
 
@@ -86,7 +91,8 @@ def load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
                 except Exception:
                     pass  # skip malformed lines
         return result
-    except Exception:
+    except Exception as e:
+        _logger.warning("Failed to load JSONL file %s: %s: %s", path, type(e).__name__, e)
         return []
 
 

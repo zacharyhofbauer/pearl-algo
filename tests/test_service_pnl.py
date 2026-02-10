@@ -675,18 +675,31 @@ class TestPnLEdgeCases:
 
     def test_handles_empty_dataframe(self, mock_service):
         """Should handle empty market data."""
+        mock_service.performance_tracker.track_exit = MagicMock()
+        mock_service.state_manager.get_recent_signals = MagicMock(return_value=[])
+
         mock_service._update_virtual_trade_exits({"df": pd.DataFrame()})
 
-        # Should not raise
+        # Empty DataFrame triggers early return: no exits tracked, no signals fetched
+        mock_service.performance_tracker.track_exit.assert_not_called()
+        mock_service.state_manager.get_recent_signals.assert_not_called()
 
     def test_handles_none_market_data(self, mock_service):
         """Should handle None market data."""
+        mock_service.performance_tracker.track_exit = MagicMock()
+        mock_service.state_manager.get_recent_signals = MagicMock(return_value=[])
+
         mock_service._update_virtual_trade_exits(None)
 
-        # Should not raise
+        # None market data triggers early return: no exits tracked, no signals fetched
+        mock_service.performance_tracker.track_exit.assert_not_called()
+        mock_service.state_manager.get_recent_signals.assert_not_called()
 
     def test_handles_missing_required_columns(self, mock_service):
-        """Should handle DataFrame without required columns."""
+        """Should handle DataFrame without required columns without modifying state."""
+        mock_service.performance_tracker.track_exit = MagicMock()
+        mock_service.state_manager.get_recent_signals = MagicMock(return_value=[])
+
         df = pd.DataFrame({
             "close": [15000.0],
             # Missing timestamp, high, low
@@ -694,4 +707,6 @@ class TestPnLEdgeCases:
 
         mock_service._update_virtual_trade_exits({"df": df})
 
-        # Should not raise
+        # Missing columns triggers early return: no exits tracked, no signals fetched
+        mock_service.performance_tracker.track_exit.assert_not_called()
+        mock_service.state_manager.get_recent_signals.assert_not_called()

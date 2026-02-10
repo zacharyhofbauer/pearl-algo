@@ -513,14 +513,17 @@ class MarketAgentDataFetcher:
         # Use sync method (data providers use sync interface)
         # Run in executor to avoid blocking the event loop
         loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            None,
-            lambda: self.data_provider.fetch_historical(
-                self.config.get("symbol", "MNQ"),
-                start=start,
-                end=end,
-                timeframe=self.config.get("timeframe", "5m"),
-            )
+        df = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: self.data_provider.fetch_historical(
+                    self.config.get("symbol", "MNQ"),
+                    start=start,
+                    end=end,
+                    timeframe=self.config.get("timeframe", "5m"),
+                )
+            ),
+            timeout=60,
         )
         
         # Update cache on successful fetch (store provider-shaped data)
@@ -625,28 +628,34 @@ class MarketAgentDataFetcher:
 
             # Fetch 5m data
             if fetch_5m:
-                df_5m = await loop.run_in_executor(
-                    None,
-                    lambda: self.data_provider.fetch_historical(
-                        self.config.get("symbol", "MNQ"),
-                        start=start_5m,
-                        end=end,
-                        timeframe="5m",
-                    )
+                df_5m = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.data_provider.fetch_historical(
+                            self.config.get("symbol", "MNQ"),
+                            start=start_5m,
+                            end=end,
+                            timeframe="5m",
+                        )
+                    ),
+                    timeout=60,
                 )
             else:
                 df_5m = pd.DataFrame()
 
             # Fetch 15m data
             if fetch_15m:
-                df_15m = await loop.run_in_executor(
-                    None,
-                    lambda: self.data_provider.fetch_historical(
-                        self.config.get("symbol", "MNQ"),
-                        start=start_15m,
-                        end=end,
-                        timeframe="15m",
-                    )
+                df_15m = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.data_provider.fetch_historical(
+                            self.config.get("symbol", "MNQ"),
+                            start=start_15m,
+                            end=end,
+                            timeframe="15m",
+                        )
+                    ),
+                    timeout=60,
                 )
             else:
                 df_15m = pd.DataFrame()

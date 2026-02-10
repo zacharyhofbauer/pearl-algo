@@ -98,6 +98,10 @@ class TestSQLiteQueueFailure:
         except Exception:
             pass  # Queue full is acceptable -- must not crash
 
+        # Worker was never started so all writes are dropped, queue stays empty
+        assert queue._queue.qsize() == 0, "Queue should be empty since worker was never started"
+        assert queue._total_drops >= 1, "At least one write should have been dropped"
+
         # Cleanup
         try:
             queue.stop(timeout=1.0)

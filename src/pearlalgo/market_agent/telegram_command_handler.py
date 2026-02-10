@@ -667,7 +667,7 @@ class TelegramCommandHandler(
         if not update.message:
             return
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         raw = str(getattr(update.message, "text", "") or "").strip()
@@ -699,7 +699,7 @@ class TelegramCommandHandler(
         if not update.message:
             return
         if not await self._check_authorized(update):
-            await update.message.reply_text("Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         # Extract message after /pearl command
@@ -823,7 +823,7 @@ class TelegramCommandHandler(
         if not update.message:
             return
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
         logger.info("Received /help command")
 
@@ -843,7 +843,7 @@ class TelegramCommandHandler(
         if not update.message:
             return
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
         logger.info("Received /settings command")
 
@@ -908,10 +908,7 @@ class TelegramCommandHandler(
             logger.warning(f"Failed to answer callback: {e}")
         
         if not await self._check_authorized(update):
-            try:
-                await query.edit_message_text("❌ Unauthorized access")
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}", exc_info=True)
+            await self._reply_unauthorized(update, context)
             return
         
         # Resolve legacy callbacks to canonical form (backward compatibility)
@@ -5747,6 +5744,10 @@ class TelegramCommandHandler(
         got = getattr(getattr(update, "effective_chat", None), "id", None)
         return str(got) == expected
 
+    async def _reply_unauthorized(self, update: Any, context: Any) -> None:
+        """Send a standard unauthorized-access reply."""
+        await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+
     async def _handle_callback(self, update: Any, context: Any) -> None:
         """Legacy callback handler expected by tests."""
         query = getattr(update, "callback_query", None)
@@ -5761,10 +5762,7 @@ class TelegramCommandHandler(
             logger.debug(f"Non-critical: {e}", exc_info=True)
 
         if not await self._check_authorized(update):
-            if callable(getattr(query, "edit_message_text", None)):
-                await query.edit_message_text("❌ Unauthorized access")
-            else:
-                await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         data = str(getattr(query, "data", "") or "")
@@ -5805,7 +5803,7 @@ class TelegramCommandHandler(
     async def _handle_status(self, update: Any, context: Any) -> None:
         """Legacy /status handler expected by tests."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         state = None
@@ -5844,12 +5842,7 @@ class TelegramCommandHandler(
     async def _handle_signals(self, update: Any, context: Any) -> None:
         """Legacy /signals handler expected by tests."""
         if not await self._check_authorized(update):
-            # Tests expect reply_text called with EXACT args (no kwargs)
-            message = getattr(update, "message", None)
-            if message is not None and callable(getattr(message, "reply_text", None)):
-                await message.reply_text("❌ Unauthorized access")
-            else:
-                await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         try:
@@ -5907,7 +5900,7 @@ class TelegramCommandHandler(
     async def _handle_performance(self, update: Any, context: Any) -> None:
         """Legacy /performance handler expected by tests."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         tracker = getattr(self, "performance_tracker", None)
@@ -5961,7 +5954,7 @@ class TelegramCommandHandler(
     async def _handle_doctor(self, update: Any, context: Any) -> None:
         """Legacy /doctor rollup expected by tests (prefers SQLite TradeDatabase if present)."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         db = getattr(self, "_trade_db", None)
@@ -6138,7 +6131,7 @@ class TelegramCommandHandler(
     async def _handle_report_detail_by_idx(self, update: Any, context: Any, report_idx: int) -> None:
         """Show report artifacts using report index (short callback_data IDs)."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         reports_dir = self._get_reports_dir()
@@ -6166,7 +6159,7 @@ class TelegramCommandHandler(
     async def _handle_report_artifact_by_idx(self, update: Any, context: Any, report_idx: int, artifact_idx: int) -> None:
         """Send a report artifact file to Telegram."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         reports_dir = self._get_reports_dir()
@@ -6213,7 +6206,7 @@ class TelegramCommandHandler(
     async def _render_strategy_review_more_menu(self, update: Any, context: Any) -> None:
         """Render Strategy Review 'More' menu (test expects Backtest/Reports/Export buttons)."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         rm = InlineKeyboardMarkup(
@@ -6235,7 +6228,7 @@ class TelegramCommandHandler(
     async def _handle_backtest_reports(self, update: Any, context: Any, *, page: int = 0) -> None:
         """List backtest reports with short callback_data IDs (<= 64 bytes)."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         try:
@@ -6275,7 +6268,7 @@ class TelegramCommandHandler(
     async def _handle_report_detail(self, update: Any, context: Any, report_name: str) -> None:
         """Show report artifacts with short callback_data IDs (<= 64 bytes)."""
         if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            await self._reply_unauthorized(update, context)
             return
 
         try:

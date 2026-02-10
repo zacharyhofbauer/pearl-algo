@@ -263,7 +263,11 @@ def apply_learning_env_overrides(learning_cfg: Dict[str, Any]) -> None:
     Environment variables checked:
         - PEARLALGO_LEARNING_ENABLED: bool (enable/disable learning)
         - PEARLALGO_LEARNING_MODE: str (shadow|live)
-        
+
+    .. deprecated::
+        Wire this into ``config_loader.load_service_config`` to activate.
+        Currently unused; kept for forward compatibility.
+
     Args:
         learning_cfg: Learning configuration dict (mutated in place)
     """

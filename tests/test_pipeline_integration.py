@@ -493,3 +493,259 @@ class TestFailurePaths:
         inner = recent[0].get("signal", recent[0])
         assert inner.get("entry_price") == 17700.0
         assert inner.get("direction") == "long"
+
+
+# ---------------------------------------------------------------------------
+# WS12: State persist-and-reload across manager instances
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestStatePersistAndReload:
+    """Verify state and signals persist across MarketAgentStateManager instances."""
+
+    def test_state_survives_manager_recreation(self, tmp_path: Path):
+        """Save state + signal with one manager, load them with a brand-new instance."""
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+        # --- Write with first manager ---
+        sm1 = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+        state = {
+            "signal_count": 42,
+            "running": True,
+            "win_rate": 0.65,
+            "total_pnl": 1250.50,
+        }
+        sm1.save_state(state)
+
+        signal = _make_signal(entry=17600.0, direction="long")
+        sm1.save_signal(signal)
+
+        # --- Create a brand-new manager for the same directory ---
+        sm2 = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+
+        # State must round-trip through a fresh instance
+        loaded = sm2.load_state()
+        assert loaded["signal_count"] == 42
+        assert loaded["running"] is True
+        assert loaded["win_rate"] == 0.65
+        assert loaded["total_pnl"] == 1250.50
+        assert "last_updated" in loaded
+
+        # Signal must also survive across instances
+        recent = sm2.get_recent_signals(limit=10)
+        assert len(recent) == 1
+        inner = recent[0].get("signal", recent[0])
+        assert inner.get("direction") == "long"
+        assert inner.get("entry_price") == 17600.0
+
+    def test_events_survive_manager_recreation(self, tmp_path: Path):
+        """Events persisted by one manager must be readable by a new instance."""
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+        sm1 = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+        sm1.append_event("trade_entry", {
+            "signal_id": "test-001",
+            "direction": "long",
+            "entry_price": 17600.0,
+        })
+        sm1.append_event("trade_exit", {
+            "signal_id": "test-001",
+            "exit_price": 17630.0,
+            "pnl": 30.0,
+        })
+
+        sm2 = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+        events = sm2.get_recent_events(limit=10)
+        assert len(events) == 2
+        assert events[0]["type"] == "trade_entry"
+        assert events[1]["type"] == "trade_exit"
+        assert events[1]["payload"]["pnl"] == 30.0
+
+
+# ---------------------------------------------------------------------------
+# WS12: Full signal pipeline through SignalHandler
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestSignalPipeline:
+    """Verify the signal processing pipeline end-to-end via SignalHandler."""
+
+    def test_process_signal_updates_counters(self, tmp_path: Path):
+        """A valid signal should flow through the pipeline and update all counters."""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+
+        from pearlalgo.market_agent.signal_handler import SignalHandler
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+        # Real state manager (persists to disk)
+        sm = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+
+        # Mock performance tracker — returns a known signal_id
+        perf_tracker = MagicMock()
+        perf_tracker.track_signal_generated.return_value = "test-signal-id-001"
+        perf_tracker.track_entry = MagicMock()
+
+        # Mock notification queue — async enqueue returns True (success)
+        notif_queue = MagicMock()
+        notif_queue.enqueue_entry = AsyncMock(return_value=True)
+
+        # Mock order manager
+        order_manager = MagicMock()
+
+        handler = SignalHandler(
+            state_manager=sm,
+            performance_tracker=perf_tracker,
+            notification_queue=notif_queue,
+            order_manager=order_manager,
+        )
+
+        # Pre-conditions
+        assert handler.signal_count == 0
+        assert handler.signals_sent == 0
+        assert handler.error_count == 0
+
+        signal = _make_signal(entry=17600.0, direction="long")
+        asyncio.run(handler.process_signal(signal))
+
+        # Post-conditions: signal was fully processed
+        assert handler.signal_count == 1, "signal_count should be incremented"
+        assert handler.signals_sent == 1, "signals_sent should be incremented"
+        assert handler.error_count == 0, "no errors expected"
+        assert handler.last_signal_generated_at is not None
+        assert handler.last_signal_id_prefix == "test-signal-id-0"
+
+        # Performance tracker should have been called
+        perf_tracker.track_signal_generated.assert_called_once()
+        perf_tracker.track_entry.assert_called_once()
+
+        # Notification should have been queued
+        notif_queue.enqueue_entry.assert_called_once()
+
+    def test_process_signal_rejects_none_entry_price(self, tmp_path: Path):
+        """A signal with None entry_price should be rejected (no crash, no counter bump)."""
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock
+
+        from pearlalgo.market_agent.signal_handler import SignalHandler
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+        sm = MarketAgentStateManager(state_dir=tmp_path, service_config={})
+        perf_tracker = MagicMock()
+        perf_tracker.track_signal_generated.return_value = "bad-signal-id"
+        notif_queue = MagicMock()
+        notif_queue.enqueue_entry = AsyncMock(return_value=True)
+        order_manager = MagicMock()
+
+        handler = SignalHandler(
+            state_manager=sm,
+            performance_tracker=perf_tracker,
+            notification_queue=notif_queue,
+            order_manager=order_manager,
+        )
+
+        signal = _make_signal(entry=17600.0, direction="long")
+        signal["entry_price"] = None  # Invalid
+
+        asyncio.run(handler.process_signal(signal))
+
+        # Signal should be rejected: signal_count NOT incremented
+        assert handler.signal_count == 0
+        assert handler.error_count == 0  # rejection is not an error
+        # Notification should NOT have been queued
+        notif_queue.enqueue_entry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# WS12: Config-to-service startup via ServiceDependencies
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestConfigToServiceStartup:
+    """Verify ServiceDependencies resolves defaults and service can be constructed."""
+
+    def test_service_dependencies_resolve_defaults(self, tmp_path: Path):
+        """ServiceDependencies.resolve_defaults() should populate all core deps."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        # asyncio.run() in earlier tests closes the main loop;
+        # ib_insync/eventkit need one at import time on Python 3.12+.
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
+        from pearlalgo.config.config_view import ConfigView
+        from pearlalgo.market_agent.service_factory import ServiceDependencies
+
+        mock_provider = MagicMock()
+        config = ConfigView({
+            "symbol": "MNQ",
+            "timeframe": "5m",
+            "scan_interval": 30,
+            "virtual_pnl_enabled": True,
+        })
+
+        deps = ServiceDependencies(
+            data_provider=mock_provider,
+            config=config,
+            state_dir=tmp_path,
+            service_config={"_test": True},  # non-empty to skip file load
+        )
+        deps.resolve_defaults()
+
+        # All core dependencies should have been created
+        assert deps.state_manager is not None
+        assert deps.performance_tracker is not None
+        assert deps.telegram_notifier is not None
+        assert deps.notification_queue is not None
+        assert deps.health_monitor is not None
+        assert deps.data_fetcher is not None
+
+        # State manager should point to the correct directory
+        assert deps.state_manager.state_dir == tmp_path
+
+    def test_market_agent_service_construction(self, tmp_path: Path):
+        """MarketAgentService can be constructed from ServiceDependencies without errors."""
+        import asyncio
+        from unittest.mock import MagicMock
+
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
+        from pearlalgo.config.config_view import ConfigView
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.market_agent.service_factory import ServiceDependencies
+
+        mock_provider = MagicMock()
+        config = ConfigView({
+            "symbol": "MNQ",
+            "timeframe": "5m",
+            "scan_interval": 30,
+            "virtual_pnl_enabled": True,
+        })
+
+        deps = ServiceDependencies(
+            data_provider=mock_provider,
+            config=config,
+            state_dir=tmp_path,
+            service_config={"_test": True},
+        )
+
+        service = MarketAgentService(deps=deps)
+
+        # Key attributes should be initialized
+        assert service.symbol == "MNQ"
+        assert service.timeframe == "5m"
+        assert service.state_manager is not None
+        assert service.performance_tracker is not None
+        assert service.telegram_notifier is not None
+        assert service.notification_queue is not None
+        assert service.running is False
+        assert service.signal_count >= 0

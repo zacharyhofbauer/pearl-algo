@@ -10,11 +10,16 @@ import pytest
 from pearlalgo.trading_bots.pearl_bot_auto import (
     CONFIG,
     MarketRegime,
+    StrategyParams,
+    _apply_filters,
     _safe_div,
     _safe_pct,
     _get_key_levels_cache_key,
     _clear_key_levels_cache_if_needed,
+    check_vwap_position,
+    detect_ema_crossover,
     detect_market_regime,
+    detect_vwap_cross,
     calculate_ema,
     calculate_vwap,
     calculate_vwap_bands,
@@ -22,6 +27,11 @@ from pearlalgo.trading_bots.pearl_bot_auto import (
     calculate_atr,
     generate_signals,
     check_trading_session,
+    check_vwap_position,
+    detect_ema_crossover,
+    detect_vwap_cross,
+    _apply_filters,
+    StrategyParams,
 )
 
 
@@ -502,3 +512,309 @@ class TestCONFIG:
         assert CONFIG.get("min_confidence", 0.55) < 1.0
         assert CONFIG.get("stop_loss_atr_mult", 3.5) > 0.0
         assert CONFIG.get("take_profit_atr_mult", 5.0) > 0.0
+
+
+# ============================================================================
+# STRATEGY FUNCTION TESTS
+# ============================================================================
+
+
+class TestDetectEmaCrossover:
+    """Test EMA crossover detection."""
+
+    def test_bullish_crossover(self):
+        """Bullish crossover: fast EMA crosses above slow EMA on last bar."""
+        # Flat period establishes EMAs near 100, decline pushes fast below slow,
+        # then a spike on the last bar makes fast cross above slow.
+        n = 51
+        close = np.array([100.0] * 30 + [90.0] * 20 + [110.0])
+        df = pd.DataFrame({
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": np.full(n, 5000.0),
+        })
+        config = {"ema_fast": 9, "ema_slow": 21}
+        bullish, bearish = detect_ema_crossover(df, config)
+        assert bullish
+        assert not bearish
+
+    def test_bearish_crossover(self):
+        """Bearish crossover: fast EMA crosses below slow EMA on last bar."""
+        # Flat period, then rise pushes fast above slow,
+        # then a drop on the last bar makes fast cross below slow.
+        n = 51
+        close = np.array([100.0] * 30 + [110.0] * 20 + [90.0])
+        df = pd.DataFrame({
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": np.full(n, 5000.0),
+        })
+        config = {"ema_fast": 9, "ema_slow": 21}
+        bullish, bearish = detect_ema_crossover(df, config)
+        assert bearish
+        assert not bullish
+
+    def test_no_crossover_flat_prices(self):
+        """No crossover when prices are flat — EMAs converge and stay equal."""
+        n = 50
+        close = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "open": close,
+            "high": close + 0.5,
+            "low": close - 0.5,
+            "close": close,
+            "volume": np.full(n, 5000.0),
+        })
+        config = {"ema_fast": 9, "ema_slow": 21}
+        bullish, bearish = detect_ema_crossover(df, config)
+        assert not bullish
+        assert not bearish
+
+    def test_insufficient_data_single_element(self):
+        """Single-element series is shorter than ema_slow; returns (False, False)."""
+        df = pd.DataFrame({
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.0],
+            "volume": [5000.0],
+        })
+        config = {"ema_fast": 9, "ema_slow": 21}
+        bullish, bearish = detect_ema_crossover(df, config)
+        assert not bullish
+        assert not bearish
+
+
+class TestCheckVwapPosition:
+    """Test price-vs-VWAP position checks."""
+
+    def test_price_above_vwap(self):
+        """Price above VWAP returns (True, False)."""
+        n = 25
+        df = pd.DataFrame({
+            "open": np.full(n, 105.0),
+            "high": np.full(n, 106.0),
+            "low": np.full(n, 104.0),
+            "close": np.full(n, 105.0),
+            "volume": np.full(n, 5000.0),
+        })
+        vwap = pd.Series(np.full(n, 100.0))
+        above, below = check_vwap_position(df, {}, vwap_series=vwap)
+        assert above
+        assert not below
+
+    def test_price_below_vwap(self):
+        """Price below VWAP returns (False, True)."""
+        n = 25
+        df = pd.DataFrame({
+            "open": np.full(n, 95.0),
+            "high": np.full(n, 96.0),
+            "low": np.full(n, 94.0),
+            "close": np.full(n, 95.0),
+            "volume": np.full(n, 5000.0),
+        })
+        vwap = pd.Series(np.full(n, 100.0))
+        above, below = check_vwap_position(df, {}, vwap_series=vwap)
+        assert not above
+        assert below
+
+    def test_price_at_vwap(self):
+        """Price exactly at VWAP returns (False, False) — neither above nor below."""
+        n = 25
+        df = pd.DataFrame({
+            "open": np.full(n, 100.0),
+            "high": np.full(n, 101.0),
+            "low": np.full(n, 99.0),
+            "close": np.full(n, 100.0),
+            "volume": np.full(n, 5000.0),
+        })
+        vwap = pd.Series(np.full(n, 100.0))
+        above, below = check_vwap_position(df, {}, vwap_series=vwap)
+        assert not above
+        assert not below
+
+
+class TestDetectVwapCross:
+    """Test VWAP cross detection."""
+
+    def test_bullish_vwap_cross(self):
+        """Price crosses from below to above VWAP on last bar."""
+        df = pd.DataFrame({
+            "open": [98.0, 101.0],
+            "high": [99.0, 103.0],
+            "low": [97.0, 101.0],
+            "close": [98.0, 102.0],
+            "volume": [5000.0, 5000.0],
+        })
+        vwap = pd.Series([100.0, 100.0])
+        bullish, bearish = detect_vwap_cross(df, vwap_series=vwap)
+        assert bullish
+        assert not bearish
+
+    def test_bearish_vwap_cross(self):
+        """Price crosses from above to below VWAP on last bar."""
+        df = pd.DataFrame({
+            "open": [102.0, 99.0],
+            "high": [103.0, 99.0],
+            "low": [101.0, 97.0],
+            "close": [102.0, 98.0],
+            "volume": [5000.0, 5000.0],
+        })
+        vwap = pd.Series([100.0, 100.0])
+        bullish, bearish = detect_vwap_cross(df, vwap_series=vwap)
+        assert bearish
+        assert not bullish
+
+    def test_no_vwap_cross(self):
+        """No cross when price stays on the same side of VWAP."""
+        df = pd.DataFrame({
+            "open": [102.0, 103.0],
+            "high": [103.0, 105.0],
+            "low": [101.0, 102.0],
+            "close": [102.0, 104.0],
+            "volume": [5000.0, 5000.0],
+        })
+        vwap = pd.Series([100.0, 100.0])
+        bullish, bearish = detect_vwap_cross(df, vwap_series=vwap)
+        assert not bullish
+        assert not bearish
+
+
+class TestApplyFilters:
+    """Test _apply_filters post-processing and regime adjustments."""
+
+    def test_reduced_regime_scales_confidence(self):
+        """Reduced-size regime multiplies confidence by regime_reduced_multiplier."""
+        signals = [{"confidence": 0.80}]
+        params = StrategyParams(min_confidence=0.40)
+        regime = MarketRegime(
+            regime="ranging", confidence=0.6,
+            trend_strength=0.3, volatility_ratio=1.0,
+            recommendation="reduced_size",
+        )
+        filtered = _apply_filters(signals, params, regime)
+        assert len(filtered) == 1
+        expected = round(0.80 * params.regime_reduced_multiplier, 4)
+        assert filtered[0]["confidence"] == expected
+        assert filtered[0]["regime_adjustment"]["multiplier"] == params.regime_reduced_multiplier
+
+    def test_avoid_regime_drops_weak_signal(self):
+        """Avoid regime pushes confidence below min_confidence, dropping the signal."""
+        signals = [{"confidence": 0.60}]
+        params = StrategyParams(min_confidence=0.55)
+        regime = MarketRegime(
+            regime="volatile", confidence=0.7,
+            trend_strength=0.1, volatility_ratio=3.0,
+            recommendation="avoid",
+        )
+        filtered = _apply_filters(signals, params, regime)
+        # 0.60 * 0.5 = 0.30 < 0.55 → dropped
+        assert len(filtered) == 0
+
+    def test_confidence_capped_at_max(self):
+        """Confidence never exceeds params.max_confidence."""
+        signals = [{"confidence": 0.99}]
+        params = StrategyParams(min_confidence=0.40, max_confidence=0.95)
+        regime = MarketRegime(
+            regime="trending_up", confidence=0.9,
+            trend_strength=0.8, volatility_ratio=1.0,
+            recommendation="full_size",
+        )
+        filtered = _apply_filters(signals, params, regime)
+        assert len(filtered) == 1
+        assert filtered[0]["confidence"] <= 0.95
+
+
+class TestGenerateSignalsStrengthened:
+    """Strengthened tests for generate_signals output structure."""
+
+    @staticmethod
+    def _build_crossover_df():
+        """Build DataFrame designed to trigger a bullish EMA crossover with volume."""
+        n = 51
+        # Flat → decline → spike: fast EMA crosses above slow EMA on last bar
+        close = np.array([100.0] * 30 + [90.0] * 20 + [110.0])
+        volume = np.array([5000.0] * 50 + [15000.0])
+        return pd.DataFrame({
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": volume,
+        })
+
+    @staticmethod
+    def _build_config(**overrides):
+        """Build a full config dict suitable for generate_signals."""
+        cfg = {
+            "symbol": "TEST",
+            "timeframe": "5m",
+            "ema_fast": 9,
+            "ema_slow": 21,
+            "vwap_std_dev": 1.0,
+            "vwap_bands": 2,
+            "volume_ma_length": 20,
+            "sr_length": 130,
+            "sr_extend": 30,
+            "sr_atr_mult": 0.5,
+            "tbt_period": 10,
+            "tbt_trend_type": "wicks",
+            "tbt_extend": 25,
+            "sd_threshold_pct": 10.0,
+            "sd_resolution": 50,
+            "key_level_proximity_pct": 0.15,
+            "key_level_breakout_pct": 0.05,
+            "key_level_bounce_confidence": 0.12,
+            "key_level_breakout_confidence": 0.10,
+            "key_level_rejection_penalty": 0.08,
+            "stop_loss_atr_mult": 3.5,
+            "take_profit_atr_mult": 5.0,
+            # Low thresholds to survive regime adjustment
+            "min_confidence": 0.15,
+            "min_risk_reward": 1.0,
+            "start_hour": 9,
+            "start_minute": 30,
+            "end_hour": 16,
+            "end_minute": 0,
+            "allow_vwap_cross_entries": False,
+            "allow_vwap_retest_entries": False,
+            "allow_trend_momentum_entries": False,
+            "allow_trend_breakout_entries": False,
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def test_signal_has_required_fields(self):
+        """Generated signals must contain all required fields."""
+        df = self._build_crossover_df()
+        config = self._build_config()
+        trading_time = datetime(2024, 1, 15, 15, 0, 0, tzinfo=timezone.utc)
+
+        signals = generate_signals(df, config=config, current_time=trading_time)
+        assert len(signals) >= 1, "Expected at least one signal from crafted crossover data"
+
+        required_fields = {
+            "type", "direction", "entry_price",
+            "stop_loss", "take_profit", "confidence",
+        }
+        for signal in signals:
+            for field in required_fields:
+                assert field in signal, f"Missing required field: {field}"
+
+    def test_signal_value_ranges(self):
+        """Signal values fall within valid ranges."""
+        df = self._build_crossover_df()
+        config = self._build_config()
+        trading_time = datetime(2024, 1, 15, 15, 0, 0, tzinfo=timezone.utc)
+
+        signals = generate_signals(df, config=config, current_time=trading_time)
+        assert len(signals) >= 1, "Expected at least one signal"
+
+        for signal in signals:
+            assert signal["entry_price"] > 0
+            assert 0 < signal["confidence"] <= 1.0
+            assert signal["direction"] in ("long", "short")

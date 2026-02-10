@@ -21,6 +21,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from pearlalgo.config.defaults import (
+    CONFIDENCE_HIGH_SIZE_MULTIPLIER,
+    CONFIDENCE_LOW_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_THRESHOLD,
+)
 from pearlalgo.learning.feature_engineer import FeatureVector
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.model_integrity import save_model_hash, verify_model_hash
@@ -569,13 +575,13 @@ class EnsembleScorer:
         # Confidence tier
         if ensemble_score >= self.config.confidence_boost_threshold:
             confidence_tier = "high"
-            size_multiplier = 1.3
-        elif ensemble_score >= 0.5:
+            size_multiplier = CONFIDENCE_HIGH_SIZE_MULTIPLIER
+        elif ensemble_score >= CONFIDENCE_MEDIUM_THRESHOLD:
             confidence_tier = "medium"
-            size_multiplier = 1.0
+            size_multiplier = CONFIDENCE_MEDIUM_SIZE_MULTIPLIER
         else:
             confidence_tier = "low"
-            size_multiplier = 0.7
+            size_multiplier = CONFIDENCE_LOW_SIZE_MULTIPLIER
         
         # Build reason
         if execute:

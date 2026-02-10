@@ -141,6 +141,103 @@ class OperatorHandler:
             grade_file.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
+    # Close Trade Requests
+    # ------------------------------------------------------------------
+
+    async def process_close_trade_requests(self, state_dir: Path) -> None:
+        """Process close_trade request files written by the web API.
+
+        Reads ``operator_requests/close_trade_*.json`` files, extracts signal_ids,
+        and appends them to ``close_signals_requested`` in state.json so that the
+        main agent loop can close the positions (virtual + broker).
+        """
+        req_dir = Path(state_dir) / "operator_requests"
+        if not req_dir.exists():
+            return
+
+        try:
+            files = sorted([p for p in req_dir.glob("close_trade_*.json") if p.is_file()])
+        except Exception as e:
+            logger.warning(f"Failed listing close_trade files: {e}")
+            return
+
+        if not files:
+            return
+
+        new_signal_ids: list[str] = []
+        for fp in files[:50]:
+            try:
+                raw = fp.read_text(encoding="utf-8")
+                rec = json.loads(raw) if raw else {}
+                if not isinstance(rec, dict):
+                    continue
+
+                signal_id = str(rec.get("signal_id") or "").strip()
+                if not signal_id:
+                    logger.warning(f"close_trade request missing signal_id: {fp.name}")
+                    continue
+
+                new_signal_ids.append(signal_id)
+                logger.info(f"Ingested close_trade request: signal_id={signal_id} from {fp.name}")
+            except Exception as e:
+                logger.warning(f"Failed to process close_trade request {fp.name}: {e}")
+            finally:
+                try:
+                    fp.unlink(missing_ok=True)
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
+
+        if not new_signal_ids:
+            return
+
+        # Merge into close_signals_requested in state.json
+        try:
+            state = self.state_manager.load_state()
+            if not isinstance(state, dict):
+                state = {}
+            existing = list(state.get("close_signals_requested", []))
+            # Deduplicate while preserving order
+            merged = list(dict.fromkeys(existing + new_signal_ids))
+            state["close_signals_requested"] = merged
+            state["close_signals_requested_time"] = datetime.now(timezone.utc).isoformat()
+            self.state_manager.save_state(state)
+            logger.info(f"Updated close_signals_requested: {merged}")
+        except Exception as e:
+            logger.error(f"Failed to update close_signals_requested in state: {e}")
+
+    # ------------------------------------------------------------------
+    # Close All Flag (web API → state.json bridge)
+    # ------------------------------------------------------------------
+
+    async def process_close_all_flag(self, state_dir: Path) -> None:
+        """Ingest ``close_all_request.flag`` written by the web API.
+
+        The web API writes a flag file instead of editing state.json directly
+        (to avoid race conditions with the agent).  This method reads the flag
+        and sets ``close_all_requested=True`` in state.json so the main agent
+        loop can process it.
+        """
+        flag_file = Path(state_dir) / "close_all_request.flag"
+        if not flag_file.exists():
+            return
+
+        try:
+            state = self.state_manager.load_state()
+            if not isinstance(state, dict):
+                state = {}
+            state["close_all_requested"] = True
+            state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
+            self.state_manager.save_state(state)
+            logger.info("Ingested close_all_request.flag → close_all_requested=True in state")
+        except Exception as e:
+            logger.error(f"Failed to set close_all_requested in state: {e}")
+        finally:
+            try:
+                flag_file.unlink(missing_ok=True)
+            except Exception as e:
+                logger.debug(f"Non-critical: {e}")
+
+    # ------------------------------------------------------------------
     # Operator Requests (Pearl suggestion feedback)
     # ------------------------------------------------------------------
 
@@ -157,7 +254,7 @@ class OperatorHandler:
         try:
             files = sorted([p for p in req_dir.glob("pearl_suggestion_feedback_*.json") if p.is_file()])
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.warning(f"Failed listing pearl_suggestion_feedback files: {e}")
             return
 
         if not files:

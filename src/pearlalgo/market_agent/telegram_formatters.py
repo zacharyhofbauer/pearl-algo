@@ -825,7 +825,7 @@ class TelegramFormattersMixin:
         # Recent trades (last 5)
         lines.append("*Recent:*")
         for trade in trades[-5:]:
-            direction = trade.get("direction", "?")[0].upper()
+            direction = (trade.get("direction") or "?")[:1].upper()
             pnl = float(trade.get("pnl", 0) or 0)
             is_win = trade.get("is_win")
             outcome = "✅" if is_win else "❌"

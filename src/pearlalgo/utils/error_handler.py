@@ -87,8 +87,8 @@ class ErrorHandler:
                     if hasattr(executor, 'is_connected'):
                         if not executor.is_connected():
                             return True  # IBKR executor is disconnected
-        except Exception:
-            pass  # If we can't check, don't assume connection issue
+        except Exception as e:
+            logger.debug("Connection check failed: %s: %s", type(e).__name__, e)
 
         # For IBKR providers: If data is empty and we have no latest_bar, 
         # and we've had recent successful cycles, likely a connection issue
@@ -109,8 +109,8 @@ class ErrorHandler:
                                 time_since_success = (datetime.now(timezone.utc) - last_successful_cycle).total_seconds()
                                 if time_since_success < 600:  # Had data within last 10 minutes
                                     return True
-        except Exception:
-            pass  # If check fails, don't assume connection issue
+        except Exception as _e:
+            logger.debug("Data freshness check failed: %s: %s", type(_e).__name__, _e)
         
         return False
 

@@ -9,23 +9,35 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from pearlalgo.config.defaults import (
+    CONFIDENCE_HIGH_SIZE_MULTIPLIER,
+    CONFIDENCE_LOW_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_THRESHOLD,
+    DEFAULT_MARGIN_PER_CONTRACT,
+    ML_GOOD_OPPORTUNITY_MULTIPLIER,
+    ML_GOOD_OPPORTUNITY_THRESHOLD,
+    ML_HIGH_OPPORTUNITY_MULTIPLIER,
+    ML_HIGH_OPPORTUNITY_THRESHOLD,
+    ML_LOW_OPPORTUNITY_MULTIPLIER,
+    ML_LOW_OPPORTUNITY_THRESHOLD,
+    ML_NORMAL_OPPORTUNITY_MULTIPLIER,
+)
 from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_float, safe_get_int
 from pearlalgo.utils.logger import logger
 
 if TYPE_CHECKING:
     from pearlalgo.learning.ml_signal_filter import MLSignalFilter
 
-# --- ML opportunity sizing thresholds (Issue 12) ---
-_ML_HIGH_OPPORTUNITY_THRESHOLD = 0.8
-_ML_HIGH_OPPORTUNITY_MULTIPLIER = 1.5
-_ML_GOOD_OPPORTUNITY_THRESHOLD = 0.6
-_ML_GOOD_OPPORTUNITY_MULTIPLIER = 1.25
-_ML_NORMAL_OPPORTUNITY_MULTIPLIER = 1.0
-_ML_LOW_OPPORTUNITY_THRESHOLD = 0.4
-_ML_LOW_OPPORTUNITY_MULTIPLIER = 0.75
-
-# --- Default margin estimate per contract (MNQ) ---
-_DEFAULT_MARGIN_PER_CONTRACT = 5000
+# Re-export under private names for backward compatibility
+_ML_HIGH_OPPORTUNITY_THRESHOLD = ML_HIGH_OPPORTUNITY_THRESHOLD
+_ML_HIGH_OPPORTUNITY_MULTIPLIER = ML_HIGH_OPPORTUNITY_MULTIPLIER
+_ML_GOOD_OPPORTUNITY_THRESHOLD = ML_GOOD_OPPORTUNITY_THRESHOLD
+_ML_GOOD_OPPORTUNITY_MULTIPLIER = ML_GOOD_OPPORTUNITY_MULTIPLIER
+_ML_NORMAL_OPPORTUNITY_MULTIPLIER = ML_NORMAL_OPPORTUNITY_MULTIPLIER
+_ML_LOW_OPPORTUNITY_THRESHOLD = ML_LOW_OPPORTUNITY_THRESHOLD
+_ML_LOW_OPPORTUNITY_MULTIPLIER = ML_LOW_OPPORTUNITY_MULTIPLIER
+_DEFAULT_MARGIN_PER_CONTRACT = DEFAULT_MARGIN_PER_CONTRACT
 
 
 class OrderManager:
@@ -69,6 +81,82 @@ class OrderManager:
         self._ml_signal_filter = ml_signal_filter
         self._ml_adjust_sizing = ml_adjust_sizing
 
+    def validate_signal_financials(self, signal: Dict) -> bool:
+        """
+        Validate financial inputs in a signal before order sizing.
+
+        Checks:
+        - ``entry_price > 0``
+        - ``stop_loss > 0``
+        - For long signals: ``stop_loss < entry_price``
+        - For short signals: ``stop_loss > entry_price``
+
+        Args:
+            signal: Signal dictionary (must include ``entry_price`` and
+                ``stop_loss`` for full validation; missing values are
+                treated as "not yet set" and pass).
+
+        Returns:
+            ``True`` if the signal passes validation (or has no price
+            fields to validate), ``False`` otherwise.
+        """
+        entry_price = signal.get("entry_price")
+        stop_loss = signal.get("stop_loss")
+
+        # If neither price field is present, nothing to validate yet.
+        if entry_price is None and stop_loss is None:
+            return True
+
+        try:
+            entry_price = float(entry_price) if entry_price is not None else None
+        except (TypeError, ValueError):
+            logger.warning(
+                "validate_signal_financials: entry_price is not numeric "
+                f"(got {signal.get('entry_price')!r})"
+            )
+            return False
+
+        try:
+            stop_loss = float(stop_loss) if stop_loss is not None else None
+        except (TypeError, ValueError):
+            logger.warning(
+                "validate_signal_financials: stop_loss is not numeric "
+                f"(got {signal.get('stop_loss')!r})"
+            )
+            return False
+
+        if entry_price is not None and entry_price <= 0:
+            logger.warning(
+                f"validate_signal_financials: entry_price must be > 0 (got {entry_price})"
+            )
+            return False
+
+        if stop_loss is not None and stop_loss <= 0:
+            logger.warning(
+                f"validate_signal_financials: stop_loss must be > 0 (got {stop_loss})"
+            )
+            return False
+
+        # Direction-aware stop-loss check
+        if entry_price is not None and stop_loss is not None:
+            direction = str(signal.get("direction") or signal.get("side") or "").lower()
+            if direction in ("long", "buy"):
+                if stop_loss >= entry_price:
+                    logger.warning(
+                        "validate_signal_financials: long signal stop_loss "
+                        f"({stop_loss}) must be < entry_price ({entry_price})"
+                    )
+                    return False
+            elif direction in ("short", "sell"):
+                if stop_loss <= entry_price:
+                    logger.warning(
+                        "validate_signal_financials: short signal stop_loss "
+                        f"({stop_loss}) must be > entry_price ({entry_price})"
+                    )
+                    return False
+
+        return True
+
     def compute_base_position_size(self, signal: Dict) -> int:
         """
         Compute a base position size from config + signal confidence.
@@ -77,8 +165,23 @@ class OrderManager:
             signal: Signal dictionary with optional confidence score
 
         Returns:
-            Position size (number of contracts)
+            Position size (number of contracts).  Returns the configured
+            minimum (at least 1) when financial-input validation fails.
         """
+        # --- Financial input validation (WS6) ---
+        try:
+            min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
+        except Exception:
+            min_size = 1
+        safe_default = max(1, min_size)
+
+        if not self.validate_signal_financials(signal):
+            logger.warning(
+                "compute_base_position_size: returning safe default "
+                f"({safe_default}) due to failed financial validation"
+            )
+            return safe_default
+
         # Check if signal already has a size
         existing = signal.get("position_size")
         if existing is not None:
@@ -252,12 +355,11 @@ class OrderManager:
         if account_value is not None and account_value > 0:
             try:
                 max_pct = float(self._risk_settings.get("max_position_pct", 0.1) or 0.1)
-                # Assume each contract is ~$5000 margin for MNQ (rough estimate)
-                estimated_margin = size * 5000
+                estimated_margin = size * _DEFAULT_MARGIN_PER_CONTRACT
                 position_pct = estimated_margin / account_value
 
                 if position_pct > max_pct:
-                    adjusted = int(account_value * max_pct / 5000)
+                    adjusted = int(account_value * max_pct / _DEFAULT_MARGIN_PER_CONTRACT)
                     adjusted = max(1, adjusted)
                     if adjusted < result["adjusted_size"]:
                         result["adjusted_size"] = adjusted

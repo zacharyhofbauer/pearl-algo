@@ -288,7 +288,8 @@ class PearlBrain:
             })
         elif new_trades < old_trades:
             # Trade closed
-            recent_exit = new.get("recent_exits", [{}])[0] if new.get("recent_exits") else {}
+            recent_exits = new.get("recent_exits") or []
+            recent_exit = recent_exits[0] if recent_exits else {}
             await self.narrate_event("trade_exited", {
                 "pnl": recent_exit.get("pnl"),
                 "exit_reason": recent_exit.get("exit_reason"),

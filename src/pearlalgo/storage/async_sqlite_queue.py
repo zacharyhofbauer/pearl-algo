@@ -121,6 +121,7 @@ class AsyncSQLiteQueue:
         self._overflow: list = []
         self._overflow_lock = threading.Lock()
         self._total_overflow_writes = 0
+        self._max_overflow_size = 10_000  # Safety cap to prevent unbounded memory growth
         
         # Backpressure configuration
         self._backpressure_threshold = int(max_queue_size * 0.8)  # 80% full
@@ -212,6 +213,18 @@ class AsyncSQLiteQueue:
             if priority == WritePriority.HIGH:
                 # HIGH priority NEVER drops - stash in overflow buffer (non-blocking)
                 with self._overflow_lock:
+                    overflow_len = len(self._overflow)
+                    if overflow_len >= self._max_overflow_size:
+                        logger.error(
+                            f"AsyncSQLiteQueue overflow buffer at capacity ({self._max_overflow_size}), "
+                            f"dropping oldest entry to make room for: {operation}"
+                        )
+                        self._overflow.pop(0)
+                    elif overflow_len >= self._max_overflow_size * 0.8:
+                        logger.warning(
+                            f"AsyncSQLiteQueue overflow buffer nearing capacity: "
+                            f"{overflow_len}/{self._max_overflow_size}"
+                        )
                     self._overflow.append(write)
                 self._total_high_priority_writes += 1
                 self._total_overflow_writes += 1

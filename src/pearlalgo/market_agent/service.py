@@ -54,6 +54,7 @@ from pearlalgo.utils.volume_pressure import (
 )
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
 from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
+from pearlalgo.market_agent.ml_manager import MLManager
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
 from pearlalgo.market_agent.order_manager import OrderManager
@@ -454,77 +455,15 @@ class MarketAgentService(ServiceNotificationsMixin):
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
         # ==========================================================================
-        # ML LIFT GATING (Shadow A/B → allow blocking only if it shows lift)
+        # ML / LEARNING (WS8: extracted to MLManager)
         # ==========================================================================
-        ml_cfg = service_config.get("ml_filter", {}) or {}
-        self._ml_filter_mode = str(ml_cfg.get("mode", "shadow") or "shadow").lower()
-        if self._ml_filter_mode not in ("shadow", "live"):
-            self._ml_filter_mode = "shadow"
-        self._ml_require_lift_to_block = bool(ml_cfg.get("require_lift_to_block", True))
-        self._ml_lift_lookback_trades = int(ml_cfg.get("lift_lookback_trades", 200) or 200)
-        self._ml_lift_min_trades = int(ml_cfg.get("lift_min_trades", 50) or 50)
-        self._ml_lift_min_winrate_delta = float(ml_cfg.get("lift_min_winrate_delta", 0.05) or 0.05)
-        # Shadow-only threshold for lift measurement (does NOT affect trading; only pass/fail labels).
-        self._ml_shadow_threshold: Optional[float] = None
-        try:
-            st = ml_cfg.get("shadow_threshold", None)
-            if st is not None:
-                self._ml_shadow_threshold = float(st)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._ml_shadow_threshold = None
-        # Default safe: do NOT allow live blocking until we have evaluated lift.
-        self._ml_blocking_allowed: bool = False
-        self._ml_lift_metrics: Dict[str, Any] = {}
-        self._ml_lift_last_eval_at: Optional[datetime] = None
-
-        # ML sizing/priority adjustments (shadow-safe; does not bypass risk gates)
-        self._ml_adjust_sizing = bool(ml_cfg.get("adjust_sizing", False))
-        try:
-            self._ml_size_multiplier_min = float(ml_cfg.get("size_multiplier_min", 1.0) or 1.0)
-            self._ml_size_multiplier_max = float(ml_cfg.get("size_multiplier_max", 1.5) or 1.5)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._ml_size_multiplier_min = 1.0
-            self._ml_size_multiplier_max = 1.5
-        try:
-            self._ml_size_threshold = float(ml_cfg.get("high_probability", 0.7) or 0.7)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._ml_size_threshold = 0.7
-
-        # ML signal filter (shadow-only measurement by default; never blocks unless explicitly enabled elsewhere)
-        self._ml_filter_enabled: bool = bool(ml_cfg.get("enabled", False))
-        self._ml_signal_filter: Optional["MLSignalFilter"] = None
-        self._ml_filter_init_status: Dict[str, Any] = {}
-        if self._ml_filter_enabled:
-            if not ML_FILTER_AVAILABLE or get_ml_signal_filter is None:
-                logger.warning("ML filter enabled in config, but dependencies unavailable (skipping)")
-                self._ml_filter_enabled = False
-            else:
-                try:
-                    # Train from recent exited signals (shadow dataset) so predictions are non-trivial.
-                    train_limit = int(ml_cfg.get("training_max_samples", 2000) or 2000)
-                    trades_for_training = self._build_ml_training_trades_from_signals(limit=train_limit)
-                    self._ml_signal_filter = get_ml_signal_filter(config=service_config, trades=trades_for_training)
-                    self._ml_filter_init_status = {
-                        "enabled": True,
-                        "mode": str(self._ml_filter_mode),
-                        "trained": bool(getattr(self._ml_signal_filter, "is_ready", False)),
-                        "training_samples": int(len(trades_for_training)),
-                    }
-                    logger.info(
-                        "ML filter initialized",
-                        extra={
-                            "mode": self._ml_filter_mode,
-                            "trained": bool(getattr(self._ml_signal_filter, "is_ready", False)),
-                            "training_samples": int(len(trades_for_training)),
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"ML filter init failed (continuing without): {e}")
-                    self._ml_signal_filter = None
-                    self._ml_filter_enabled = False
+        self._ml_manager = MLManager(
+            service_config=service_config,
+            state_dir=self.state_manager.state_dir,
+            trade_db=self._trade_db,
+            sqlite_enabled=self._sqlite_enabled,
+            signals_file_path=getattr(self.state_manager, "signals_file", None),
+        )
 
         # ==========================================================================
         # AUTO-FLAT (Virtual trades) - Daily + Friday/Weekend safety
@@ -694,8 +633,8 @@ class MarketAgentService(ServiceNotificationsMixin):
         # Initialize Pearl suggestion engine
         self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_manager.state_dir))
 
-        # Initialize Pearl AI shadow tracker (tracks suggestion outcomes)
-        self.shadow_tracker = get_shadow_tracker(state_dir=self.state_manager.state_dir)
+        # Shadow tracker now lives in MLManager (WS8).
+        # self.shadow_tracker delegates via property below.
 
         # ------------------------------------------------------------------
         # Extracted sub-modules (Phase 3: Arch-1B decomposition)
@@ -812,65 +751,10 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._connection_alert_cooldown_seconds: int = 300  # 5 minutes between alerts
 
         # ==========================================================================
-        # LEARNING (Adaptive Bandit Policy)
+        # LEARNING (Adaptive Bandit Policy) -- now managed by MLManager (WS8)
         # ==========================================================================
-        # Initialize adaptive policy for signal type selection.
-        # SAFETY: Default is shadow mode - learns but does NOT affect execution.
-        self.bandit_policy: Optional["BanditPolicy"] = None
-        self._bandit_config: Optional["BanditConfig"] = None
-        self.contextual_policy: Optional["ContextualBanditPolicy"] = None
-        self._contextual_config: Optional["ContextualBanditConfig"] = None
-        learning_settings = service_config.get("learning", {})
-        
-        if LEARNING_AVAILABLE and learning_settings.get("enabled", True):
-            try:
-                self._bandit_config = BanditConfig.from_dict(learning_settings)
-                # Use state_manager.state_dir to ensure policy_state.json is written
-                # alongside state.json (where Telegram commands expect it)
-                self.bandit_policy = BanditPolicy(
-                    config=self._bandit_config,
-                    state_dir=self.state_manager.state_dir,
-                )
-                logger.info(
-                    f"Bandit policy initialized: mode={self._bandit_config.mode}, "
-                    f"threshold={self._bandit_config.decision_threshold}, "
-                    f"explore_rate={self._bandit_config.explore_rate}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to initialize bandit policy: {e}", exc_info=True)
-                self.bandit_policy = None
-        else:
-            if not LEARNING_AVAILABLE:
-                logger.debug("Learning layer not available (import failed)")
-            else:
-                logger.info("Bandit policy disabled (learning.enabled=false)")
-
-        # Contextual learning (optional): learns signal quality per session/regime/time bucket.
-        # This is safe in manual mode because it only annotates signals + records outcomes.
-        if CONTEXTUAL_BANDIT_AVAILABLE:
-            contextual_settings = learning_settings.get("contextual", {})
-            if not isinstance(contextual_settings, dict):
-                contextual_settings = {}
-            if bool(contextual_settings.get("enabled", False)):
-                try:
-                    self._contextual_config = ContextualBanditConfig.from_dict(contextual_settings)
-                    self.contextual_policy = ContextualBanditPolicy(
-                        config=self._contextual_config,
-                        state_dir=self.state_manager.state_dir,
-                    )
-                    logger.info(
-                        "Contextual policy initialized: mode=%s threshold=%s explore_rate=%s",
-                        getattr(self._contextual_config, "mode", "shadow"),
-                        getattr(self._contextual_config, "decision_threshold", 0.3),
-                        getattr(self._contextual_config, "explore_rate", 0.1),
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to initialize contextual bandit policy: {e}", exc_info=True)
-                    self.contextual_policy = None
-            else:
-                logger.info("Contextual policy disabled (learning.contextual.enabled=false)")
-        else:
-            logger.debug("Contextual bandit not available (import failed)")
+        # bandit_policy, contextual_policy, and _bandit_config are accessed
+        # via backward-compatible properties that delegate to self._ml_manager.
 
         # ------------------------------------------------------------------
         # SignalHandler: extracted signal processing pipeline (Arch-1B)
@@ -878,8 +762,8 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._order_manager = OrderManager(
             risk_settings=self._risk_settings,
             strategy_settings=self._strategy_settings,
-            ml_signal_filter=self._ml_signal_filter,
-            ml_adjust_sizing=self._ml_adjust_sizing,
+            ml_signal_filter=self._ml_manager.signal_filter,
+            ml_adjust_sizing=self._ml_manager.adjust_sizing,
         )
         self._signal_handler = SignalHandler(
             state_manager=self.state_manager,
@@ -887,13 +771,13 @@ class MarketAgentService(ServiceNotificationsMixin):
             notification_queue=self.notification_queue,
             order_manager=self._order_manager,
             trading_circuit_breaker=self.trading_circuit_breaker,
-            bandit_policy=self.bandit_policy,
-            bandit_config=self._bandit_config,
-            contextual_policy=self.contextual_policy,
-            ml_signal_filter=self._ml_signal_filter,
-            ml_filter_enabled=self._ml_filter_enabled,
-            ml_filter_mode=self._ml_filter_mode,
-            ml_shadow_threshold=self._ml_shadow_threshold,
+            bandit_policy=self._ml_manager.bandit_policy,
+            bandit_config=self._ml_manager.bandit_config,
+            contextual_policy=self._ml_manager.contextual_policy,
+            ml_signal_filter=self._ml_manager.signal_filter,
+            ml_filter_enabled=self._ml_manager.filter_enabled,
+            ml_filter_mode=self._ml_manager.filter_mode,
+            ml_shadow_threshold=self._ml_manager.shadow_threshold,
             execution_adapter=self.execution_adapter,
             telegram_notifier=self.telegram_notifier,
         )
@@ -916,10 +800,10 @@ class MarketAgentService(ServiceNotificationsMixin):
             order_manager=self._order_manager,
             state_manager=self.state_manager,
             signal_forwarder=self.signal_forwarder,
-            ml_signal_filter=self._ml_signal_filter,
-            bandit_policy=self.bandit_policy,
-            ml_filter_enabled=self._ml_filter_enabled,
-            ml_filter_mode=self._ml_filter_mode,
+            ml_signal_filter=self._ml_manager.signal_filter,
+            bandit_policy=self._ml_manager.bandit_policy,
+            ml_filter_enabled=self._ml_manager.filter_enabled,
+            ml_filter_mode=self._ml_manager.filter_mode,
         )
         self.execution_orchestrator = ExecutionOrchestrator(
             virtual_trade_manager=self.virtual_trade_manager,
@@ -1891,58 +1775,11 @@ class MarketAgentService(ServiceNotificationsMixin):
         return max(1, size)
 
     def _apply_ml_opportunity_sizing(self, signal: Dict) -> None:
-        """Adjust size and priority based on ML opportunity signal."""
-        if not getattr(self, "_ml_adjust_sizing", False):
-            return
-
-        pred = signal.get("_ml_prediction") or {}
-        try:
-            win_prob = float(pred.get("win_probability"))
-        except Exception as e:
-            logger.warning(f"Failed to parse ML win probability for sizing: {e}")
-            return
-
+        """Adjust size and priority based on ML opportunity signal (delegates to MLManager)."""
         base_size = self._compute_base_position_size(signal)
-        multiplier = (
-            self._ml_size_multiplier_max
-            if win_prob >= getattr(self, "_ml_size_threshold", 0.7)
-            else self._ml_size_multiplier_min
+        self._ml_manager.apply_opportunity_sizing(
+            signal, base_size=base_size, risk_settings=self._risk_settings
         )
-        try:
-            adjusted = int(round(base_size * float(multiplier)))
-        except Exception as e:
-            logger.warning(f"Failed to apply ML size multiplier: {e}")
-            adjusted = base_size
-
-        # Clamp to risk min/max
-        try:
-            min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
-        except Exception as e:
-            logger.warning(f"Failed to parse min position size for ML sizing: {e}")
-            min_size = 1
-        try:
-            max_size = int(self._risk_settings.get("max_position_size", adjusted) or adjusted)
-        except Exception as e:
-            logger.warning(f"Failed to parse max position size for ML sizing: {e}")
-            max_size = adjusted
-
-        adjusted = max(min_size, min(max_size, adjusted))
-        adjusted = max(1, adjusted)
-
-        signal["position_size"] = adjusted
-        signal["_ml_size_multiplier"] = float(multiplier)
-        signal["_ml_size_adjusted"] = True
-
-        if win_prob >= getattr(self, "_ml_size_threshold", 0.7):
-            signal["_ml_priority"] = "critical"
-        else:
-            signal["_ml_priority"] = "high"
-
-        if adjusted != base_size:
-            logger.info(
-                f"ML sizing adjusted position size: {base_size} -> {adjusted} "
-                f"(p={win_prob:.2f}, mult={multiplier:.2f})"
-            )
 
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """Delegate to VirtualTradeManager (extracted for testability)."""
@@ -2132,18 +1969,6 @@ class MarketAgentService(ServiceNotificationsMixin):
             return SuggestionType.OPPORTUNITY.value
         else:
             return SuggestionType.PATTERN_INSIGHT.value
-
-    @staticmethod
-    def _escape_markdown_v2(text: str) -> str:
-        """Escape special characters for MarkdownV2."""
-        escape_chars = r'_*[]()~`>#+-=|{}.!'
-        result = ""
-        for char in text:
-            if char in escape_chars:
-                result += f"\\{char}"
-            else:
-                result += char
-        return result
 
     def _build_pearl_review_message(self, state: Dict[str, Any]) -> Optional[str]:
         """Build PEARL check-in content (plain text, will be converted to MarkdownV2 by sender).
@@ -2631,7 +2456,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                 df_5m = market_data["df_5m"]
                 if df_5m is not None and not df_5m.empty and "close" in df_5m.columns and len(df_5m) >= 10:
                     closes = df_5m["close"].tail(10)
-                    if len(closes) >= 2:
+                    if len(closes) >= 2 and closes.iloc[0] != 0:
                         slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
                         trends["5m"] = float(slope)
             
@@ -2640,7 +2465,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                 df_15m = market_data["df_15m"]
                 if df_15m is not None and not df_15m.empty and "close" in df_15m.columns and len(df_15m) >= 5:
                     closes = df_15m["close"].tail(5)
-                    if len(closes) >= 2:
+                    if len(closes) >= 2 and closes.iloc[0] != 0:
                         slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
                         trends["15m"] = float(slope)
             
@@ -2651,21 +2476,21 @@ class MarketAgentService(ServiceNotificationsMixin):
                     # 1h: look at 4 bars of 15m data
                     if len(df_15m) >= 4:
                         closes_1h = df_15m["close"].tail(4)
-                        if len(closes_1h) >= 2:
+                        if len(closes_1h) >= 2 and closes_1h.iloc[0] != 0:
                             slope = (closes_1h.iloc[-1] - closes_1h.iloc[0]) / closes_1h.iloc[0] * 100
                             trends["1h"] = float(slope)
                     
                     # 4h: look at 16 bars of 15m data
                     if len(df_15m) >= 16:
                         closes_4h = df_15m["close"].tail(16)
-                        if len(closes_4h) >= 2:
+                        if len(closes_4h) >= 2 and closes_4h.iloc[0] != 0:
                             slope = (closes_4h.iloc[-1] - closes_4h.iloc[0]) / closes_4h.iloc[0] * 100
                             trends["4h"] = float(slope)
                     
                     # 1D: look at all available 15m data (up to 96 bars = 24h)
                     if len(df_15m) >= 20:
                         closes_1d = df_15m["close"].tail(min(96, len(df_15m)))
-                        if len(closes_1d) >= 2:
+                        if len(closes_1d) >= 2 and closes_1d.iloc[0] != 0:
                             slope = (closes_1d.iloc[-1] - closes_1d.iloc[0]) / closes_1d.iloc[0] * 100
                             trends["1D"] = float(slope)
         except Exception as e:
@@ -3142,7 +2967,19 @@ class MarketAgentService(ServiceNotificationsMixin):
                 await self.operator_handler.process_operator_requests(state_dir)
             except Exception as e:
                 logger.debug(f"Operator requests processing failed (non-fatal): {e}")
-            
+
+            # ==========================================================================
+            # Ingest close-trade requests & close-all flag from web API
+            # ==========================================================================
+            try:
+                await self.operator_handler.process_close_trade_requests(state_dir)
+            except Exception as e:
+                logger.debug(f"Close-trade request ingestion failed (non-fatal): {e}")
+            try:
+                await self.operator_handler.process_close_all_flag(state_dir)
+            except Exception as e:
+                logger.debug(f"Close-all flag ingestion failed (non-fatal): {e}")
+
             # Define flag files
             kill_file = state_dir / "kill_request.flag"
             disarm_file = state_dir / "disarm_request.flag"
@@ -3519,32 +3356,10 @@ class MarketAgentService(ServiceNotificationsMixin):
                 if self.execution_adapter is not None
                 else {"enabled": False, "armed": False, "mode": "disabled"}
             ),
-            # Learning/policy status
-            "learning": (
-                self.bandit_policy.get_status()
-                if self.bandit_policy is not None
-                else {"enabled": False, "mode": "disabled"}
-            ),
-            # Contextual learning (optional)
-            "learning_contextual": (
-                self.contextual_policy.get_status()
-                if self.contextual_policy is not None
-                else {"enabled": False, "mode": "disabled"}
-            ),
-            # ML filter operational status (shadow/live + lift gating)
-            "ml_filter": {
-                "enabled": bool(getattr(self, "_ml_filter_enabled", False)),
-                "mode": getattr(self, "_ml_filter_mode", "shadow"),
-                "trained": bool(getattr(getattr(self, "_ml_signal_filter", None), "is_ready", False)),
-                "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
-                "blocking_allowed": bool(getattr(self, "_ml_blocking_allowed", False)),
-                "lift": getattr(self, "_ml_lift_metrics", {}) or {},
-                "last_eval_at": (
-                    self._ml_lift_last_eval_at.isoformat()
-                    if getattr(self, "_ml_lift_last_eval_at", None) is not None
-                    else None
-                ),
-            },
+            # Learning/policy status (WS8: delegated to MLManager)
+            "learning": self._ml_manager.get_learning_status(),
+            "learning_contextual": self._ml_manager.get_contextual_status(),
+            "ml_filter": self._ml_manager.get_filter_status(),
         }
 
     def _persist_cycle_diagnostics(
@@ -3588,344 +3403,20 @@ class MarketAgentService(ServiceNotificationsMixin):
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
 
     def _build_ml_training_trades_from_signals(self, *, limit: int = 2000) -> list[dict]:
-        """
-        Build supervised training samples from `signals.jsonl`.
-
-        This is intentionally lightweight and uses only data already persisted with each signal,
-        so it does not add runtime overhead to the scan loop.
-        """
-        try:
-            lim = max(1, int(limit or 2000))
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            lim = 2000
-
-        try:
-            path = getattr(self.state_manager, "signals_file", None)
-            if not path:
-                return []
-            if not Path(path).exists():
-                return []
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return []
-
-        # Stop-loss ATR multiplier used to derive ATR from stop distance (best-effort).
-        try:
-            stop_mult = float(self.config.get("stop_loss_atr_mult", 3.5) or 3.5)
-            if stop_mult <= 0:
-                stop_mult = 3.5
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            stop_mult = 3.5
-
-        samples = deque(maxlen=lim)
-        try:
-            with open(str(path), "r", encoding="utf-8") as f:
-                for line in f:
-                    line = (line or "").strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        continue
-                    if not isinstance(rec, dict):
-                        continue
-                    if str(rec.get("status") or "").lower() != "exited":
-                        continue
-
-                    # Label
-                    if "is_win" in rec:
-                        is_win = bool(rec.get("is_win"))
-                    else:
-                        outcome = str(rec.get("outcome") or "").lower()
-                        if outcome not in ("win", "loss"):
-                            continue
-                        is_win = outcome == "win"
-
-                    sig = rec.get("signal") or {}
-                    if not isinstance(sig, dict):
-                        sig = {}
-
-                    # Core features we can reliably reconstruct
-                    try:
-                        confidence = float(sig.get("confidence") or 0.0)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        confidence = 0.0
-                    try:
-                        rr = float(sig.get("risk_reward") or 0.0)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        rr = 0.0
-
-                    # Derive ATR from stop distance (best-effort; consistent with how stops are constructed).
-                    atr_val = 0.0
-                    try:
-                        entry = float(sig.get("entry_price") or rec.get("entry_price") or 0.0)
-                        stop = float(sig.get("stop_loss") or 0.0)
-                        if entry > 0 and stop > 0 and stop_mult > 0:
-                            atr_val = abs(entry - stop) / stop_mult
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        atr_val = 0.0
-
-                    # Volatility ratio (if present via market_regime); else neutral.
-                    vol_ratio = 1.0
-                    try:
-                        mr = sig.get("market_regime") or {}
-                        if isinstance(mr, dict) and mr.get("volatility_ratio") is not None:
-                            vol_ratio = float(mr.get("volatility_ratio") or 1.0)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        vol_ratio = 1.0
-
-                    # Optional regime dict (used for one-hot context features in MLSignalFilter)
-                    regime_dict: Dict[str, Any] = {}
-                    try:
-                        mr = sig.get("market_regime") or {}
-                        if isinstance(mr, dict):
-                            regime_type = str(mr.get("regime") or "")
-                            regime_dict["regime"] = regime_type
-                            # Bucket volatility from ratio
-                            vb = "normal"
-                            try:
-                                if float(vol_ratio) < 0.8:
-                                    vb = "low"
-                                elif float(vol_ratio) > 1.5:
-                                    vb = "high"
-                            except Exception as e:
-                                logger.debug(f"Non-critical: {e}")
-                                vb = "normal"
-                            regime_dict["volatility"] = vb
-                            regime_dict["session"] = str(mr.get("session") or "")
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        regime_dict = {}
-
-                    sample = {
-                        "signal_type": str(rec.get("signal_type") or sig.get("type") or "unknown"),
-                        "is_win": bool(is_win),
-                        "exit_time": str(rec.get("exit_time") or rec.get("timestamp") or ""),
-                        # MLSignalFilter expected features
-                        "confidence": float(confidence),
-                        "risk_reward": float(rr),
-                        "atr": float(atr_val),
-                        "volatility_ratio": float(vol_ratio),
-                        "volume_ratio": 1.0,       # not persisted today; neutral
-                        "rsi": 0.0,                # not persisted today; neutral
-                        "macd_histogram": 0.0,     # not persisted today; neutral
-                        "bb_position": 0.0,        # not persisted today; neutral
-                        "vwap_distance": 0.0,      # not persisted today; neutral
-                    }
-                    if regime_dict:
-                        sample["regime"] = regime_dict
-
-                    samples.append(sample)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return []
-
-        return list(samples)
+        """Build supervised training samples (delegates to MLManager)."""
+        return self._ml_manager.build_training_trades_from_signals(limit=limit)
 
     async def _build_ml_training_trades_from_signals_async(self, *, limit: int = 2000) -> list[dict]:
-        """Async wrapper for _build_ml_training_trades_from_signals() – runs file I/O in a thread."""
-        return await asyncio.to_thread(self._build_ml_training_trades_from_signals, limit=limit)
+        """Async wrapper (delegates to MLManager)."""
+        return await self._ml_manager.build_training_trades_from_signals_async(limit=limit)
 
     def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
-        """
-        Compute shadow A/B lift for ML gating:
-        Compare outcomes for trades where ML would PASS vs would BLOCK.
-
-        Expects trade dicts from TradeDatabase.get_recent_trades_by_exit(), including:
-        - is_win (bool)
-        - pnl (float)
-        - features.ml_win_probability (float) OR features.ml_pass_filter (0/1)
-        - features.ml_pass_threshold (float, optional)
-        - features.ml_fallback_used (0/1)
-        """
-        if not isinstance(trades, list) or not trades:
-            return {"status": "no_trades", "lift_ok": False, "blocking_allowed": False}
-
-        # Filter to trades that have real ML predictions (exclude fallback-only periods).
-        scored = []
-        for t in trades:
-            if not isinstance(t, dict):
-                continue
-            feats = t.get("features", {})
-            if not isinstance(feats, dict):
-                continue
-            has_prob = ("ml_win_probability" in feats) and (feats.get("ml_win_probability") is not None)
-            has_flag = "ml_pass_filter" in feats
-            if not (has_prob or has_flag):
-                continue
-            # If model wasn't ready, ML filter is in neutral fallback (no gating signal).
-            try:
-                if float(feats.get("ml_fallback_used", 0.0) or 0.0) >= 0.5:
-                    continue
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-            scored.append(t)
-
-        total_scored = len(scored)
-        # Determine pass/fail groups.
-        # Prefer probability-based thresholding (shadow_threshold / stored ml_pass_threshold) so we
-        # can create a meaningful split even if historical trades were written before that feature.
-        pass_group: list = []
-        fail_group: list = []
-        threshold_used: Optional[float] = None
-        for t in scored:
-            feats = t.get("features", {}) or {}
-
-            # Determine the threshold for this trade (prefer stored threshold, else current shadow threshold).
-            thr = None
-            try:
-                if feats.get("ml_pass_threshold") is not None:
-                    thr = float(feats.get("ml_pass_threshold") or 0.0)
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                thr = None
-            if thr is None:
-                try:
-                    st = getattr(self, "_ml_shadow_threshold", None)
-                    if getattr(self, "_ml_filter_mode", "shadow") == "shadow" and st is not None:
-                        thr = float(st)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    thr = None
-
-            pass_flag = True
-            if thr is not None:
-                threshold_used = float(thr)
-                try:
-                    p = float(feats.get("ml_win_probability", 0.0) or 0.0)
-                    pass_flag = p >= float(thr)
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    pass_flag = True
-            else:
-                # Fallback to stored boolean flag if probability/threshold missing.
-                try:
-                    pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    pass_flag = True
-
-            if pass_flag:
-                pass_group.append(t)
-            else:
-                fail_group.append(t)
-
-        if total_scored < int(getattr(self, "_ml_lift_min_trades", 50) or 50):
-            # Provide pass/fail split even before reaching min_trades so operators can
-            # verify that lift measurement is actually meaningful (i.e. we have both groups).
-            out = {
-                "status": "insufficient_data",
-                "scored_trades": total_scored,
-                "min_trades": int(getattr(self, "_ml_lift_min_trades", 50) or 50),
-                "pass_trades": int(len(pass_group)),
-                "fail_trades": int(len(fail_group)),
-                "lift_ok": False,
-                "blocking_allowed": False,
-            }
-            if threshold_used is not None:
-                out["pass_threshold_used"] = float(threshold_used)
-            return out
-
-        if not pass_group or not fail_group:
-            out = {
-                "status": "no_split",
-                "scored_trades": total_scored,
-                "pass_trades": len(pass_group),
-                "fail_trades": len(fail_group),
-                "lift_ok": False,
-                "blocking_allowed": False,
-                "reason": "Need both pass+fail groups to measure lift",
-            }
-            if threshold_used is not None:
-                out["pass_threshold_used"] = float(threshold_used)
-            return out
-
-        def _wr(xs: list) -> float:
-            wins = 0
-            for t in xs:
-                try:
-                    if bool(t.get("is_win", False)):
-                        wins += 1
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    continue
-            return wins / max(1, len(xs))
-
-        def _avg_pnl(xs: list) -> float:
-            vals = []
-            for t in xs:
-                try:
-                    vals.append(float(t.get("pnl", 0.0) or 0.0))
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    continue
-            return float(sum(vals) / max(1, len(vals))) if vals else 0.0
-
-        wr_pass = _wr(pass_group)
-        wr_fail = _wr(fail_group)
-        lift_wr = wr_pass - wr_fail
-        avg_pnl_pass = _avg_pnl(pass_group)
-        avg_pnl_fail = _avg_pnl(fail_group)
-        lift_pnl = avg_pnl_pass - avg_pnl_fail
-
-        min_delta = float(getattr(self, "_ml_lift_min_winrate_delta", 0.05) or 0.05)
-        lift_ok = bool(lift_wr >= min_delta)
-
-        # Actual blocking permission depends on mode + lift gating config.
-        if bool(getattr(self, "_ml_require_lift_to_block", True)):
-            blocking_allowed = bool((getattr(self, "_ml_filter_mode", "shadow") == "live") and lift_ok)
-        else:
-            blocking_allowed = bool(getattr(self, "_ml_filter_mode", "shadow") == "live")
-
-        return {
-            "status": "ok",
-            "scored_trades": total_scored,
-            "pass_trades": len(pass_group),
-            "fail_trades": len(fail_group),
-            "win_rate_pass": float(wr_pass),
-            "win_rate_fail": float(wr_fail),
-            "lift_win_rate": float(lift_wr),
-            "avg_pnl_pass": float(avg_pnl_pass),
-            "avg_pnl_fail": float(avg_pnl_fail),
-            "lift_avg_pnl": float(lift_pnl),
-            "lift_ok": bool(lift_ok),
-            "lift_min_winrate_delta": float(min_delta),
-            "pass_threshold_used": float(threshold_used) if threshold_used is not None else None,
-            "mode": getattr(self, "_ml_filter_mode", "shadow"),
-            "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
-            "blocking_allowed": bool(blocking_allowed),
-        }
+        """Compute shadow A/B lift for ML gating (delegates to MLManager)."""
+        return self._ml_manager.compute_lift_metrics(trades)
 
     def _refresh_ml_lift(self, *, force: bool = False) -> None:
-        """Refresh ML lift metrics + blocking allowance (best-effort)."""
-        try:
-            # Only meaningful when SQLite is enabled
-            if not getattr(self, "_sqlite_enabled", False) or self._trade_db is None:
-                self._ml_lift_metrics = {"status": "sqlite_disabled", "lift_ok": False, "blocking_allowed": False}
-                self._ml_blocking_allowed = False
-                return
-
-            now = datetime.now(timezone.utc)
-            # Rate limit lift evaluation (cheap, but no need every 5s)
-            if (not force) and self._ml_lift_last_eval_at is not None:
-                if (now - self._ml_lift_last_eval_at).total_seconds() < 300:
-                    return
-
-            trades = self._trade_db.get_recent_trades_by_exit(limit=int(self._ml_lift_lookback_trades or 200))
-            metrics = self._compute_ml_lift_metrics(trades)
-            self._ml_lift_metrics = metrics
-            self._ml_blocking_allowed = bool(metrics.get("blocking_allowed", False))
-            self._ml_lift_last_eval_at = now
-        except Exception as e:
-            logger.debug(f"Could not refresh ML lift metrics: {e}")
+        """Refresh ML lift metrics + blocking allowance (delegates to MLManager)."""
+        self._ml_manager.refresh_lift(force=force)
 
     @staticmethod
     def _parse_hhmm(value: Any, *, default: tuple[int, int]) -> tuple[int, int]:
@@ -4333,8 +3824,66 @@ class MarketAgentService(ServiceNotificationsMixin):
                 market_data=market_data,
                 reason="manual_close_requested"
             )
-            if closed_ids:
-                self._clear_close_signals_requested(closed_ids)
+            # Always clear the requests (even if no virtual trades matched --
+            # the signal_id may be a Tradovate position ID for MFFU, not a
+            # virtual trade signal_id).
+            self._clear_close_signals_requested(close_signal_ids)
+
+            # Also close the corresponding broker positions (Tradovate/MFFU).
+            # This runs regardless of whether virtual trades matched, because
+            # for MFFU the real Tradovate position may exist without a
+            # matching virtual trade (e.g. after auto-flat closed virtuals
+            # but the broker position stayed open).
+            if self.execution_adapter is not None:
+                    broker_errors: list[str] = []
+                    cancelled_count = 0
+                    flattened_count = 0
+                    try:
+                        # Cancel open orders (TP/SL brackets) first
+                        cancel_results = await self.execution_adapter.cancel_all()
+                        cancelled_count = sum(1 for r in cancel_results if r.success)
+                        broker_errors.extend(
+                            r.error_message for r in cancel_results
+                            if not r.success and r.error_message
+                        )
+                        if cancelled_count:
+                            logger.warning(f"Close-trade: cancelled {cancelled_count} open orders")
+
+                        # Flatten the broker position
+                        flatten_results = await self.execution_adapter.flatten_all_positions()
+                        flattened_count = sum(1 for r in flatten_results if r.success)
+                        broker_errors.extend(
+                            r.error_message for r in flatten_results
+                            if not r.success and r.error_message
+                        )
+                        if flattened_count:
+                            logger.warning(f"Close-trade: submitted {flattened_count} flatten order(s)")
+                        if broker_errors:
+                            logger.warning(f"Close-trade: broker errors: {broker_errors[:3]}")
+                    except Exception as e:
+                        logger.error(f"Close-trade: broker flatten failed: {e}", exc_info=True)
+                        broker_errors.append(str(e)[:80])
+
+                    # Notify
+                    try:
+                        acct_label = getattr(self.telegram_notifier, "account_label", None)
+                        acct_tag = f"[{acct_label}] " if acct_label else ""
+                        parts = [f"{acct_tag}\U0001f6d1 *Close Trade Executed*\n"]
+                        parts.append(f"Virtual closed: `{closed_ids}`")
+                        parts.append(f"Orders cancelled: `{cancelled_count}`")
+                        parts.append(f"Positions flattened: `{flattened_count}`")
+                        if broker_errors:
+                            parts.append(f"\u26a0\ufe0f Errors: `{broker_errors[0][:60]}`")
+                        asyncio.create_task(
+                            self.notification_queue.enqueue_raw_message(
+                                "\n".join(parts),
+                                parse_mode="Markdown",
+                                priority=Priority.CRITICAL,
+                                dedupe=False,
+                            )
+                        )
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}")
 
         # Auto-flat rules (daily + Friday + weekend safety)
         try:
@@ -4576,6 +4125,96 @@ class MarketAgentService(ServiceNotificationsMixin):
             )
             self.last_connection_failure_alert = now
 
+    # ------------------------------------------------------------------
+    # Backward-compatible delegation properties (WS8: MLManager extraction)
+    # ------------------------------------------------------------------
+    # These properties let existing code (and submodules that read via
+    # getattr(self, "_ml_*", default)) keep working without changes.
+
+    @property
+    def _ml_signal_filter(self):
+        return self._ml_manager.signal_filter
+
+    @property
+    def _ml_adjust_sizing(self):
+        return self._ml_manager.adjust_sizing
+
+    @property
+    def _ml_filter_enabled(self):
+        return self._ml_manager.filter_enabled
+
+    @property
+    def _ml_filter_mode(self):
+        return self._ml_manager.filter_mode
+
+    @property
+    def _ml_shadow_threshold(self):
+        return self._ml_manager.shadow_threshold
+
+    @property
+    def _ml_blocking_allowed(self):
+        return self._ml_manager.blocking_allowed
+
+    @property
+    def _ml_lift_metrics(self):
+        return self._ml_manager.lift_metrics
+
+    @property
+    def _ml_lift_last_eval_at(self):
+        return self._ml_manager.lift_last_eval_at
+
+    @property
+    def _ml_require_lift_to_block(self):
+        return self._ml_manager.require_lift_to_block
+
+    @property
+    def _ml_lift_lookback_trades(self):
+        return self._ml_manager.lift_lookback_trades
+
+    @property
+    def _ml_lift_min_trades(self):
+        return self._ml_manager.lift_min_trades
+
+    @property
+    def _ml_lift_min_winrate_delta(self):
+        return self._ml_manager.lift_min_winrate_delta
+
+    @property
+    def _ml_size_multiplier_min(self):
+        return self._ml_manager.size_multiplier_min
+
+    @property
+    def _ml_size_multiplier_max(self):
+        return self._ml_manager.size_multiplier_max
+
+    @property
+    def _ml_size_threshold(self):
+        return self._ml_manager.size_threshold
+
+    @property
+    def _ml_filter_init_status(self):
+        return self._ml_manager.filter_init_status
+
+    @property
+    def _bandit_config(self):
+        return self._ml_manager.bandit_config
+
+    @property
+    def bandit_policy(self):
+        return self._ml_manager.bandit_policy
+
+    @property
+    def contextual_policy(self):
+        return self._ml_manager.contextual_policy
+
+    @property
+    def _contextual_config(self):
+        return self._ml_manager.contextual_config
+
+    @property
+    def shadow_tracker(self):
+        return self._ml_manager.shadow_tracker
+
     def _os_signal_handler(self, signum, frame) -> None:
         """Handle OS shutdown signals (SIGINT/SIGTERM)."""
         signal_names = {
@@ -4585,3 +4224,4 @@ class MarketAgentService(ServiceNotificationsMixin):
         signal_name = signal_names.get(signum, f"Signal {signum}")
         logger.info(f"Received {signal_name}, initiating graceful shutdown...")
         self.shutdown_requested = True
+

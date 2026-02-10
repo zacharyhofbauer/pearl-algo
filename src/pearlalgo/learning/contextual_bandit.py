@@ -24,6 +24,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from pearlalgo.config.defaults import (
+    CONFIDENCE_HIGH_SIZE_MULTIPLIER,
+    CONFIDENCE_LOW_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_SIZE_MULTIPLIER,
+    CONFIDENCE_MEDIUM_THRESHOLD,
+)
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir
 
@@ -589,13 +595,13 @@ class ContextualBanditPolicy:
         # Confidence tier and size adjustment
         if expected_wr >= self.config.confidence_boost_threshold:
             confidence_tier = "high"
-            size_multiplier = 1.3
-        elif expected_wr >= 0.5:
+            size_multiplier = CONFIDENCE_HIGH_SIZE_MULTIPLIER
+        elif expected_wr >= CONFIDENCE_MEDIUM_THRESHOLD:
             confidence_tier = "medium"
-            size_multiplier = 1.0
+            size_multiplier = CONFIDENCE_MEDIUM_SIZE_MULTIPLIER
         else:
             confidence_tier = "low"
-            size_multiplier = 0.7
+            size_multiplier = CONFIDENCE_LOW_SIZE_MULTIPLIER
         
         # Build reason
         if execute:

@@ -165,14 +165,14 @@ DATA_BUFFER_SIZE: int = 100
 DATA_BUFFER_SIZE_5M: int = 50
 DATA_BUFFER_SIZE_15M: int = 50
 HISTORICAL_HOURS: int = 2
-MULTITIMEFRAME_5M_HOURS: int = 4
-MULTITIMEFRAME_15M_HOURS: int = 12
+MULTITIMEFRAME_5M_HOURS: int = 25
+MULTITIMEFRAME_15M_HOURS: int = 25
 PERFORMANCE_HISTORY_LIMIT: int = 1000
 STALE_DATA_THRESHOLD_MINUTES: float = 10.0
 CONNECTION_TIMEOUT_MINUTES: float = 30.0
 ENABLE_BASE_CACHE: bool = False
 BASE_REFRESH_SECONDS: int = 60
-ENABLE_MTF_CACHE: bool = False
+ENABLE_MTF_CACHE: bool = True
 MTF_REFRESH_SECONDS_5M: int = 300
 MTF_REFRESH_SECONDS_15M: int = 900
 IBKR_VERBOSE_LOGGING: bool = False
@@ -279,3 +279,30 @@ SIGNAL_FORWARDING_ENABLED: bool = False
 SIGNAL_FORWARDING_MODE: str = "off"
 SIGNAL_FORWARDING_SHARED_FILE: str = "data/shared_signals.jsonl"
 SIGNAL_FORWARDING_MAX_LINES: int = 500
+
+
+# =============================================================================
+# ORDER SIZING DEFAULTS — ML Opportunity Sizing (WS6 / Issue 12)
+# =============================================================================
+# Used by ``order_manager.py`` for ML-based opportunity sizing tiers.
+
+ML_HIGH_OPPORTUNITY_THRESHOLD: float = 0.8
+ML_HIGH_OPPORTUNITY_MULTIPLIER: float = 1.5
+ML_GOOD_OPPORTUNITY_THRESHOLD: float = 0.6
+ML_GOOD_OPPORTUNITY_MULTIPLIER: float = 1.25
+ML_NORMAL_OPPORTUNITY_MULTIPLIER: float = 1.0
+ML_LOW_OPPORTUNITY_THRESHOLD: float = 0.4
+ML_LOW_OPPORTUNITY_MULTIPLIER: float = 0.75
+DEFAULT_MARGIN_PER_CONTRACT: int = 5000
+
+
+# =============================================================================
+# CONFIDENCE TIER SIZING DEFAULTS (WS6)
+# =============================================================================
+# Shared by ``contextual_bandit.py`` and ``ensemble_scorer.py`` for
+# confidence-based position-size adjustments.
+
+CONFIDENCE_HIGH_SIZE_MULTIPLIER: float = 1.3
+CONFIDENCE_MEDIUM_SIZE_MULTIPLIER: float = 1.0
+CONFIDENCE_LOW_SIZE_MULTIPLIER: float = 0.7
+CONFIDENCE_MEDIUM_THRESHOLD: float = 0.5

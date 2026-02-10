@@ -45,6 +45,7 @@ from pearlalgo.config import defaults
 from pearlalgo.config.adapters import (
     build_strategy_config_from_yaml,
     apply_execution_env_overrides as _apply_execution_env_overrides,
+    apply_learning_env_overrides as _apply_learning_env_overrides,
 )
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
@@ -370,7 +371,12 @@ def load_service_config(
         _apply_execution_env_overrides(result.get("execution", {}))
     except Exception as e:
         logger.warning(f"Could not apply execution env overrides: {e}")
-    
+
+    try:
+        _apply_learning_env_overrides(result.get("learning", {}))
+    except Exception as e:
+        logger.warning(f"Could not apply learning env overrides: {e}")
+
     # Flatten virtual_pnl fields for legacy attribute access
     vp_cfg = result.get("virtual_pnl", {}) or {}
     result["virtual_pnl_enabled"] = bool(vp_cfg.get("enabled", True))

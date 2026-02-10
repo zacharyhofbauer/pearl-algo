@@ -1462,23 +1462,20 @@ def generate_signals(
     if ind is None:
         return signals  # ATR invalid or zero
     
-    # Calculate core indicators with NaN guards
-    atr_series = calculate_atr(df, period=14)
-    atr = float(atr_series.iloc[-1]) if not atr_series.empty else None
-    close = float(df["close"].iloc[-1])
-    prev_close = float(df["close"].iloc[-2]) if len(df) > 1 else close
-    
-    # Guard: ATR must be valid and positive for SL/TP calculation
-    if atr is None or pd.isna(atr) or atr <= 0:
-        logger.debug("ATR invalid or zero, skipping signal generation")
-        return signals
-    
-    # Core indicators (computed once; reused across optional triggers and VWAP band logic)
-    ema_fast_period = int(config.get("ema_fast", 9) or 9)
-    ema_slow_period = int(config.get("ema_slow", 21) or 21)
-    ema_fast = calculate_ema(df, ema_fast_period)
-    ema_slow = calculate_ema(df, ema_slow_period)
-    
+    # ------------------------------------------------------------------
+    # Extract core indicators from ind (already computed by
+    # _calculate_indicators) to avoid redundant ATR / EMA / VWAP work.
+    # ------------------------------------------------------------------
+    atr = ind.atr
+    atr_series = ind.atr_series
+    close = ind.close
+    prev_close = ind.prev_close
+    ema_fast = ind.ema_fast
+    ema_slow = ind.ema_slow
+    vwap_series = ind.vwap_series
+    vwap_val = ind.vwap_val
+    key_levels = ind.key_levels
+
     fast_curr = float(ema_fast.iloc[-1])
     fast_prev = float(ema_fast.iloc[-2]) if len(ema_fast) > 1 else fast_curr
     slow_curr = float(ema_slow.iloc[-1])
@@ -1489,19 +1486,13 @@ def generate_signals(
         bullish_cross, bearish_cross = False, False
         ema_bull_trend, ema_bear_trend = False, False
     else:
-        bullish_cross = fast_prev <= slow_prev and fast_curr > slow_curr
-        bearish_cross = fast_prev >= slow_prev and fast_curr < slow_curr
+        bullish_cross = ind.ema_cross_up
+        bearish_cross = ind.ema_cross_down
         ema_bull_trend = fast_curr > slow_curr
         ema_bear_trend = fast_curr < slow_curr
     
     # 2) VWAP position (core - required)
-    try:
-        vwap_series = calculate_vwap(df)
-    except Exception:
-        vwap_series = pd.Series([float("nan")] * len(df), index=df.index)
-    
-    vwap_val = float(vwap_series.iloc[-1]) if not vwap_series.empty else float("nan")
-    if pd.isna(vwap_val) or pd.isna(close):
+    if vwap_val is None or pd.isna(vwap_val) or pd.isna(close):
         price_above_vwap, price_below_vwap = False, False
         vwap_curr: Optional[float] = None
     else:
@@ -1592,13 +1583,12 @@ def generate_signals(
     
     # 7. SpacemanBTC Key Levels (extended - conditional)
     # These are CRITICAL for reversal/breakout detection
-    key_levels = {}
+    # key_levels dict already extracted from ind above
     key_level_signal = None
     key_level_conf_adj = 0.0
     key_level_info = {}
-    if len(df) >= 5:
+    if key_levels and len(df) >= 5:
         try:
-            key_levels = get_key_levels(df) or {}
             # Check for bounce/breakout signals at key levels
             key_level_signal, key_level_conf_adj, key_level_info = check_key_level_signals(
                 df, key_levels, config
@@ -1639,7 +1629,7 @@ def generate_signals(
     # MARKET REGIME DETECTION
     # Adjusts confidence and filters signals based on market conditions
     # ==========================================================================
-    market_regime = detect_market_regime(df, lookback=50)
+    market_regime = ind.regime
     regime_multiplier = 1.0
     
     # Skip signals in unfavorable regimes (configurable)

@@ -59,16 +59,16 @@ class RiskConfig(BaseModel):
 
 class ServiceConfig(BaseModel):
     """Service operation configuration."""
-    status_update_interval: int = Field(default=3600, ge=60)
-    heartbeat_interval: int = Field(default=86400, ge=60)
-    state_save_interval: int = Field(default=10, ge=1)
-    connection_failure_alert_interval: int = Field(default=600, ge=60)
-    data_quality_alert_interval: int = Field(default=300, ge=60)
-    dashboard_chart_enabled: bool = True
-    dashboard_chart_interval: int = Field(default=3600, ge=300)
-    dashboard_chart_timeframe: str = "5m"
-    dashboard_chart_lookback_hours: int = Field(default=8, ge=1, le=48)
-    enable_new_bar_gating: bool = True
+    status_update_interval: int = Field(default=defaults.STATUS_UPDATE_INTERVAL, ge=60)
+    heartbeat_interval: int = Field(default=defaults.HEARTBEAT_INTERVAL, ge=60)
+    state_save_interval: int = Field(default=defaults.STATE_SAVE_INTERVAL, ge=1)
+    connection_failure_alert_interval: int = Field(default=defaults.CONNECTION_FAILURE_ALERT_INTERVAL, ge=60)
+    data_quality_alert_interval: int = Field(default=defaults.DATA_QUALITY_ALERT_INTERVAL, ge=60)
+    dashboard_chart_enabled: bool = defaults.DASHBOARD_CHART_ENABLED
+    dashboard_chart_interval: int = Field(default=defaults.DASHBOARD_CHART_INTERVAL, ge=300)
+    dashboard_chart_timeframe: str = defaults.DASHBOARD_CHART_TIMEFRAME
+    dashboard_chart_lookback_hours: int = Field(default=defaults.DASHBOARD_CHART_LOOKBACK_HOURS, ge=1, le=48)
+    enable_new_bar_gating: bool = defaults.ENABLE_NEW_BAR_GATING
     adaptive_cadence_enabled: bool = True
     scan_interval_active_seconds: float = Field(default=5, ge=1)
     scan_interval_idle_seconds: float = Field(default=30, ge=5)
@@ -126,20 +126,20 @@ class TradingCircuitBreakerConfig(BaseModel):
 
 class DataConfig(BaseModel):
     """Data fetching and caching configuration."""
-    buffer_size: int = Field(default=100, ge=10)
-    buffer_size_5m: int = Field(default=300, ge=10)
-    buffer_size_15m: int = Field(default=100, ge=10)
-    historical_hours: int = Field(default=2, ge=1)
-    multitimeframe_5m_hours: int = Field(default=25, ge=1)
-    multitimeframe_15m_hours: int = Field(default=25, ge=1)
-    performance_history_limit: int = Field(default=1000, ge=100)
-    stale_data_threshold_minutes: int = Field(default=10, ge=1)
-    connection_timeout_minutes: int = Field(default=30, ge=5)
-    enable_base_cache: bool = True
-    base_refresh_seconds: int = Field(default=60, ge=10)
-    enable_mtf_cache: bool = True
-    mtf_refresh_seconds_5m: int = Field(default=300, ge=60)
-    mtf_refresh_seconds_15m: int = Field(default=900, ge=60)
+    buffer_size: int = Field(default=defaults.DATA_BUFFER_SIZE, ge=10)
+    buffer_size_5m: int = Field(default=defaults.DATA_BUFFER_SIZE_5M, ge=10)
+    buffer_size_15m: int = Field(default=defaults.DATA_BUFFER_SIZE_15M, ge=10)
+    historical_hours: int = Field(default=defaults.HISTORICAL_HOURS, ge=1)
+    multitimeframe_5m_hours: int = Field(default=defaults.MULTITIMEFRAME_5M_HOURS, ge=1)
+    multitimeframe_15m_hours: int = Field(default=defaults.MULTITIMEFRAME_15M_HOURS, ge=1)
+    performance_history_limit: int = Field(default=defaults.PERFORMANCE_HISTORY_LIMIT, ge=100)
+    stale_data_threshold_minutes: int = Field(default=int(defaults.STALE_DATA_THRESHOLD_MINUTES), ge=1)
+    connection_timeout_minutes: int = Field(default=int(defaults.CONNECTION_TIMEOUT_MINUTES), ge=5)
+    enable_base_cache: bool = defaults.ENABLE_BASE_CACHE
+    base_refresh_seconds: int = Field(default=defaults.BASE_REFRESH_SECONDS, ge=10)
+    enable_mtf_cache: bool = defaults.ENABLE_MTF_CACHE
+    mtf_refresh_seconds_5m: int = Field(default=defaults.MTF_REFRESH_SECONDS_5M, ge=60)
+    mtf_refresh_seconds_15m: int = Field(default=defaults.MTF_REFRESH_SECONDS_15M, ge=60)
 
 
 class StorageConfig(BaseModel):
