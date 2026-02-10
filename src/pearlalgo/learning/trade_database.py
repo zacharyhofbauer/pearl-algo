@@ -139,6 +139,11 @@ class TradeDatabase:
         If cache_connection is True, reuses a single connection (more efficient
         for background workers). Otherwise, creates a new connection per operation
         (safer for multi-threaded access from different contexts).
+
+        THREAD SAFETY: When cache_connection=True, the cached connection is NOT
+        thread-safe.  Only use cached mode from a single thread (e.g. the
+        dedicated async_sqlite_queue worker thread).  Multi-threaded callers
+        should use the default cache_connection=False mode.
         """
         if self._cache_connection:
             # Use cached connection (for background workers)

@@ -30,8 +30,27 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Thread pool for running blocking data provider calls
-_executor = ThreadPoolExecutor(max_workers=2)
+# Thread pool for running blocking I/O (data provider calls, file reads)
+_executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _read_json_sync(path: Path) -> Any:
+    """Read and parse a JSON file (sync, for use with run_in_executor).
+
+    Returns ``None`` when the file does not exist or cannot be parsed.
+    """
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+async def _read_json_async(path: Path) -> Any:
+    """Read and parse a JSON file without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, _read_json_sync, path)
 
 # Cache for candle data when market is closed (LRU, bounded)
 _CANDLE_CACHE_MAX_ENTRIES = 50
@@ -182,6 +201,8 @@ import collections as _collections
 _rate_limit_window: int = 60  # seconds
 _rate_limit_max: int = 5  # max requests per window per endpoint
 _rate_limit_buckets: Dict[str, _collections.deque] = {}
+_RATE_LIMIT_MAX_ENDPOINTS: int = 1000  # cap on tracked endpoints
+_rate_limit_lock = threading.Lock()  # thread safety for concurrent access
 
 
 def _check_rate_limit(endpoint: str) -> None:
@@ -189,23 +210,31 @@ def _check_rate_limit(endpoint: str) -> None:
     Simple in-memory token bucket rate limiter for operator endpoints.
 
     Raises HTTPException(429) if the rate limit is exceeded.
+    Thread-safe: uses _rate_limit_lock for concurrent access.
     """
     import time as _time
 
     now = _time.monotonic()
-    bucket = _rate_limit_buckets.setdefault(endpoint, _collections.deque())
+    with _rate_limit_lock:
+        bucket = _rate_limit_buckets.setdefault(endpoint, _collections.deque())
 
-    # Evict expired entries
-    while bucket and bucket[0] < now - _rate_limit_window:
-        bucket.popleft()
+        # Evict expired entries from this bucket
+        while bucket and bucket[0] < now - _rate_limit_window:
+            bucket.popleft()
 
-    if len(bucket) >= _rate_limit_max:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded for {endpoint}. Max {_rate_limit_max} requests per {_rate_limit_window}s.",
-        )
+        if len(bucket) >= _rate_limit_max:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded for {endpoint}. Max {_rate_limit_max} requests per {_rate_limit_window}s.",
+            )
 
-    bucket.append(now)
+        bucket.append(now)
+
+        # Periodic full cleanup: remove stale endpoint entries (Issue 18)
+        if len(_rate_limit_buckets) > _RATE_LIMIT_MAX_ENDPOINTS:
+            stale = [k for k, v in _rate_limit_buckets.items() if not v or v[-1] < now - _rate_limit_window]
+            for k in stale:
+                del _rate_limit_buckets[k]
 
 # Security schemes
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -234,6 +263,8 @@ _operator_enabled: bool = bool(_operator_passphrase)
 operator_header = APIKeyHeader(name="X-PEARL-OPERATOR", auto_error=False)
 _operator_failures: Dict[str, List[float]] = {}
 _operator_max_attempts_per_minute: int = int(os.getenv("PEARL_OPERATOR_MAX_ATTEMPTS_PER_MINUTE", "20") or "20")
+_OPERATOR_FAILURES_MAX_CLIENTS: int = 1000  # cap on tracked client IPs
+_operator_failures_lock = threading.Lock()  # thread safety for concurrent access
 
 
 def _get_client_id(request: Request) -> str:
@@ -265,25 +296,33 @@ async def verify_operator(
 
     client_id = _get_client_id(request)
     now = time.time()
-    bucket = _operator_failures.get(client_id, [])
-    # Keep only last 60 seconds
-    bucket = [t for t in bucket if now - t < 60.0]
-    _operator_failures[client_id] = bucket
 
-    if _operator_max_attempts_per_minute > 0 and len(bucket) >= _operator_max_attempts_per_minute:
-        raise HTTPException(status_code=429, detail="Too many attempts.")
-
-    if not operator:
-        bucket.append(now)
+    with _operator_failures_lock:
+        bucket = _operator_failures.get(client_id, [])
+        # Keep only last 60 seconds
+        bucket = [t for t in bucket if now - t < 60.0]
         _operator_failures[client_id] = bucket
-        raise HTTPException(status_code=403, detail="Operator access required.")
 
-    # Constant-time compare
-    if secrets.compare_digest(operator.strip(), _operator_passphrase):
-        return operator
+        if _operator_max_attempts_per_minute > 0 and len(bucket) >= _operator_max_attempts_per_minute:
+            raise HTTPException(status_code=429, detail="Too many attempts.")
 
-    bucket.append(now)
-    _operator_failures[client_id] = bucket
+        if not operator:
+            bucket.append(now)
+            raise HTTPException(status_code=403, detail="Operator access required.")
+
+        # Constant-time compare
+        if secrets.compare_digest(operator.strip(), _operator_passphrase):
+            return operator
+
+        bucket.append(now)
+
+        # Periodic cleanup: remove stale client entries (Issue 18)
+        if len(_operator_failures) > _OPERATOR_FAILURES_MAX_CLIENTS:
+            stale_clients = [k for k, v in _operator_failures.items()
+                            if not v or v[-1] < now - 120.0]
+            for k in stale_clients:
+                del _operator_failures[k]
+
     raise HTTPException(status_code=403, detail="Operator access required.")
 
 
@@ -1098,6 +1137,9 @@ _pearl_last_state_sync_error: Optional[str] = None
 # WebSocket Connection Manager
 # ---------------------------------------------------------------------------
 
+_WS_MAX_CONNECTIONS: int = 100  # max concurrent WebSocket connections
+
+
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
 
@@ -1112,10 +1154,17 @@ class ConnectionManager:
         self._last_state_size: int = 0
         self._cached_state: Dict[str, Any] = {}
 
-    async def connect(self, websocket: WebSocket):
-        """Register a new WebSocket connection (assumes accepted)."""
+    async def connect(self, websocket: WebSocket) -> bool:
+        """Register a new WebSocket connection (assumes accepted).
+
+        Returns False if the connection cap has been reached.
+        """
+        if len(self.active_connections) >= _WS_MAX_CONNECTIONS:
+            logger.warning(f"[WebSocket] Connection rejected: max {_WS_MAX_CONNECTIONS} reached")
+            return False
         self.active_connections.append(websocket)
         print(f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}")
+        return True
 
     def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
@@ -1124,20 +1173,29 @@ class ConnectionManager:
         print(f"[WebSocket] Client disconnected. Total connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
-        """Broadcast a message to all connected clients."""
+        """Broadcast a message to all connected clients using asyncio.gather."""
         if not self.active_connections:
             return
 
-        disconnected = []
-        for connection in self.active_connections:
+        async def _safe_send(conn: WebSocket) -> Optional[WebSocket]:
             try:
-                await connection.send_json(message)
+                await asyncio.wait_for(conn.send_json(message), timeout=5.0)
+                return None
             except Exception:
-                disconnected.append(connection)
+                return conn  # mark for removal
 
-        # Clean up disconnected clients
-        for conn in disconnected:
-            self.disconnect(conn)
+        # Copy list to avoid mutation during iteration
+        results = await asyncio.gather(
+            *[_safe_send(conn) for conn in list(self.active_connections)],
+            return_exceptions=True,
+        )
+
+        # Clean up disconnected / timed-out clients
+        for result in results:
+            if isinstance(result, WebSocket):
+                self.disconnect(result)
+            elif isinstance(result, Exception):
+                pass  # gather caught it; connection already gone
 
     async def start_broadcast_loop(self, interval: float = 2.0):
         """Start broadcasting state updates at regular intervals."""

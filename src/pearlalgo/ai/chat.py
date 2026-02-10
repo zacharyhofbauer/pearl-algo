@@ -45,32 +45,8 @@ def _get_openai_client():
     return _openai_client
 
 
-@dataclass
-class RateLimiter:
-    """Simple sliding window rate limiter."""
-
-    max_requests: int = 5
-    window_seconds: float = 60.0
-    timestamps: List[float] = field(default_factory=list)
-
-    def is_allowed(self) -> bool:
-        """Check if request is allowed under rate limit."""
-        now = time.time()
-        # Remove timestamps outside window
-        self.timestamps = [t for t in self.timestamps if now - t < self.window_seconds]
-        return len(self.timestamps) < self.max_requests
-
-    def record(self) -> None:
-        """Record a request timestamp."""
-        self.timestamps.append(time.time())
-
-    def time_until_allowed(self) -> float:
-        """Return seconds until next request is allowed."""
-        if self.is_allowed():
-            return 0.0
-        now = time.time()
-        oldest = min(self.timestamps)
-        return max(0.0, self.window_seconds - (now - oldest))
+# Re-export from shared utility for backward compatibility.
+from pearlalgo.utils.rate_limiter import SlidingWindowRateLimiter as RateLimiter  # noqa: F401
 
 
 @dataclass

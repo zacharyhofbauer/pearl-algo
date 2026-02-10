@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional, Any, Tuple
 
-from pearlalgo.utils.formatting import fmt_currency
+from pearlalgo.utils.formatting import fmt_currency, fmt_pct_direct
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.telegram_alerts import (
     sanitize_telegram_markdown,
@@ -30,8 +30,6 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_confidence_tier,
     format_time_ago,
     safe_label,
-    _format_currency,
-    _format_percentage,
 )
 from pearlalgo.utils.paths import parse_utc_timestamp
 
@@ -111,34 +109,8 @@ def format_streak(streak_count: int, streak_type: str | None) -> str:
     return f"{emoji}{streak_count}{suffix}"
 
 
-def format_percentage(value: float, decimals: int = 1) -> str:
-    """Format a percentage value.
-
-    Thin wrapper around ``_format_percentage`` for a cleaner public API.
-
-    Args:
-        value: Percentage value (e.g. 75.0 for 75%).
-        decimals: Decimal places.
-
-    Returns:
-        Formatted string like '75.0%'.
-    """
-    return _format_percentage(value, decimals=decimals)
-
-
-def format_currency(value: float, *, show_sign: bool = False) -> str:
-    """Format a currency value.
-
-    Thin wrapper around ``_format_currency`` for a cleaner public API.
-
-    Args:
-        value: Dollar amount.
-        show_sign: Whether to show +/- sign.
-
-    Returns:
-        Formatted string like '$1,234.56' or '+$50.00'.
-    """
-    return _format_currency(value, show_sign=show_sign)
+# NOTE: format_percentage / format_currency wrappers removed.
+# Use fmt_pct_direct / fmt_currency from pearlalgo.utils.formatting directly.
 
 
 # ---------------------------------------------------------------------------

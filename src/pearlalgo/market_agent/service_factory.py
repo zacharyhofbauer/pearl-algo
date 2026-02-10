@@ -82,6 +82,72 @@ class ServiceDependencies:
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
+    def resolve_defaults(self) -> "ServiceDependencies":
+        """Fill in ``None`` fields with sensible production defaults.
+
+        This eliminates the dual construction path in
+        ``MarketAgentService.__init__`` — the service now always receives
+        a fully-populated ``ServiceDependencies``.
+
+        Returns ``self`` for convenience (mutates in place).
+        """
+        if not self.service_config:
+            self.service_config = load_service_config()
+
+        if self.config is None:
+            from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+            self.config = ConfigView(PEARL_BOT_CONFIG.copy())
+
+        symbol = str(self.config.get("symbol", "MNQ"))
+        timeframe = str(self.config.get("timeframe", "5m"))
+
+        if self.data_fetcher is None and self.data_provider is not None:
+            nq_config_dict = {"symbol": symbol, "timeframe": timeframe}
+            self.data_fetcher = MarketAgentDataFetcher(self.data_provider, config=nq_config_dict)
+
+        if self.state_manager is None:
+            self.state_manager = MarketAgentStateManager(
+                state_dir=self.state_dir,
+                service_config=self.service_config,
+            )
+
+        if self.performance_tracker is None:
+            self.performance_tracker = PerformanceTracker(
+                state_dir=self.state_dir,
+                state_manager=self.state_manager,
+            )
+
+        if self.telegram_notifier is None:
+            challenge_cfg = self.service_config.get("challenge", {}) or {}
+            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            account_label = (
+                "MFFU"
+                if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
+                else "INCEPTION"
+            )
+            self.telegram_notifier = MarketAgentTelegramNotifier(
+                bot_token=self.telegram_bot_token,
+                chat_id=self.telegram_chat_id,
+                state_dir=self.state_dir,
+                account_label=account_label,
+            )
+
+        if self.notification_queue is None:
+            telegram_settings = self.service_config.get("telegram", {}) or {}
+            min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
+            self.notification_queue = NotificationQueue(
+                telegram_notifier=self.telegram_notifier,
+                max_queue_size=1000,
+                batch_delay_seconds=0.5,
+                max_retries=3,
+                min_tier=min_tier,
+            )
+
+        if self.health_monitor is None:
+            self.health_monitor = HealthMonitor(state_dir=self.state_dir)
+
+        return self
+
 
 def build_service_dependencies(
     data_provider: DataProvider,

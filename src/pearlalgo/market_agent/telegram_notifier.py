@@ -13,8 +13,9 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-from pearlalgo.utils.formatting import fmt_currency
+from pearlalgo.utils.formatting import fmt_currency, fmt_pct_direct
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.telegram_markdown import escape_markdown_v2 as _canonical_escape_markdown_v2
 
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
@@ -24,8 +25,6 @@ from pearlalgo.utils.telegram_alerts import (
     TelegramPrefs,
     _truncate_telegram_text,
     _format_uptime,
-    _format_currency,
-    _format_percentage,
     format_signal_status,
     format_signal_direction,
     format_signal_confidence_tier,
@@ -37,6 +36,11 @@ from pearlalgo.utils.telegram_alerts import (
     sanitize_telegram_markdown,
     # Standardized terminology constants
     LABEL_SCANS,
+)
+from pearlalgo.market_agent.telegram_formatters import (
+    format_compact_signal as _canonical_format_compact_signal,
+    format_signal_message as _canonical_format_signal_message,
+    format_status_message as _canonical_format_status_message,
 )
 from pearlalgo.utils.telegram_ui_contract import (
     callback_menu,
@@ -151,94 +155,13 @@ class MarketAgentTelegramNotifier:
             return self.prefs
 
     def _format_compact_signal(self, signal: Dict) -> str:
+        """Format signal as a calm-minimal, decision-first push alert.
+
+        Delegates to the pure function in ``telegram_formatters``.
         """
-        Format signal as a calm-minimal, decision-first push alert.
-        
-        Layout (calm-minimal spec):
-        1. Header: Symbol, direction, type
-        2. Trade Plan: Entry, Stop, TP, R:R
-        3. Action cue: What to do next (immediately after plan)
-        4. Confidence: Single line with tier
-        5. Context: Single condensed line (regime + MTF) only if informative
-        6. Signal ID: Short reference for Details drill-down
-        
-        Full context (reason, timestamps, detailed regime) lives in Details view.
-        
-        Args:
-            signal: Signal dictionary with full context
-            
-        Returns:
-            Formatted message string (under ~1000 chars for mobile, fast scan)
-        """
-        symbol = str(signal.get("symbol") or "MNQ")
-        signal_type = str(signal.get("type") or "unknown").replace("_", " ").title()
-        try:
-            entry_price = float(signal.get("entry_price") or 0.0)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            entry_price = 0.0
-        try:
-            stop_loss = float(signal.get("stop_loss") or 0.0)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            stop_loss = 0.0
-        try:
-            take_profit = float(signal.get("take_profit") or 0.0)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            take_profit = 0.0
-        try:
-            confidence = float(signal.get("confidence") or 0.0)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            confidence = 0.0
-        signal_id = str(signal.get("signal_id") or "")
-
-        # Check if this is a test signal (won't be saved to database/menu)
-        is_test = signal.get("_is_test", False) or str(signal.get("reason", "")).lower().startswith("test")
-        test_label = "🧪 *[TEST - NOT TRACKED]*\n" if is_test else ""
-
-        # Use shared helpers for consistent formatting
-        dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
-        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
-
-        # Calculate risk/reward
-        rr = 0.0
-        if entry_price > 0 and stop_loss > 0 and take_profit > 0:
-            if dir_label == "LONG":
-                risk = entry_price - stop_loss
-                reward = take_profit - entry_price
-            else:
-                risk = stop_loss - entry_price
-                reward = entry_price - take_profit
-            if risk > 0:
-                rr = reward / risk
-
-        # Build compact mobile-first push alert (4 lines max)
-        acct_prefix = f"[{self.account_label}] " if self.account_label else ""
-
-        # Line 1: Direction + symbol + entry price
-        message = f"{test_label}{acct_prefix}{dir_emoji} *{dir_label} {symbol}* {fmt_currency(entry_price)}\n"
-
-        # Line 2: SL / TP / R:R (all on one line)
-        if stop_loss > 0 and take_profit > 0:
-            message += f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {rr:.1f}\n"
-
-        # Line 3: Size + confidence + signal type
-        position_size = signal.get("position_size") or 1
-        message += f"Size {position_size} | {conf_emoji} {confidence:.0%} | {signal_type}\n"
-
-        # Line 4: Session context (one line, only if informative)
-        regime = signal.get("regime", {}) or {}
-        ctx_parts = []
-        if regime.get("session"):
-            ctx_parts.append(str(regime["session"]).replace("_", " ").title())
-        if regime.get("regime"):
-            ctx_parts.append(str(regime["regime"]).replace("_", " ").title())
-        if ctx_parts:
-            message += " | ".join(ctx_parts)
-
-        return message
+        return _canonical_format_compact_signal(
+            signal, account_label=self.account_label,
+        )
     
     async def _send_photo(
         self,
@@ -735,56 +658,20 @@ class MarketAgentTelegramNotifier:
             return False
 
     def _format_signal_message(self, signal: Dict) -> str:
-        """
-        Format signal as Telegram message.
-        
-        Args:
-            signal: Signal dictionary
-            
-        Returns:
-            Formatted message string
-        """
-        signal_type = signal.get("type", "unknown")
-        direction = signal.get("direction", "").upper()
-        entry_price = signal.get("entry_price", 0)
-        stop_loss = signal.get("stop_loss", 0)
-        take_profit = signal.get("take_profit", 0)
-        confidence = signal.get("confidence", 0)
-        reason = signal.get("reason", "")
+        """Format signal as Telegram message.
 
-        # Calculate risk/reward
-        if direction == "LONG" and stop_loss > 0 and take_profit > 0:
-            risk = entry_price - stop_loss
-            reward = take_profit - entry_price
-            risk_reward = reward / risk if risk > 0 else 0
-        else:
-            risk_reward = 0
-
-        acct_tag = f"[{self.account_label}] " if self.account_label else ""
-        dir_short = direction if direction else "?"
-        message = (
-            f"{acct_tag}{dir_short} MNQ {fmt_currency(entry_price)}\n"
-            f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {risk_reward:.1f}\n"
-            f"{confidence:.0%} | {signal_type} | {reason}"
+        Delegates to the pure function in ``telegram_formatters``.
+        """
+        return _canonical_format_signal_message(
+            signal, account_label=self.account_label,
         )
-        return message.strip()
 
     def _format_status_message(self, status: Dict) -> str:
-        """
-        Format status update as Telegram message.
-        
-        Args:
-            status: Status dictionary
-            
-        Returns:
-            Formatted message string
-        """
-        message = f"""
-📊 *NQ Agent Status*
+        """Format status update as Telegram message.
 
-{status.get('message', 'No status available')}
-"""
-        return message.strip()
+        Delegates to the pure function in ``telegram_formatters``.
+        """
+        return _canonical_format_status_message(status)
 
     async def send_daily_summary(self, performance_metrics: Dict) -> bool:
         """
@@ -967,7 +854,7 @@ class MarketAgentTelegramNotifier:
                     total_pnl = performance.get('total_pnl', 0)
                     avg_pnl = performance.get('avg_pnl', 0)
 
-                    message += f"📈 *Performance (7d):* {wins}W/{losses}L • {_format_percentage(win_rate)} WR • {_format_currency(total_pnl)} • {_format_currency(avg_pnl)} avg\n"
+                    message += f"📈 *Performance (7d):* {wins}W/{losses}L • {fmt_pct_direct(win_rate)} WR • {fmt_currency(total_pnl)} • {fmt_currency(avg_pnl)} avg\n"
                 else:
                     message += "📈 *Performance (7d):* No completed trades yet\n"
 
@@ -1080,19 +967,6 @@ class MarketAgentTelegramNotifier:
     # Custom PEARL emoji ID (created via @PEARLalgobot sticker pack)
     PEARL_EMOJI_ID = "5177134388684523561"
 
-    @staticmethod
-    def _escape_markdown_v2(text: str) -> str:
-        """Escape special characters for MarkdownV2."""
-        # Characters that need escaping: _ * [ ] ( ) ~ ` > # + - = | { } . !
-        escape_chars = r'_*[]()~`>#+-=|{}.!'
-        result = ""
-        for char in text:
-            if char in escape_chars:
-                result += f"\\{char}"
-            else:
-                result += char
-        return result
-
     @classmethod
     def _convert_to_markdown_v2_with_pearl(cls, text: str) -> str:
         """Convert Markdown text to MarkdownV2 with custom PEARL emoji header.
@@ -1167,14 +1041,14 @@ class MarketAgentTelegramNotifier:
         try:
             if use_header:
                 # Escape message content for MarkdownV2
-                escaped_message = self._escape_markdown_v2(message)
-                escaped_type = self._escape_markdown_v2(message_type)
+                escaped_message = _canonical_escape_markdown_v2(message)
+                escaped_type = _canonical_escape_markdown_v2(message_type)
                 
                 # Build PEARL branded message with custom emoji
                 header = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\n{escaped_type}\n"
                 formatted_msg = header + "\n" + escaped_message
             else:
-                formatted_msg = self._escape_markdown_v2(message)
+                formatted_msg = _canonical_escape_markdown_v2(message)
             
             return await self.telegram.send_message(formatted_msg, parse_mode="MarkdownV2")
         except Exception as e:
@@ -2145,14 +2019,14 @@ class MarketAgentTelegramNotifier:
             message += f"• Exited: {exited_signals}\n"
             if total_signals > 0:
                 exit_rate = (exited_signals / total_signals) * 100
-                message += f"• Exit Rate: {_format_percentage(exit_rate)}\n"
+                message += f"• Exit Rate: {fmt_pct_direct(exit_rate)}\n"
 
             if exited_signals > 0:
                 message += "\n*Trade Performance:*\n"
                 message += f"✅ {wins}W  ❌ {losses}L\n"
-                message += f"📈 {_format_percentage(win_rate)} WR\n"
-                message += f"💰 {_format_currency(total_pnl)}\n"
-                message += f"📊 {_format_currency(avg_pnl)} avg\n"
+                message += f"📈 {fmt_pct_direct(win_rate)} WR\n"
+                message += f"💰 {fmt_currency(total_pnl)}\n"
+                message += f"📊 {fmt_currency(avg_pnl)} avg\n"
                 message += f"⏱️ {avg_hold:.1f}m avg hold\n"
 
                 # Performance trend

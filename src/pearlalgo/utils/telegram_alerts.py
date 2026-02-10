@@ -308,14 +308,8 @@ def _format_number(value: float, decimals: int = 2, show_sign: bool = False) -> 
     return fmt_number_commas(value, decimals=decimals, show_sign=show_sign, default="N/A")
 
 
-def _format_currency(value: float, show_sign: bool = False) -> str:
-    """Format currency value. Delegates to fmt_currency."""
-    return fmt_currency(value, show_sign=show_sign, default="$0.00")
-
-
-def _format_percentage(value: float, decimals: int = 1) -> str:
-    """Format percentage. Delegates to fmt_pct_direct."""
-    return fmt_pct_direct(value, decimals=decimals, default="0%")
+# NOTE: _format_currency / _format_percentage wrappers removed.
+# Use fmt_currency / fmt_pct_direct from pearlalgo.utils.formatting directly.
 
 
 # ---------------------------------------------------------------------------
@@ -1276,7 +1270,7 @@ def format_performance_line(
     else:
         wr_part = f"{wr:.0f}% WR"
 
-    return f"📈 {int(wins)}W/{int(losses)}L • {wr_part} • {pnl_emoji} {_format_currency(total_pnl)}"
+    return f"📈 {int(wins)}W/{int(losses)}L • {wr_part} • {pnl_emoji} {fmt_currency(total_pnl)}"
 
 
 def format_home_card(
@@ -2319,10 +2313,10 @@ class TelegramAlerts:
         trend_text = "Profitable" if daily_pnl >= 0 else "Loss"
 
         message = f"{pnl_emoji} *Daily Summary*\n\n"
-        message += f"💰 *P&L:* {_format_currency(daily_pnl)}\n"
+        message += f"💰 *P&L:* {fmt_currency(daily_pnl)}\n"
 
         if win_rate is not None:
-            message += f"📊 *Trades:* {total_trades} ({_format_percentage(win_rate * 100)} WR)\n"
+            message += f"📊 *Trades:* {total_trades} ({fmt_pct_direct(win_rate * 100)} WR)\n"
         else:
             message += f"📊 *Trades:* {total_trades}\n"
 
@@ -2427,15 +2421,15 @@ class TelegramAlerts:
                     rr_ratio = reward / risk
 
             # Format with consistent alignment
-            message += f"Entry:    {_format_currency(entry)}\n"
+            message += f"Entry:    {fmt_currency(entry)}\n"
             if stop_loss:
-                message += f"Stop:     {_format_currency(stop_loss)}{stop_pct_str}\n"
+                message += f"Stop:     {fmt_currency(stop_loss)}{stop_pct_str}\n"
             if take_profit:
                 # Include R:R on target line if available
                 if rr_ratio is not None:
-                    message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}  R:R {rr_ratio:.1f}:1\n"
+                    message += f"Target:   {fmt_currency(take_profit)}{tp_pct_str}  R:R {rr_ratio:.1f}:1\n"
                 else:
-                    message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}\n"
+                    message += f"Target:   {fmt_currency(take_profit)}{tp_pct_str}\n"
 
         # Confidence bar
         if confidence is not None:
@@ -2460,7 +2454,7 @@ class TelegramAlerts:
                 option_emoji = "📞" if option_type.lower() == "call" else "📉"
                 message += f"Type: {option_emoji} {option_type.upper()}\n"
             if strike:
-                message += f"Strike: {_format_currency(strike)}\n"
+                message += f"Strike: {fmt_currency(strike)}\n"
             if expiration:
                 message += f"Expiry: {expiration}\n"
             if dte is not None:

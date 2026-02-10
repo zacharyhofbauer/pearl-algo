@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import fcntl
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -265,10 +266,11 @@ class _SignalStore:
         self._sqlite_enabled: bool = False
         self._trade_db: Any = None
 
-        # Recent signals TTL cache
+        # Recent signals TTL cache (protected by lock for thread safety)
         self._signals_cache: Optional[List[Dict]] = None
         self._signals_cache_time: float = 0.0
         self._signals_cache_limit: int = 0
+        self._signals_cache_lock = threading.Lock()
 
     # -- public helpers ------------------------------------------------
 
@@ -293,7 +295,8 @@ class _SignalStore:
         return self._signal_count
 
     def invalidate_signals_cache(self) -> None:
-        self._signals_cache = None
+        with self._signals_cache_lock:
+            self._signals_cache = None
 
     # -- duplicate detection -------------------------------------------
 
@@ -517,18 +520,21 @@ class _SignalStore:
 
         now = time.monotonic()
 
-        if (
-            self._signals_cache is not None
-            and (now - self._signals_cache_time) < self._SIGNALS_CACHE_TTL
-            and limit <= self._signals_cache_limit
-        ):
-            return self._signals_cache[-limit:]
+        with self._signals_cache_lock:
+            if (
+                self._signals_cache is not None
+                and (now - self._signals_cache_time) < self._SIGNALS_CACHE_TTL
+                and limit <= self._signals_cache_limit
+            ):
+                return self._signals_cache[-limit:]
 
+        # Read outside lock to avoid blocking concurrent readers
         signals = self.get_recent_signals_tail(max_lines=limit)
 
-        self._signals_cache = signals
-        self._signals_cache_time = now
-        self._signals_cache_limit = limit
+        with self._signals_cache_lock:
+            self._signals_cache = signals
+            self._signals_cache_time = now
+            self._signals_cache_limit = limit
 
         return signals
 

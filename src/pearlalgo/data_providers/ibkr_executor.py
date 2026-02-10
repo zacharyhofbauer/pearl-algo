@@ -26,9 +26,18 @@ from pearlalgo.utils.formatting import fmt_price as _fmt_price, fmt_int as _fmt_
 from pearlalgo.utils.logger import logger
 
 
-# Load IBKR verbose logging setting once at module load time
-_data_settings = load_service_config(validate=False).get("data", {})
-_IBKR_VERBOSE_LOGGING = bool(_data_settings.get("ibkr_verbose_logging", False))
+# IBKR verbose logging setting — loaded lazily on first use to avoid
+# module-level side effects (file I/O at import time).
+_IBKR_VERBOSE_LOGGING: Optional[bool] = None
+
+
+def _get_ibkr_verbose_logging() -> bool:
+    """Return the IBKR verbose logging flag, loading config lazily on first call."""
+    global _IBKR_VERBOSE_LOGGING
+    if _IBKR_VERBOSE_LOGGING is None:
+        _data_settings = load_service_config(validate=False).get("data", {})
+        _IBKR_VERBOSE_LOGGING = bool(_data_settings.get("ibkr_verbose_logging", False))
+    return _IBKR_VERBOSE_LOGGING
 
 
 def _log_trace(message: str, *args, **kwargs) -> None:
@@ -38,7 +47,7 @@ def _log_trace(message: str, *args, **kwargs) -> None:
     This is used for step-by-step tracing in the IBKR executor.
     Actionable warnings/errors should still use logger.warning/error directly.
     """
-    if _IBKR_VERBOSE_LOGGING:
+    if _get_ibkr_verbose_logging():
         logger.info(message, *args, **kwargs)
     else:
         logger.debug(message, *args, **kwargs)

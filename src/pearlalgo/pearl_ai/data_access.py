@@ -7,8 +7,9 @@ find similar trades, and analyze patterns.
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import logging
@@ -37,6 +38,14 @@ class TradeDataAccess:
             self.db_path = self._find_database()
 
         self._verify_database()
+
+        # TTL cache for format_for_context (Issue 19B)
+        self._context_cache: Optional[Tuple[str, float]] = None  # (result, expire_time)
+        self._CONTEXT_CACHE_TTL: float = 30.0  # seconds
+
+    def invalidate_context_cache(self) -> None:
+        """Invalidate the context cache (e.g. after a new trade exit)."""
+        self._context_cache = None
 
     def _find_database(self) -> Path:
         """Find trade database in default locations."""
@@ -558,10 +567,17 @@ class TradeDataAccess:
         if not self.is_available():
             return ""
 
+        # Check TTL cache (Issue 19B) — keyed on query + regime
+        now = time.monotonic()
+        regime = current_state.get("market_regime", {}).get("regime")
+        cache_key = f"{query}:{regime}"
+        if self._context_cache is not None:
+            cached_result, expire_time = self._context_cache
+            if now < expire_time and hasattr(self, "_context_cache_key") and self._context_cache_key == cache_key:
+                return cached_result
+
         query_lower = query.lower()
         context_parts = []
-
-        regime = current_state.get("market_regime", {}).get("regime")
 
         try:
             with self._connection() as conn:
@@ -621,7 +637,13 @@ class TradeDataAccess:
         except Exception as e:
             logger.error(f"Error formatting trade context: {e}")
 
-        return "\n".join(context_parts) if context_parts else ""
+        result = "\n".join(context_parts) if context_parts else ""
+
+        # Update TTL cache
+        self._context_cache = (result, now + self._CONTEXT_CACHE_TTL)
+        self._context_cache_key = cache_key
+
+        return result
 
     # ------------------------------------------------------------------
     # Internal query methods that accept an existing connection

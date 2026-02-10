@@ -184,17 +184,13 @@ class LocalLLM:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def __del__(self):
-        """Cleanup on deletion."""
-        if self._session and not self._session.closed:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self._session.close())
-                else:
-                    loop.run_until_complete(self._session.close())
-            except Exception:
-                pass
+    # --- Async context manager for deterministic cleanup ---
+
+    async def __aenter__(self) -> "LocalLLM":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()
 
 
 class LocalLLMPool:

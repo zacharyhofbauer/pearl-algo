@@ -9,10 +9,23 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_float, safe_get_int
 from pearlalgo.utils.logger import logger
 
 if TYPE_CHECKING:
     from pearlalgo.learning.ml_signal_filter import MLSignalFilter
+
+# --- ML opportunity sizing thresholds (Issue 12) ---
+_ML_HIGH_OPPORTUNITY_THRESHOLD = 0.8
+_ML_HIGH_OPPORTUNITY_MULTIPLIER = 1.5
+_ML_GOOD_OPPORTUNITY_THRESHOLD = 0.6
+_ML_GOOD_OPPORTUNITY_MULTIPLIER = 1.25
+_ML_NORMAL_OPPORTUNITY_MULTIPLIER = 1.0
+_ML_LOW_OPPORTUNITY_THRESHOLD = 0.4
+_ML_LOW_OPPORTUNITY_MULTIPLIER = 0.75
+
+# --- Default margin estimate per contract (MNQ) ---
+_DEFAULT_MARGIN_PER_CONTRACT = 5000
 
 
 class OrderManager:
@@ -67,34 +80,24 @@ class OrderManager:
             Position size (number of contracts)
         """
         # Check if signal already has a size
-        try:
-            existing = signal.get("position_size")
-            if existing is not None:
-                return max(1, int(float(existing)))
-        except Exception:
-            pass
+        existing = signal.get("position_size")
+        if existing is not None:
+            parsed = safe_get_int({"_v": existing}, "_v", 0, warn=True, context="order_manager")
+            if parsed > 0:
+                return max(1, parsed)
 
         cfg = self._strategy_settings or {}
-        enable_dynamic = bool(cfg.get("enable_dynamic_sizing", False))
-        base_contracts = int(cfg.get("base_contracts", 1) or 1)
-        high_contracts = int(cfg.get("high_conf_contracts", base_contracts) or base_contracts)
-        max_contracts = int(cfg.get("max_conf_contracts", high_contracts) or high_contracts)
+        enable_dynamic = safe_get_bool(cfg, "enable_dynamic_sizing", False, context="order_manager")
+        base_contracts = safe_get_int(cfg, "base_contracts", 1, context="order_manager")
+        high_contracts = safe_get_int(cfg, "high_conf_contracts", base_contracts, context="order_manager")
+        max_contracts = safe_get_int(cfg, "max_conf_contracts", high_contracts, context="order_manager")
 
         # Get confidence from signal
-        try:
-            conf = float(signal.get("confidence") or 0.0)
-        except Exception:
-            conf = 0.0
+        conf = safe_get_float({"_v": signal.get("confidence")}, "_v", 0.0, warn=False)
 
         # Get thresholds
-        try:
-            high_th = float(cfg.get("high_conf_threshold", 0.8) or 0.8)
-        except Exception:
-            high_th = 0.8
-        try:
-            max_th = float(cfg.get("max_conf_threshold", 0.9) or 0.9)
-        except Exception:
-            max_th = 0.9
+        high_th = safe_get_float(cfg, "high_conf_threshold", 0.8, context="order_manager")
+        max_th = safe_get_float(cfg, "max_conf_threshold", 0.9, context="order_manager")
 
         # Determine size based on confidence
         size = base_contracts
@@ -154,21 +157,17 @@ class OrderManager:
             signal["_ml_opportunity_score"] = opportunity_score
 
             # Determine sizing multiplier based on opportunity score
-            # High opportunity (>0.8) -> 1.5x
-            # Good opportunity (>0.6) -> 1.25x
-            # Normal opportunity -> 1.0x
-            # Low opportunity (<0.4) -> 0.75x
-            if opportunity_score >= 0.8:
-                multiplier = 1.5
+            if opportunity_score >= _ML_HIGH_OPPORTUNITY_THRESHOLD:
+                multiplier = _ML_HIGH_OPPORTUNITY_MULTIPLIER
                 priority = "critical"
-            elif opportunity_score >= 0.6:
-                multiplier = 1.25
+            elif opportunity_score >= _ML_GOOD_OPPORTUNITY_THRESHOLD:
+                multiplier = _ML_GOOD_OPPORTUNITY_MULTIPLIER
                 priority = "high"
-            elif opportunity_score >= 0.4:
-                multiplier = 1.0
+            elif opportunity_score >= _ML_LOW_OPPORTUNITY_THRESHOLD:
+                multiplier = _ML_NORMAL_OPPORTUNITY_MULTIPLIER
                 priority = "normal"
             else:
-                multiplier = 0.75
+                multiplier = _ML_LOW_OPPORTUNITY_MULTIPLIER
                 priority = "normal"
 
             signal["_ml_size_multiplier"] = multiplier

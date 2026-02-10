@@ -37,7 +37,10 @@ def load_json_file(path: Path) -> Dict[str, Any]:
 
 
 def load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
-    """Load last *max_lines* entries from a JSONL file.
+    """Load last *max_lines* entries from a JSONL file using tail-read.
+
+    Reads from the end of the file backwards so memory usage is proportional
+    to *max_lines*, not to the total file size.
 
     Args:
         path: Path to the JSONL file.
@@ -49,14 +52,39 @@ def load_jsonl_file(path: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
     try:
-        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        chunk_size = 8192
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+
+            if file_size == 0:
+                return []
+
+            remaining = file_size
+            tail_bytes = b""
+            lines_found = 0
+
+            # Read backwards in chunks until we have enough lines
+            while remaining > 0 and lines_found <= max_lines:
+                read_size = min(chunk_size, remaining)
+                remaining -= read_size
+                f.seek(remaining)
+                chunk = f.read(read_size)
+                tail_bytes = chunk + tail_bytes
+                lines_found = tail_bytes.count(b"\n")
+
+        text = tail_bytes.decode("utf-8", errors="replace")
+        all_lines = text.splitlines()
+        tail_lines = all_lines[-max_lines:] if len(all_lines) > max_lines else all_lines
+
         result: List[Dict[str, Any]] = []
-        for line in lines[-max_lines:]:
-            if line.strip():
+        for line in tail_lines:
+            stripped = line.strip()
+            if stripped:
                 try:
-                    result.append(json.loads(line))
+                    result.append(json.loads(stripped))
                 except Exception:
-                    pass
+                    pass  # skip malformed lines
         return result
     except Exception:
         return []

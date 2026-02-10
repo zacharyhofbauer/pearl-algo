@@ -707,18 +707,10 @@ Provide ONE focused piece of coaching advice with a specific action step."""
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def __del__(self):
-        """Cleanup on deletion.
+    # --- Async context manager for deterministic cleanup ---
 
-        NOTE: Accessing the event loop in __del__ is inherently unsafe
-        because __del__ may run after the loop is closed or from a
-        different thread. We only attempt a best-effort cleanup here.
-        Prefer calling ``await close()`` explicitly.
-        """
-        if self._session and not self._session.closed:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._session.close())
-            except RuntimeError:
-                # No running loop - session will be garbage collected
-                pass
+    async def __aenter__(self) -> "ClaudeLLM":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()

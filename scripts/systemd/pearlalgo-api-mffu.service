@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo API Server (NQ / Inception)
+Description=PearlAlgo API Server (MFFU Eval)
 After=network.target pearlalgo-agent.service
 Wants=pearlalgo-agent.service
 
@@ -11,7 +11,7 @@ WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
 Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
 EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market NQ --port 8000
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market MFFU_EVAL --port 8001
 Restart=always
 RestartSec=5
 

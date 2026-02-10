@@ -182,19 +182,28 @@ class MarketAgentService(ServiceNotificationsMixin):
             telegram_chat_id: Telegram chat ID (legacy path, optional)
             deps: Pre-built dependencies (factory path, keyword-only)
         """
-        # --- resolve dependencies (factory vs legacy) -------------------------
-        if deps is not None:
-            # Factory path — use pre-built dependencies
-            self.config = deps.config if deps.config is not None else ConfigView(config or PEARL_BOT_CONFIG.copy())
-            data_provider = deps.data_provider
-            state_dir = deps.state_dir
-            telegram_bot_token = deps.telegram_bot_token
-            telegram_chat_id = deps.telegram_chat_id
-            service_config = deps.service_config or load_service_config()
-        else:
-            # Legacy path — build inline
-            self.config = ConfigView(config or PEARL_BOT_CONFIG.copy())
-            service_config = load_service_config()
+        # --- resolve dependencies -------------------------------------------------
+        # Build a ServiceDependencies from legacy kwargs when not provided,
+        # then let resolve_defaults() fill in any remaining Nones.
+        from pearlalgo.market_agent.service_factory import ServiceDependencies
+
+        if deps is None:
+            deps = ServiceDependencies(
+                data_provider=data_provider,
+                config=ConfigView(config or PEARL_BOT_CONFIG.copy()) if config is not None else None,
+                service_config=load_service_config(),
+                state_dir=state_dir,
+                telegram_bot_token=telegram_bot_token,
+                telegram_chat_id=telegram_chat_id,
+            )
+
+        deps.resolve_defaults()
+
+        self.config = deps.config
+        service_config = deps.service_config
+        state_dir = deps.state_dir
+        telegram_bot_token = deps.telegram_bot_token
+        telegram_chat_id = deps.telegram_chat_id
 
         self.symbol = str(self.config.get("symbol", "MNQ"))
         self.timeframe = str(self.config.get("timeframe", "5m"))
@@ -211,56 +220,12 @@ class MarketAgentService(ServiceNotificationsMixin):
 
         self.strategy = _StrategyAdapter(self.config)
 
-        # --- core dependencies (use factory-built or construct inline) --------
-        if deps is not None and deps.data_fetcher is not None:
-            self.data_fetcher = deps.data_fetcher
-        else:
-            nq_config_dict = {"symbol": self.symbol, "timeframe": self.timeframe}
-            self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
-
-        if deps is not None and deps.state_manager is not None:
-            self.state_manager = deps.state_manager
-        else:
-            self.state_manager = MarketAgentStateManager(
-                state_dir=state_dir,
-                service_config=service_config,
-            )
-
-        if deps is not None and deps.performance_tracker is not None:
-            self.performance_tracker = deps.performance_tracker
-        else:
-            self.performance_tracker = PerformanceTracker(
-                state_dir=state_dir,
-                state_manager=self.state_manager,
-            )
-
-        if deps is not None and deps.telegram_notifier is not None:
-            self.telegram_notifier = deps.telegram_notifier
-        else:
-            challenge_cfg = (config or {}).get("challenge", {}) if isinstance(config, dict) else {}
-            if not challenge_cfg:
-                challenge_cfg = service_config.get("challenge", {}) or {}
-            _mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else "INCEPTION"
-            self.telegram_notifier = MarketAgentTelegramNotifier(
-                bot_token=telegram_bot_token,
-                chat_id=telegram_chat_id,
-                state_dir=state_dir,
-                account_label=_account_label,
-            )
-
-        if deps is not None and deps.notification_queue is not None:
-            self.notification_queue = deps.notification_queue
-        else:
-            telegram_settings = service_config.get("telegram", {}) or {}
-            _min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
-            self.notification_queue = NotificationQueue(
-                telegram_notifier=self.telegram_notifier,
-                max_queue_size=1000,
-                batch_delay_seconds=0.5,
-                max_retries=3,
-                min_tier=_min_tier,
-            )
+        # --- assign resolved dependencies (no branching) -----------------------
+        self.data_fetcher = deps.data_fetcher
+        self.state_manager = deps.state_manager
+        self.performance_tracker = deps.performance_tracker
+        self.telegram_notifier = deps.telegram_notifier
+        self.notification_queue = deps.notification_queue
 
         # Log Telegram configuration status
         if self.telegram_notifier.enabled:
@@ -276,10 +241,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                 f"chat_id={'present' if telegram_chat_id else 'MISSING'}"
             )
 
-        if deps is not None and deps.health_monitor is not None:
-            self.health_monitor = deps.health_monitor
-        else:
-            self.health_monitor = HealthMonitor(state_dir=state_dir)
+        self.health_monitor = deps.health_monitor
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         trading_circuit_breaker_settings = service_config.get("trading_circuit_breaker", {}) or {}
