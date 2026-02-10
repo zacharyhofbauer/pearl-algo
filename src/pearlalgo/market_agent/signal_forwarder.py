@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -100,14 +101,29 @@ class SignalForwarder:
                     with open(self.shared_signals_path, "a") as f:
                         f.write(json.dumps(record) + "\n")
 
-                    # Rotate if file exceeds max_lines
+                    # Rotate if file exceeds max_lines (atomic via temp + rename)
                     try:
                         with open(self.shared_signals_path, "r") as f:
                             lines = f.readlines()
                         if len(lines) > self._max_lines:
                             keep = lines[-self._max_lines :]
-                            with open(self.shared_signals_path, "w") as f:
-                                f.writelines(keep)
+                            import tempfile
+                            tmp_fd, tmp_name = tempfile.mkstemp(
+                                dir=str(self.shared_signals_path.parent),
+                                suffix=".tmp",
+                            )
+                            try:
+                                with os.fdopen(tmp_fd, "w") as tmp_f:
+                                    tmp_f.writelines(keep)
+                                    tmp_f.flush()
+                                    os.fsync(tmp_f.fileno())
+                                os.replace(tmp_name, self.shared_signals_path)
+                            except BaseException:
+                                try:
+                                    os.unlink(tmp_name)
+                                except OSError:
+                                    pass
+                                raise
                     except Exception as e:
                         logger.debug(f"Non-critical: {e}")  # rotation is non-critical
                 finally:

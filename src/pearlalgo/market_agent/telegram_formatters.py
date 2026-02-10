@@ -1,13 +1,16 @@
 """
 Telegram Message Formatters for Market Agent.
 
-This module provides mixin methods for formatting dashboard and card messages.
-These are extracted from TelegramCommandHandler to improve modularity.
+This module provides:
+1. Pure formatting functions for PnL, percentages, status labels, emoji mapping,
+   and metric formatting. These are stateless helpers with no side effects.
+2. A mixin class (TelegramFormattersMixin) for composing with TelegramCommandHandler.
 
 Architecture Note:
 ------------------
-This is a mixin class designed to be composed with TelegramCommandHandler.
-It provides message formatting utilities while keeping the main handler class
+Pure functions live at module level and can be imported independently.
+The mixin class is designed to be composed with TelegramCommandHandler,
+providing message formatting utilities while keeping the main handler class
 focused on routing and orchestration.
 """
 
@@ -15,7 +18,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Dict, Optional, Any, Tuple
 
 from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
@@ -27,11 +30,529 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_confidence_tier,
     format_time_ago,
     safe_label,
+    _format_currency,
+    _format_percentage,
 )
 from pearlalgo.utils.paths import parse_utc_timestamp
 
 if TYPE_CHECKING:
     pass
+
+
+# =============================================================================
+# Pure Formatting Functions (no side effects, no API calls)
+# =============================================================================
+
+
+def pnl_emoji(value: float) -> str:
+    """Return a colored emoji for a PnL value.
+
+    Args:
+        value: Profit/loss amount.
+
+    Returns:
+        '🟢' for non-negative, '🔴' for negative.
+    """
+    return "🟢" if value >= 0 else "🔴"
+
+
+def format_pnl_line(pnl: float, *, show_sign: bool = True) -> str:
+    """Format a PnL value as a human-readable string with emoji prefix.
+
+    Args:
+        pnl: Profit/loss amount.
+        show_sign: Whether to include +/- sign.
+
+    Returns:
+        e.g. '🟢 +$125.50' or '🔴 -$42.00'
+    """
+    emoji = pnl_emoji(pnl)
+    return f"{emoji} {fmt_currency(pnl, show_sign=show_sign)}"
+
+
+def format_win_loss_line(
+    wins: int,
+    losses: int,
+    *,
+    include_rate: bool = True,
+) -> str:
+    """Format a win/loss summary line.
+
+    Args:
+        wins: Number of winning trades.
+        losses: Number of losing trades.
+        include_rate: Whether to append win-rate percentage.
+
+    Returns:
+        e.g. '3W/1L • 75% WR'
+    """
+    total = wins + losses
+    line = f"{wins}W/{losses}L"
+    if include_rate and total > 0:
+        win_rate = wins / total * 100
+        line += f" • {win_rate:.0f}% WR"
+    return line
+
+
+def format_streak(streak_count: int, streak_type: str | None) -> str:
+    """Format a win/loss streak indicator.
+
+    Args:
+        streak_count: Number of consecutive results.
+        streak_type: 'win' or 'loss' (or None).
+
+    Returns:
+        e.g. '🔥3W' or '❄️2L' or '' if no meaningful streak.
+    """
+    if streak_count < 3 or not streak_type:
+        return ""
+    emoji = "🔥" if streak_type == "win" else "❄️"
+    suffix = "W" if streak_type == "win" else "L"
+    return f"{emoji}{streak_count}{suffix}"
+
+
+def format_percentage(value: float, decimals: int = 1) -> str:
+    """Format a percentage value.
+
+    Thin wrapper around ``_format_percentage`` for a cleaner public API.
+
+    Args:
+        value: Percentage value (e.g. 75.0 for 75%).
+        decimals: Decimal places.
+
+    Returns:
+        Formatted string like '75.0%'.
+    """
+    return _format_percentage(value, decimals=decimals)
+
+
+def format_currency(value: float, *, show_sign: bool = False) -> str:
+    """Format a currency value.
+
+    Thin wrapper around ``_format_currency`` for a cleaner public API.
+
+    Args:
+        value: Dollar amount.
+        show_sign: Whether to show +/- sign.
+
+    Returns:
+        Formatted string like '$1,234.56' or '+$50.00'.
+    """
+    return _format_currency(value, show_sign=show_sign)
+
+
+# ---------------------------------------------------------------------------
+# Status / Emoji Mapping Helpers
+# ---------------------------------------------------------------------------
+
+CONNECTION_STATUS_EMOJI: Dict[str, str] = {
+    "connected": "🟢",
+    "disconnected": "🔴",
+    "reconnecting": "🟡",
+    "connection_lost": "🔴",
+    "recovered": "✅",
+}
+
+GATE_STATUS_EMOJI_TRUE = "🟢"
+GATE_STATUS_EMOJI_FALSE = "🔴"
+GATE_STATUS_EMOJI_UNKNOWN = "⚪"
+
+DATA_LEVEL_SHORT: Dict[str, str] = {
+    "level1": "L1",
+    "level2": "L2",
+    "historical": "HIST",
+    "historical_fallback": "HIST",
+    "error": "ERR",
+    "unknown": "?",
+}
+
+
+def connection_status_emoji(status: str) -> str:
+    """Return emoji for a connection status string.
+
+    Args:
+        status: One of 'connected', 'disconnected', 'reconnecting',
+                'connection_lost', 'recovered'.
+
+    Returns:
+        Corresponding emoji, defaulting to '⚪'.
+    """
+    return CONNECTION_STATUS_EMOJI.get(status.lower(), "⚪")
+
+
+def gate_emoji(value: bool | None) -> str:
+    """Return a traffic-light emoji for a boolean gate.
+
+    Args:
+        value: True/False/None.
+
+    Returns:
+        '🟢', '🔴', or '⚪'.
+    """
+    if value is True:
+        return GATE_STATUS_EMOJI_TRUE
+    if value is False:
+        return GATE_STATUS_EMOJI_FALSE
+    return GATE_STATUS_EMOJI_UNKNOWN
+
+
+def gate_label(value: bool | None, *, true_label: str = "OPEN", false_label: str = "CLOSED") -> str:
+    """Return a human label for a boolean gate.
+
+    Args:
+        value: True/False/None.
+        true_label: Label when True.
+        false_label: Label when False.
+
+    Returns:
+        true_label, false_label, or 'UNKNOWN'.
+    """
+    if value is True:
+        return true_label
+    if value is False:
+        return false_label
+    return "UNKNOWN"
+
+
+def data_level_short(level: str | None) -> str:
+    """Abbreviate a data-level string for the support footer.
+
+    Args:
+        level: e.g. 'level1', 'level2', 'historical'.
+
+    Returns:
+        Short abbreviation like 'L1', 'L2', 'HIST', or '?'.
+    """
+    return DATA_LEVEL_SHORT.get(str(level or "").strip().lower(), "?")
+
+
+# ---------------------------------------------------------------------------
+# Duration / Time Formatting
+# ---------------------------------------------------------------------------
+
+def format_duration_short(seconds: float | None) -> str:
+    """Format a duration in seconds to a compact human-readable form.
+
+    Args:
+        seconds: Duration in seconds (or None).
+
+    Returns:
+        e.g. '45s', '12m', '3h15m', or '?' if None.
+    """
+    if seconds is None:
+        return "?"
+    try:
+        s = float(seconds)
+    except (ValueError, TypeError):
+        return "?"
+    if s < 0:
+        return "?"
+    if s < 60:
+        return f"{int(s)}s"
+    if s < 3600:
+        return f"{int(s // 60)}m"
+    hours = int(s // 3600)
+    mins = int((s % 3600) // 60)
+    if mins > 0:
+        return f"{hours}h{mins}m"
+    return f"{hours}h"
+
+
+def format_hold_duration(minutes: float) -> str:
+    """Format a hold-duration in minutes to human-readable form.
+
+    Args:
+        minutes: Hold time in minutes.
+
+    Returns:
+        e.g. '45m' or '2h 15m'.
+    """
+    if minutes < 60:
+        return f"{int(minutes)}m"
+    return f"{int(minutes / 60)}h {int(minutes % 60)}m"
+
+
+# ---------------------------------------------------------------------------
+# Metric / Performance Formatting
+# ---------------------------------------------------------------------------
+
+def format_performance_block(
+    pnl: float,
+    wins: int,
+    losses: int,
+    *,
+    label: str = "24h",
+    streak_count: int = 0,
+    streak_type: str | None = None,
+) -> str:
+    """Format a performance summary block for a time window.
+
+    Args:
+        pnl: Total P&L for the period.
+        wins: Win count.
+        losses: Loss count.
+        label: Period label (e.g. '24h', '72h', '30d').
+        streak_count: Current streak length.
+        streak_type: 'win' or 'loss'.
+
+    Returns:
+        Multi-line formatted block, e.g.::
+
+            *24h:*
+            🟢 +$125.50 (3W/1L • 75% WR) 🔥3W
+    """
+    total = wins + losses
+    emoji = pnl_emoji(pnl)
+    win_rate = (wins / total * 100) if total > 0 else 0.0
+    streak_str = format_streak(streak_count, streak_type)
+    if streak_str:
+        streak_str = f" • {streak_str}"
+
+    header = f"*{label}:*"
+    detail = f"{emoji} {fmt_currency(pnl, show_sign=True)} ({wins}W/{losses}L • {win_rate:.0f}% WR){streak_str}"
+    return f"{header}\n{detail}"
+
+
+def format_recent_exit_line(trade: Dict) -> str:
+    """Format a single recent-exit line.
+
+    Args:
+        trade: Trade dict with 'pnl', 'direction', 'type', 'exit_reason'.
+
+    Returns:
+        e.g. '🟢 *+$50.00* • 🟢 LONG • Breakout • TP'
+    """
+    try:
+        pnl_val = float(trade.get("pnl") or 0.0)
+    except (ValueError, TypeError):
+        pnl_val = 0.0
+    p_emoji, p_str = format_pnl(pnl_val)
+    dir_emoji, dir_label = format_signal_direction(trade.get("direction", "long"))
+    sig_type = safe_label(str(trade.get("type") or "unknown"))
+    reason = safe_label(str(trade.get("exit_reason") or "")).strip()
+    line = f"{p_emoji} *{p_str}* • {dir_emoji} {dir_label} • {sig_type}"
+    if reason:
+        line += f" • {reason}"
+    return line
+
+
+def format_compact_signal(
+    signal: Dict,
+    *,
+    account_label: str | None = None,
+) -> str:
+    """Format a signal as a calm-minimal, decision-first push alert.
+
+    This is a pure-function equivalent of
+    ``MarketAgentTelegramNotifier._format_compact_signal``.
+
+    Layout:
+        1. Direction + symbol + entry
+        2. SL / TP / R:R
+        3. Size + confidence + type
+        4. Session context (optional)
+
+    Args:
+        signal: Signal dictionary with full context.
+        account_label: Optional account prefix (e.g. 'MFFU').
+
+    Returns:
+        Formatted message string (< ~1000 chars).
+    """
+    symbol = str(signal.get("symbol") or "MNQ")
+    signal_type = str(signal.get("type") or "unknown").replace("_", " ").title()
+
+    def _safe_float(key: str) -> float:
+        try:
+            return float(signal.get(key) or 0.0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    entry_price = _safe_float("entry_price")
+    stop_loss = _safe_float("stop_loss")
+    take_profit = _safe_float("take_profit")
+    confidence = _safe_float("confidence")
+
+    is_test = signal.get("_is_test", False) or str(signal.get("reason", "")).lower().startswith("test")
+    test_label = "🧪 *[TEST - NOT TRACKED]*\n" if is_test else ""
+
+    dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+    conf_emoji, _conf_tier = format_signal_confidence_tier(confidence)
+
+    # Risk/reward
+    rr = 0.0
+    if entry_price > 0 and stop_loss > 0 and take_profit > 0:
+        if dir_label == "LONG":
+            risk = entry_price - stop_loss
+            reward = take_profit - entry_price
+        else:
+            risk = stop_loss - entry_price
+            reward = entry_price - take_profit
+        if risk > 0:
+            rr = reward / risk
+
+    acct_prefix = f"[{account_label}] " if account_label else ""
+    message = f"{test_label}{acct_prefix}{dir_emoji} *{dir_label} {symbol}* {fmt_currency(entry_price)}\n"
+
+    if stop_loss > 0 and take_profit > 0:
+        message += f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {rr:.1f}\n"
+
+    position_size = signal.get("position_size") or 1
+    message += f"Size {position_size} | {conf_emoji} {confidence:.0%} | {signal_type}\n"
+
+    regime = signal.get("regime", {}) or {}
+    ctx_parts = []
+    if regime.get("session"):
+        ctx_parts.append(str(regime["session"]).replace("_", " ").title())
+    if regime.get("regime"):
+        ctx_parts.append(str(regime["regime"]).replace("_", " ").title())
+    if ctx_parts:
+        message += " | ".join(ctx_parts)
+
+    return message
+
+
+def format_signal_message(
+    signal: Dict,
+    *,
+    account_label: str | None = None,
+) -> str:
+    """Format a signal as a concise Telegram message.
+
+    Pure-function equivalent of
+    ``MarketAgentTelegramNotifier._format_signal_message``.
+
+    Args:
+        signal: Signal dictionary.
+        account_label: Optional account prefix.
+
+    Returns:
+        Formatted message string.
+    """
+    signal_type = signal.get("type", "unknown")
+    direction = signal.get("direction", "").upper()
+    entry_price = signal.get("entry_price", 0)
+    stop_loss = signal.get("stop_loss", 0)
+    take_profit = signal.get("take_profit", 0)
+    confidence = signal.get("confidence", 0)
+    reason = signal.get("reason", "")
+
+    if direction == "LONG" and stop_loss > 0 and take_profit > 0:
+        risk = entry_price - stop_loss
+        reward = take_profit - entry_price
+        risk_reward = reward / risk if risk > 0 else 0
+    else:
+        risk_reward = 0
+
+    acct_tag = f"[{account_label}] " if account_label else ""
+    dir_short = direction if direction else "?"
+    message = (
+        f"{acct_tag}{dir_short} MNQ {fmt_currency(entry_price)}\n"
+        f"SL {fmt_currency(stop_loss)} | TP {fmt_currency(take_profit)} | R:R {risk_reward:.1f}\n"
+        f"{confidence:.0%} | {signal_type} | {reason}"
+    )
+    return message.strip()
+
+
+def format_status_message(status: Dict) -> str:
+    """Format a status update as a Telegram message.
+
+    Pure-function equivalent of
+    ``MarketAgentTelegramNotifier._format_status_message``.
+
+    Args:
+        status: Status dictionary.
+
+    Returns:
+        Formatted message string.
+    """
+    return f"📊 *NQ Agent Status*\n\n{status.get('message', 'No status available')}"
+
+
+def format_support_footer_line(
+    *,
+    market_label: str = "NQ",
+    symbol: str = "MNQ",
+    version: str | None = None,
+    agent_running: bool = False,
+    gateway_running: bool | None = None,
+    data_level: str | None = None,
+    data_age_seconds: float | None = None,
+    data_stale_threshold_minutes: float = 10.0,
+    is_data_stale: bool = False,
+    last_cycle_seconds: float | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Build the compact ``🩺`` support-footer line for dashboards.
+
+    Args:
+        market_label: Market identifier (e.g. 'NQ').
+        symbol: Trading symbol (e.g. 'MNQ').
+        version: Package version string.
+        agent_running: Whether the agent process is running.
+        gateway_running: Gateway health (True/False/None).
+        data_level: Data quality level.
+        data_age_seconds: Age of last data bar in seconds.
+        data_stale_threshold_minutes: Threshold for stale data.
+        is_data_stale: Whether data is considered stale.
+        last_cycle_seconds: Seconds since last successful cycle.
+        run_id: Current run ID.
+
+    Returns:
+        Monospace support-footer string wrapped in backticks.
+    """
+    age_str = format_duration_short(data_age_seconds)
+    thr_str = f"{float(data_stale_threshold_minutes):.0f}m"
+    cycle_str = format_duration_short(last_cycle_seconds)
+    gw = "OK" if gateway_running is True else "OFF" if gateway_running is False else "?"
+    a = "ON" if agent_running else "OFF"
+    v = f" v{version}" if version else ""
+    rid = str(run_id or "?").strip()
+    lvl = data_level_short(data_level)
+    stale_flag = "!" if is_data_stale else ""
+    return f"`🩺 {market_label}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl} {age_str}/{thr_str}{stale_flag} | C:{cycle_str} | run:{rid}`"
+
+
+def format_exit_notification(
+    signal: Dict,
+    *,
+    account_label: str | None = None,
+) -> str:
+    """Format an exit notification message line.
+
+    This builds the text portion of an exit notification, without sending it.
+
+    Args:
+        signal: Signal/trade dictionary with exit info.
+        account_label: Optional account prefix.
+
+    Returns:
+        Formatted exit notification string.
+    """
+    symbol = str(signal.get("symbol") or "MNQ")
+    pnl = float(signal.get("pnl") or 0.0)
+    is_win = signal.get("is_win")
+    entry_price = float(signal.get("entry_price") or 0.0)
+    exit_price = float(signal.get("exit_price") or 0.0)
+    exit_reason = str(signal.get("exit_reason") or "unknown")
+
+    status_emoji, status_label = format_signal_status("exited", is_win)
+    pnl_em, pnl_str = format_pnl(pnl)
+    dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+
+    acct_prefix = f"[{account_label}] " if account_label else ""
+    message = f"{acct_prefix}{status_emoji} *EXIT {symbol} {dir_label}* {pnl_str}\n"
+
+    exit_icons = {
+        "stop_loss": "SL",
+        "take_profit": "TP",
+        "manual": "Manual",
+        "expired": "Expired",
+        "trailing_stop": "Trail",
+    }
+    reason_short = exit_icons.get(exit_reason.lower(), exit_reason.replace("_", " ").title())
+    message += f"{fmt_currency(entry_price)} -> {fmt_currency(exit_price)} | {reason_short}"
+    return message
 
 
 class TelegramFormattersMixin:

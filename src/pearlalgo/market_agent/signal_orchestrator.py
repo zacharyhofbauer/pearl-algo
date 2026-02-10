@@ -2,11 +2,19 @@
 Signal Orchestrator
 
 Coordinates signal processing, ML filtering, and bandit/policy decisions.
-Thin delegation layer that routes calls to SignalHandler, OrderManager,
-and ML components.
 
 Part of the Arch-2 decomposition: service.py → orchestrator classes.
-This file provides the framework; actual method migration happens incrementally.
+
+**Already migrated:**
+- ``process_signals()`` — batch signal processing
+- ``configure_ml_filter()`` — ML filter reconfiguration
+- ``build_context_features()`` — contextual bandit feature building
+
+**To migrate next (marked with ``# TODO(1A-migrate)`` in service.py):**
+- ``_refresh_ml_lift()`` — ML lift evaluation
+- ``_compute_ml_lift_metrics()`` — shadow A/B lift calculation
+- ``_build_ml_training_trades_from_signals()`` — training sample extraction
+- Signal forwarding coordination (writer/follower modes)
 """
 
 from __future__ import annotations
@@ -141,3 +149,37 @@ class SignalOrchestrator:
             "SignalOrchestrator: ML filter reconfigured",
             extra={"enabled": enabled, "mode": mode},
         )
+
+    # ------------------------------------------------------------------
+    # Contextual features (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    def build_context_features(
+        self,
+        signal: Dict[str, Any],
+        market_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build contextual features for bandit policy from signal + market data.
+
+        Extracts signal metadata (type, confidence, direction) and market
+        context (regime, volume ratio, spread) into a flat dict suitable
+        for contextual bandit policies.
+
+        Returns:
+            Dict of string feature-name → numeric/string feature-value.
+        """
+        features: Dict[str, Any] = {}
+        try:
+            features["signal_type"] = signal.get("type", "unknown")
+            features["confidence"] = float(signal.get("confidence", 0.0))
+            features["direction"] = signal.get("direction", "unknown")
+            features["risk_reward"] = float(signal.get("risk_reward", 0.0))
+
+            # Market context
+            df = market_data.get("df")
+            if df is not None and not df.empty:
+                features["regime"] = signal.get("market_regime", "unknown")
+                features["volume_ratio"] = float(signal.get("volume_ratio", 1.0))
+        except Exception as exc:
+            logger.debug("Error building context features: %s", exc)
+        return features

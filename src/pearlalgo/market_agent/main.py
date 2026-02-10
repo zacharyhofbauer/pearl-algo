@@ -17,6 +17,7 @@ from pearlalgo.config.config_loader import build_strategy_config
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.market_agent.service_factory import build_service_dependencies
 from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
 from pearlalgo.utils.paths import ensure_state_dir
@@ -106,14 +107,15 @@ async def main():
     # Resolve state directory (supports PEARLALGO_STATE_DIR / PEARLALGO_MARKET overrides)
     state_dir = ensure_state_dir()
 
-    # Create service with Telegram configuration
-    service = MarketAgentService(
+    # Build dependencies via factory and create service
+    deps = build_service_dependencies(
         data_provider=data_provider,
         config=config,
         state_dir=state_dir,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
     )
+    service = MarketAgentService(deps=deps)
 
     # Run service
     try:

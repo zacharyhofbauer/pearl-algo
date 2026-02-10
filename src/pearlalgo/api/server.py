@@ -36,24 +36,27 @@ _executor = ThreadPoolExecutor(max_workers=2)
 # Cache for candle data when market is closed (LRU, bounded)
 _CANDLE_CACHE_MAX_ENTRIES = 50
 _candle_cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+_candle_cache_lock = threading.Lock()
 _cache_file: Optional[Path] = None
 
 
 def _candle_cache_get(key: str) -> Optional[List[Dict[str, Any]]]:
     """Get a value from the candle cache, promoting it to most-recently-used."""
-    if key in _candle_cache:
-        _candle_cache.move_to_end(key)
-        return _candle_cache[key]
-    return None
+    with _candle_cache_lock:
+        if key in _candle_cache:
+            _candle_cache.move_to_end(key)
+            return _candle_cache[key]
+        return None
 
 
 def _candle_cache_set(key: str, value: List[Dict[str, Any]]) -> None:
     """Set a value in the candle cache with LRU eviction."""
-    if key in _candle_cache:
-        _candle_cache.move_to_end(key)
-    _candle_cache[key] = value
-    while len(_candle_cache) > _CANDLE_CACHE_MAX_ENTRIES:
-        _candle_cache.popitem(last=False)
+    with _candle_cache_lock:
+        if key in _candle_cache:
+            _candle_cache.move_to_end(key)
+        _candle_cache[key] = value
+        while len(_candle_cache) > _CANDLE_CACHE_MAX_ENTRIES:
+            _candle_cache.popitem(last=False)
 
 # Project root: src/pearlalgo/api/server.py -> src/pearlalgo/api -> src/pearlalgo -> src -> project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -995,6 +998,28 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------------------------
+# Request body size limit middleware (defence-in-depth against OOM)
+# ---------------------------------------------------------------------------
+_MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
+
+
+@app.middleware("http")
+async def limit_request_body_size(request: Request, call_next):
+    """Reject requests whose Content-Length exceeds the configured limit."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Request body too large. Max {_MAX_REQUEST_BODY_BYTES} bytes."},
+                )
+        except ValueError:
+            pass  # malformed header — let downstream handle it
+    return await call_next(request)
+
+
 # Path prefix stripping middleware for reverse-proxy deployments
 # (e.g., Cloudflare Tunnel routes /mffu/api/* to port 8001)
 @app.middleware("http")
@@ -1033,18 +1058,35 @@ def _read_state_safe() -> Dict[str, Any]:
 
 
 # Cache of StateReader instances per state_dir (for multi-market helpers)
-_state_reader_cache: Dict[str, StateReader] = {}
+# Bounded to avoid unbounded memory growth; LRU eviction via OrderedDict.
+_STATE_READER_CACHE_MAX = 10
+_state_reader_cache: OrderedDict[str, StateReader] = OrderedDict()
+_state_reader_cache_lock = threading.Lock()
 
 
 def _read_state_for_dir(state_dir: Path) -> Dict[str, Any]:
     """Read state.json via a locked StateReader for the given directory.
 
     Caches the StateReader per directory to avoid repeated construction.
+    Thread-safe with LRU eviction (max ``_STATE_READER_CACHE_MAX`` entries).
     """
     key = str(state_dir)
-    if key not in _state_reader_cache:
-        _state_reader_cache[key] = StateReader(state_dir)
-    return _state_reader_cache[key].read_state()
+    with _state_reader_cache_lock:
+        if key in _state_reader_cache:
+            _state_reader_cache.move_to_end(key)
+            return _state_reader_cache[key].read_state()
+    # Build outside lock to avoid blocking other readers during construction
+    reader = StateReader(state_dir)
+    with _state_reader_cache_lock:
+        # Another thread may have inserted while we were constructing
+        if key not in _state_reader_cache:
+            _state_reader_cache[key] = reader
+            while len(_state_reader_cache) > _STATE_READER_CACHE_MAX:
+                _state_reader_cache.popitem(last=False)
+        else:
+            _state_reader_cache.move_to_end(key)
+            reader = _state_reader_cache[key]
+    return reader.read_state()
 
 # Pearl AI observability for UI heartbeat (updated by broadcast loop)
 _pearl_last_state_seen_time: Optional[str] = None
@@ -2806,11 +2848,15 @@ def _get_cadence_metrics_enhanced(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_gateway_status() -> Dict[str, Any]:
+def _get_gateway_status_uncached() -> Dict[str, Any]:
     """
     Check IBKR Gateway status: process running and port listening.
 
     Returns gateway health for live chart display.
+
+    NOTE: This contains blocking I/O (subprocess, socket).  It is wrapped
+    by ``_get_gateway_status()`` with a short TTL cache so the blocking
+    calls are amortised across the frequent broadcast-loop invocations.
     """
     import socket
     import subprocess
@@ -2859,6 +2905,15 @@ def _get_gateway_status() -> Dict[str, Any]:
     }
 
 
+def _get_gateway_status() -> Dict[str, Any]:
+    """Cached wrapper for gateway status (5s TTL).
+
+    Avoids blocking the event loop on every broadcast tick by amortising
+    the subprocess + socket checks via the existing ``_cached`` helper.
+    """
+    return _cached("gateway_status", 5.0, _get_gateway_status_uncached)
+
+
 def _get_connection_health(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract connection health metrics from agent state.
@@ -2888,12 +2943,19 @@ def _get_error_summary(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]
     last_error = state.get("last_error")
     last_error_time = state.get("last_error_time")
 
-    # Try to get more details from error log if available
+    # Try to get more details from error log if available.
+    # Read only the tail of the file (last 4 KB) to avoid loading large logs
+    # into memory entirely.
     error_log = state_dir / "errors.log"
     if last_error is None and error_log.exists():
         try:
-            # Read last line of error log
-            lines = error_log.read_text().strip().split("\n")
+            _MAX_TAIL_BYTES = 4096
+            file_size = error_log.stat().st_size
+            with open(error_log, "r", encoding="utf-8", errors="replace") as f:
+                if file_size > _MAX_TAIL_BYTES:
+                    f.seek(file_size - _MAX_TAIL_BYTES)
+                    f.readline()  # skip partial first line
+                lines = f.read().strip().split("\n")
             if lines and lines[-1]:
                 last_line = lines[-1]
                 # Parse if it's a JSON line

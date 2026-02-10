@@ -2,15 +2,27 @@
 Observability Orchestrator
 
 Coordinates performance tracking, dashboard delivery, and notifications.
-Thin delegation layer that routes calls to PerformanceTracker,
-NotificationQueue, and TelegramNotifier.
 
 Part of the Arch-2 decomposition: service.py → orchestrator classes.
-This file provides the framework; actual method migration happens incrementally.
+
+**Already migrated:**
+- ``track_performance()`` — signal outcome recording
+- ``get_daily_performance()`` — daily metrics aggregation
+- ``send_notification()`` — enqueue Telegram messages
+- ``get_daily_summary()`` — dashboard-ready summary
+- ``notify_error()`` — error notification via queue
+- ``compute_quiet_period_minutes()`` — time since last signal
+
+**To migrate next (marked with ``# TODO(1A-migrate)`` in service.py):**
+- ``_check_dashboard()`` — periodic dashboard scheduling
+- ``_generate_dashboard_chart()`` — chart capture + export
+- ``_send_dashboard()`` — dashboard delivery
+- ``get_status()`` — full status snapshot
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
@@ -131,3 +143,44 @@ class ObservabilityOrchestrator:
             "performance": perf,
             "notifications": queue_stats,
         }
+
+    # ------------------------------------------------------------------
+    # Error notification (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    async def notify_error(self, error_message: str, *, context: str = "") -> None:
+        """Send an error notification via the notification queue.
+
+        This is a convenience wrapper that formats a user-friendly error
+        message and enqueues it at high priority.
+        """
+        try:
+            prefix = f"[{context}] " if context else ""
+            # Truncate to avoid Telegram message-length limits
+            truncated = error_message[:500] if len(error_message) > 500 else error_message
+            await self._notification_queue.enqueue_raw_message(
+                f"⚠️ {prefix}{truncated}",
+            )
+        except Exception as exc:
+            logger.debug("Error notification enqueue failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Quiet-period calculation (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    def compute_quiet_period_minutes(
+        self,
+        last_signal_at: Optional[datetime],
+    ) -> Optional[float]:
+        """Compute minutes since the last signal was generated.
+
+        Returns ``None`` if *last_signal_at* is not set (no signals yet).
+        """
+        if last_signal_at is None:
+            return None
+        try:
+            now = datetime.now(timezone.utc)
+            delta = now - last_signal_at
+            return delta.total_seconds() / 60.0
+        except Exception:
+            return None

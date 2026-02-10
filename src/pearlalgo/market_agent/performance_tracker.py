@@ -892,9 +892,6 @@ class PerformanceTracker:
 
     async def get_performance_metrics_async(self, days: Optional[int] = None) -> Dict:
         """Async wrapper for get_performance_metrics() – runs file I/O in a thread."""
-        return await asyncio.to_thread(self.get_performance_metrics, days)
-
-    async def _save_performance_async(self, performance: Dict) -> None:
+        return await asyncio.to_thread(self.get_performance_metrics, days)    async def _save_performance_async(self, performance: Dict) -> None:
         """Async wrapper for _save_performance() – runs file I/O in a thread."""
         return await asyncio.to_thread(self._save_performance, performance)
-

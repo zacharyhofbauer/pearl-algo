@@ -285,36 +285,42 @@ class MarketAgentStateManager:
         the rotated-out (oldest) lines to signals_archive.jsonl in the same
         directory.  Called under the existing file lock so no concurrent writers
         can interfere.
+
+        Streams the file line-by-line to avoid loading the entire file into
+        memory (the file can be large before rotation kicks in).
         """
         try:
             if not self.signals_file.exists():
                 return
 
+            # Count lines without loading the whole file into memory
+            line_count = 0
             with open(self.signals_file, "r") as f:
-                lines = f.readlines()
+                for _ in f:
+                    line_count += 1
 
-            if len(lines) <= self._max_signal_lines:
+            if line_count <= self._max_signal_lines:
                 return
 
-            # Split into archive (oldest) and keep (newest)
-            keep_lines = lines[-self._max_signal_lines:]
-            archive_lines = lines[:-self._max_signal_lines]
+            archive_count = line_count - self._max_signal_lines
 
-            # Append rotated-out lines to archive file
+            # Stream through file: archive the first N lines, keep the rest.
             archive_file = self.signals_file.parent / "signals_archive.jsonl"
-            with open(archive_file, "a") as f:
-                f.writelines(archive_lines)
-
-            # Rewrite signals file with only kept lines (atomic via tmp + replace)
             tmp_path = Path(str(self.signals_file) + ".tmp")
-            with open(tmp_path, "w") as f:
-                f.writelines(keep_lines)
-                f.flush()
-                os.fsync(f.fileno())
+            with open(self.signals_file, "r") as src, \
+                 open(archive_file, "a") as archive_f, \
+                 open(tmp_path, "w") as keep_f:
+                for i, line in enumerate(src):
+                    if i < archive_count:
+                        archive_f.write(line)
+                    else:
+                        keep_f.write(line)
+                keep_f.flush()
+                os.fsync(keep_f.fileno())
             os.replace(tmp_path, self.signals_file)
 
             # Update incremental signal count after rotation
-            self._signal_count = len(keep_lines)
+            self._signal_count = self._max_signal_lines
 
             logger.info(
                 f"Rotated signals.jsonl: archived {len(archive_lines)} lines, "
@@ -363,21 +369,9 @@ class MarketAgentStateManager:
                 with open(lock_file, "w") as lock:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                     try:
-                        # Read recent signals for duplicate checking
-                        recent_signals = []
-                        if self.signals_file.exists():
-                            try:
-                                with open(self.signals_file, "r") as f:
-                                    lines = f.readlines()
-                                    # Read last 100 signals (enough to cover duplicate window)
-                                    for line in lines[-100:]:
-                                        try:
-                                            record = json.loads(line.strip())
-                                            recent_signals.append(record)
-                                        except json.JSONDecodeError:
-                                            continue
-                            except Exception as e:
-                                logger.warning(f"Critical path error: {e}", exc_info=True)
+                        # Read recent signals for duplicate checking.
+                        # Use tail-read to avoid loading entire file into memory.
+                        recent_signals = self.get_recent_signals_tail(max_lines=100)
                         
                         # Check for duplicates. IMPORTANT: we still persist the record.
                         # Dropping persistence breaks the virtual trade lifecycle (entered/exited),
@@ -715,18 +709,49 @@ class MarketAgentStateManager:
                 logger.warning(f"Critical path error: {e}", exc_info=True)
 
     def get_recent_events(self, limit: int = 200) -> List[Dict[str, Any]]:
-        """Get recent events from events.jsonl (best-effort)."""
+        """Get recent events from events.jsonl (best-effort).
+
+        Uses a tail-read strategy (reading backwards from the end of the file)
+        to avoid loading the entire events file into memory.
+        """
         events: List[Dict[str, Any]] = []
         if not self.events_file.exists():
             return events
+
+        safe_limit = max(1, int(limit))
+        chunk_size = 8192  # 8 KB chunks for backward reading
+
         try:
-            with open(self.events_file, "r") as f:
-                lines = f.readlines()
-            for line in lines[-max(1, int(limit)) :]:
-                try:
-                    events.append(json.loads(line.strip()))
-                except json.JSONDecodeError:
-                    continue
+            with open(self.events_file, "rb") as f:
+                f.seek(0, 2)
+                file_size = f.tell()
+                if file_size == 0:
+                    return events
+
+                remaining = file_size
+                tail_bytes = b""
+                lines_found = 0
+
+                while remaining > 0 and lines_found <= safe_limit:
+                    read_size = min(chunk_size, remaining)
+                    remaining -= read_size
+                    f.seek(remaining)
+                    chunk = f.read(read_size)
+                    tail_bytes = chunk + tail_bytes
+                    lines_found = tail_bytes.count(b"\n")
+
+                text = tail_bytes.decode("utf-8", errors="replace")
+                all_lines = text.splitlines()
+                tail_lines = all_lines[-safe_limit:] if len(all_lines) > safe_limit else all_lines
+
+                for line in tail_lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        events.append(json.loads(stripped))
+                    except json.JSONDecodeError:
+                        continue
         except Exception as e:
             logger.debug(f"Error reading events: {e}")
         return events
@@ -782,11 +807,58 @@ class MarketAgentStateManager:
             return {}
 
     # ------------------------------------------------------------------
-    # JSON ↔ SQLite Reconciliation
+    # ------------------------------------------------------------------
+    # JSON Export (for external tools that read signals.jsonl)
+    # ------------------------------------------------------------------
+
+    def export_signals_to_json(self, trade_db=None, limit: int = 5000) -> int:
+        """Export recent signals from SQLite to ``signals.jsonl`` for external consumers.
+
+        This is the **read path** for tools (API server, Telegram handlers,
+        web dashboard) that consume the legacy JSON format.  SQLite is the
+        **write path** (single source of truth).
+
+        Returns:
+            Number of signals exported.
+        """
+        db = trade_db or getattr(self, "_trade_db", None)
+        if db is None:
+            return 0
+
+        try:
+            events = db.get_recent_signal_events(limit=limit)
+            if not events:
+                return 0
+
+            tmp_path = Path(str(self.signals_file) + ".export.tmp")
+            with open(tmp_path, "w") as f:
+                for event in events:
+                    f.write(json.dumps(event) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.signals_file)
+
+            # Update cached count
+            self._signal_count = len(events)
+            self.invalidate_signals_cache()
+
+            logger.debug(f"Exported {len(events)} signals from SQLite to {self.signals_file}")
+            return len(events)
+        except Exception as e:
+            logger.warning(f"Signal export to JSON failed: {e}")
+            return 0
+
+    # ------------------------------------------------------------------
+    # JSON ↔ SQLite Reconciliation (DEPRECATED — kept for transition)
     # ------------------------------------------------------------------
 
     def reconcile_signals(self, trade_db=None, threshold: int = 10) -> Dict:
-        """Reconcile signals between JSON (primary) and SQLite (secondary) stores.
+        """Reconcile signals between JSON and SQLite stores.
+
+        .. deprecated::
+            With SQLite as the single source of truth (2A migration),
+            reconciliation is no longer necessary.  Use
+            :meth:`export_signals_to_json` to regenerate JSON from SQLite.
 
         Compares the number of signals in ``signals.jsonl`` against the
         ``signal_events`` table in SQLite.  When the JSON count exceeds the

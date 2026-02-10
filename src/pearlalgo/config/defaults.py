@@ -1,8 +1,10 @@
 """
 Centralized configuration defaults for the PearlAlgo trading system.
 
-This module is the SINGLE SOURCE OF TRUTH for all default configuration values.
-Other modules should import these constants rather than hardcoding defaults.
+This module is the **SINGLE SOURCE OF TRUTH** for all default configuration
+values.  Other modules (``config_loader._SERVICE_DEFAULTS``,
+``config_schema.py`` Pydantic models) **import from here** rather than
+hardcoding their own defaults.
 
 **Purpose:**
 - Eliminate configuration drift across modules
@@ -29,37 +31,20 @@ from __future__ import annotations
 # IBKR CONNECTION DEFAULTS
 # =============================================================================
 
-# Default host for IBKR Gateway/TWS connection
 IBKR_HOST: str = "127.0.0.1"
-
-# Default port for IBKR Gateway (paper trading)
-# Note: TWS default is 7497, Gateway default is 4002
 IBKR_PORT: int = 4002
-
-# Default client ID for main connection
 IBKR_CLIENT_ID: int = 1
-
-# Default client ID for execution (separate to avoid conflicts)
 IBKR_TRADING_CLIENT_ID: int = 20
-
-# Default client ID for live chart API server
 IBKR_LIVE_CHART_CLIENT_ID: int = 99
 
 
 # =============================================================================
-# CHART/API SERVER DEFAULTS
+# CHART / API SERVER DEFAULTS
 # =============================================================================
 
-# Default port for the live chart Next.js frontend
 CHART_PORT: int = 3001
-
-# Default host for the API server
 API_SERVER_HOST: str = "127.0.0.1"
-
-# Default port for the API server
 API_SERVER_PORT: int = 8000
-
-# Default chart URL for Telegram screenshots
 CHART_URL: str = f"http://localhost:{CHART_PORT}"
 
 
@@ -67,28 +52,13 @@ CHART_URL: str = f"http://localhost:{CHART_PORT}"
 # EXECUTION LAYER DEFAULTS
 # =============================================================================
 
-# Master enable flag for execution layer (safety default: disabled)
 EXECUTION_ENABLED: bool = False
-
-# Armed flag for execution (safety default: disarmed)
 EXECUTION_ARMED: bool = False
-
-# Execution mode (dry_run, paper, live)
 EXECUTION_MODE: str = "dry_run"
-
-# Maximum concurrent positions
 MAX_POSITIONS: int = 1
-
-# Maximum orders per trading day
 MAX_ORDERS_PER_DAY: int = 20
-
-# Kill switch: maximum daily loss in dollars
 MAX_DAILY_LOSS: float = 500.0
-
-# Minimum seconds between orders for same signal type
 COOLDOWN_SECONDS: int = 60
-
-# Default symbol whitelist
 DEFAULT_SYMBOL_WHITELIST: list[str] = ["MNQ"]
 
 
@@ -96,30 +66,15 @@ DEFAULT_SYMBOL_WHITELIST: list[str] = ["MNQ"]
 # LEARNING LAYER DEFAULTS
 # =============================================================================
 
-# Learning layer enabled by default (observes but doesn't block)
 LEARNING_ENABLED: bool = True
-
-# Learning mode (shadow, live)
 LEARNING_MODE: str = "shadow"
-
-# Minimum samples before policy has opinion
 MIN_SAMPLES_PER_TYPE: int = 10
-
-# Random exploration rate (epsilon-greedy)
 EXPLORE_RATE: float = 0.1
-
-# Skip signal if P(win) < threshold
 DECISION_THRESHOLD: float = 0.3
-
-# Position sizing multipliers
 MAX_SIZE_MULTIPLIER: float = 1.5
 MIN_SIZE_MULTIPLIER: float = 0.5
-
-# Beta distribution priors (optimistic start)
 PRIOR_ALPHA: float = 2.0
 PRIOR_BETA: float = 2.0
-
-# Decay factor for older observations (0 = no decay)
 DECAY_FACTOR: float = 0.0
 
 
@@ -139,74 +94,188 @@ CHALLENGE_AUTO_RESET_ON_FAIL: bool = True
 # SERVICE DEFAULTS
 # =============================================================================
 
-# Default scan interval (seconds)
 DEFAULT_SCAN_INTERVAL: int = 30
-
-# Default status update interval (seconds)
-STATUS_UPDATE_INTERVAL: int = 300
-
-# Default heartbeat interval (seconds)
-HEARTBEAT_INTERVAL: int = 1800
-
-# Default state save interval (cycles)
+STATUS_UPDATE_INTERVAL: int = 1800
+HEARTBEAT_INTERVAL: int = 3600
 STATE_SAVE_INTERVAL: int = 10
+CADENCE_MODE: str = "fixed"
+ENABLE_NEW_BAR_GATING: bool = True
+PRESSURE_LOOKBACK_BARS: int = 24
+PRESSURE_BASELINE_BARS: int = 120
+DASHBOARD_CHART_ENABLED: bool = True
+DASHBOARD_CHART_INTERVAL: int = 3600
+DASHBOARD_CHART_LOOKBACK_HOURS: int = 8
+DASHBOARD_CHART_TIMEFRAME: str = "auto"
+DASHBOARD_CHART_MAX_BARS: int = 420
+DASHBOARD_CHART_SHOW_PRESSURE: bool = True
+CONNECTION_FAILURE_ALERT_INTERVAL: int = 600
+DATA_QUALITY_ALERT_INTERVAL: int = 300
 
-# Default data buffer size (bars)
-DATA_BUFFER_SIZE: int = 100
 
-# Default historical data hours
-HISTORICAL_HOURS: int = 2
+# =============================================================================
+# TELEGRAM UI DEFAULTS
+# =============================================================================
 
-# Default stale data threshold (minutes)
-STALE_DATA_THRESHOLD_MINUTES: float = 5.0
-
-# Default connection timeout (minutes)
-CONNECTION_TIMEOUT_MINUTES: float = 10.0
+TELEGRAM_UI_COMPACT_METRICS: bool = True
+TELEGRAM_UI_SHOW_PROGRESS_BARS: bool = False
+TELEGRAM_UI_SHOW_VOLUME_METRICS: bool = True
+TELEGRAM_UI_COMPACT_METRIC_WIDTH: int = 10
 
 
 # =============================================================================
 # CIRCUIT BREAKER DEFAULTS
 # =============================================================================
 
-# Maximum consecutive errors before pausing
 MAX_CONSECUTIVE_ERRORS: int = 10
-
-# Maximum connection failures before alerting
-MAX_CONNECTION_FAILURES: int = 3
+MAX_CONNECTION_FAILURES: int = 10
+MAX_DATA_FETCH_ERRORS: int = 5
 
 
 # =============================================================================
-# SIGNAL DEFAULTS
+# TRADING CIRCUIT BREAKER DEFAULTS
 # =============================================================================
 
-# Minimum confidence threshold for signals
-MIN_CONFIDENCE: float = 0.55
+TCB_ENABLED: bool = True
+TCB_MAX_CONSECUTIVE_LOSSES: int = 5
+TCB_CONSECUTIVE_LOSS_COOLDOWN_MINUTES: int = 30
+TCB_MAX_SESSION_DRAWDOWN: float = 500.0
+TCB_MAX_DAILY_DRAWDOWN: float = 1000.0
+TCB_DRAWDOWN_COOLDOWN_MINUTES: int = 60
+TCB_ROLLING_WINDOW_TRADES: int = 20
+TCB_MIN_ROLLING_WIN_RATE: float = 0.30
+TCB_WIN_RATE_COOLDOWN_MINUTES: int = 30
+TCB_MAX_CONCURRENT_POSITIONS: int = 5
+TCB_MIN_PRICE_DISTANCE_PCT: float = 0.5
+TCB_ENABLE_VOLATILITY_FILTER: bool = True
+TCB_MIN_ATR_RATIO: float = 0.8
+TCB_MAX_ATR_RATIO: float = 2.5
+TCB_CHOP_DETECTION_WINDOW: int = 10
+TCB_CHOP_WIN_RATE_THRESHOLD: float = 0.35
+TCB_AUTO_RESUME_AFTER_COOLDOWN: bool = True
+TCB_REQUIRE_WINNING_TRADE_TO_RESUME: bool = False
+TCB_ENABLE_SESSION_FILTER: bool = True
+TCB_ALLOWED_SESSIONS: list[str] = ["overnight", "midday", "close"]
 
-# Minimum risk/reward ratio
-MIN_RISK_REWARD: float = 1.3
 
-# Duplicate signal window (seconds)
-DUPLICATE_WINDOW_SECONDS: int = 300
+# =============================================================================
+# DATA DEFAULTS
+# =============================================================================
+
+DATA_BUFFER_SIZE: int = 100
+DATA_BUFFER_SIZE_5M: int = 50
+DATA_BUFFER_SIZE_15M: int = 50
+HISTORICAL_HOURS: int = 2
+MULTITIMEFRAME_5M_HOURS: int = 4
+MULTITIMEFRAME_15M_HOURS: int = 12
+PERFORMANCE_HISTORY_LIMIT: int = 1000
+STALE_DATA_THRESHOLD_MINUTES: float = 10.0
+CONNECTION_TIMEOUT_MINUTES: float = 30.0
+ENABLE_BASE_CACHE: bool = False
+BASE_REFRESH_SECONDS: int = 60
+ENABLE_MTF_CACHE: bool = False
+MTF_REFRESH_SECONDS_5M: int = 300
+MTF_REFRESH_SECONDS_15M: int = 900
+IBKR_VERBOSE_LOGGING: bool = False
+
+
+# =============================================================================
+# STORAGE DEFAULTS
+# =============================================================================
+
+# SQLite is the primary write path (single source of truth).
+# JSON files are generated as periodic exports for external tools.
+STORAGE_SQLITE_ENABLED: bool = True
+STORAGE_DB_PATH: str = "data/agent_state/NQ/trades.db"
+# Dual-write is DEPRECATED — kept only for transition.
+# Set to False to use SQLite-only mode (recommended).
+STORAGE_DUAL_WRITE_FILES: bool = False
+
+
+# =============================================================================
+# ML FILTER DEFAULTS
+# =============================================================================
+
+ML_FILTER_ENABLED: bool = False
+ML_FILTER_MODEL_PATH: str | None = None
+ML_FILTER_MODEL_VERSION: str = "v1.0.0"
+ML_FILTER_MIN_PROBABILITY: float = 0.55
+ML_FILTER_HIGH_PROBABILITY: float = 0.70
+ML_FILTER_ADJUST_SIZING: bool = False
+ML_FILTER_SIZE_MULTIPLIER_MIN: float = 1.0
+ML_FILTER_SIZE_MULTIPLIER_MAX: float = 1.5
+ML_FILTER_MIN_TRAINING_SAMPLES: int = 30
+ML_FILTER_RETRAIN_INTERVAL_DAYS: int = 7
+ML_FILTER_N_ESTIMATORS: int = 100
+ML_FILTER_MAX_DEPTH: int = 6
+ML_FILTER_LEARNING_RATE: float = 0.1
+ML_FILTER_CALIBRATE_PROBABILITIES: bool = True
 
 
 # =============================================================================
 # RISK DEFAULTS
 # =============================================================================
 
-# Maximum risk per trade (as fraction of account)
-MAX_RISK_PER_TRADE: float = 0.015
-
-# Maximum drawdown (as fraction of account)
+MAX_RISK_PER_TRADE: float = 0.01
 MAX_DRAWDOWN: float = 0.10
-
-# ATR multiplier for stop loss
-STOP_LOSS_ATR_MULTIPLIER: float = 4.0
-
-# Risk/reward ratio for take profit
+STOP_LOSS_ATR_MULTIPLIER: float = 1.5
 TAKE_PROFIT_RISK_REWARD: float = 1.5
-
-# Minimum position size (contracts)
 MIN_POSITION_SIZE: int = 5
+MAX_POSITION_SIZE: int = 25
 
-# Maximum position size (contracts)
-MAX_POSITION_SIZE: int = 50
+
+# =============================================================================
+# SIGNAL DEFAULTS
+# =============================================================================
+
+MIN_CONFIDENCE: float = 0.50
+MIN_RISK_REWARD: float = 1.5
+DUPLICATE_WINDOW_SECONDS: int = 300
+
+
+# =============================================================================
+# PERFORMANCE DEFAULTS
+# =============================================================================
+
+PERFORMANCE_MAX_RECORDS: int = 1000
+PERFORMANCE_DEFAULT_LOOKBACK_DAYS: int = 7
+
+
+# =============================================================================
+# VIRTUAL PNL DEFAULTS
+# =============================================================================
+
+VIRTUAL_PNL_ENABLED: bool = True
+VIRTUAL_PNL_INTRABAR_TIEBREAK: str = "stop_loss"
+VIRTUAL_PNL_NOTIFY_ENTRY: bool = False
+VIRTUAL_PNL_NOTIFY_EXIT: bool = False
+
+
+# =============================================================================
+# AUTO-FLAT DEFAULTS
+# =============================================================================
+
+AUTO_FLAT_ENABLED: bool = True
+AUTO_FLAT_FRIDAY_ENABLED: bool = True
+AUTO_FLAT_FRIDAY_TIME: str = "16:55"
+AUTO_FLAT_WEEKEND_ENABLED: bool = True
+AUTO_FLAT_TIMEZONE: str = "America/New_York"
+AUTO_FLAT_NOTIFY: bool = True
+
+
+# =============================================================================
+# MARKET HOURS DEFAULTS
+# =============================================================================
+
+MARKET_HOURS_ENABLE_CONFIG_OVERRIDES: bool = False
+MARKET_HOURS_HOLIDAY_OVERRIDES: list = []
+MARKET_HOURS_EARLY_CLOSES: dict = {}
+
+
+# =============================================================================
+# SIGNAL FORWARDING DEFAULTS
+# =============================================================================
+
+SIGNAL_FORWARDING_ENABLED: bool = False
+SIGNAL_FORWARDING_MODE: str = "off"
+SIGNAL_FORWARDING_SHARED_FILE: str = "data/shared_signals.jsonl"
+SIGNAL_FORWARDING_MAX_LINES: int = 500

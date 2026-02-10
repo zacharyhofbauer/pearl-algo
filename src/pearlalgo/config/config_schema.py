@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from pearlalgo.config import defaults
+
 
 class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
@@ -31,10 +33,10 @@ class TelegramConfig(BaseModel):
 
 class TelegramUIConfig(BaseModel):
     """Telegram UI display settings."""
-    compact_metrics_enabled: bool = True
-    show_progress_bars: bool = False
-    show_volume_metrics: bool = True
-    compact_metric_width: int = Field(default=10, ge=5, le=20)
+    compact_metrics_enabled: bool = defaults.TELEGRAM_UI_COMPACT_METRICS
+    show_progress_bars: bool = defaults.TELEGRAM_UI_SHOW_PROGRESS_BARS
+    show_volume_metrics: bool = defaults.TELEGRAM_UI_SHOW_VOLUME_METRICS
+    compact_metric_width: int = Field(default=defaults.TELEGRAM_UI_COMPACT_METRIC_WIDTH, ge=5, le=20)
 
 
 class SessionConfig(BaseModel):
@@ -45,12 +47,12 @@ class SessionConfig(BaseModel):
 
 class RiskConfig(BaseModel):
     """Risk management configuration."""
-    max_risk_per_trade: float = Field(default=0.01, ge=0.001, le=0.1)
-    max_drawdown: float = Field(default=0.1, ge=0.01, le=0.5)
-    stop_loss_atr_multiplier: float = Field(default=1.5, ge=0.5, le=10.0)
-    take_profit_risk_reward: float = Field(default=1.5, ge=0.5, le=10.0)
-    min_position_size: int = Field(default=5, ge=1)
-    max_position_size: int = Field(default=25, ge=1)
+    max_risk_per_trade: float = Field(default=defaults.MAX_RISK_PER_TRADE, ge=0.001, le=0.1)
+    max_drawdown: float = Field(default=defaults.MAX_DRAWDOWN, ge=0.01, le=0.5)
+    stop_loss_atr_multiplier: float = Field(default=defaults.STOP_LOSS_ATR_MULTIPLIER, ge=0.5, le=10.0)
+    take_profit_risk_reward: float = Field(default=defaults.TAKE_PROFIT_RISK_REWARD, ge=0.5, le=10.0)
+    min_position_size: int = Field(default=defaults.MIN_POSITION_SIZE, ge=1)
+    max_position_size: int = Field(default=defaults.MAX_POSITION_SIZE, ge=1)
     signal_type_size_multipliers: Dict[str, float] = Field(default_factory=dict)
     signal_type_max_contracts: Dict[str, int] = Field(default_factory=dict)
 
@@ -80,9 +82,9 @@ class ServiceConfig(BaseModel):
 
 class CircuitBreakerConfig(BaseModel):
     """Circuit breaker configuration for error handling."""
-    max_consecutive_errors: int = Field(default=10, ge=1)
-    max_connection_failures: int = Field(default=10, ge=1)
-    max_data_fetch_errors: int = Field(default=5, ge=1)
+    max_consecutive_errors: int = Field(default=defaults.MAX_CONSECUTIVE_ERRORS, ge=1)
+    max_connection_failures: int = Field(default=defaults.MAX_CONNECTION_FAILURES, ge=1)
+    max_data_fetch_errors: int = Field(default=defaults.MAX_DATA_FETCH_ERRORS, ge=1)
 
 
 class TradingCircuitBreakerConfig(BaseModel):
@@ -142,21 +144,22 @@ class DataConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     """Data persistence configuration."""
-    sqlite_enabled: bool = True
-    db_path: str = "data/agent_state/NQ/trades.db"
+    sqlite_enabled: bool = defaults.STORAGE_SQLITE_ENABLED
+    db_path: str = defaults.STORAGE_DB_PATH
     async_writes_enabled: bool = True
     async_queue_max_size: int = Field(default=1000, ge=100)
     async_queue_priority_trades: bool = True
+    dual_write_files: bool = defaults.STORAGE_DUAL_WRITE_FILES
 
 
 class ChallengeConfig(BaseModel):
     """Prop firm challenge tracking configuration."""
-    enabled: bool = False
-    start_balance: float = Field(default=50000.0, ge=1000)
-    max_drawdown: float = Field(default=2000.0, ge=100)
-    profit_target: float = Field(default=3000.0, ge=100)
-    auto_reset_on_pass: bool = True
-    auto_reset_on_fail: bool = True
+    enabled: bool = defaults.CHALLENGE_ENABLED
+    start_balance: float = Field(default=defaults.CHALLENGE_START_BALANCE, ge=1000)
+    max_drawdown: float = Field(default=defaults.CHALLENGE_MAX_DRAWDOWN, ge=100)
+    profit_target: float = Field(default=defaults.CHALLENGE_PROFIT_TARGET, ge=100)
+    auto_reset_on_pass: bool = defaults.CHALLENGE_AUTO_RESET_ON_PASS
+    auto_reset_on_fail: bool = defaults.CHALLENGE_AUTO_RESET_ON_FAIL
 
 
 class QualityScoreFactors(BaseModel):
@@ -198,9 +201,9 @@ class AdaptiveVolatilityFilterConfig(BaseModel):
 
 class SignalsConfig(BaseModel):
     """Signal generation configuration."""
-    duplicate_window_seconds: int = Field(default=120, ge=10)
-    min_confidence: float = Field(default=0.55, ge=0, le=1)
-    min_risk_reward: float = Field(default=1.3, ge=0.5)
+    duplicate_window_seconds: int = Field(default=defaults.DUPLICATE_WINDOW_SECONDS, ge=10)
+    min_confidence: float = Field(default=defaults.MIN_CONFIDENCE, ge=0, le=1)
+    min_risk_reward: float = Field(default=defaults.MIN_RISK_REWARD, ge=0.5)
     duplicate_price_threshold_pct: float = Field(default=0.5, ge=0)
     volatility_threshold: float = Field(default=0.0001, ge=0)
     avoid_lunch_lull: bool = False
@@ -235,8 +238,8 @@ class StrategyConfig(BaseModel):
 
 class PerformanceConfig(BaseModel):
     """Performance tracking configuration."""
-    max_records: int = Field(default=1000, ge=100)
-    default_lookback_days: int = Field(default=7, ge=1)
+    max_records: int = Field(default=defaults.PERFORMANCE_MAX_RECORDS, ge=100)
+    default_lookback_days: int = Field(default=defaults.PERFORMANCE_DEFAULT_LOOKBACK_DAYS, ge=1)
 
 
 class VirtualPnLConfig(BaseModel):

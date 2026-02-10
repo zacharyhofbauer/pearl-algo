@@ -31,6 +31,12 @@ SECRET_PATTERNS = [
     (r"\bAKIA[0-9A-Z]{16}\b", "AWS Access Key ID"),
     # Private keys
     (r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", "Private key"),
+    # Passphrase values in .env files (non-placeholder)
+    (r'(?:PASSPHRASE|OPERATOR_PASSPHRASE)\s*=\s*["\']?(?!<set-in-)[A-Za-z0-9!@#$%^&*]{4,}["\']?', "Hardcoded passphrase"),
+    # PEARL_API_KEY with actual value (not placeholder)
+    (r'PEARL_API_KEY\s*=\s*(?!<set-in-)[A-Za-z0-9_-]{20,}', "Hardcoded PEARL_API_KEY"),
+    # NEXT_PUBLIC_API_KEY with actual value (not placeholder)
+    (r'NEXT_PUBLIC_API_KEY\s*=\s*(?!<set-in-)[A-Za-z0-9_-]{20,}', "Hardcoded NEXT_PUBLIC_API_KEY"),
 ]
 
 # Files/patterns to skip (already secrets or templates)
@@ -48,6 +54,9 @@ SKIP_PATTERNS = [
 ALLOWLIST_PATTERNS = [
     r"_SERVICE_CONFIG_OVERRIDE",
     r"\bContextVar\b",
+    r"<set-in-secrets\.env>",  # Placeholder values are safe
+    r"test-secret-key-",  # Test-only API keys (not real)
+    r"typeof data\?\.passphrase",  # TypeScript passphrase field access (not a value)
 ]
 
 

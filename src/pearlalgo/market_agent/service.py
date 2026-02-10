@@ -12,10 +12,13 @@ import json
 import signal
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from pearlalgo.market_agent.service_factory import ServiceDependencies
 
 from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
@@ -149,38 +152,54 @@ class MarketAgentService(ServiceNotificationsMixin):
 
     def __init__(
         self,
-        data_provider: DataProvider,
+        data_provider: Optional[DataProvider] = None,
         config: Optional[Dict] = None,
         state_dir: Optional[Path] = None,
         telegram_bot_token: Optional[str] = None,
         telegram_chat_id: Optional[str] = None,
+        *,
+        deps: Optional["ServiceDependencies"] = None,
     ):
         """
         Initialize market agent service.
-        
+
+        There are two construction paths:
+
+        1. **Legacy / direct** — pass ``data_provider`` and optional kwargs.
+           Dependencies are built inline (existing behavior).
+        2. **Factory** — pass a pre-built :class:`ServiceDependencies` via
+           ``deps``.  All other positional args are ignored.  This is the
+           preferred path for tests and for ``main.py`` via
+           :func:`build_service_dependencies`.
+
         Args:
-            data_provider: Data provider instance
-            config: Strategy configuration (optional)
-            state_dir: State directory (optional)
-            telegram_bot_token: Telegram bot token (optional)
-            telegram_chat_id: Telegram chat ID (optional)
+            data_provider: Data provider instance (legacy path)
+            config: Strategy configuration (legacy path, optional)
+            state_dir: State directory (legacy path, optional)
+            telegram_bot_token: Telegram bot token (legacy path, optional)
+            telegram_chat_id: Telegram chat ID (legacy path, optional)
+            deps: Pre-built dependencies (factory path, keyword-only)
         """
-        # Use PearlBot Auto config (from Pine Scripts)
-        self.config = ConfigView(config or PEARL_BOT_CONFIG.copy())
+        # --- resolve dependencies (factory vs legacy) -------------------------
+        if deps is not None:
+            # Factory path — use pre-built dependencies
+            self.config = deps.config if deps.config is not None else ConfigView(config or PEARL_BOT_CONFIG.copy())
+            data_provider = deps.data_provider
+            state_dir = deps.state_dir
+            telegram_bot_token = deps.telegram_bot_token
+            telegram_chat_id = deps.telegram_chat_id
+            service_config = deps.service_config or load_service_config()
+        else:
+            # Legacy path — build inline
+            self.config = ConfigView(config or PEARL_BOT_CONFIG.copy())
+            service_config = load_service_config()
+
         self.symbol = str(self.config.get("symbol", "MNQ"))
         self.timeframe = str(self.config.get("timeframe", "5m"))
         self.scan_interval = float(self.config.get("scan_interval", 30))
-        
-        # -------------------------------------------------------------------
-        # Load service configuration ONCE and reuse throughout init.
-        # Previously this was called 3+ times; consolidating avoids redundant
-        # YAML parsing and ensures all components see identical config.
-        # -------------------------------------------------------------------
-        service_config = load_service_config()
         self._service_config = service_config
-        
+
         # Strategy adapter (kept so tests can monkeypatch `service.strategy.analyze`).
-        # Internally it delegates to `pearlalgo.trading_bots.pearl_bot_auto.generate_signals`.
         class _StrategyAdapter:
             def __init__(self, config: ConfigView):
                 self.config = config
@@ -189,47 +208,58 @@ class MarketAgentService(ServiceNotificationsMixin):
                 return generate_signals(df, config=self.config, current_time=current_time)
 
         self.strategy = _StrategyAdapter(self.config)
-        
-        # Create a simple config dict for data_fetcher compatibility
-        nq_config_dict = {
-            "symbol": self.symbol,
-            "timeframe": self.timeframe,
-        }
-        self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
 
-        self.state_manager = MarketAgentStateManager(
-            state_dir=state_dir,
-            service_config=service_config,
-        )
-        self.performance_tracker = PerformanceTracker(
-            state_dir=state_dir,
-            state_manager=self.state_manager,
-        )
-        # Derive account label for Telegram messages (e.g. "MFFU" for prop firm)
-        challenge_cfg = (config or {}).get("challenge", {}) if isinstance(config, dict) else {}
-        if not challenge_cfg:
-            challenge_cfg = service_config.get("challenge", {}) or {}
-        _mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-        _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else "INCEPTION"
+        # --- core dependencies (use factory-built or construct inline) --------
+        if deps is not None and deps.data_fetcher is not None:
+            self.data_fetcher = deps.data_fetcher
+        else:
+            nq_config_dict = {"symbol": self.symbol, "timeframe": self.timeframe}
+            self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
 
-        self.telegram_notifier = MarketAgentTelegramNotifier(
-            bot_token=telegram_bot_token,
-            chat_id=telegram_chat_id,
-            state_dir=state_dir,
-            account_label=_account_label,
-        )
-        
-        # Initialize notification queue for non-blocking Telegram delivery
-        telegram_settings = service_config.get("telegram", {}) or {}
-        _min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
-        self.notification_queue = NotificationQueue(
-            telegram_notifier=self.telegram_notifier,
-            max_queue_size=1000,
-            batch_delay_seconds=0.5,
-            max_retries=3,
-            min_tier=_min_tier,
-        )
-        
+        if deps is not None and deps.state_manager is not None:
+            self.state_manager = deps.state_manager
+        else:
+            self.state_manager = MarketAgentStateManager(
+                state_dir=state_dir,
+                service_config=service_config,
+            )
+
+        if deps is not None and deps.performance_tracker is not None:
+            self.performance_tracker = deps.performance_tracker
+        else:
+            self.performance_tracker = PerformanceTracker(
+                state_dir=state_dir,
+                state_manager=self.state_manager,
+            )
+
+        if deps is not None and deps.telegram_notifier is not None:
+            self.telegram_notifier = deps.telegram_notifier
+        else:
+            challenge_cfg = (config or {}).get("challenge", {}) if isinstance(config, dict) else {}
+            if not challenge_cfg:
+                challenge_cfg = service_config.get("challenge", {}) or {}
+            _mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            _account_label = "MFFU" if _mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live") else "INCEPTION"
+            self.telegram_notifier = MarketAgentTelegramNotifier(
+                bot_token=telegram_bot_token,
+                chat_id=telegram_chat_id,
+                state_dir=state_dir,
+                account_label=_account_label,
+            )
+
+        if deps is not None and deps.notification_queue is not None:
+            self.notification_queue = deps.notification_queue
+        else:
+            telegram_settings = service_config.get("telegram", {}) or {}
+            _min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
+            self.notification_queue = NotificationQueue(
+                telegram_notifier=self.telegram_notifier,
+                max_queue_size=1000,
+                batch_delay_seconds=0.5,
+                max_retries=3,
+                min_tier=_min_tier,
+            )
+
         # Log Telegram configuration status
         if self.telegram_notifier.enabled:
             logger.info(
@@ -243,8 +273,11 @@ class MarketAgentService(ServiceNotificationsMixin):
                 f"bot_token={'present' if telegram_bot_token else 'MISSING'}, "
                 f"chat_id={'present' if telegram_chat_id else 'MISSING'}"
             )
-        
-        self.health_monitor = HealthMonitor(state_dir=state_dir)
+
+        if deps is not None and deps.health_monitor is not None:
+            self.health_monitor = deps.health_monitor
+        else:
+            self.health_monitor = HealthMonitor(state_dir=state_dir)
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         trading_circuit_breaker_settings = service_config.get("trading_circuit_breaker", {}) or {}
@@ -379,7 +412,12 @@ class MarketAgentService(ServiceNotificationsMixin):
             
             challenge_cfg = service_config.get("challenge", {}) or {}
             self._challenge_enabled = bool(challenge_cfg.get("enabled", False))
-            if self._challenge_enabled:
+            # Skip ChallengeTracker for MFFU accounts — MFFUEvaluationTracker handles
+            # challenge state for those. Running both causes them to overwrite the same
+            # challenge_state.json with incompatible formats.
+            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            is_mffu = mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
+            if self._challenge_enabled and not is_mffu:
                 cfg = ChallengeConfig(
                     enabled=True,
                     start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
@@ -397,6 +435,8 @@ class MarketAgentService(ServiceNotificationsMixin):
                     f"50k Challenge enabled: balance=${cfg.start_balance:,.0f}, "
                     f"target=+${cfg.profit_target:,.0f}, max_dd=-${cfg.max_drawdown:,.0f}"
                 )
+            elif is_mffu:
+                logger.info("ChallengeTracker skipped — MFFU account uses MFFUEvaluationTracker")
         except Exception as e:
             logger.warning(f"Challenge tracker init failed (continuing without): {e}")
             self._challenge_tracker = None
@@ -1438,9 +1478,16 @@ class MarketAgentService(ServiceNotificationsMixin):
                             )
                     else:
                         # Normal mode: run pearl_bot_auto strategy
+                        # Use run_in_executor to avoid blocking the event loop during
+                        # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
                         df = market_data.get("df")
                         if df is not None and not df.empty:
-                            signals = self.strategy.analyze(df, current_time=datetime.now(timezone.utc))
+                            import functools
+                            _analyze_fn = functools.partial(
+                                self.strategy.analyze, df, current_time=datetime.now(timezone.utc)
+                            )
+                            loop = asyncio.get_event_loop()
+                            signals = await loop.run_in_executor(None, _analyze_fn)
                         else:
                             signals = []
                     self._analysis_run_count += 1
@@ -4624,7 +4671,24 @@ class MarketAgentService(ServiceNotificationsMixin):
                     if nf.get("id") and nf["id"] not in existing_ids:
                         existing_fills.append(nf)
                         existing_ids.add(nf["id"])
-                fills_file.write_text(json.dumps(existing_fills))
+                # Atomic write: temp file + rename to prevent corruption on crash
+                import tempfile
+                tmp_fd, tmp_name = tempfile.mkstemp(
+                    dir=str(fills_file.parent), suffix=".tmp"
+                )
+                try:
+                    with os.fdopen(tmp_fd, "w") as tmp_f:
+                        json.dump(existing_fills, tmp_f)
+                        tmp_f.flush()
+                        os.fsync(tmp_f.fileno())
+                    os.replace(tmp_name, fills_file)
+                except BaseException:
+                    # Clean up temp file on failure
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+                    raise
                 state["tradovate_fills"] = existing_fills
             except Exception as e:
                 logger.warning(f"Failed to merge tradovate fills into state: {e}")

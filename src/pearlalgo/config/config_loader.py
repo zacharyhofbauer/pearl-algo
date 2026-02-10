@@ -49,14 +49,8 @@ from pearlalgo.config.adapters import (
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
 
-# Schema validation (optional - only validates if explicitly requested)
-try:
-    from pearlalgo.config.config_schema import validate_config, FullServiceConfig
-    SCHEMA_VALIDATION_AVAILABLE = True
-except ImportError:
-    SCHEMA_VALIDATION_AVAILABLE = False
-    validate_config = None  # type: ignore
-    FullServiceConfig = None  # type: ignore
+# Schema validation — mandatory at startup to catch config errors early.
+from pearlalgo.config.config_schema import validate_config, FullServiceConfig
 
 # Optional per-call override (used for experiments/backtests; never persisted).
 # ContextVar keeps this safe across async tasks. It does NOT affect other processes.
@@ -127,232 +121,166 @@ def build_strategy_config(
     return build_strategy_config_from_yaml(base_strategy, config_data)
 
 
-# Default values for service configuration sections
+# ---------------------------------------------------------------------------
+# Default values for service configuration sections.
+#
+# ALL values are sourced from ``pearlalgo.config.defaults`` so there is a
+# single source of truth.  Do NOT add literal values here — add them to
+# ``defaults.py`` and reference them.
+# ---------------------------------------------------------------------------
 _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "service": {
-        "status_update_interval": 1800,
-        "heartbeat_interval": 3600,
-        "state_save_interval": 10,
-        # Cadence mode: "fixed" (start-to-start timing) or "sleep_after" (legacy)
-        "cadence_mode": "fixed",
-        # New-bar gating (skip redundant analysis when bar hasn't advanced)
-        "enable_new_bar_gating": True,
-        # Dashboard observability (15m push)
-        "pressure_lookback_bars": 24,   # ~2h on 5m bars
-        "pressure_baseline_bars": 120,  # ~10h on 5m bars
-        # Dashboard chart (hourly image)
-        "dashboard_chart_enabled": True,       # set False to disable automatic chart pushes
-        "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
-        "dashboard_chart_lookback_hours": 8,  # default notification chart window (8h for cleaner charts)
-        "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
-        "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
-        "dashboard_chart_show_pressure": True, # show signed-volume pressure panel
-        # Alert throttling
-        "connection_failure_alert_interval": 600,  # 10 minutes
-        "data_quality_alert_interval": 300,        # 5 minutes
+        "status_update_interval": defaults.STATUS_UPDATE_INTERVAL,
+        "heartbeat_interval": defaults.HEARTBEAT_INTERVAL,
+        "state_save_interval": defaults.STATE_SAVE_INTERVAL,
+        "cadence_mode": defaults.CADENCE_MODE,
+        "enable_new_bar_gating": defaults.ENABLE_NEW_BAR_GATING,
+        "pressure_lookback_bars": defaults.PRESSURE_LOOKBACK_BARS,
+        "pressure_baseline_bars": defaults.PRESSURE_BASELINE_BARS,
+        "dashboard_chart_enabled": defaults.DASHBOARD_CHART_ENABLED,
+        "dashboard_chart_interval": defaults.DASHBOARD_CHART_INTERVAL,
+        "dashboard_chart_lookback_hours": defaults.DASHBOARD_CHART_LOOKBACK_HOURS,
+        "dashboard_chart_timeframe": defaults.DASHBOARD_CHART_TIMEFRAME,
+        "dashboard_chart_max_bars": defaults.DASHBOARD_CHART_MAX_BARS,
+        "dashboard_chart_show_pressure": defaults.DASHBOARD_CHART_SHOW_PRESSURE,
+        "connection_failure_alert_interval": defaults.CONNECTION_FAILURE_ALERT_INTERVAL,
+        "data_quality_alert_interval": defaults.DATA_QUALITY_ALERT_INTERVAL,
     },
-    # Telegram UI (Home Card / dashboards): compact, mobile-friendly telemetry
     "telegram_ui": {
-        "compact_metrics_enabled": True,
-        "show_progress_bars": False,
-        "show_volume_metrics": True,
-        "compact_metric_width": 10,
+        "compact_metrics_enabled": defaults.TELEGRAM_UI_COMPACT_METRICS,
+        "show_progress_bars": defaults.TELEGRAM_UI_SHOW_PROGRESS_BARS,
+        "show_volume_metrics": defaults.TELEGRAM_UI_SHOW_VOLUME_METRICS,
+        "compact_metric_width": defaults.TELEGRAM_UI_COMPACT_METRIC_WIDTH,
     },
     "circuit_breaker": {
-        "max_consecutive_errors": 10,
-        "max_connection_failures": 10,
-        "max_data_fetch_errors": 5,
+        "max_consecutive_errors": defaults.MAX_CONSECUTIVE_ERRORS,
+        "max_connection_failures": defaults.MAX_CONNECTION_FAILURES,
+        "max_data_fetch_errors": defaults.MAX_DATA_FETCH_ERRORS,
     },
-    # ==========================================================================
-    # TRADING CIRCUIT BREAKER (Loss-based risk controls + session filter)
-    # ==========================================================================
-    # IMPORTANT: This section MUST be present here so `trading_circuit_breaker:` in
-    # config.yaml / market overlays actually affects the running agent (otherwise
-    # it is silently ignored and the circuit breaker runs on hardcoded defaults).
     "trading_circuit_breaker": {
-        "enabled": True,
-        # Consecutive loss limits
-        "max_consecutive_losses": 5,
-        "consecutive_loss_cooldown_minutes": 30,
-        # Drawdown limits
-        "max_session_drawdown": 500.0,
-        "max_daily_drawdown": 1000.0,
-        "drawdown_cooldown_minutes": 60,
-        # Rolling win rate filter
-        "rolling_window_trades": 20,
-        "min_rolling_win_rate": 0.30,
-        "win_rate_cooldown_minutes": 30,
-        # Position limits / clustering
-        "max_concurrent_positions": 5,
-        "min_price_distance_pct": 0.5,
-        # Volatility/chop filter
-        "enable_volatility_filter": True,
-        "min_atr_ratio": 0.8,
-        "max_atr_ratio": 2.5,
-        "chop_detection_window": 10,
-        "chop_win_rate_threshold": 0.35,
-        # Auto-recovery
-        "auto_resume_after_cooldown": True,
-        "require_winning_trade_to_resume": False,
-        # Session filter (time-of-day)
-        "enable_session_filter": True,
-        "allowed_sessions": ["overnight", "midday", "close"],
+        "enabled": defaults.TCB_ENABLED,
+        "max_consecutive_losses": defaults.TCB_MAX_CONSECUTIVE_LOSSES,
+        "consecutive_loss_cooldown_minutes": defaults.TCB_CONSECUTIVE_LOSS_COOLDOWN_MINUTES,
+        "max_session_drawdown": defaults.TCB_MAX_SESSION_DRAWDOWN,
+        "max_daily_drawdown": defaults.TCB_MAX_DAILY_DRAWDOWN,
+        "drawdown_cooldown_minutes": defaults.TCB_DRAWDOWN_COOLDOWN_MINUTES,
+        "rolling_window_trades": defaults.TCB_ROLLING_WINDOW_TRADES,
+        "min_rolling_win_rate": defaults.TCB_MIN_ROLLING_WIN_RATE,
+        "win_rate_cooldown_minutes": defaults.TCB_WIN_RATE_COOLDOWN_MINUTES,
+        "max_concurrent_positions": defaults.TCB_MAX_CONCURRENT_POSITIONS,
+        "min_price_distance_pct": defaults.TCB_MIN_PRICE_DISTANCE_PCT,
+        "enable_volatility_filter": defaults.TCB_ENABLE_VOLATILITY_FILTER,
+        "min_atr_ratio": defaults.TCB_MIN_ATR_RATIO,
+        "max_atr_ratio": defaults.TCB_MAX_ATR_RATIO,
+        "chop_detection_window": defaults.TCB_CHOP_DETECTION_WINDOW,
+        "chop_win_rate_threshold": defaults.TCB_CHOP_WIN_RATE_THRESHOLD,
+        "auto_resume_after_cooldown": defaults.TCB_AUTO_RESUME_AFTER_COOLDOWN,
+        "require_winning_trade_to_resume": defaults.TCB_REQUIRE_WINNING_TRADE_TO_RESUME,
+        "enable_session_filter": defaults.TCB_ENABLE_SESSION_FILTER,
+        "allowed_sessions": defaults.TCB_ALLOWED_SESSIONS.copy(),
     },
     "data": {
-        "buffer_size": 100,
-        "buffer_size_5m": 50,
-        "buffer_size_15m": 50,
-        "historical_hours": 2,
-        "multitimeframe_5m_hours": 4,
-        "multitimeframe_15m_hours": 12,
-        "performance_history_limit": 1000,
-        "stale_data_threshold_minutes": 10,
-        "connection_timeout_minutes": 30,
-        # Base historical fetch caching (default OFF).
-        # When enabled, 1m history is refreshed on a TTL rather than every cycle.
-        # Level 1 real-time data is still fetched every cycle for latest bar freshness.
-        "enable_base_cache": False,
-        "base_refresh_seconds": 60,  # 1 minute TTL when enabled
-        # Multi-timeframe fetch caching (default OFF).
-        # When enabled, 5m/15m history is refreshed on a TTL rather than every cycle.
-        "enable_mtf_cache": False,
-        "mtf_refresh_seconds_5m": 300,
-        "mtf_refresh_seconds_15m": 900,
-        # IBKR executor logging verbosity (default OFF).
-        # When enabled, logs step-by-step tracing at INFO level.
-        # When disabled, step-by-step tracing is at DEBUG level (actionable events stay at INFO/WARN).
-        "ibkr_verbose_logging": False,
+        "buffer_size": defaults.DATA_BUFFER_SIZE,
+        "buffer_size_5m": defaults.DATA_BUFFER_SIZE_5M,
+        "buffer_size_15m": defaults.DATA_BUFFER_SIZE_15M,
+        "historical_hours": defaults.HISTORICAL_HOURS,
+        "multitimeframe_5m_hours": defaults.MULTITIMEFRAME_5M_HOURS,
+        "multitimeframe_15m_hours": defaults.MULTITIMEFRAME_15M_HOURS,
+        "performance_history_limit": defaults.PERFORMANCE_HISTORY_LIMIT,
+        "stale_data_threshold_minutes": defaults.STALE_DATA_THRESHOLD_MINUTES,
+        "connection_timeout_minutes": defaults.CONNECTION_TIMEOUT_MINUTES,
+        "enable_base_cache": defaults.ENABLE_BASE_CACHE,
+        "base_refresh_seconds": defaults.BASE_REFRESH_SECONDS,
+        "enable_mtf_cache": defaults.ENABLE_MTF_CACHE,
+        "mtf_refresh_seconds_5m": defaults.MTF_REFRESH_SECONDS_5M,
+        "mtf_refresh_seconds_15m": defaults.MTF_REFRESH_SECONDS_15M,
+        "ibkr_verbose_logging": defaults.IBKR_VERBOSE_LOGGING,
     },
-    # ==========================================================================
-    # STORAGE (Platform memory)
-    # ==========================================================================
-    # Dual-write state to SQLite for queryable history + ML datasets.
-    # JSON/JSONL files remain for backward compatibility with Telegram/mobile tooling.
     "storage": {
-        "sqlite_enabled": False,
-        "db_path": "data/agent_state/NQ/trades.db",
-        "dual_write_files": True,
+        "sqlite_enabled": defaults.STORAGE_SQLITE_ENABLED,
+        "db_path": defaults.STORAGE_DB_PATH,
+        "dual_write_files": defaults.STORAGE_DUAL_WRITE_FILES,
     },
     "ml_filter": {
-        "enabled": False,
-        "model_path": None,
-        "model_version": "v1.0.0",
-        "min_probability": 0.55,
-        "high_probability": 0.70,
-        "adjust_sizing": False,
-        "size_multiplier_min": 1.0,
-        "size_multiplier_max": 1.5,
-        "min_training_samples": 30,
-        "retrain_interval_days": 7,
-        "n_estimators": 100,
-        "max_depth": 6,
-        "learning_rate": 0.1,
-        "calibrate_probabilities": True,
+        "enabled": defaults.ML_FILTER_ENABLED,
+        "model_path": defaults.ML_FILTER_MODEL_PATH,
+        "model_version": defaults.ML_FILTER_MODEL_VERSION,
+        "min_probability": defaults.ML_FILTER_MIN_PROBABILITY,
+        "high_probability": defaults.ML_FILTER_HIGH_PROBABILITY,
+        "adjust_sizing": defaults.ML_FILTER_ADJUST_SIZING,
+        "size_multiplier_min": defaults.ML_FILTER_SIZE_MULTIPLIER_MIN,
+        "size_multiplier_max": defaults.ML_FILTER_SIZE_MULTIPLIER_MAX,
+        "min_training_samples": defaults.ML_FILTER_MIN_TRAINING_SAMPLES,
+        "retrain_interval_days": defaults.ML_FILTER_RETRAIN_INTERVAL_DAYS,
+        "n_estimators": defaults.ML_FILTER_N_ESTIMATORS,
+        "max_depth": defaults.ML_FILTER_MAX_DEPTH,
+        "learning_rate": defaults.ML_FILTER_LEARNING_RATE,
+        "calibrate_probabilities": defaults.ML_FILTER_CALIBRATE_PROBABILITIES,
     },
-    # ==========================================================================
-    # RISK (Sizing + Risk Controls)
-    # ==========================================================================
-    # NOTE: This section MUST be present here so `risk:` in config.yaml
-    # actually affects the running agent (otherwise it is silently ignored).
     "risk": {
-        "max_risk_per_trade": 0.01,
-        "max_drawdown": 0.10,
-        "stop_loss_atr_multiplier": 1.5,
-        "take_profit_risk_reward": 1.5,
-        "min_position_size": 5,
-        "max_position_size": 25,
-        # Per-signal-type sizing overrides (Option A / risk shaping).
-        # Example:
-        #   signal_type_size_multipliers: { sr_bounce: 0.25 }
-        #   signal_type_max_contracts: { sr_bounce: 2 }
+        "max_risk_per_trade": defaults.MAX_RISK_PER_TRADE,
+        "max_drawdown": defaults.MAX_DRAWDOWN,
+        "stop_loss_atr_multiplier": defaults.STOP_LOSS_ATR_MULTIPLIER,
+        "take_profit_risk_reward": defaults.TAKE_PROFIT_RISK_REWARD,
+        "min_position_size": defaults.MIN_POSITION_SIZE,
+        "max_position_size": defaults.MAX_POSITION_SIZE,
         "signal_type_size_multipliers": {},
         "signal_type_max_contracts": {},
     },
     "signals": {
-        "duplicate_window_seconds": 300,
-        "min_confidence": 0.50,
-        "min_risk_reward": 1.5,
+        "duplicate_window_seconds": defaults.DUPLICATE_WINDOW_SECONDS,
+        "min_confidence": defaults.MIN_CONFIDENCE,
+        "min_risk_reward": defaults.MIN_RISK_REWARD,
     },
     "performance": {
-        "max_records": 1000,
-        "default_lookback_days": 7,
+        "max_records": defaults.PERFORMANCE_MAX_RECORDS,
+        "default_lookback_days": defaults.PERFORMANCE_DEFAULT_LOOKBACK_DAYS,
     },
     "virtual_pnl": {
-        "enabled": True,
-        "intrabar_tiebreak": "stop_loss",
-        "notify_entry": False,
-        "notify_exit": False,
+        "enabled": defaults.VIRTUAL_PNL_ENABLED,
+        "intrabar_tiebreak": defaults.VIRTUAL_PNL_INTRABAR_TIEBREAK,
+        "notify_entry": defaults.VIRTUAL_PNL_NOTIFY_ENTRY,
+        "notify_exit": defaults.VIRTUAL_PNL_NOTIFY_EXIT,
     },
     "auto_flat": {
-        "enabled": True,
-        "friday_enabled": True,
-        "friday_time": "16:55",
-        "weekend_enabled": True,
-        "timezone": "America/New_York",
-        "notify": True,
+        "enabled": defaults.AUTO_FLAT_ENABLED,
+        "friday_enabled": defaults.AUTO_FLAT_FRIDAY_ENABLED,
+        "friday_time": defaults.AUTO_FLAT_FRIDAY_TIME,
+        "weekend_enabled": defaults.AUTO_FLAT_WEEKEND_ENABLED,
+        "timezone": defaults.AUTO_FLAT_TIMEZONE,
+        "notify": defaults.AUTO_FLAT_NOTIFY,
     },
-    # Market hours configuration (for holiday/early-close overrides)
-    # Disabled by default to preserve current behavior.
-    # Enable by setting enable_config_overrides: true and providing dates.
     "market_hours": {
-        "enable_config_overrides": False,  # Set to true to load overrides from config
-        # holiday_overrides: list of (year, month, day) tuples for full-day closures
-        # Example: [[2025, 11, 27], [2025, 3, 28]]  # Thanksgiving, Good Friday
-        "holiday_overrides": [],
-        # early_closes: dict mapping (year, month, day) to close_hour (24h format)
-        # Example: {"2025-11-26": 13, "2025-12-24": 13}  # Day before Thanksgiving, Christmas Eve
-        "early_closes": {},
+        "enable_config_overrides": defaults.MARKET_HOURS_ENABLE_CONFIG_OVERRIDES,
+        "holiday_overrides": defaults.MARKET_HOURS_HOLIDAY_OVERRIDES.copy(),
+        "early_closes": defaults.MARKET_HOURS_EARLY_CLOSES.copy(),
     },
-    # ==========================================================================
-    # EXECUTION (ATS - Automated Trading System)
-    # ==========================================================================
-    # Controls automated order placement via IBKR.
-    # SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
-    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "execution": {
         "enabled": defaults.EXECUTION_ENABLED,
         "armed": defaults.EXECUTION_ARMED,
         "mode": defaults.EXECUTION_MODE,
         "adapter": "ibkr",
-        # Risk limits (hard caps)
         "max_positions": defaults.MAX_POSITIONS,
         "max_orders_per_day": defaults.MAX_ORDERS_PER_DAY,
         "max_daily_loss": defaults.MAX_DAILY_LOSS,
         "cooldown_seconds": defaults.COOLDOWN_SECONDS,
-        # Symbol whitelist (empty = all symbols allowed)
         "symbol_whitelist": defaults.DEFAULT_SYMBOL_WHITELIST.copy(),
-        # IBKR connection (separate client_id from data to avoid conflicts)
         "ibkr_trading_client_id": defaults.IBKR_TRADING_CLIENT_ID,
         "ibkr_host": defaults.IBKR_HOST,
         "ibkr_port": defaults.IBKR_PORT,
     },
-    # ==========================================================================
-    # LEARNING (Adaptive Bandit Policy)
-    # ==========================================================================
-    # Adjusts execution decisions based on observed signal type performance.
-    # Uses Thompson sampling (Beta-Bernoulli) per signal type.
-    # SAFETY: Default is shadow mode - learns but does NOT affect execution.
-    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "learning": {
         "enabled": defaults.LEARNING_ENABLED,
         "mode": defaults.LEARNING_MODE,
-        # Bandit configuration
         "min_samples_per_type": defaults.MIN_SAMPLES_PER_TYPE,
         "explore_rate": defaults.EXPLORE_RATE,
         "decision_threshold": defaults.DECISION_THRESHOLD,
-        # Position sizing adjustment (when mode=live)
         "max_size_multiplier": defaults.MAX_SIZE_MULTIPLIER,
         "min_size_multiplier": defaults.MIN_SIZE_MULTIPLIER,
-        # Prior distribution (Beta distribution parameters)
         "prior_alpha": defaults.PRIOR_ALPHA,
         "prior_beta": defaults.PRIOR_BETA,
-        # Decay factor for older observations (0 = no decay)
         "decay_factor": defaults.DECAY_FACTOR,
     },
-    # ==========================================================================
-    # 50K CHALLENGE TRACKER (Pass/Fail Rules)
-    # ==========================================================================
-    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "challenge": {
         "enabled": defaults.CHALLENGE_ENABLED,
         "start_balance": defaults.CHALLENGE_START_BALANCE,
@@ -361,12 +289,11 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "auto_reset_on_pass": defaults.CHALLENGE_AUTO_RESET_ON_PASS,
         "auto_reset_on_fail": defaults.CHALLENGE_AUTO_RESET_ON_FAIL,
     },
-    # Signal forwarding (inception -> MFFU)
     "signal_forwarding": {
-        "enabled": False,
-        "mode": "off",           # "writer" | "follower" | "off"
-        "shared_file": "data/shared_signals.jsonl",
-        "max_lines": 500,
+        "enabled": defaults.SIGNAL_FORWARDING_ENABLED,
+        "mode": defaults.SIGNAL_FORWARDING_MODE,
+        "shared_file": defaults.SIGNAL_FORWARDING_SHARED_FILE,
+        "max_lines": defaults.SIGNAL_FORWARDING_MAX_LINES,
     },
 }
 
@@ -417,13 +344,13 @@ def load_service_config(
     if validate and config_data:
         log_config_warnings(config_data)
 
-        # Run full schema validation if available (logs errors but doesn't fail startup)
-        if SCHEMA_VALIDATION_AVAILABLE:
-            try:
-                validate_config(config_data)
-                logger.debug("Config schema validation passed")
-            except Exception as e:
-                logger.warning(f"Config schema validation failed: {e}")
+        # Run mandatory schema validation — fail fast on invalid config
+        try:
+            validate_config(config_data)
+            logger.debug("Config schema validation passed")
+        except Exception as e:
+            logger.error(f"Config schema validation FAILED: {e}")
+            raise SystemExit(f"Invalid configuration — aborting startup: {e}") from e
     
     # Merge config sections with defaults
     result = {}
@@ -568,15 +495,8 @@ def validate_service_config(
         and raise_on_error is False.
 
     Raises:
-        ImportError: If schema validation module is not available
         pydantic.ValidationError: If config is invalid and raise_on_error is True
     """
-    if not SCHEMA_VALIDATION_AVAILABLE:
-        raise ImportError(
-            "Schema validation requires pydantic. "
-            "Install with: pip install pydantic>=2.8"
-        )
-
     try:
         config_data = load_config_yaml(config_path)
         validated = validate_config(config_data)
