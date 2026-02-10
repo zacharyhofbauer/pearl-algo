@@ -1315,7 +1315,7 @@ def _calculate_indicators(
     tbt_signal, tbt_conf = safe_check(check_tbt_signals, ctx)
     sd_signal, sd_conf = safe_check(check_supply_demand_signals, ctx)
 
-    key_levels = get_key_levels(df, config=config) if len(df) >= 5 else {}
+    key_levels = get_key_levels(df) if len(df) >= 5 else {}
     kl_signal, kl_conf = (None, 0.0)
     if key_levels:
         kl_signal, kl_conf = safe_check(check_key_level_signals, close, key_levels, config)
