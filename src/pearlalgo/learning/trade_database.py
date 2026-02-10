@@ -361,6 +361,49 @@ class TradeDatabase:
             )
             conn.commit()
 
+    def get_signal_event_by_id(self, signal_id: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent signal event for a given signal_id.
+
+        Reconstructs the record from the latest event's payload.
+        Uses the ``idx_signal_events_signal_id`` index for O(1) lookup.
+
+        Args:
+            signal_id: Signal identifier
+
+        Returns:
+            Record dict with all accumulated fields, or ``None`` if not found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT signal_id, status, timestamp, payload_json
+                FROM signal_events
+                WHERE signal_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (str(signal_id),),
+            )
+            row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            payload = {}
+
+        # Ensure top-level fields are present for compatibility
+        payload.setdefault("signal_id", row["signal_id"])
+        payload.setdefault("status", row["status"])
+        payload.setdefault("timestamp", row["timestamp"])
+        return payload
+
     def get_recent_signal_events(self, limit: int = 200) -> List[Dict[str, Any]]:
         """Get most recent signal events (newest first)."""
         with self._get_connection() as conn:

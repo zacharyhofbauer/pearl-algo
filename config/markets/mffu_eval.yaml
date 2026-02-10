@@ -85,8 +85,9 @@ trading_circuit_breaker:
   max_concurrent_positions: 20
   # Disable session filter -- MFFU eval gate handles hours, allow all sessions
   enable_session_filter: false
-  # Disable direction gating -- trade both directions for evaluation
-  enable_direction_gating: false
+  # Direction gating ENABLED -- broker only allows one-side positions
+  # Re-enabled 2026-02-10: Tradovate rejects opposite-side orders
+  enable_direction_gating: true
 
 # ---------------------------------------------------------------------------
 # Telegram: notification tier

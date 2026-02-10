@@ -136,3 +136,115 @@ def configured_service(tmp_state_dir, mock_data_provider):
         data_provider=mock_data_provider,
         state_dir=tmp_state_dir,
     )
+
+
+# ---------------------------------------------------------------------------
+# Signal Factory Fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def signal_factory():
+    """Factory for creating signal dicts with sensible defaults."""
+    def _make_signal(
+        *,
+        signal_type="momentum_ema_cross",
+        direction="long",
+        entry_price=17500.0,
+        stop_loss=17480.0,
+        take_profit=17540.0,
+        confidence=0.75,
+        symbol="MNQ",
+        timestamp=None,
+        signal_id=None,
+        **overrides,
+    ):
+        from datetime import datetime, timezone
+        sig = {
+            "type": signal_type,
+            "direction": direction,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "confidence": confidence,
+            "symbol": symbol,
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+        }
+        if signal_id:
+            sig["signal_id"] = signal_id
+        sig.update(overrides)
+        return sig
+    return _make_signal
+
+
+# ---------------------------------------------------------------------------
+# Market Hours Parametrized Fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(params=["pre_market", "regular", "after_hours", "weekend"])
+def market_hours_params(request):
+    """Parametrized fixture for market hours scenarios."""
+    # Return a dict with the market phase name and a representative datetime
+    from datetime import datetime, timezone, timedelta
+    # Use a known Monday for pre/regular/after, Saturday for weekend
+    base_monday = datetime(2025, 6, 2, tzinfo=timezone.utc)  # a known Monday
+    scenarios = {
+        "pre_market": {"phase": "pre_market", "dt": base_monday.replace(hour=8, minute=0)},
+        "regular": {"phase": "regular", "dt": base_monday.replace(hour=15, minute=0)},
+        "after_hours": {"phase": "after_hours", "dt": base_monday.replace(hour=22, minute=0)},
+        "weekend": {"phase": "weekend", "dt": (base_monday + timedelta(days=5)).replace(hour=12)},
+    }
+    return scenarios[request.param]
+
+
+# ---------------------------------------------------------------------------
+# Stale OHLCV DataFrame Fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def stale_ohlcv_df():
+    """OHLCV DataFrame with timestamps from 2 hours ago (stale data)."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    stale_time = now - timedelta(hours=2)
+    rows = []
+    for i in range(20):
+        ts = stale_time + timedelta(minutes=i)
+        rows.append({
+            "timestamp": ts,
+            "Open": 17500.0 + i,
+            "High": 17505.0 + i,
+            "Low": 17495.0 + i,
+            "Close": 17502.0 + i,
+            "Volume": 100 + i * 10,
+        })
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Corrupt State Directory Fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def corrupt_state_dir(tmp_path):
+    """Temp directory with corrupt state files for recovery testing."""
+    state_dir = tmp_path / "corrupt_state"
+    state_dir.mkdir()
+
+    # Corrupt signals.jsonl (malformed JSON lines)
+    signals_file = state_dir / "signals.jsonl"
+    signals_file.write_text(
+        '{"signal_id": "good_1", "timestamp": "2025-01-01T00:00:00Z", "status": "generated", "signal": {"type": "test", "direction": "long", "entry_price": 17500.0}}\n'
+        'THIS IS NOT JSON\n'
+        '{"truncated": true\n'
+        '{"signal_id": "good_2", "timestamp": "2025-01-01T01:00:00Z", "status": "generated", "signal": {"type": "test", "direction": "short", "entry_price": 17600.0}}\n'
+    )
+
+    # Corrupt state.json
+    state_file = state_dir / "state.json"
+    state_file.write_text('{"partial": true')
+
+    # Empty events file
+    events_file = state_dir / "events.jsonl"
+    events_file.write_text("")
+
+    return state_dir

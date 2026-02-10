@@ -76,12 +76,13 @@ trading_circuit_breaker:
   # All sessions enabled for maximum trading opportunity
   
   # =========================================================================
-  # Phase 1: Direction gating by market regime (currently disabled)
+  # Phase 1: Direction gating by market regime (ENABLED)
   # Based on data: shorts underperform longs (40% vs 47% WR)
   # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
+  # Re-enabled 2026-02-10: one-side-only broker constraint + short-side losses
   # =========================================================================
-  enable_direction_gating: false
-  direction_gating_min_confidence: 0.70  # Disabled - allowing all trade directions
+  enable_direction_gating: true
+  direction_gating_min_confidence: 0.70  # Strict gating only if regime confidence >= this
   # Rules: trending_up -> long only, trending_down -> short only
   #        ranging/volatile/unknown -> long only (conservative)
   

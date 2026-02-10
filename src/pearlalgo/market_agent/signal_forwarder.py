@@ -12,12 +12,18 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.utils.paths import get_utc_timestamp
+
+# Maximum number of dedup keys to retain before trimming.
+_DEDUP_MAX_KEYS = 2000
+# Number of most-recent keys to keep after trimming.
+_DEDUP_TRIM_TARGET = 1000
 
 
 class SignalForwarder:
@@ -44,7 +50,9 @@ class SignalForwarder:
             config.get("shared_file", "data/shared_signals.jsonl")
         )
         self._max_lines: int = int(config.get("max_lines", 500))
-        self._processed_keys: set = set()
+        # OrderedDict preserves insertion order so we can trim oldest keys
+        # when the dedup set grows too large.  Values are unused (always True).
+        self._processed_keys: OrderedDict[tuple[str, str], bool] = OrderedDict()
 
     # ------------------------------------------------------------------
     # Startup helpers
@@ -187,19 +195,19 @@ class SignalForwarder:
                 if dedup_key in self._processed_keys:
                     continue
 
-                self._processed_keys.add(dedup_key)
+                self._processed_keys[dedup_key] = True
                 # Ensure position_size defaults to 1 (strategy doesn't always set it)
                 if not sig.get("position_size"):
                     sig["position_size"] = 1
                 new_signals.append(sig)
 
-            # Prevent unbounded memory growth: cap the dedup set
-            if len(self._processed_keys) > 2000:
-                recent_keys = {
-                    (str(s.get("direction")), str(s.get("_bar_timestamp", "")))
-                    for s in new_signals
-                }
-                self._processed_keys = recent_keys
+            # Prevent unbounded memory growth: trim oldest keys when over limit.
+            # We keep the most-recent _DEDUP_TRIM_TARGET entries so that valid
+            # dedup history is preserved across batches.
+            if len(self._processed_keys) > _DEDUP_MAX_KEYS:
+                excess = len(self._processed_keys) - _DEDUP_TRIM_TARGET
+                for _ in range(excess):
+                    self._processed_keys.popitem(last=False)  # remove oldest
 
         except Exception as e:
             logger.warning(f"Error reading shared signals: {e}")

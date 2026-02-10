@@ -52,6 +52,7 @@ class AsyncSQLiteQueueMetrics:
     total_errors: int = 0
     total_high_priority_writes: int = 0
     total_backpressure_waits: int = 0
+    total_overflow_writes: int = 0
     writes_per_second: float = 0.0
     avg_latency_ms: float = 0.0
     worker_running: bool = False
@@ -66,6 +67,7 @@ class AsyncSQLiteQueueMetrics:
             "total_errors": self.total_errors,
             "total_high_priority_writes": self.total_high_priority_writes,
             "total_backpressure_waits": self.total_backpressure_waits,
+            "total_overflow_writes": self.total_overflow_writes,
             "writes_per_second": round(self.writes_per_second, 2),
             "avg_latency_ms": round(self.avg_latency_ms, 1),
             "worker_running": self.worker_running,
@@ -114,6 +116,11 @@ class AsyncSQLiteQueue:
         self._total_backpressure_waits = 0
         self._write_times: list[float] = []
         self._metrics_start_time = time.monotonic()
+        
+        # Overflow buffer for HIGH-priority writes when main queue is full
+        self._overflow: list = []
+        self._overflow_lock = threading.Lock()
+        self._total_overflow_writes = 0
         
         # Backpressure configuration
         self._backpressure_threshold = int(max_queue_size * 0.8)  # 80% full
@@ -203,31 +210,16 @@ class AsyncSQLiteQueue:
         except queue.Full:
             # Queue full: handle based on priority
             if priority == WritePriority.HIGH:
-                # HIGH priority NEVER drops - block with timeout (backpressure)
-                self._total_backpressure_waits += 1
-                try:
-                    logger.warning(
-                        f"AsyncSQLiteQueue full - applying backpressure for HIGH priority write: {operation}"
-                    )
-                    # Block up to timeout waiting for space
-                    self._queue.put(write, timeout=self._high_priority_timeout)
-                    self._total_high_priority_writes += 1
-                    return True
-                except queue.Full:
-                    # Even after waiting, queue is still full
-                    # As a last resort, execute HIGH priority write synchronously
-                    logger.error(
-                        f"AsyncSQLiteQueue backpressure timeout - executing HIGH priority write synchronously: {operation}"
-                    )
-                    try:
-                        self._execute_write(write)
-                        self._total_writes += 1
-                        self._total_high_priority_writes += 1
-                        return True
-                    except Exception as e:
-                        self._total_errors += 1
-                        logger.error(f"Synchronous HIGH priority write failed: {e}")
-                        return False
+                # HIGH priority NEVER drops - stash in overflow buffer (non-blocking)
+                with self._overflow_lock:
+                    self._overflow.append(write)
+                self._total_high_priority_writes += 1
+                self._total_overflow_writes += 1
+                logger.warning(
+                    f"AsyncSQLiteQueue full - using overflow buffer for HIGH priority write: {operation} "
+                    f"(overflow_size={len(self._overflow)})"
+                )
+                return True
             elif priority == WritePriority.MEDIUM:
                 # MEDIUM priority: try once more with short wait, then drop
                 try:
@@ -243,6 +235,12 @@ class AsyncSQLiteQueue:
                 logger.debug(f"Dropped LOW priority write (queue full): {operation}")
                 return False
     
+    @property
+    def overflow_size(self) -> int:
+        """Current number of items in the overflow buffer (for monitoring)."""
+        with self._overflow_lock:
+            return len(self._overflow)
+    
     def is_backpressure_active(self) -> bool:
         """Check if queue is under backpressure (above threshold)."""
         return self._queue.qsize() >= self._backpressure_threshold
@@ -253,7 +251,28 @@ class AsyncSQLiteQueue:
         
         while not self._shutdown_event.is_set():
             try:
-                # Block with timeout so we can check shutdown_event periodically
+                # --- Drain overflow buffer first (HIGH-priority spill) ---
+                overflow_batch: list[QueuedWrite] = []
+                with self._overflow_lock:
+                    if self._overflow:
+                        overflow_batch = list(self._overflow)
+                        self._overflow.clear()
+                
+                for ow in overflow_batch:
+                    start_time = time.monotonic()
+                    try:
+                        self._execute_write(ow)
+                        self._total_writes += 1
+                        
+                        latency_ms = (time.monotonic() - start_time) * 1000
+                        self._write_times.append(latency_ms)
+                        if len(self._write_times) > 1000:
+                            self._write_times = self._write_times[-1000:]
+                    except Exception as e:
+                        self._total_errors += 1
+                        logger.debug(f"Overflow write failed (non-fatal): {ow.operation} | {e}")
+                
+                # --- Then pull from the main queue ---
                 try:
                     write = self._queue.get(timeout=0.5)
                 except queue.Empty:
@@ -280,7 +299,22 @@ class AsyncSQLiteQueue:
             except Exception as e:
                 logger.error(f"AsyncSQLiteQueue worker error: {e}", exc_info=True)
         
-        # Flush remaining writes on shutdown
+        # Flush overflow buffer on shutdown
+        with self._overflow_lock:
+            overflow_remaining = list(self._overflow)
+            self._overflow.clear()
+        if overflow_remaining:
+            logger.info(f"Flushing {len(overflow_remaining)} overflow writes...")
+            for ow in overflow_remaining:
+                try:
+                    self._execute_write(ow)
+                    self._total_writes += 1
+                except Exception as e:
+                    self._total_errors += 1
+                    logger.debug(f"Overflow flush write failed: {e}")
+            logger.info(f"Flushed {len(overflow_remaining)} overflow writes")
+        
+        # Flush remaining writes from main queue on shutdown
         remaining = self._queue.qsize()
         if remaining > 0:
             logger.info(f"Flushing {remaining} pending SQLite writes...")
@@ -333,6 +367,7 @@ class AsyncSQLiteQueue:
             total_errors=self._total_errors,
             total_high_priority_writes=self._total_high_priority_writes,
             total_backpressure_waits=self._total_backpressure_waits,
+            total_overflow_writes=self._total_overflow_writes,
             writes_per_second=writes_per_sec,
             avg_latency_ms=avg_latency,
             worker_running=self._running and (self._worker_thread is not None) and self._worker_thread.is_alive(),
