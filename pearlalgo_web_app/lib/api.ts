@@ -50,8 +50,7 @@ export function getApiUrl(): string {
   const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
   // Account-based switching: ?account=tv_paper uses /tv_paper/ prefix on production
-  // Backward compat: ?account=mffu still accepted
-  if (account === 'mffu' || account === 'tv_paper') {
+  if (account === 'tv_paper') {
     if (isLocal) {
       return 'http://localhost:8001'
     }

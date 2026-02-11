@@ -140,9 +140,9 @@ class TestMetricsModuleContract:
 class TestDataLayerContract:
     """Verify the data layer module exports the expected functions."""
 
-    def test_is_mffu_account_importable(self):
-        from pearlalgo.api.data_layer import is_mffu_account
-        assert callable(is_mffu_account)
+    def test_is_tv_paper_account_importable(self):
+        from pearlalgo.api.data_layer import is_tv_paper_account
+        assert callable(is_tv_paper_account)
 
     def test_get_signals_importable(self):
         from pearlalgo.api.data_layer import get_signals

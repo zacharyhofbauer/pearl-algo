@@ -178,31 +178,9 @@ class SignalHandler:
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
 
-            # Guard: reject signals with NaN or None entry_price
-            raw_entry_price = signal.get("entry_price")
-            if raw_entry_price is None:
-                logger.warning(
-                    f"Rejecting signal {str(signal_id)[:16]}: entry_price is None"
-                )
-                if self._audit_logger is not None:
-                    self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_none", {})
-                return
-            try:
-                _entry_val = float(raw_entry_price)
-                if math.isnan(_entry_val):
-                    logger.warning(
-                        f"Rejecting signal {str(signal_id)[:16]}: entry_price is NaN"
-                    )
-                    if self._audit_logger is not None:
-                        self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_nan", {})
-                    return
-            except (TypeError, ValueError):
-                logger.warning(
-                    f"Rejecting signal {str(signal_id)[:16]}: "
-                    f"entry_price={raw_entry_price!r} is not a valid number"
-                )
-                if self._audit_logger is not None:
-                    self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_invalid", {"value": str(raw_entry_price)})
+            # Guard: reject signals with invalid entry_price
+            validated_price = self._validate_entry_price(signal, signal_id)
+            if validated_price is None:
                 return
 
             # Guard: reject signals with timestamps more than 5 minutes in the future
@@ -231,19 +209,7 @@ class SignalHandler:
             entry_price = self._track_virtual_entry(signal, signal_id)
 
             # Audit: trade entered
-            if self._audit_logger is not None:
-                try:
-                    self._audit_logger.log_trade_entered(
-                        str(signal_id),
-                        {
-                            "entry_price": float(entry_price),
-                            "direction": str(signal.get("direction", "")),
-                            "position_size": int(signal.get("position_size", 1)),
-                            "execution_status": "virtual",
-                        },
-                    )
-                except Exception:
-                    pass  # non-fatal
+            self._log_trade_entry(signal_id, signal, entry_price, "virtual")
 
             # ==========================================================================
             # BANDIT POLICY: Evaluate signal type and decide whether to execute
@@ -273,7 +239,7 @@ class SignalHandler:
         """Streamlined execution path for signal forwarding (Tradovate Paper follower).
 
         Skips ML filter, bandit policy, and contextual policy since these are
-        inception-specific. Only runs: circuit breaker -> tracking -> virtual entry ->
+        IBKR Virtual-specific. Only runs: circuit breaker -> tracking -> virtual entry ->
         execution -> notification.
 
         Args:
@@ -303,37 +269,16 @@ class SignalHandler:
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
 
-            # Guard: entry price validation (same as process_signal)
-            raw_entry_price = signal.get("entry_price")
-            if raw_entry_price is None:
-                logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price is None")
-                return
-            try:
-                _entry_val = float(raw_entry_price)
-                if math.isnan(_entry_val):
-                    logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price is NaN")
-                    return
-            except (TypeError, ValueError):
-                logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price={raw_entry_price!r} invalid")
+            # Guard: entry price validation
+            validated_price = self._validate_entry_price(signal, signal_id)
+            if validated_price is None:
                 return
 
             # Virtual entry
             entry_price = self._track_virtual_entry(signal, signal_id)
 
             # Audit: trade entered
-            if self._audit_logger is not None:
-                try:
-                    self._audit_logger.log_trade_entered(
-                        str(signal_id),
-                        {
-                            "entry_price": float(entry_price),
-                            "direction": str(signal.get("direction", "")),
-                            "position_size": int(signal.get("position_size", 1)),
-                            "execution_status": "follower",
-                        },
-                    )
-                except Exception:
-                    pass
+            self._log_trade_entry(signal_id, signal, entry_price, "follower")
 
             # Execute directly (no bandit/ML gating)
             await self._execute_signal(signal, policy_decision=None)
@@ -346,6 +291,61 @@ class SignalHandler:
         except Exception as e:
             logger.error(f"Error in follower_execute: {e}", exc_info=True)
             self.error_count += 1
+
+    # ------------------------------------------------------------------
+    # Shared helpers (eliminate duplication between process_signal & follower_execute)
+    # ------------------------------------------------------------------
+
+    def _validate_entry_price(self, signal: Dict, signal_id: Any) -> Optional[float]:
+        """Validate entry_price from a signal dict.
+
+        Returns the validated price as a float, or ``None`` if invalid
+        (caller should ``return`` early).
+        """
+        sid = str(signal_id)[:16]
+        raw = signal.get("entry_price")
+        if raw is None:
+            logger.warning(f"Rejecting signal {sid}: entry_price is None")
+            if self._audit_logger is not None:
+                self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_none", {})
+            return None
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            logger.warning(f"Rejecting signal {sid}: entry_price={raw!r} is not a valid number")
+            if self._audit_logger is not None:
+                self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_invalid", {"value": str(raw)})
+            return None
+        if math.isnan(val) or math.isinf(val):
+            logger.warning(f"Rejecting signal {sid}: entry_price is NaN/Inf")
+            if self._audit_logger is not None:
+                self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_nan", {})
+            return None
+        if val <= 0:
+            logger.warning(f"Rejecting signal {sid}: entry_price={val} is <= 0")
+            if self._audit_logger is not None:
+                self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_non_positive", {"value": str(val)})
+            return None
+        return val
+
+    def _log_trade_entry(
+        self, signal_id: Any, signal: Dict, entry_price: float, execution_status: str,
+    ) -> None:
+        """Log a trade entry to the audit logger (non-fatal on failure)."""
+        if self._audit_logger is None:
+            return
+        try:
+            self._audit_logger.log_trade_entered(
+                str(signal_id),
+                {
+                    "entry_price": float(entry_price),
+                    "direction": str(signal.get("direction", "")),
+                    "position_size": int(signal.get("position_size", 1)),
+                    "execution_status": execution_status,
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"Audit log_trade_entered failed: {exc}")
 
     def _check_circuit_breaker(
         self,

@@ -392,7 +392,7 @@ class StateBuilder:
         # The interactive Telegram command handler reads state.json. Persisting these
         # fields here keeps /start dashboards accurate (open positions + unrealized PnL).
         #
-        # For MFFU (Tradovate), the real broker data is authoritative and was already
+        # For Tradovate Paper, the real broker data is authoritative and was already
         # set above (lines ~6121-6122). Skip virtual override when Tradovate data exists.
         _tradovate_authoritative = bool(self.service._tradovate_account and self.service._tradovate_account.get("position_count") is not None)
 

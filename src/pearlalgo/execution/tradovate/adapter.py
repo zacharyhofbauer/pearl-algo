@@ -2,7 +2,7 @@
 Tradovate Execution Adapter
 
 Implements the ExecutionAdapter interface for Tradovate paper/live trading.
-Used for the MFFU prop firm evaluation on Tradovate demo accounts.
+Used for the Tradovate Paper prop firm evaluation on Tradovate demo accounts.
 
 Key design decisions:
 - Uses placeOSO for bracket orders (entry spawns OCO stop+target)

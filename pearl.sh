@@ -751,7 +751,7 @@ show_help() {
     echo "  gateway <start|stop|status>    Control IB Gateway"
     echo "  agent <start|stop|status>      Control Market Agent (IBKR Virtual)"
     echo "  tv-paper <start|stop|status|restart|api|logs>  Control Tradovate Paper Eval"
-    echo "    (alias: mffu — kept for backward compatibility)"
+    echo ""
     echo "  telegram <start|stop|status>   Control Telegram Handler"
     echo "  chart <start|stop|status|build|deploy>  Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
@@ -813,7 +813,7 @@ case "$COMMAND" in
     chart)
         handle_chart "${1:-status}"
         ;;
-    tv-paper|mffu)
+    tv-paper)
         handle_tv_paper "${1:-status}"
         ;;
     tunnel)

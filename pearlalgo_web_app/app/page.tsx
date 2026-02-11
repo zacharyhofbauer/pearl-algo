@@ -61,7 +61,7 @@ function AccountGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Show account selector on every clean URL (no ?account= param)
-    // Once user picks, the URL gets ?account=mffu and the selector won't show
+    // Once user picks, the URL gets ?account=tv_paper and the selector won't show
     if (shouldShowAccountSelector()) {
       setShowPicker(true)
     } else {

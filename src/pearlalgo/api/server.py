@@ -113,6 +113,7 @@ from pearlalgo.api.data_layer import (
     get_cached_performance_data as _get_cached_performance_data_new,
     load_performance_data as _load_performance_data_new,
     get_signals as _get_signals,
+    TvPaperChallengeState,
 )
 from pearlalgo.api.tradovate_helpers import (
     normalize_fill as _normalize_fill_new,
@@ -737,16 +738,11 @@ async def limit_request_body_size(request: Request, call_next):
 # (e.g., Cloudflare Tunnel routes /tv_paper/api/* to port 8001)
 @app.middleware("http")
 async def strip_path_prefix(request, call_next):
-    """Strip /tv_paper (or legacy /mffu) prefix so routes match when behind a reverse proxy."""
+    """Strip /tv_paper prefix so routes match when behind a reverse proxy."""
     path = request.scope.get("path", "")
     if path.startswith("/tv_paper/"):
         request.scope["path"] = path[9:]  # Remove "/tv_paper" prefix, keep the "/"
     elif path == "/tv_paper":
-        request.scope["path"] = "/"
-    # Backward compat: also strip legacy /mffu prefix
-    elif path.startswith("/mffu/"):
-        request.scope["path"] = path[5:]  # Remove "/mffu" prefix, keep the "/"
-    elif path == "/mffu":
         request.scope["path"] = "/"
     return await call_next(request)
 
@@ -1342,7 +1338,6 @@ async def startup_event():
 
 @app.websocket("/ws")
 @app.websocket("/tv_paper/ws")
-@app.websocket("/mffu/ws")  # backward compat
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
     """WebSocket endpoint for real-time state updates."""
     # Verify API key if authentication is enabled.
@@ -1717,7 +1712,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
             challenge = _get_challenge_status(state_dir)
             if challenge and challenge.get("trades", 0) > 0:
                 # Use today's date from daily_pnl_by_date if available
-                mffu = challenge.get("mffu") or {}
+                tv_paper = challenge.get("tv_paper") or {}
                 # Read daily breakdown from challenge state file directly
                 ch_file = state_dir / "challenge_state.json"
                 if ch_file.exists():
@@ -2109,18 +2104,9 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
         }
 
         # Tradovate Paper extensions (present when stage is set in challenge_state.json)
-        mffu = data.get("mffu")
-        if mffu and isinstance(mffu, dict):
-            result["mffu"] = {
-                "stage": mffu.get("stage", "evaluation"),
-                "eod_high_water_mark": mffu.get("eod_high_water_mark"),
-                "current_drawdown_floor": mffu.get("current_drawdown_floor"),
-                "drawdown_locked": mffu.get("drawdown_locked", False),
-                "consistency": mffu.get("consistency", {}),
-                "min_days": mffu.get("min_days", {}),
-                "trading_days_count": mffu.get("trading_days_count", 0),
-                "max_contracts_mini": mffu.get("max_contracts_mini", 5),
-            }
+        tv_paper_state = TvPaperChallengeState.from_challenge_data(data)
+        if tv_paper_state is not None:
+            result["tv_paper"] = tv_paper_state.to_dict()
 
         # Tradovate Paper: override balance/pnl/trades with Tradovate live data
         if _is_tv_paper_account(state_dir):
@@ -2142,8 +2128,8 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
                 result["win_rate"] = win_rate
 
                 # Drawdown risk based on live equity vs floor
-                if mffu and mffu.get("current_drawdown_floor"):
-                    floor = float(mffu.get("current_drawdown_floor", 48000))
+                if tv_paper_state and tv_paper_state.current_drawdown_floor:
+                    floor = tv_paper_state.current_drawdown_floor
                     max_dd_dist = config.get("max_drawdown", 2000.0)
                     distance_to_floor = equity - floor
                     dd_risk = max(0, min(100, ((max_dd_dist - distance_to_floor) / max_dd_dist) * 100)) if max_dd_dist > 0 else 0
@@ -2688,7 +2674,7 @@ def _init_accounts_config() -> None:
             "telegram_prefix": "IBKR-VIR",
             "description": "Live market data from IBKR, virtual P&L tracking",
         },
-        "mffu": {
+        "tv_paper": {
             "display_name": "Tradovate Paper",
             "badge": "PAPER",
             "badge_color": "purple",
@@ -3716,14 +3702,14 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
 
         # Tradovate Paper calendar from fills
         from collections import defaultdict as _dd
-        mffu_cal: Dict[str, Dict[str, float]] = _dd(lambda: {"pnl": 0.0, "trades": 0})
+        tv_paper_cal: Dict[str, Dict[str, float]] = _dd(lambda: {"pnl": 0.0, "trades": 0})
         for t in trades:
             xt = t.get("exit_time", "")
             if xt:
                 dk = str(xt)[:10]
-                mffu_cal[dk]["pnl"] += (t.get("pnl") or 0)
-                mffu_cal[dk]["trades"] += 1
-        calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(mffu_cal.items())]
+                tv_paper_cal[dk]["pnl"] += (t.get("pnl") or 0)
+                tv_paper_cal[dk]["trades"] += 1
+        calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(tv_paper_cal.items())]
 
         # Use equity-based total (accounts for fees) instead of fill sum
         start_balance = _get_start_balance(_state_dir)

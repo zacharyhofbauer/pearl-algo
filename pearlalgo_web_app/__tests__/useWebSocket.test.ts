@@ -599,8 +599,8 @@ describe('getWebSocketUrl', () => {
     expect(getWebSocketUrl()).toBe('ws://localhost:9000/ws')
   })
 
-  it('should handle mffu account on localhost', () => {
-    window.history.pushState({}, '', '/?account=mffu')
+  it('should handle tv_paper account on localhost', () => {
+    window.history.pushState({}, '', '/?account=tv_paper')
 
     expect(getWebSocketUrl()).toBe('ws://localhost:8001/ws')
   })

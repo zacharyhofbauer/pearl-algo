@@ -378,8 +378,7 @@ def check_stale_display_names() -> int:
     Returns the number of violations found.
 
     Old names that should NOT appear as display text:
-    - "MFFU 50K" (display label)
-    - "MFFU Eval" (display label -- NOT file names like mffu_eval.yaml)
+    - "MFFU" in any display context (fully renamed to Tradovate Paper)
 
     Note: The old name "IBKR Virtual" (formerly displayed as a different label) is no longer
     checked since the rename is complete.
@@ -393,10 +392,8 @@ def check_stale_display_names() -> int:
 
     # Patterns to flag (only in display/label contexts, not variables/paths)
     stale_patterns = [
-        # Match "MFFU 50K" anywhere
-        (re.compile(r"MFFU 50K"), "MFFU 50K"),
-        # Match "MFFU Eval" as display label (not mffu_eval or MFFU_EVAL)
-        (re.compile(r"MFFU Eval"), "MFFU Eval"),
+        # Match "MFFU" as a standalone word in any context
+        (re.compile(r"\bMFFU\b"), "MFFU"),
     ]
 
     # Files to exclude (migration notes, comments explaining the rename)
@@ -437,7 +434,7 @@ if __name__ == "__main__":
     stale_count = check_stale_display_names()
     if stale_count > 0:
         print(f"\nSTALE NAMES: Found {stale_count} hardcoded old display names.")
-        print("Replace 'MFFU 50K/Eval' with 'Tradovate Paper'.")
+        print("Replace 'MFFU' references with 'Tradovate Paper'.")
         if "--enforce" in sys.argv:
             exit_code = max(exit_code, 1)
 

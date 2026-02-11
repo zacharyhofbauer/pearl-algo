@@ -59,7 +59,7 @@ export interface ChallengeStatus {
   max_drawdown: number
   attempt_number?: number
   /** TV Paper-specific extensions (present only for prop firm accounts) */
-  mffu?: TvPaperExtensions
+  tv_paper?: TvPaperExtensions
 }
 
 export interface PeriodStats {

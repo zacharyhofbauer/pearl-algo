@@ -553,6 +553,27 @@ class TestWebSocket:
             assert "performance" in inner
             assert "operator_lock_enabled" in inner
 
+    def test_websocket_challenge_uses_tv_paper_key(self, client, _patch_globals):
+        """When challenge data contains tv_paper extensions, the key should be 'tv_paper' not 'mffu'."""
+        with client.websocket_connect("/ws") as ws:
+            data = ws.receive_json()
+            inner = data["data"]
+            challenge = inner.get("challenge")
+            if challenge is not None:
+                # If challenge has TV Paper extensions, they must use the new key
+                assert "mffu" not in challenge, (
+                    "Challenge response still uses legacy 'mffu' key — "
+                    "should be 'tv_paper'"
+                )
+                # If tv_paper key is present, validate its structure
+                if "tv_paper" in challenge:
+                    tv_paper = challenge["tv_paper"]
+                    assert "stage" in tv_paper
+                    assert "current_drawdown_floor" in tv_paper
+                    assert "drawdown_locked" in tv_paper
+                    assert "consistency" in tv_paper
+                    assert "min_days" in tv_paper
+
     def test_websocket_responds_to_ping(self, client, _patch_globals):
         """Sending 'ping' text returns a pong JSON message."""
         with client.websocket_connect("/ws") as ws:

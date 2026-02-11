@@ -3,7 +3,7 @@ Tradovate data helpers for the Pearl API server.
 
 Functions for loading, normalising, and transforming Tradovate fill and
 position data.  Used by both the REST endpoints and the WebSocket broadcast
-loop for MFFU (MyFundedFutures) accounts.
+loop for Tradovate Paper accounts.
 
 Extracted from server.py for testability and DRY.
 """

@@ -305,7 +305,7 @@ class ScheduledTasks:
                         _reader = StateReader(self.state_manager.state_dir)
                         ch_data = _reader.read_challenge_state()
                         if ch_data:
-                            tv_paper_cfg = ch_data.get("mffu", {}) or ch_data.get("config", {}) or {}
+                            tv_paper_cfg = ch_data.get("tv_paper", {}) or ch_data.get("config", {}) or {}
                             current = ch_data.get("current_attempt", {}) or {}
                             profit_target = float(tv_paper_cfg.get("profit_target", 3000))
                             cum_pnl = float(current.get("cumulative_pnl", 0))

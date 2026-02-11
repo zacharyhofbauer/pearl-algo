@@ -4087,7 +4087,7 @@ class TelegramCommandHandler(
                     _cdata = _cjson.loads(challenge_state_file.read_text())
                     _cenabled = (_cdata.get("config") or {}).get("enabled", False)
                     # Only show if explicitly enabled AND not an Tradovate Paper tracker
-                    _cstage = (_cdata.get("config") or {}).get("stage") or (_cdata.get("mffu") or {}).get("stage")
+                    _cstage = (_cdata.get("config") or {}).get("stage") or (_cdata.get("tv_paper") or {}).get("stage")
                     if _cenabled and not _cstage:
                         _skip_ibkr_virtual_challenge = False
                 else:
@@ -4457,7 +4457,7 @@ class TelegramCommandHandler(
                             _tv_paper_data = await _resp.json()
                             _tv_paper_ch = _tv_paper_data.get("challenge")
                             if _tv_paper_ch and _tv_paper_ch.get("enabled"):
-                                _m = _tv_paper_ch.get("mffu", {}) or {}
+                                _m = _tv_paper_ch.get("tv_paper", {}) or {}
                                 _balance = _tv_paper_ch.get("current_balance", 0)
                                 _pnl = _tv_paper_ch.get("pnl", 0)
                                 _target = _tv_paper_ch.get("profit_target", 3000)
@@ -5064,8 +5064,8 @@ class TelegramCommandHandler(
             ch_file = self.state_dir / "challenge_state.json"
             if ch_file.exists():
                 ch = json.loads(ch_file.read_text())
-                _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
-                if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "tv_paper_eval", "mffu_eval"):
+                _stage = (ch.get("tv_paper", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
+                if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "tv_paper_eval"):
                     return True
         except Exception as e:
             logger.debug(f"Non-critical Tradovate Paper detection: {e}", exc_info=True)

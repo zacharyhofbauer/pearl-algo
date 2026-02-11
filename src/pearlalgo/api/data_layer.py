@@ -107,12 +107,11 @@ def read_state_for_dir(state_dir: Path) -> Dict[str, Any]:
 # Tradovate Paper account detection
 # ---------------------------------------------------------------------------
 
-def is_tv_paper_account(state_dir: Path) -> bool:
-    """Check if this state_dir has live Tradovate account data (Tradovate Paper mode).
+_TV_PAPER_ACCOUNT_TTL = 60.0  # seconds — account type rarely changes mid-session
 
-    Uses key-presence (``"equity" in tv``) rather than truthiness so that
-    equity == 0 during initialisation is still detected as Tradovate Paper.
-    """
+
+def _detect_tv_paper_account(state_dir: Path) -> bool:
+    """Inner detection logic (uncached)."""
     try:
         data = read_state_for_dir(state_dir)
         if data:
@@ -128,6 +127,115 @@ def is_tv_paper_account(state_dir: Path) -> bool:
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
     return False
+
+
+def is_tv_paper_account(state_dir: Path) -> bool:
+    """Check if this state_dir has live Tradovate account data (Tradovate Paper mode).
+
+    Uses key-presence (``"equity" in tv``) rather than truthiness so that
+    equity == 0 during initialisation is still detected as Tradovate Paper.
+
+    Result is cached with a 60-second TTL to avoid repeated disk reads —
+    account type does not change during a session.
+    """
+    return cached(
+        f"is_tv_paper:{state_dir}", _TV_PAPER_ACCOUNT_TTL,
+        _detect_tv_paper_account, state_dir,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TvPaperChallengeState — typed representation of challenge state extensions
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class TvPaperChallengeState:
+    """Typed representation of the Tradovate Paper challenge state extensions.
+
+    Replaces the repeated ``.get("tv_paper")`` chains scattered through
+    server.py, providing typed access and sensible defaults.
+    """
+
+    stage: str = "evaluation"
+    eod_high_water_mark: Optional[float] = None
+    current_drawdown_floor: Optional[float] = None
+    drawdown_locked: bool = False
+    consistency: Dict[str, Any] = field(default_factory=dict)
+    min_days: Dict[str, Any] = field(default_factory=dict)
+    trading_days_count: int = 0
+    max_contracts_mini: int = 5
+
+    @classmethod
+    def from_challenge_data(cls, data: Dict[str, Any]) -> Optional["TvPaperChallengeState"]:
+        """Parse from a challenge_state.json dict.
+
+        Returns ``None`` if no ``"tv_paper"`` key is present.
+        """
+        tv_paper = data.get("tv_paper")
+        if not tv_paper or not isinstance(tv_paper, dict):
+            return None
+        return cls(
+            stage=str(tv_paper.get("stage", "evaluation")),
+            eod_high_water_mark=_safe_float(tv_paper.get("eod_high_water_mark")),
+            current_drawdown_floor=_safe_float(tv_paper.get("current_drawdown_floor")),
+            drawdown_locked=bool(tv_paper.get("drawdown_locked", False)),
+            consistency=tv_paper.get("consistency", {}) if isinstance(tv_paper.get("consistency"), dict) else {},
+            min_days=tv_paper.get("min_days", {}) if isinstance(tv_paper.get("min_days"), dict) else {},
+            trading_days_count=int(tv_paper.get("trading_days_count", 0)),
+            max_contracts_mini=int(tv_paper.get("max_contracts_mini", 5)),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a dict suitable for JSON API responses."""
+        return {
+            "stage": self.stage,
+            "eod_high_water_mark": self.eod_high_water_mark,
+            "current_drawdown_floor": self.current_drawdown_floor,
+            "drawdown_locked": self.drawdown_locked,
+            "consistency": self.consistency,
+            "min_days": self.min_days,
+            "trading_days_count": self.trading_days_count,
+            "max_contracts_mini": self.max_contracts_mini,
+        }
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    """Convert to float if possible, otherwise return ``None``."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Cached challenge state accessor
+# ---------------------------------------------------------------------------
+
+_CHALLENGE_STATE_TTL = 10.0  # seconds — refreshes often enough for dashboards
+
+
+def get_cached_challenge_state(state_dir: Path) -> Optional[TvPaperChallengeState]:
+    """Load and parse challenge_state.json with a 10-second TTL cache.
+
+    Returns ``None`` if the file doesn't exist or has no ``"tv_paper"`` key.
+    """
+    def _read() -> Optional[TvPaperChallengeState]:
+        ch_file = state_dir / "challenge_state.json"
+        if not ch_file.exists():
+            return None
+        try:
+            data = json.loads(ch_file.read_text(encoding="utf-8"))
+            return TvPaperChallengeState.from_challenge_data(data)
+        except Exception as exc:
+            logger.debug(f"Could not parse challenge_state.json: {exc}")
+            return None
+
+    return cached(f"challenge_state:{state_dir}", _CHALLENGE_STATE_TTL, _read)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +313,99 @@ def get_signals(state_dir: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Backward compatibility aliases
+# Cursor-based paginated signals reader
 # ---------------------------------------------------------------------------
-is_mffu_account = is_tv_paper_account
+
+# Per-directory tracking of the file offset we last read to.
+_signals_cursor: Dict[str, int] = {}  # state_dir_str -> last_read_byte_offset
+_signals_cursor_lock = threading.Lock()
+
+
+def get_signals_paginated(
+    state_dir: Path,
+    *,
+    limit: int = 50,
+    cursor: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return paginated signals with a cursor for incremental reads.
+
+    Parameters
+    ----------
+    state_dir : Path
+        Agent state directory containing ``signals.jsonl``.
+    limit : int
+        Maximum number of signal entries to return.
+    cursor : str, optional
+        Opaque cursor string from a previous call.  When ``None`` or
+        ``"latest"``, returns the most recent *limit* entries.
+
+    Returns
+    -------
+    dict with keys:
+        ``"signals"`` — list of signal dicts (newest last)
+        ``"cursor"``  — opaque cursor for the next call
+        ``"has_more"`` — whether older signals exist before the cursor
+    """
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return {"signals": [], "cursor": "0", "has_more": False}
+
+    try:
+        file_size = signals_file.stat().st_size
+    except OSError:
+        return {"signals": [], "cursor": "0", "has_more": False}
+
+    if file_size == 0:
+        return {"signals": [], "cursor": "0", "has_more": False}
+
+    # Parse cursor — it encodes a byte offset in the file
+    start_offset: int = 0
+    if cursor and cursor != "latest":
+        try:
+            start_offset = int(cursor)
+        except (ValueError, TypeError):
+            start_offset = 0
+
+    # If no cursor (or "latest"), read the last N entries via tail-read
+    if start_offset <= 0 or cursor == "latest" or cursor is None:
+        entries = _load_jsonl_file(signals_file, max_lines=limit)
+        new_cursor = str(file_size)
+        return {
+            "signals": entries,
+            "cursor": new_cursor,
+            "has_more": file_size > 0 and len(entries) >= limit,
+        }
+
+    # Incremental read: read only bytes added since last cursor
+    if start_offset >= file_size:
+        # No new data
+        return {"signals": [], "cursor": str(file_size), "has_more": False}
+
+    try:
+        with open(signals_file, "r", encoding="utf-8") as f:
+            f.seek(start_offset)
+            new_bytes = f.read()
+    except OSError:
+        return {"signals": [], "cursor": str(file_size), "has_more": False}
+
+    entries: List[Dict[str, Any]] = []
+    for line in new_bytes.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    # Only return up to limit (most recent)
+    if len(entries) > limit:
+        entries = entries[-limit:]
+
+    return {
+        "signals": entries,
+        "cursor": str(file_size),
+        "has_more": len(entries) >= limit,
+    }
+
+

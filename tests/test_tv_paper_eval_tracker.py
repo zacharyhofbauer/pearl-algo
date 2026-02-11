@@ -19,10 +19,10 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from pearlalgo.market_agent.mffu_eval_tracker import (
-    MFFUEvalConfig as TvPaperEvalConfig,
-    MFFUEvalAttempt as TvPaperEvalAttempt,
-    MFFUEvaluationTracker as TvPaperEvaluationTracker,
+from pearlalgo.market_agent.tv_paper_eval_tracker import (
+    TvPaperEvalConfig,
+    TvPaperEvalAttempt,
+    TvPaperEvalTracker as TvPaperEvaluationTracker,
 )
 
 

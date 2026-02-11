@@ -131,7 +131,7 @@ if [ "$COMMAND" = "stop" ]; then
     fi
     
     # Also kill orphan processes for THIS market only (check env/cmdline for state dir)
-    # Avoids killing other market agents (e.g., MFFU_EVAL when stopping NQ)
+    # Avoids killing other market agents (e.g., TV_PAPER_EVAL when stopping NQ)
     ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
     if [ -n "$ORPHAN_PIDS" ]; then
         for OPID in $ORPHAN_PIDS; do
@@ -170,7 +170,7 @@ if ! pgrep -f "java.*IBC.jar" > /dev/null; then
 fi
 
 # Pre-start cleanup: kill stale agent processes for THIS market only
-# (avoids killing other market agents like MFFU_EVAL when restarting NQ)
+# (avoids killing other market agents like TV_PAPER_EVAL when restarting NQ)
 ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
 CLEANED=false
 if [ -n "$ORPHAN_PIDS" ]; then

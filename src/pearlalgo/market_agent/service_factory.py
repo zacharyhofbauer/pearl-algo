@@ -49,6 +49,47 @@ from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.utils.logger import logger
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers (eliminate duplication between resolve_defaults & factory)
+# ---------------------------------------------------------------------------
+
+_TV_PAPER_STAGES = ("tv_paper_eval", "evaluation", "sim_funded", "live")
+
+
+def _get_account_label(service_config: Dict[str, Any]) -> str:
+    """Derive the Telegram account label from challenge config."""
+    challenge_cfg = service_config.get("challenge", {}) or {}
+    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+    accounts_cfg = service_config.get("accounts", {}) or {}
+    if tv_paper_stage in _TV_PAPER_STAGES:
+        return accounts_cfg.get("tv_paper", {}).get("telegram_prefix") or "TV-PAPER"
+    return accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR"
+
+
+def _get_audit_account_type(service_config: Dict[str, Any]) -> str:
+    """Return ``'tradovate_paper'`` or ``'ibkr_virtual'`` based on challenge stage."""
+    challenge_cfg = service_config.get("challenge", {}) or {}
+    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+    return "tradovate_paper" if tv_paper_stage in _TV_PAPER_STAGES else "ibkr_virtual"
+
+
+def _build_notification_queue(
+    telegram_notifier: MarketAgentTelegramNotifier,
+    service_config: Dict[str, Any],
+) -> NotificationQueue:
+    """Build a :class:`NotificationQueue` from service config with sensible defaults."""
+    telegram_settings = service_config.get("telegram", {}) or {}
+    notification_cfg = telegram_settings.get("notification_queue", {}) or {}
+    min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
+    return NotificationQueue(
+        telegram_notifier=telegram_notifier,
+        max_queue_size=int(notification_cfg.get("max_queue_size", 1000)),
+        batch_delay_seconds=float(notification_cfg.get("batch_delay_seconds", 0.5)),
+        max_retries=int(notification_cfg.get("max_retries", 3)),
+        min_tier=min_tier,
+    )
+
+
 @dataclass
 class ServiceDependencies:
     """Container for all ``MarketAgentService`` dependencies.
@@ -122,46 +163,26 @@ class ServiceDependencies:
             )
 
         if self.telegram_notifier is None:
-            challenge_cfg = self.service_config.get("challenge", {}) or {}
-            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            accounts_cfg = self.service_config.get("accounts", {}) or {}
-            if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live"):
-                account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
-            else:
-                account_label = (accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR")
             self.telegram_notifier = MarketAgentTelegramNotifier(
                 bot_token=self.telegram_bot_token,
                 chat_id=self.telegram_chat_id,
                 state_dir=self.state_dir,
-                account_label=account_label,
+                account_label=_get_account_label(self.service_config),
             )
 
         if self.notification_queue is None:
-            telegram_settings = self.service_config.get("telegram", {}) or {}
-            min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
-            self.notification_queue = NotificationQueue(
-                telegram_notifier=self.telegram_notifier,
-                max_queue_size=1000,
-                batch_delay_seconds=0.5,
-                max_retries=3,
-                min_tier=min_tier,
+            self.notification_queue = _build_notification_queue(
+                self.telegram_notifier, self.service_config,
             )
 
         if self.health_monitor is None:
             self.health_monitor = HealthMonitor(state_dir=self.state_dir)
 
         if self.audit_logger is None and self.state_manager is not None:
-            challenge_cfg_al = self.service_config.get("challenge", {}) or {}
-            tv_paper_stage_al = str(challenge_cfg_al.get("stage", "") or "").strip().lower()
-            al_account = (
-                "tradovate_paper"
-                if tv_paper_stage_al in ("tv_paper_eval", "evaluation", "sim_funded", "live")
-                else "ibkr_virtual"
-            )
             audit_cfg = self.service_config.get("audit", {}) or {}
             self.audit_logger = AuditLogger(
                 db_path=self.state_manager.state_dir / "trades.db",
-                account=al_account,
+                account=_get_audit_account_type(self.service_config),
                 retention_days=int(audit_cfg.get("retention_days", 90)),
                 snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
             )
@@ -204,45 +225,22 @@ def build_service_dependencies(
         state_manager=state_manager,
     )
 
-    # Derive account label for Telegram messages
-    challenge_cfg = service_config.get("challenge", {}) or {}
-    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-    accounts_cfg = service_config.get("accounts", {}) or {}
-    if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live"):
-        account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
-    else:
-        account_label = (accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR")
-
     telegram_notifier = MarketAgentTelegramNotifier(
         bot_token=telegram_bot_token,
         chat_id=telegram_chat_id,
         state_dir=state_dir,
-        account_label=account_label,
+        account_label=_get_account_label(service_config),
     )
 
-    telegram_settings = service_config.get("telegram", {}) or {}
-    min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
-    notification_queue = NotificationQueue(
-        telegram_notifier=telegram_notifier,
-        max_queue_size=1000,
-        batch_delay_seconds=0.5,
-        max_retries=3,
-        min_tier=min_tier,
-    )
+    notification_queue = _build_notification_queue(telegram_notifier, service_config)
 
     health_monitor = HealthMonitor(state_dir=state_dir)
 
-    # Audit logger
-    al_account = (
-        "tradovate_paper"
-        if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live")
-        else "ibkr_virtual"
-    )
     audit_cfg = service_config.get("audit", {}) or {}
     audit_db_path = state_manager.state_dir / "trades.db" if state_manager.state_dir else Path("trades.db")
     audit_logger = AuditLogger(
         db_path=audit_db_path,
-        account=al_account,
+        account=_get_audit_account_type(service_config),
         retention_days=int(audit_cfg.get("retention_days", 90)),
         snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
     )

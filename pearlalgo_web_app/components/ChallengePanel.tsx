@@ -123,8 +123,8 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
   const gapFromPeak = peakBalance - challenge.current_balance
 
-  const mffu = challenge.mffu
-  const panelTitle = mffu ? (mffu.stage === 'evaluation' ? 'Tradovate Paper Eval' : mffu.stage === 'sim_funded' ? 'TV Paper SIM' : 'TV Paper LIVE') : 'Challenge'
+  const tvPaper = challenge.tv_paper
+  const panelTitle = tvPaper ? (tvPaper.stage === 'evaluation' ? 'Tradovate Paper Eval' : tvPaper.stage === 'sim_funded' ? 'TV Paper SIM' : 'TV Paper LIVE') : 'Challenge'
 
   return (
     <DataPanel title={panelTitle} className="challenge-panel" variant="feature">
@@ -137,9 +137,9 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
               {challenge.attempt_number && (
                 <span className="challenge-attempt">#{challenge.attempt_number}</span>
               )}
-              {mffu && (
+              {tvPaper && (
                 <span className="challenge-stage-badge" style={{
-                  background: mffu.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
+                  background: tvPaper.stage === 'evaluation' ? 'var(--color-accent, #7c4dff)' : 'var(--accent-green, #00e676)',
                   color: 'var(--bg-primary, #0a0a0f)',
                   padding: '1px 5px',
                   borderRadius: '3px',
@@ -148,7 +148,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
                   letterSpacing: '0.04em',
                   marginLeft: '4px',
                 }}>
-                  {mffu.stage === 'evaluation' ? 'EVAL' : mffu.stage === 'sim_funded' ? 'SIM' : 'LIVE'}
+                  {tvPaper.stage === 'evaluation' ? 'EVAL' : tvPaper.stage === 'sim_funded' ? 'SIM' : 'LIVE'}
                 </span>
               )}
             </div>
@@ -257,39 +257,39 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         )}
 
         {/* TV Paper-specific info */}
-        {mffu && (
+        {tvPaper && (
           <div className="grid grid-cols-3 gap-sm">
             <StatDisplay
               label="DD Floor"
-              value={mffu.current_drawdown_floor != null ? `$${mffu.current_drawdown_floor.toLocaleString()}` : '--'}
+              value={tvPaper.current_drawdown_floor != null ? `$${tvPaper.current_drawdown_floor.toLocaleString()}` : '--'}
               variant="compact"
             />
             <StatDisplay
               label="Days"
-              value={`${mffu.min_days?.days_traded ?? 0}/${mffu.min_days?.days_required ?? 2}`}
+              value={`${tvPaper.min_days?.days_traded ?? 0}/${tvPaper.min_days?.days_required ?? 2}`}
               variant="compact"
-              positive={mffu.min_days?.met}
-              negative={!mffu.min_days?.met}
+              positive={tvPaper.min_days?.met}
+              negative={!tvPaper.min_days?.met}
               colorMode="financial"
             />
             <StatDisplay
               label="Consistency"
-              value={mffu.consistency?.met ? 'OK' : `${mffu.consistency?.best_day_pct?.toFixed(0) ?? 0}%`}
+              value={tvPaper.consistency?.met ? 'OK' : `${tvPaper.consistency?.best_day_pct?.toFixed(0) ?? 0}%`}
               variant="compact"
-              positive={mffu.consistency?.met}
-              negative={!mffu.consistency?.met && (mffu.consistency?.best_day_pct ?? 0) > 50}
+              positive={tvPaper.consistency?.met}
+              negative={!tvPaper.consistency?.met && (tvPaper.consistency?.best_day_pct ?? 0) > 50}
               colorMode="financial"
             />
           </div>
         )}
-        {mffu?.drawdown_locked && (
+        {tvPaper?.drawdown_locked && (
           <div style={{
             fontSize: '10px',
             color: 'var(--accent-green, #00e676)',
             textAlign: 'center',
             opacity: 0.8,
           }}>
-            DD Floor Locked at ${mffu.current_drawdown_floor?.toLocaleString()}
+            DD Floor Locked at ${tvPaper.current_drawdown_floor?.toLocaleString()}
           </div>
         )}
       </div>

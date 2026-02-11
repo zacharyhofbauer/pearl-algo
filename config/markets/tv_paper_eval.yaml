@@ -4,7 +4,7 @@
 # This config overlay is used by the Tradovate Paper Eval instance (port 8001).
 # It extends the base config.yaml with prop-firm-specific settings.
 #
-# Launch: ./scripts/lifecycle/mffu_eval.sh start --background
+# Launch: ./scripts/lifecycle/tv_paper_eval.sh start --background
 # Web:    http://localhost:3000?api_port=8001
 # ============================================================================
 

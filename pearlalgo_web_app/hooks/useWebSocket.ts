@@ -230,12 +230,11 @@ export function getWebSocketUrl(): string {
   const apiPort = urlParams.get('api_port')
 
   // Account-based switching: ?account=tv_paper uses /tv_paper/ws prefix on production
-  // Backward compat: ?account=mffu still accepted
   const urlParams2 = new URLSearchParams(window.location.search)
   const account = urlParams2.get('account')
   const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
-  if (account === 'mffu' || account === 'tv_paper') {
+  if (account === 'tv_paper') {
     if (isLocal) {
       return 'ws://localhost:8001/ws'
     }

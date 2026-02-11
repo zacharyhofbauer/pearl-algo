@@ -486,10 +486,6 @@ class AccountsConfig(BaseModel):
         )
     )
 
-    @property
-    def mffu(self) -> AccountDisplayConfig:
-        """Backward-compatible alias for ``tv_paper``."""
-        return self.tv_paper
 
 
 class FullServiceConfig(BaseModel):

@@ -249,7 +249,7 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     const now = new Date()
     const isCurrentMonth = calMonth.year === now.getFullYear() && calMonth.month === now.getMonth()
 
-    // Use equity-based total when available (MFFU current month), else sum from calendar days
+    // Use equity-based total when available (Tradovate Paper current month), else sum from calendar days
     const serverTotalPnL = (analytics as any)?.calendar_total_pnl as number | undefined
     const sumPnL = calendarData.reduce((sum, d) => sum + d.pnl, 0)
     const useEquityTotal = serverTotalPnL != null && isCurrentMonth

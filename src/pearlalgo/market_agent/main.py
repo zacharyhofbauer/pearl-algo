@@ -28,7 +28,7 @@ sys.path.insert(0, str(project_root))
 
 # Load .env files if they exist.
 # IMPORTANT: override=False so that shell-level env vars (from launch scripts)
-# take precedence over .env file values. This lets mffu_eval.sh set its own
+# take precedence over .env file values. This lets tv_paper_eval.sh set its own
 # IBKR_CLIENT_ID/IBKR_DATA_CLIENT_ID without .env clobbering them.
 try:
     from dotenv import load_dotenv

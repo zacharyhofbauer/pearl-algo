@@ -454,7 +454,7 @@ accounts:
     badge_color: "blue"
     telegram_prefix: "IBKR-VIR"
     description: "Live market data from IBKR, virtual P&L tracking"
-  # Renamed from 'mffu' to 'tv_paper' (2026-02-11) -- legacy code may still reference 'mffu'
+  # Renamed from 'mffu' to 'tv_paper' (2026-02-11)
   tv_paper:
     display_name: "Tradovate Paper"
     badge: "PAPER"

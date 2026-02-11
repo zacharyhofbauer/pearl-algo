@@ -1,7 +1,7 @@
 """
 T1 News Calendar Service
 
-Provides news blackout detection for MFFU prop firm rule compliance.
+Provides news blackout detection for Tradovate Paper prop firm rule compliance.
 
 Rules:
 - No open positions or orders 2 minutes BEFORE and 2 minutes AFTER any data release
@@ -9,7 +9,7 @@ Rules:
 - During Evaluation: T1 news trading is ALLOWED (but standard protocols still apply)
 - During Sim Funded: T1 news trading is PROHIBITED
 
-Data source: data/t1_news_2026.json (populated from MFFU help center calendar)
+Data source: data/t1_news_2026.json (populated from prop firm help center calendar)
 """
 
 from __future__ import annotations

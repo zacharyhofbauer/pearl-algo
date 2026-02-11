@@ -131,6 +131,24 @@ except ImportError:
     MLSignalFilter = None  # type: ignore
 
 
+def _safe_get_bool(config: dict, key: str, default: bool) -> bool:
+    """Safely read a boolean from *config*, returning *default* on any error."""
+    try:
+        return bool(config.get(key, default))
+    except Exception as exc:
+        logger.debug(f"Non-critical config read ({key}): {exc}")
+        return default
+
+
+def _safe_get_int(config: dict, key: str, default: int, lo: int = 0, hi: int = 100) -> int:
+    """Safely read a clamped int from *config*."""
+    try:
+        return max(lo, min(hi, int(config.get(key, default) or default)))
+    except Exception as exc:
+        logger.debug(f"Non-critical config read ({key}): {exc}")
+        return default
+
+
 def get_trading_day_date() -> date:
     """
     Get the current trading day date based on 6pm ET boundary.
@@ -383,8 +401,8 @@ class MarketAgentService(ServiceNotificationsMixin):
             # challenge state for those. Running both causes them to overwrite the same
             # challenge_state.json with incompatible formats.
             tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            is_mffu = tv_paper_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
-            if self._challenge_enabled and not is_mffu:
+            is_tv_paper = tv_paper_stage in ("evaluation", "sim_funded", "live")
+            if self._challenge_enabled and not is_tv_paper:
                 cfg = ChallengeConfig(
                     enabled=True,
                     start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
@@ -402,7 +420,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     f"50k Challenge enabled: balance=${cfg.start_balance:,.0f}, "
                     f"target=+${cfg.profit_target:,.0f}, max_dd=-${cfg.max_drawdown:,.0f}"
                 )
-            elif is_mffu:
+            elif is_tv_paper:
                 logger.info("ChallengeTracker skipped — Tradovate Paper account uses TvPaperEvalTracker")
         except Exception as e:
             logger.warning(f"Challenge tracker init failed (continuing without): {e}")
@@ -417,14 +435,14 @@ class MarketAgentService(ServiceNotificationsMixin):
         try:
             challenge_cfg = service_config.get("challenge", {}) or {}
             tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            if tv_paper_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+            if tv_paper_stage in ("evaluation", "sim_funded", "live"):
                 from pearlalgo.market_agent.tv_paper_eval_tracker import (
                     TvPaperEvalTracker,
-                    MFFUEvalConfig,
+                    TvPaperEvalConfig,
                 )
-                tv_paper_cfg = MFFUEvalConfig(
+                tv_paper_cfg = TvPaperEvalConfig(
                     enabled=True,
-                    stage=tv_paper_stage if tv_paper_stage != "mffu_eval" else "evaluation",
+                    stage=tv_paper_stage,
                     start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
                     profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
                     max_loss_distance=float(challenge_cfg.get("max_drawdown", 2_000.0)),
@@ -497,33 +515,10 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._last_close_all_price_source: Optional[str] = None
 
         # Telegram UI formatting (Home Card / dashboards)
-        try:
-            self._telegram_ui_compact_metrics_enabled = bool(
-                telegram_ui_settings.get("compact_metrics_enabled", True)
-            )
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._telegram_ui_compact_metrics_enabled = True
-        try:
-            self._telegram_ui_show_progress_bars = bool(
-                telegram_ui_settings.get("show_progress_bars", False)
-            )
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._telegram_ui_show_progress_bars = False
-        try:
-            self._telegram_ui_show_volume_metrics = bool(
-                telegram_ui_settings.get("show_volume_metrics", True)
-            )
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            self._telegram_ui_show_volume_metrics = True
-        try:
-            w = int(telegram_ui_settings.get("compact_metric_width", 10) or 10)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            w = 10
-        self._telegram_ui_compact_metric_width = max(5, min(20, w))
+        self._telegram_ui_compact_metrics_enabled = _safe_get_bool(telegram_ui_settings, "compact_metrics_enabled", True)
+        self._telegram_ui_show_progress_bars = _safe_get_bool(telegram_ui_settings, "show_progress_bars", False)
+        self._telegram_ui_show_volume_metrics = _safe_get_bool(telegram_ui_settings, "show_volume_metrics", True)
+        self._telegram_ui_compact_metric_width = _safe_get_int(telegram_ui_settings, "compact_metric_width", 10, lo=5, hi=20)
 
         # Configure optional market-hours overrides (disabled by default).
         # Keeps the declared boundary intact: config drives utils, never the reverse.
@@ -583,6 +578,7 @@ class MarketAgentService(ServiceNotificationsMixin):
         self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
         self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
         self.state_save_interval = service_settings.get("state_save_interval", 10)
+        self._state_dirty: bool = False  # Set True when state changes; reset after save
         self.connection_failure_alert_interval = service_settings.get("connection_failure_alert_interval", 600)
         self.data_quality_alert_interval = service_settings.get("data_quality_alert_interval", 300)
         self.consecutive_errors = 0
@@ -976,9 +972,9 @@ class MarketAgentService(ServiceNotificationsMixin):
         except Exception as e:
             logger.warning(f"Error stopping notification queue: {e}")
 
-        # Save final state
+        # Save final state (unconditional — shutdown safety net)
         try:
-            self._save_state()
+            self._save_state(force=True)
         except Exception as e:
             logger.warning(f"Could not save final state: {e}", exc_info=True)
 
@@ -1037,7 +1033,7 @@ class MarketAgentService(ServiceNotificationsMixin):
         # Persist a final state with running=False so /start doesn't show stale "ON"
         # after a stop/shutdown notification.
         try:
-            self._save_state()
+            self._save_state(force=True)
         except Exception as e:
             logger.warning(f"Could not save stopped state: {e}", exc_info=True)
         logger.info("NQ Agent Service stopped")
@@ -1609,8 +1605,10 @@ class MarketAgentService(ServiceNotificationsMixin):
                     self.last_signal_generated_at
                     and self._last_signal_diagnostics is not None
                 )
-                if _signal_this_cycle or self.cycle_count % self.state_save_interval == 0:
-                    self._save_state()
+                if _signal_this_cycle:
+                    self.mark_state_dirty()
+                if self._state_dirty or self.cycle_count % self.state_save_interval == 0:
+                    self._save_state(force=True)
 
                 self.cycle_count += 1
 
@@ -3929,10 +3927,22 @@ class MarketAgentService(ServiceNotificationsMixin):
     # Call sites use self.signal_forwarder.write_shared_signal / read_shared_signals /
     # process_forwarded_signals.
 
-    def _save_state(self) -> None:
-        """Save current service state."""
+    def mark_state_dirty(self) -> None:
+        """Mark the service state as needing a save on the next cycle-end."""
+        self._state_dirty = True
+
+    def _save_state(self, *, force: bool = False) -> None:
+        """Save current service state.
+
+        When *force* is False (default), only saves if ``_state_dirty`` is True.
+        Shutdown and error paths should pass ``force=True`` to guarantee
+        persistence regardless of the dirty flag.
+        """
+        if not force and not self._state_dirty:
+            return
         state = self._state_builder.build_state()
         self.state_manager.save_state(state)
+        self._state_dirty = False
 
     async def _check_heartbeat(self) -> None:
         """Send periodic heartbeat messages."""

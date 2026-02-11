@@ -19,7 +19,7 @@ interface PostTradesPanelsProps {
 export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) {
   return (
     <div className="post-trades-panels">
-      {/* MFFU Eval panel -- first, right below trades */}
+      {/* Tradovate Paper Eval panel -- first, right below trades */}
       {agentState.challenge && (
         <DataPanelsContainer>
           <ChallengePanel challenge={agentState.challenge} equityCurve={agentState.equity_curve} />

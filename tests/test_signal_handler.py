@@ -1046,6 +1046,44 @@ class TestEdgeCases:
         # Guard rejects None entry_price
         assert h.signal_count == 0
 
+    async def test_zero_entry_price_rejected(
+        self, state_manager, performance_tracker, notification_queue, order_manager
+    ):
+        """Signal with entry_price=0 should be rejected by _validate_entry_price guard."""
+        h = SignalHandler(
+            state_manager=state_manager,
+            performance_tracker=performance_tracker,
+            notification_queue=notification_queue,
+            order_manager=order_manager,
+        )
+
+        signal = make_valid_signal()
+        signal["entry_price"] = 0
+
+        await h.process_signal(signal)
+
+        # Guard rejects entry_price <= 0
+        assert h.signal_count == 0
+
+    async def test_negative_entry_price_rejected(
+        self, state_manager, performance_tracker, notification_queue, order_manager
+    ):
+        """Signal with entry_price=-100 should be rejected by _validate_entry_price guard."""
+        h = SignalHandler(
+            state_manager=state_manager,
+            performance_tracker=performance_tracker,
+            notification_queue=notification_queue,
+            order_manager=order_manager,
+        )
+
+        signal = make_valid_signal()
+        signal["entry_price"] = -100.0
+
+        await h.process_signal(signal)
+
+        # Guard rejects negative entry_price
+        assert h.signal_count == 0
+
     async def test_multiple_signals_accumulate_counters(
         self, state_manager, performance_tracker, notification_queue, order_manager
     ):
