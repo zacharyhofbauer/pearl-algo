@@ -53,18 +53,18 @@ cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/logs"
 mkdir -p "$STATE_DIR"
 
-# Load secrets (Tradovate credentials, API keys, etc.)
+# Load project .env first (base defaults)
+if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
+# Load secrets SECOND so real keys override placeholders in .env
 SECRETS_FILE="$HOME/.config/pearlalgo/secrets.env"
 if [ -f "$SECRETS_FILE" ]; then
     set -a
     source "$SECRETS_FILE"
-    set +a
-fi
-
-# Also load project .env if present
-if [ -f "$PROJECT_DIR/.env" ]; then
-    set -a
-    source "$PROJECT_DIR/.env"
     set +a
 fi
 
