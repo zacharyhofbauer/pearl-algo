@@ -60,3 +60,6 @@ live-chart/node_modules/
 .vscode/
 *.swp
 secrets.env
+
+# Junk files created by MagicMock state_dir in tests
+<MagicMock*

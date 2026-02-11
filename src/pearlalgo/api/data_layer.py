@@ -175,7 +175,7 @@ class TvPaperChallengeState:
         Returns ``None`` if no ``"tv_paper"`` key is present.
         """
         tv_paper = data.get("tv_paper")
-        if not tv_paper or not isinstance(tv_paper, dict):
+        if tv_paper is None or not isinstance(tv_paper, dict):
             return None
         return cls(
             stage=str(tv_paper.get("stage", "evaluation")),

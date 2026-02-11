@@ -32,10 +32,18 @@ from pearlalgo.market_agent.signal_handler import SignalHandler
 # Helper factories
 # ---------------------------------------------------------------------------
 
-def make_mock_state_manager():
-    """Create a mock MarketAgentStateManager with safe defaults."""
+def make_mock_state_manager(tmp_path=None):
+    """Create a mock MarketAgentStateManager with safe defaults.
+
+    When *tmp_path* is provided, ``state_dir`` is set to a real directory
+    so that ``state_dir / "filename"`` returns a real Path instead of a
+    MagicMock string — which would otherwise be used as a literal filename
+    and pollute the repo root with junk files.
+    """
     sm = MagicMock()
     sm.get_recent_signals.return_value = []
+    if tmp_path is not None:
+        sm.state_dir = tmp_path
     return sm
 
 
@@ -93,9 +101,9 @@ def make_cb_decision(*, allowed=True, reason="", details=None, severity="warning
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def state_manager():
-    """Mock state manager fixture."""
-    return make_mock_state_manager()
+def state_manager(tmp_path):
+    """Mock state manager fixture with real state_dir path."""
+    return make_mock_state_manager(tmp_path)
 
 
 @pytest.fixture
