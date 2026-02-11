@@ -185,6 +185,52 @@ class TestBuildStateKeys:
         missing = expected_keys - state.keys()
         assert not missing, f"Missing keys: {missing}"
 
+        # Value type assertions for critical keys
+        assert isinstance(state["running"], bool), (
+            f"running should be bool, got {type(state['running']).__name__}"
+        )
+        assert isinstance(state["paused"], bool), (
+            f"paused should be bool, got {type(state['paused']).__name__}"
+        )
+        assert isinstance(state["cycle_count"], int), (
+            f"cycle_count should be int, got {type(state['cycle_count']).__name__}"
+        )
+        assert isinstance(state["signal_count"], int), (
+            f"signal_count should be int, got {type(state['signal_count']).__name__}"
+        )
+        assert isinstance(state["signals_sent"], int), (
+            f"signals_sent should be int, got {type(state['signals_sent']).__name__}"
+        )
+        assert isinstance(state["error_count"], int), (
+            f"error_count should be int, got {type(state['error_count']).__name__}"
+        )
+        assert isinstance(state["consecutive_errors"], int), (
+            f"consecutive_errors should be int, got {type(state['consecutive_errors']).__name__}"
+        )
+        assert isinstance(state["buffer_size"], int), (
+            f"buffer_size should be int, got {type(state['buffer_size']).__name__}"
+        )
+        assert isinstance(state["buffer_size_target"], int), (
+            f"buffer_size_target should be int, got {type(state['buffer_size_target']).__name__}"
+        )
+        assert isinstance(state["config"], dict), (
+            f"config should be dict, got {type(state['config']).__name__}"
+        )
+        assert isinstance(state["execution"], dict), (
+            f"execution should be dict, got {type(state['execution']).__name__}"
+        )
+        assert isinstance(state["market"], str), (
+            f"market should be str, got {type(state['market']).__name__}"
+        )
+        # pause_reason is None or str
+        assert state["pause_reason"] is None or isinstance(state["pause_reason"], str), (
+            f"pause_reason should be None or str, got {type(state['pause_reason']).__name__}"
+        )
+        # start_time is None or an ISO timestamp str
+        assert state["start_time"] is None or isinstance(state["start_time"], str), (
+            f"start_time should be None or str, got {type(state['start_time']).__name__}"
+        )
+
     @patch("pearlalgo.market_agent.state_builder.get_market_hours")
     def test_config_section_has_symbol_and_timeframe(self, mock_mkt_hours: MagicMock) -> None:
         mock_mkt_hours.return_value.is_market_open.return_value = True

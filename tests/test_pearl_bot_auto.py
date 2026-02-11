@@ -374,15 +374,44 @@ class TestGenerateSignals:
         assert signals == []
 
     def test_during_trading_hours(self, sample_ohlcv_df):
-        """Test signal generation during trading hours."""
+        """Test signal generation during trading hours.
+
+        Validates that generate_signals returns well-formed signal dicts.
+        The random OHLCV fixture may or may not trigger signals depending on
+        the seeded price path -- both outcomes are valid because the strategy
+        requires specific crossover/VWAP conditions to fire.
+        """
         # Use a time during trading hours (e.g., 10 AM ET = 15:00 UTC)
         trading_time = datetime(2024, 1, 15, 15, 0, 0, tzinfo=timezone.utc)
 
         # May or may not generate signals depending on market conditions
         signals = generate_signals(sample_ohlcv_df, current_time=trading_time)
 
-        # Just verify it doesn't raise an error and returns a list
         assert isinstance(signals, list)
+
+        # If signals were generated, each must have the required schema
+        required_keys = {"direction", "entry_price", "stop_loss", "take_profit", "confidence"}
+        for signal in signals:
+            assert isinstance(signal, dict), "Each signal must be a dict"
+            missing = required_keys - signal.keys()
+            assert not missing, f"Signal missing required keys: {missing}"
+
+            # Value-level validation
+            assert signal["direction"] in ("long", "short"), (
+                f"Invalid direction: {signal['direction']}"
+            )
+            assert isinstance(signal["entry_price"], (int, float)) and signal["entry_price"] > 0, (
+                f"entry_price must be a positive number, got {signal['entry_price']}"
+            )
+            assert isinstance(signal["stop_loss"], (int, float)) and signal["stop_loss"] > 0, (
+                f"stop_loss must be a positive number, got {signal['stop_loss']}"
+            )
+            assert isinstance(signal["take_profit"], (int, float)) and signal["take_profit"] > 0, (
+                f"take_profit must be a positive number, got {signal['take_profit']}"
+            )
+            assert 0 < signal["confidence"] <= 1.0, (
+                f"confidence must be in (0, 1], got {signal['confidence']}"
+            )
 
     def test_invalid_atr(self):
         """Test no signals when ATR is invalid."""
@@ -818,3 +847,4 @@ class TestGenerateSignalsStrengthened:
             assert signal["entry_price"] > 0
             assert 0 < signal["confidence"] <= 1.0
             assert signal["direction"] in ("long", "short")
+

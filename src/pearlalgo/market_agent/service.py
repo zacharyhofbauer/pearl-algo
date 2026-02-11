@@ -1650,93 +1650,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     except Exception as e:
                         logger.warning(f"Could not queue recovery notification: {e}")
 
-    def _build_context_features_for_signal(self, signal: Dict) -> Optional["ContextFeatures"]:
-        """
-        Build lightweight contextual features for contextual learning.
-
-        This is intentionally "best-effort": missing fields fall back to defaults
-        so the agent keeps running even if a signal is sparse.
-        """
-        if not (CONTEXTUAL_BANDIT_AVAILABLE and self.contextual_policy is not None and ContextFeatures is not None):
-            return None
-
-        # Parse timestamp (prefer signal timestamp for determinism)
-        dt_utc = None
-        try:
-            raw_ts = signal.get("timestamp")
-            if raw_ts:
-                dt_utc = parse_utc_timestamp(str(raw_ts))
-        except Exception as e:
-            logger.warning(f"Failed to parse signal timestamp for context features: {e}")
-            dt_utc = None
-        if dt_utc is None:
-            dt_utc = datetime.now(timezone.utc)
-        if dt_utc.tzinfo is None:
-            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-
-        # Convert to ET for time buckets (Asia/London/NY make more sense in ET)
-        et_dt = dt_utc
-        minutes_since_session_open = 0
-        is_first_hour = False
-        is_last_hour = False
-        try:
-            from zoneinfo import ZoneInfo
-            from datetime import time as _time
-
-            et_tz = ZoneInfo("America/New_York")
-            et_dt = dt_utc.astimezone(et_tz)
-
-            start_s = str(getattr(self.config, "start_time", "18:00") or "18:00")
-            end_s = str(getattr(self.config, "end_time", "16:10") or "16:10")
-
-            sh, sm = [int(x) for x in start_s.split(":")[:2]]
-            eh, em = [int(x) for x in end_s.split(":")[:2]]
-            start_minutes = sh * 60 + sm
-            end_minutes = eh * 60 + em
-            now_minutes = et_dt.hour * 60 + et_dt.minute
-            overnight = start_minutes > end_minutes
-
-            if overnight:
-                session_start_date = et_dt.date() if now_minutes >= start_minutes else (et_dt - timedelta(days=1)).date()
-                session_end_date = session_start_date + timedelta(days=1)
-            else:
-                session_start_date = et_dt.date()
-                session_end_date = et_dt.date()
-
-            session_start = datetime.combine(session_start_date, _time(sh, sm), tzinfo=et_tz)
-            session_end = datetime.combine(session_end_date, _time(eh, em), tzinfo=et_tz)
-
-            minutes_since_session_open = int((et_dt - session_start).total_seconds() / 60)
-            minutes_to_end = int((session_end - et_dt).total_seconds() / 60)
-            is_first_hour = 0 <= minutes_since_session_open < 60
-            is_last_hour = 0 <= minutes_to_end < 60
-        except Exception as e:
-            # Keep safe defaults
-            logger.warning(f"Failed to compute market session context: {e}")
-
-        # Regime + volatility from signal context (if present)
-        regime = signal.get("regime", {}) or {}
-        regime_name = str(regime.get("regime") or "unknown")
-        vol_label = str(regime.get("volatility") or "normal").lower()
-        if vol_label in ("low", "quiet"):
-            vol_pct = 0.2
-        elif vol_label in ("high", "volatile"):
-            vol_pct = 0.8
-        else:
-            vol_pct = 0.5
-
-        return ContextFeatures(
-            regime=regime_name,
-            volatility_percentile=float(vol_pct),
-            hour_of_day=int(et_dt.hour),
-            minutes_since_session_open=int(minutes_since_session_open),
-            is_first_hour=bool(is_first_hour),
-            is_last_hour=bool(is_last_hour),
-            recent_win_rate=0.5,
-            recent_streak=0,
-            volume_percentile=0.5,
-            trend_strength=0.5,
-        )
+    # _build_context_features_for_signal: removed (lives in signal_handler.py)
 
     # Signal processing delegated to self._signal_handler (see signal_handler.py)
 
@@ -1764,9 +1678,9 @@ class MarketAgentService(ServiceNotificationsMixin):
     # performance tracking, bandit/contextual policy, execution, notifications)
     # now lives in signal_handler.py::SignalHandler.process_signal().
     # Call sites updated to use self._signal_handler.process_signal() directly.
-    # Helper methods below (_compute_base_position_size, _apply_ml_opportunity_sizing,
-    # _build_context_features_for_signal) were only called from _process_signal
-    # but are kept as they may be useful for other code paths.
+    # Helper methods below (_compute_base_position_size, _apply_ml_opportunity_sizing)
+    # were only called from _process_signal but are kept for other code paths.
+    # Note: _build_context_features_for_signal was removed (now in signal_handler.py).
 
     def _compute_base_position_size(self, signal: Dict) -> int:
         """Compute a base position size from config + signal confidence."""

@@ -387,11 +387,37 @@ class TestGetCurrentTimeStr:
     """Tests for _get_current_time_str method."""
 
     def test_returns_time_string(self, state_queries_mixin):
-        """Should return a time string."""
+        """Should return a well-formatted time string.
+
+        The method returns either "H:MM AM/PM ET" (via pytz) or "HH:MM UTC"
+        (fallback).  Both formats must contain a colon separating hours and
+        minutes, and must include a timezone indicator.
+        """
         result = state_queries_mixin._get_current_time_str()
 
         assert isinstance(result, str)
         assert len(result) > 0
+
+        # Must contain ":" separating hours and minutes
+        assert ":" in result, (
+            f"Time string should contain ':' for HH:MM format, got: {result!r}"
+        )
+
+        # Must include a timezone indicator (ET or UTC)
+        assert "ET" in result or "UTC" in result, (
+            f"Time string should include timezone indicator (ET or UTC), got: {result!r}"
+        )
+
+        # Extract the numeric time part (before the timezone/AM/PM)
+        # For "1:30 PM ET" -> "1:30", for "15:30 UTC" -> "15:30"
+        import re
+        time_match = re.search(r"(\d{1,2}):(\d{2})", result)
+        assert time_match is not None, (
+            f"Time string should contain a recognizable HH:MM pattern, got: {result!r}"
+        )
+        hours, minutes = int(time_match.group(1)), int(time_match.group(2))
+        assert 0 <= hours <= 23, f"Hours out of range: {hours}"
+        assert 0 <= minutes <= 59, f"Minutes out of range: {minutes}"
 
     def test_includes_timezone(self, state_queries_mixin):
         """Should include timezone indicator."""
