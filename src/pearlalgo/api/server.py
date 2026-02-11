@@ -104,6 +104,29 @@ from pearlalgo.utils.state_io import (
 from pearlalgo.market_agent.state_reader import StateReader
 from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tradovate_fills_to_trades
 
+# -- Extracted modules (Phase 0 refactor) ------------------------------------
+from pearlalgo.api.data_layer import (
+    cached as _cached_new,
+    read_state_for_dir as _read_state_for_dir_new,
+    is_mffu_account as _is_mffu_account_new,
+    get_start_balance as _get_start_balance_new,
+    get_cached_performance_data as _get_cached_performance_data_new,
+    load_performance_data as _load_performance_data_new,
+    get_signals as _get_signals,
+)
+from pearlalgo.api.tradovate_helpers import (
+    normalize_fill as _normalize_fill_new,
+    get_tradovate_state as _get_tradovate_state_new,
+    get_paired_tradovate_trades as _get_paired_tradovate_trades,
+    tradovate_positions_for_api as _tradovate_positions_for_api_new,
+    tradovate_performance_summary as _tradovate_performance_summary_new,
+    tradovate_performance_for_period as _tradovate_performance_for_period_new,
+)
+from pearlalgo.api.metrics import (
+    compute_risk_metrics,
+    DEFAULT_RISK_METRICS,
+)
+
 import pandas as pd
 
 try:
@@ -157,25 +180,8 @@ def _cached(key: str, ttl_seconds: float, fn, *args, **kwargs):
 
 
 def _get_cached_performance_data(state_dir: Path) -> dict:
-    """Load performance.json with a 5-second TTL cache.
-
-    Returns a dict with a ``"trades"`` key holding the list of trade records,
-    or an empty dict when the file is missing / invalid.  The cache key
-    includes *state_dir* so multiple markets never collide.
-    """
-    def _read_perf() -> dict:
-        pf = state_dir / "performance.json"
-        if not pf.exists():
-            return {}
-        try:
-            data = json.loads(pf.read_text())
-            if isinstance(data, list):
-                return {"trades": data}
-            return {}
-        except Exception:
-            return {}
-
-    return _cached(f"perf_data:{state_dir}", 5.0, _read_perf)
+    """Delegates to :func:`pearlalgo.api.data_layer.get_cached_performance_data`."""
+    return _get_cached_performance_data_new(state_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -477,20 +483,8 @@ _DEFAULT_START_BALANCE = 50000.0
 
 
 def _get_start_balance(state_dir: Path) -> float:
-    """Read MFFU start balance from challenge_state.json, or return default.
-
-    Centralises the 'read challenge config -> fall back to 50 000' pattern
-    that was previously duplicated across 4 call sites.
-    """
-    try:
-        ch_file = state_dir / "challenge_state.json"
-        if ch_file.exists():
-            ch_data = json.loads(ch_file.read_text())
-            return float(ch_data.get("config", {}).get("start_balance", _DEFAULT_START_BALANCE))
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).debug(f"Could not read start_balance from challenge_state.json: {e}")
-    return _DEFAULT_START_BALANCE
+    """Delegates to :func:`pearlalgo.api.data_layer.get_start_balance`."""
+    return _get_start_balance_new(state_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +821,186 @@ _pearl_last_state_sync_error: Optional[str] = None
 _WS_MAX_CONNECTIONS: int = 100  # max concurrent WebSocket connections
 
 
+# ---------------------------------------------------------------------------
+# Broadcast-only helpers (sync, run via run_in_executor)
+# ---------------------------------------------------------------------------
+
+def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
+    """Build positions list for the WS broadcast payload.
+
+    Reuses the same logic as ``/api/positions`` but via cached data.
+    """
+    try:
+        if _is_mffu_account(state_dir):
+            tv, _ = _get_tradovate_state(state_dir)
+            positions = _tradovate_positions_for_api(tv)
+            # Enrich with TP/SL from virtual signals
+            if positions:
+                try:
+                    signals = _get_signals(state_dir, max_lines=300)
+                    active_signals = [
+                        s for s in signals
+                        if s.get("status") == "entered" and s.get("signal", {}).get("stop_loss")
+                    ]
+                    for pos in positions:
+                        matching = [
+                            s for s in active_signals
+                            if (s.get("signal", {}).get("direction", "").lower() == pos["direction"])
+                        ]
+                        if matching:
+                            best = min(
+                                matching,
+                                key=lambda s: abs(float(s.get("entry_price", 0) or 0) - pos["entry_price"]),
+                            )
+                            sig = best.get("signal", {})
+                            pos["stop_loss"] = sig.get("stop_loss")
+                            pos["take_profit"] = sig.get("take_profit")
+                except Exception:
+                    pass
+            return positions
+
+        # Inception: from signals.jsonl
+        signals = _get_signals(state_dir, max_lines=500)
+        positions = []
+        for s in signals:
+            if s.get("status") == "exited":
+                continue
+            entry_price = s.get("entry_price")
+            if not entry_price:
+                continue
+            signal_data = s.get("signal", {})
+            direction = signal_data.get("direction", "long") if isinstance(signal_data, dict) else s.get("direction", "long")
+            symbol = signal_data.get("symbol") if isinstance(signal_data, dict) else None
+            position_size = signal_data.get("position_size") if isinstance(signal_data, dict) else None
+            stop_loss = signal_data.get("stop_loss") if isinstance(signal_data, dict) else None
+            take_profit = signal_data.get("take_profit") if isinstance(signal_data, dict) else None
+            positions.append({
+                "signal_id": s.get("signal_id"),
+                "symbol": symbol or "MNQ",
+                "direction": direction,
+                "position_size": position_size,
+                "entry_price": entry_price,
+                "entry_time": s.get("entry_time"),
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+            })
+        return positions
+    except Exception as e:
+        logger.debug(f"Broadcast positions error: {e}")
+        return []
+
+
+def _get_trades_for_broadcast(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
+    """Build recent trades list for the WS broadcast payload."""
+    try:
+        if _is_mffu_account(state_dir):
+            trades = _get_paired_tradovate_trades(state_dir)
+            return trades[-limit:]
+
+        signals = _get_signals(state_dir, max_lines=max(500, limit * 10))
+        trades = []
+        for s in signals:
+            if s.get("status") != "exited":
+                continue
+            signal_data = s.get("signal", {})
+            if not isinstance(signal_data, dict):
+                signal_data = {}
+            trades.append({
+                "signal_id": s.get("signal_id"),
+                "symbol": signal_data.get("symbol") or s.get("symbol") or "MNQ",
+                "direction": signal_data.get("direction") or s.get("direction"),
+                "position_size": signal_data.get("position_size"),
+                "entry_time": s.get("entry_time"),
+                "entry_price": s.get("entry_price"),
+                "exit_time": s.get("exit_time"),
+                "exit_price": s.get("exit_price"),
+                "pnl": s.get("pnl"),
+                "exit_reason": s.get("exit_reason"),
+            })
+        return trades[-limit:]
+    except Exception as e:
+        logger.debug(f"Broadcast trades error: {e}")
+        return []
+
+
+def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str, Any]]:
+    """Build performance summary for the WS broadcast payload.
+
+    Returns the same structure as ``/api/performance-summary`` but cached.
+    """
+    def _compute() -> Optional[Dict[str, Any]]:
+        try:
+            if _is_mffu_account(state_dir):
+                tv, fills = _get_tradovate_state(state_dir)
+                equity_stats = _tradovate_performance_summary(tv, fills, state_dir)
+
+                now = datetime.now(timezone.utc)
+                td_start = _get_trading_day_start()
+                yday_start, yday_end = _get_previous_trading_day_bounds()
+                wtd_start = _get_trading_week_start(now)
+                mtd_start = _get_month_to_date_start(now)
+                ytd_start = _get_year_to_date_start(now)
+                all_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+                all_trades_raw = _tradovate_fills_to_trades(fills)
+                total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
+                equity = float(tv.get("equity", 0)) if tv else 0
+                start_balance = _get_start_balance(state_dir)
+                equity_pnl = equity - start_balance
+                total_trades = len(all_trades_raw)
+                commission_per_trade = 0.0
+                if total_trades > 0 and total_fill_pnl > equity_pnl:
+                    commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+
+                cpt = commission_per_trade
+                all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
+                all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
+
+                return {
+                    "as_of": now.isoformat(),
+                    "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt),
+                    "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt),
+                    "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt),
+                    "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt),
+                    "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt),
+                    "all": all_fill_stats,
+                }
+
+            # Inception
+            cached_perf = _get_cached_performance_data(state_dir)
+            trades = cached_perf.get("trades")
+            if trades is None:
+                empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
+                return {
+                    "as_of": datetime.now(timezone.utc).isoformat(),
+                    "td": empty, "yday": empty, "wtd": empty,
+                    "mtd": empty, "ytd": empty, "all": empty,
+                }
+
+            now = datetime.now(timezone.utc)
+            td_start = _get_trading_day_start()
+            yday_start, yday_end = _get_previous_trading_day_bounds()
+            wtd_start = _get_trading_week_start(now)
+            mtd_start = _get_month_to_date_start(now)
+            ytd_start = _get_year_to_date_start(now)
+            all_time_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+            return {
+                "as_of": now.isoformat(),
+                "td": _aggregate_performance_since(trades, td_start),
+                "yday": _aggregate_performance_since(trades, yday_start, yday_end),
+                "wtd": _aggregate_performance_since(trades, wtd_start),
+                "mtd": _aggregate_performance_since(trades, mtd_start),
+                "ytd": _aggregate_performance_since(trades, ytd_start),
+                "all": _aggregate_performance_since(trades, all_time_start),
+            }
+        except Exception as e:
+            logger.debug(f"Broadcast performance-summary error: {e}")
+            return None
+
+    return _cached("broadcast_perf_summary", 3.0, _compute)
+
+
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
 
@@ -987,71 +1161,73 @@ class ConnectionManager:
                             except Exception:
                                 pearl_fingerprint = "error"
 
-                        # Cheap fingerprint: mtime/size already track state.json
-                        # changes; pearl_fingerprint tracks Pearl AI changes.
-                        # Avoids expensive json.dumps serialization every cycle.
+                        # -- Fingerprint-first: only compute payload when state changed --
                         combined_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}:{pearl_fingerprint}"
 
-                        # Only broadcast if state OR Pearl feed/chat changed
                         if self.active_connections and combined_hash != self._last_state_hash:
                             self._last_state_hash = combined_hash
 
-                            # Build the same response as /api/state (full data for real-time updates)
+                            # Build the full broadcast payload (computed only on change)
                             daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-                            broadcast_data = {
-                                "type": "state_update",
-                                "data": {
-                                    "running": state.get("running", False),
-                                    "paused": state.get("paused", False),
-                                    "daily_pnl": daily_stats["daily_pnl"],
-                                    "daily_trades": daily_stats["daily_trades"],
-                                    "daily_wins": daily_stats["daily_wins"],
-                                    "daily_losses": daily_stats["daily_losses"],
-                                    # For MFFU: use Tradovate position count & open PnL
-                                    "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
-                                    "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
-                                    "futures_market_open": state.get("futures_market_open", False),
-                                    "data_fresh": state.get("data_fresh", False),
-                                    "last_updated": datetime.now(timezone.utc).isoformat(),
-                                    "ai_status": _get_ai_status(state),
-                                    "cadence_metrics": _get_cadence_metrics_enhanced(state),
-                                    "market_regime": _get_market_regime(state),
-                                    "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
-                                    "gateway_status": _get_gateway_status(),
-                                    "connection_health": _get_connection_health(state),
-                                    "error_summary": _get_error_summary(_state_dir, state),
-                                    "config": _get_config(state),
-                                    "data_quality": _get_data_quality(state),
-                                    # Performance data (previously HTTP-only)
-                                    "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
-                                    "performance": _compute_performance_stats(_state_dir),
-                                    "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
-                                    "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                                    # Signal activity & execution state
-                                    "signal_rejections_24h": state.get("signal_rejections_24h"),
-                                    "last_signal_decision": state.get("last_signal_decision"),
-                                    "shadow_counters": state.get("shadow_counters"),
-                                    "execution_state": state.get("execution_state"),
-                                    "tradovate_account": state.get("tradovate_account"),
-                                    "circuit_breaker": state.get("circuit_breaker"),
-                                    "ml_filter_performance": state.get("ml_filter_performance"),
-                                    "session_context": state.get("session_context"),
-                                    "signal_activity": state.get("signal_activity"),
-                                    # Pearl AI (read-only) insights from agent state (shadow mode)
-                                    "pearl_suggestion": _get_pearl_suggestion(),
-                                    "pearl_insights": state.get("pearl_insights"),
-                                    # Whether LLM chat endpoints are mounted/available on this API server
-                                    "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                                    # Pearl AI transparency (feed + heartbeat + last debug snapshot)
-                                    "pearl_feed": _get_pearl_feed(limit=40),
-                                    "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
-                                    "pearl_ai_debug": _get_pearl_ai_debug(),
-                                    # Whether operator locking is configured on this API server
-                                    "operator_lock_enabled": bool(_operator_enabled),
-                                }
+
+                            broadcast_payload = {
+                                "running": state.get("running", False),
+                                "paused": state.get("paused", False),
+                                "daily_pnl": daily_stats["daily_pnl"],
+                                "daily_trades": daily_stats["daily_trades"],
+                                "daily_wins": daily_stats["daily_wins"],
+                                "daily_losses": daily_stats["daily_losses"],
+                                # For MFFU: use Tradovate position count & open PnL
+                                "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+                                "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
+                                "futures_market_open": state.get("futures_market_open", False),
+                                "data_fresh": state.get("data_fresh", False),
+                                "last_updated": datetime.now(timezone.utc).isoformat(),
+                                "ai_status": _get_ai_status(state),
+                                "cadence_metrics": _get_cadence_metrics_enhanced(state),
+                                "market_regime": _get_market_regime(state),
+                                "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+                                "gateway_status": _get_gateway_status(),
+                                "connection_health": _get_connection_health(state),
+                                "error_summary": _get_error_summary(_state_dir, state),
+                                "config": _get_config(state),
+                                "data_quality": _get_data_quality(state),
+                                # Performance data
+                                "challenge": _get_challenge_status(_state_dir),
+                                "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
+                                "performance": _compute_performance_stats(_state_dir),
+                                "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+                                "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
+                                # --- NEW: positions, trades, performance_summary ---
+                                # These were previously HTTP-only (30s poll).  Including them
+                                # here gives the frontend ~2s latency on trade updates.
+                                "positions": await asyncio.get_event_loop().run_in_executor(
+                                    None, partial(_get_positions_for_broadcast, _state_dir)),
+                                "recent_trades": await asyncio.get_event_loop().run_in_executor(
+                                    None, partial(_get_trades_for_broadcast, _state_dir, 50)),
+                                "performance_summary": await asyncio.get_event_loop().run_in_executor(
+                                    None, partial(_get_performance_summary_for_broadcast, _state_dir)),
+                                # Signal activity & execution state
+                                "signal_rejections_24h": state.get("signal_rejections_24h"),
+                                "last_signal_decision": state.get("last_signal_decision"),
+                                "shadow_counters": state.get("shadow_counters"),
+                                "execution_state": state.get("execution_state"),
+                                "tradovate_account": state.get("tradovate_account"),
+                                "circuit_breaker": state.get("circuit_breaker"),
+                                "ml_filter_performance": state.get("ml_filter_performance"),
+                                "session_context": state.get("session_context"),
+                                "signal_activity": state.get("signal_activity"),
+                                # Pearl AI (read-only)
+                                "pearl_suggestion": _get_pearl_suggestion(),
+                                "pearl_insights": state.get("pearl_insights"),
+                                "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
+                                "pearl_feed": _get_pearl_feed(limit=40),
+                                "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
+                                "pearl_ai_debug": _get_pearl_ai_debug(),
+                                "operator_lock_enabled": bool(_operator_enabled),
                             }
-                            await self.broadcast(broadcast_data)
+
+                            await self.broadcast({"type": "state_update", "data": broadcast_payload})
 
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
@@ -1219,6 +1395,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
             if state or _get_challenge_status(_state_dir):
                 daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
                 recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
+                # Build initial_state with the SAME field set as state_update
+                # so the client has full data from the first message.
                 initial_data = {
                     "type": "initial_state",
                     "data": {
@@ -1230,6 +1408,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "daily_losses": daily_stats["daily_losses"],
                         "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
+                        "futures_market_open": state.get("futures_market_open", False),
                         "data_fresh": state.get("data_fresh", False),
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "ai_status": _get_ai_status(state),
@@ -1238,17 +1417,27 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "performance": _compute_performance_stats(_state_dir),
                         "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                         "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
+                        "positions": _get_positions_for_broadcast(_state_dir),
+                        "recent_trades": _get_trades_for_broadcast(_state_dir, 50),
+                        "performance_summary": _get_performance_summary_for_broadcast(_state_dir),
                         "cadence_metrics": _get_cadence_metrics_enhanced(state),
                         "market_regime": _get_market_regime(state),
                         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
                         "signal_rejections_24h": _get_signal_rejections_24h(state),
                         "last_signal_decision": _get_last_signal_decision(state),
                         "shadow_counters": _get_shadow_counters(state),
+                        "execution_state": state.get("execution_state"),
+                        "tradovate_account": state.get("tradovate_account"),
+                        "circuit_breaker": state.get("circuit_breaker"),
+                        "ml_filter_performance": state.get("ml_filter_performance"),
+                        "session_context": state.get("session_context"),
+                        "signal_activity": state.get("signal_activity"),
                         "gateway_status": _get_gateway_status(),
                         "connection_health": _get_connection_health(state),
                         "error_summary": _get_error_summary(_state_dir, state),
                         "config": _get_config(state),
                         "data_quality": _get_data_quality(state),
+                        "pearl_suggestion": _get_pearl_suggestion(),
                         "pearl_insights": state.get("pearl_insights"),
                         "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
                         "pearl_feed": _get_pearl_feed(limit=40),
@@ -1297,6 +1486,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "daily_losses": daily_stats["daily_losses"],
                                     "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                                     "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
+                                    "futures_market_open": state.get("futures_market_open", False),
                                     "data_fresh": state.get("data_fresh", False),
                                     "last_updated": datetime.now(timezone.utc).isoformat(),
                                     "ai_status": _get_ai_status(state),
@@ -1305,17 +1495,27 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "performance": _compute_performance_stats(_state_dir),
                                     "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                                     "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
+                                    "positions": _get_positions_for_broadcast(_state_dir),
+                                    "recent_trades": _get_trades_for_broadcast(_state_dir, 50),
+                                    "performance_summary": _get_performance_summary_for_broadcast(_state_dir),
                                     "cadence_metrics": _get_cadence_metrics_enhanced(state),
                                     "market_regime": _get_market_regime(state),
                                     "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
                                     "signal_rejections_24h": _get_signal_rejections_24h(state),
                                     "last_signal_decision": _get_last_signal_decision(state),
                                     "shadow_counters": _get_shadow_counters(state),
+                                    "execution_state": state.get("execution_state"),
+                                    "tradovate_account": state.get("tradovate_account"),
+                                    "circuit_breaker": state.get("circuit_breaker"),
+                                    "ml_filter_performance": state.get("ml_filter_performance"),
+                                    "session_context": state.get("session_context"),
+                                    "signal_activity": state.get("signal_activity"),
                                     "gateway_status": _get_gateway_status(),
                                     "connection_health": _get_connection_health(state),
                                     "error_summary": _get_error_summary(_state_dir, state),
                                     "config": _get_config(state),
                                     "data_quality": _get_data_quality(state),
+                                    "pearl_suggestion": _get_pearl_suggestion(),
                                     "pearl_insights": state.get("pearl_insights"),
                                     "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
                                     "pearl_feed": _get_pearl_feed(limit=40),
@@ -1728,70 +1928,21 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
 # ==========================================================================
 
 def _is_mffu_account(state_dir: Path) -> bool:
-    """Check if this state_dir has live Tradovate account data (MFFU mode)."""
-    try:
-        data = _read_state_for_dir(state_dir)
-        if data:
-            tv = data.get("tradovate_account")
-            return bool(tv and isinstance(tv, dict) and tv.get("equity"))
-    except Exception as e:
-        logger.warning(f"Non-critical: {e}")
-    return False
+    """Check if this state_dir has live Tradovate account data (MFFU mode).
+
+    Delegates to :func:`pearlalgo.api.data_layer.is_mffu_account`.
+    """
+    return _is_mffu_account_new(state_dir)
 
 
 def _normalize_fill(f: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize a Tradovate fill to consistent snake_case keys.
-
-    Older fills may use camelCase (contractId, orderId) from the raw
-    Tradovate API, while newer fills from the adapter use snake_case.
-    This ensures all downstream code can use a single key format.
-    """
-    return {
-        "id": f.get("id"),
-        "order_id": f.get("order_id") or f.get("orderId"),
-        "contract_id": f.get("contract_id") or f.get("contractId"),
-        "timestamp": f.get("timestamp"),
-        "action": f.get("action"),
-        "qty": f.get("qty", 0),
-        "price": f.get("price", 0.0),
-        "net_pos": f.get("net_pos") if f.get("net_pos") is not None else f.get("netPos"),
-    }
+    """Delegates to :func:`pearlalgo.api.tradovate_helpers.normalize_fill`."""
+    return _normalize_fill_new(f)
 
 
 def _get_tradovate_state(state_dir: Path) -> tuple:
-    """Load tradovate_account and tradovate_fills.
-
-    Fills are read from state.json first, then from the persistent
-    tradovate_fills.json file (which survives session resets since
-    Tradovate's /fill/list clears at end of day).
-
-    All fills are normalized to snake_case keys for consistency.
-
-    Returns (tradovate_account_dict, fills_list).
-    """
-    tv: Dict[str, Any] = {}
-    fills: List[Dict[str, Any]] = []
-    try:
-        data = _read_state_for_dir(state_dir)
-        if data:
-            tv = data.get("tradovate_account") or {}
-            fills = data.get("tradovate_fills") or []
-    except Exception as e:
-        logger.warning(f"Non-critical: {e}")
-
-    # Fallback: read from persistent fills file when state.json has none
-    if not fills:
-        try:
-            fills_file = state_dir / "tradovate_fills.json"
-            if fills_file.exists():
-                fills = json.loads(fills_file.read_text()) or []
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-    # Normalize all fills to snake_case keys
-    fills = [_normalize_fill(f) for f in fills]
-
-    return tv, fills
+    """Delegates to :func:`pearlalgo.api.tradovate_helpers.get_tradovate_state`."""
+    return _get_tradovate_state_new(state_dir)
 
 
 
@@ -1799,68 +1950,13 @@ def _get_tradovate_state(state_dir: Path) -> tuple:
 
 
 def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Convert tradovate_account positions to the format /api/positions expects.
-
-    When individual position openPnL is 0 but account-level open_pnl is
-    non-zero (common with Tradovate REST), distribute the account open_pnl
-    across positions proportionally by contract count.
-    """
-    raw_positions = [p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0]
-    if not raw_positions:
-        return []
-
-    # Check if position-level open_pnl is missing/zero across all positions
-    account_open_pnl = float(tv.get("open_pnl", 0))
-    sum_pos_pnl = sum(float(p.get("open_pnl", 0)) for p in raw_positions)
-    total_contracts = sum(abs(p.get("net_pos", 0)) for p in raw_positions)
-
-    # Use account-level open_pnl when position-level data is all zeros
-    use_account_pnl = (sum_pos_pnl == 0 and account_open_pnl != 0 and total_contracts > 0)
-
-    positions = []
-    for pos in raw_positions:
-        net_pos = pos.get("net_pos", 0)
-        direction = "long" if net_pos > 0 else "short"
-        if use_account_pnl:
-            pos_pnl = round(account_open_pnl * abs(net_pos) / total_contracts, 2)
-        else:
-            pos_pnl = pos.get("open_pnl", 0)
-        positions.append({
-            "signal_id": f"tv_pos_{pos.get('contract_id', '')}",
-            "symbol": "MNQ",
-            "direction": direction,
-            "position_size": abs(net_pos),
-            "entry_price": pos.get("net_price", 0),
-            "entry_time": None,
-            "stop_loss": None,
-            "take_profit": None,
-            "open_pnl": pos_pnl,
-        })
-    return positions
+    """Delegates to :func:`pearlalgo.api.tradovate_helpers.tradovate_positions_for_api`."""
+    return _tradovate_positions_for_api_new(tv)
 
 
 def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any]], state_dir: Path) -> Dict[str, Any]:
-    """Build overall performance summary from Tradovate data (equity-based)."""
-    start_balance = _get_start_balance(state_dir)
-
-    equity = float(tv.get("equity", 0))
-    pnl = round(equity - start_balance, 2)
-
-    trades = _tradovate_fills_to_trades(fills)
-    total = len(trades)
-    wins = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
-    losses = total - wins
-    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
-
-    stats = {
-        "pnl": pnl,
-        "trades": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "tradovate_equity": round(equity, 2),
-    }
-    return stats
+    """Delegates to :func:`pearlalgo.api.tradovate_helpers.tradovate_performance_summary`."""
+    return _tradovate_performance_summary_new(tv, fills, state_dir)
 
 
 def _tradovate_performance_for_period(
@@ -1869,43 +1965,8 @@ def _tradovate_performance_for_period(
     end_utc: Optional[datetime] = None,
     commission_per_trade: float = 0.0,
 ) -> Dict[str, Any]:
-    """Build performance stats from Tradovate fills filtered to a time range.
-
-    Filters completed trades whose exit_time falls within [start_utc, end_utc).
-    commission_per_trade: estimated round-turn commission to deduct per trade
-    (derived from equity vs fill P&L gap).
-    """
-    trades = _tradovate_fills_to_trades(fills)
-    filtered = []
-    for t in trades:
-        exit_ts = t.get("exit_time", "")
-        if not exit_ts:
-            continue
-        try:
-            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        if exit_dt < start_utc:
-            continue
-        if end_utc and exit_dt >= end_utc:
-            continue
-        filtered.append(t)
-
-    total = len(filtered)
-    wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
-    losses = total - wins
-    raw_pnl = sum(t.get("pnl") or 0 for t in filtered)
-    # Deduct estimated commissions (Tradovate fills don't include fees)
-    pnl = round(raw_pnl - (total * commission_per_trade), 2)
-    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
-
-    return {
-        "pnl": pnl,
-        "trades": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-    }
+    """Delegates to :func:`pearlalgo.api.tradovate_helpers.tradovate_performance_for_period`."""
+    return _tradovate_performance_for_period_new(fills, start_utc, end_utc, commission_per_trade)
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
@@ -2196,12 +2257,8 @@ def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
 
 
 def _load_performance_data(state_dir: Path) -> Optional[list]:
-    """Load and parse performance.json (shared by equity_curve & risk_metrics).
-
-    Delegates to :func:`_get_cached_performance_data` so the underlying
-    disk read is shared across all callers within the 5-second TTL window.
-    """
-    return _get_cached_performance_data(state_dir).get("trades")
+    """Delegates to :func:`pearlalgo.api.data_layer.load_performance_data`."""
+    return _load_performance_data_new(state_dir)
 
 
 def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
@@ -2280,222 +2337,79 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
 
 
 def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
-    """Calculate risk metrics: max drawdown, Sharpe ratio, average R:R, profit factor."""
-    signals_file = state_dir / "signals.jsonl"
-    default_metrics = {
-        "max_drawdown": 0.0,
-        "max_drawdown_pct": 0.0,
-        "sharpe_ratio": None,
-        "profit_factor": None,
-        "avg_win": 0.0,
-        "avg_loss": 0.0,
-        "avg_rr": None,
-        "largest_win": 0.0,
-        "largest_loss": 0.0,
-        "expectancy": 0.0,
-        "max_concurrent_positions_peak": 0,
-        "max_stop_risk_exposure": 0.0,
-        "top_losses": [],
-    }
+    """Calculate risk metrics via the shared :func:`compute_risk_metrics` function.
 
-    # MFFU: compute risk metrics from Tradovate fills
+    MFFU: uses Tradovate paired trades.  Inception: uses performance.json.
+    Exposure metrics (max concurrent positions, stop-risk) are calculated
+    from signals.jsonl when available.
+    """
+    # -- Gather P&L list and trades list depending on account type ----------
     if _is_mffu_account(state_dir):
         try:
-            _, fills = _get_tradovate_state(state_dir)
-            trades = _tradovate_fills_to_trades(fills)
+            trades = _get_paired_tradovate_trades(state_dir)
             pnls = [t.get("pnl", 0) or 0 for t in trades]
-            if not pnls:
-                return default_metrics
-
-            wins = [p for p in pnls if p > 0]
-            losses = [p for p in pnls if p < 0]
-
-            # Max drawdown
-            cumulative = 0.0
-            peak = 0.0
-            max_dd = 0.0
-            for p in pnls:
-                cumulative += p
-                if cumulative > peak:
-                    peak = cumulative
-                dd = peak - cumulative
-                if dd > max_dd:
-                    max_dd = dd
-
-            # Profit factor
-            total_wins = sum(wins) if wins else 0
-            total_losses = abs(sum(losses)) if losses else 0
-            profit_factor = round(total_wins / total_losses, 2) if total_losses > 0 else None
-
-            avg_win = round(statistics.mean(wins), 2) if wins else 0.0
-            avg_loss = round(statistics.mean(losses), 2) if losses else 0.0
-            avg_rr = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else None
-
-            win_rate = len(wins) / len(pnls)
-            expectancy = round((win_rate * avg_win) + ((1 - win_rate) * avg_loss), 2)
-
-            sharpe = None
-            if len(pnls) >= 5:
-                mean_pnl = statistics.mean(pnls)
-                std_pnl = statistics.stdev(pnls) if len(pnls) > 1 else 0
-                if std_pnl > 0:
-                    sharpe = round((mean_pnl / std_pnl) * (252 ** 0.5), 2)
-
-            return {
-                "max_drawdown": round(max_dd, 2),
-                "max_drawdown_pct": round((max_dd / peak * 100), 1) if peak > 0 else 0.0,
-                "sharpe_ratio": sharpe,
-                "profit_factor": profit_factor,
-                "avg_win": avg_win,
-                "avg_loss": avg_loss,
-                "avg_rr": avg_rr,
-                "largest_win": round(max(wins), 2) if wins else 0.0,
-                "largest_loss": round(min(losses), 2) if losses else 0.0,
-                "expectancy": expectancy,
-                "max_concurrent_positions_peak": 0,
-                "max_stop_risk_exposure": 0.0,
-                "top_losses": [{"pnl": round(p, 2)} for p in sorted(losses)[:3]] if losses else [],
-            }
         except Exception:
-            return default_metrics
-
-    data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
-    if not data:
-        return default_metrics
-
-    try:
-        # Extract P&L values
+            return dict(DEFAULT_RISK_METRICS)
+    else:
+        data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+        if not data:
+            return dict(DEFAULT_RISK_METRICS)
+        trades = data
         pnls = [t.get("pnl", 0.0) or 0.0 for t in data if t.get("pnl") is not None]
-        if not pnls:
-            return default_metrics
 
-        wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p < 0]
+    if not pnls:
+        return dict(DEFAULT_RISK_METRICS)
 
-        # Max drawdown calculation
-        cumulative = 0.0
-        peak = 0.0
-        max_dd = 0.0
-        for pnl in pnls:
-            cumulative += pnl
-            if cumulative > peak:
-                peak = cumulative
-            dd = peak - cumulative
-            if dd > max_dd:
-                max_dd = dd
+    # -- Compute via shared pure function -----------------------------------
+    result = compute_risk_metrics(pnls, trades)
 
-        # Sharpe ratio (simplified - daily returns, annualized)
-        sharpe = None
-        if len(pnls) >= 5:
-            mean_pnl = statistics.mean(pnls)
-            std_pnl = statistics.stdev(pnls) if len(pnls) > 1 else 0
-            if std_pnl > 0:
-                # Approximate annualization (assuming ~5 trades per day, 252 trading days)
-                sharpe = round((mean_pnl / std_pnl) * (252 ** 0.5), 2)
+    # -- Exposure metrics (require signals.jsonl entry/exit timestamps) -----
+    signals_file = state_dir / "signals.jsonl"
+    if signals_file.exists() and not _is_mffu_account(state_dir):
+        try:
+            signals = _get_signals(state_dir, max_lines=2000)
+            max_concurrent = 0
+            max_stop_risk = 0.0
+            events = []
+            for s in signals:
+                entry_time = s.get("entry_time")
+                exit_time = s.get("exit_time")
+                signal_data = s.get("signal", {})
+                entry_price = s.get("entry_price", 0)
+                stop_loss = signal_data.get("stop_loss", 0) if isinstance(signal_data, dict) else 0
+                stop_risk = abs(entry_price - stop_loss) * 2 if entry_price and stop_loss else 0
 
-        # Profit factor
-        total_wins = sum(wins) if wins else 0
-        total_losses = abs(sum(losses)) if losses else 0
-        profit_factor = round(total_wins / total_losses, 2) if total_losses > 0 else None
+                if entry_time:
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                        events.append(("entry", entry_dt, stop_risk))
+                    except (ValueError, TypeError):
+                        pass
+                if exit_time:
+                    try:
+                        exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                        events.append(("exit", exit_dt, -stop_risk))
+                    except (ValueError, TypeError):
+                        pass
 
-        # Average win/loss
-        avg_win = round(statistics.mean(wins), 2) if wins else 0.0
-        avg_loss = round(statistics.mean(losses), 2) if losses else 0.0
+            events.sort(key=lambda x: x[1])
+            current_positions = 0
+            current_stop_risk = 0.0
+            for event_type, _, risk_delta in events:
+                if event_type == "entry":
+                    current_positions += 1
+                else:
+                    current_positions -= 1
+                current_stop_risk += risk_delta
+                max_concurrent = max(max_concurrent, current_positions)
+                max_stop_risk = max(max_stop_risk, current_stop_risk)
 
-        # Average R:R (reward to risk ratio)
-        avg_rr = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else None
+            result["max_concurrent_positions_peak"] = max_concurrent
+            result["max_stop_risk_exposure"] = round(max_stop_risk, 2)
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
 
-        # Expectancy
-        win_rate = len(wins) / len(pnls) if pnls else 0
-        expectancy = round((win_rate * avg_win) + ((1 - win_rate) * avg_loss), 2)
-
-        # NEW: Top 3 losses
-        top_losses = []
-        trades_with_losses = [
-            t for t in data
-            if t.get("pnl") is not None and t.get("pnl") < 0
-        ]
-        # Sort by pnl ascending (most negative first)
-        trades_with_losses.sort(key=lambda x: x.get("pnl", 0))
-        for t in trades_with_losses[:3]:
-            top_losses.append({
-                "signal_id": t.get("signal_id", "unknown"),
-                "pnl": round(t.get("pnl", 0), 2),
-                "exit_reason": t.get("exit_reason", ""),
-            })
-
-        # NEW: Calculate max concurrent positions from signals.jsonl
-        max_concurrent = 0
-        max_stop_risk = 0.0
-
-        if signals_file.exists():
-            try:
-                signals = _load_jsonl_file(signals_file, max_lines=2000)
-
-                # Build list of entries and exits with timestamps
-                events = []
-                for s in signals:
-                    entry_time = s.get("entry_time")
-                    exit_time = s.get("exit_time")
-                    signal_data = s.get("signal", {})
-
-                    # Calculate stop risk for this position
-                    entry_price = s.get("entry_price", 0)
-                    stop_loss = signal_data.get("stop_loss", 0) if isinstance(signal_data, dict) else 0
-                    stop_risk = abs(entry_price - stop_loss) * 2 if entry_price and stop_loss else 0  # MNQ = $2/pt
-
-                    if entry_time:
-                        try:
-                            entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
-                            events.append(("entry", entry_dt, stop_risk))
-                        except (ValueError, TypeError):
-                            pass
-
-                    if exit_time:
-                        try:
-                            exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
-                            events.append(("exit", exit_dt, -stop_risk))
-                        except (ValueError, TypeError):
-                            pass
-
-                # Sort events by time
-                events.sort(key=lambda x: x[1])
-
-                # Track concurrent positions and stop risk
-                current_positions = 0
-                current_stop_risk = 0.0
-                for event_type, _, risk_delta in events:
-                    if event_type == "entry":
-                        current_positions += 1
-                        current_stop_risk += risk_delta
-                    else:
-                        current_positions -= 1
-                        current_stop_risk += risk_delta  # risk_delta is negative for exits
-
-                    max_concurrent = max(max_concurrent, current_positions)
-                    max_stop_risk = max(max_stop_risk, current_stop_risk)
-
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-
-        return {
-            "max_drawdown": round(max_dd, 2),
-            "max_drawdown_pct": round((max_dd / peak * 100), 1) if peak > 0 else 0.0,
-            "sharpe_ratio": sharpe,
-            "profit_factor": profit_factor,
-            "avg_win": avg_win,
-            "avg_loss": avg_loss,
-            "avg_rr": avg_rr,
-            "largest_win": round(max(wins), 2) if wins else 0.0,
-            "largest_loss": round(min(losses), 2) if losses else 0.0,
-            "expectancy": expectancy,
-            # NEW: Exposure metrics
-            "max_concurrent_positions_peak": max_concurrent,
-            "max_stop_risk_exposure": round(max_stop_risk, 2),
-            "top_losses": top_losses,
-        }
-    except Exception:
-        return default_metrics
+    return result
 
 
 def _get_market_regime(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3567,8 +3481,12 @@ async def get_indicators(
     """
     try:
         candles, _source = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
-        # Cache indicators by candle fingerprint (last candle time + count)
-        ind_cache_key = f"indicators:{len(candles)}:{candles[-1]['time'] if candles else 0}"
+        # Cache indicators by candle fingerprint (count + last time + close)
+        # Include close price so intra-bar updates invalidate correctly.
+        if candles:
+            ind_cache_key = f"indicators:{len(candles)}:{candles[-1]['time']}:{candles[-1]['close']}"
+        else:
+            ind_cache_key = "indicators:empty"
         indicators = _cached(ind_cache_key, 5.0, _calculate_indicators, candles)
         return JSONResponse(content=indicators)
     except DataUnavailableError as e:

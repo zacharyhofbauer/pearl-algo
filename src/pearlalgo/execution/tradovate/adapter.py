@@ -70,8 +70,12 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Connection state
         self._connected = False
 
-        # Track open orders for reconciliation
+        # Track open orders for reconciliation (guarded by _orders_lock)
         self._open_orders: Dict[str, Dict[str, Any]] = {}
+        self._orders_lock = asyncio.Lock()
+
+        # Live position cache updated from WebSocket events
+        self._live_positions: Dict[str, Dict[str, Any]] = {}
 
         # Background reconciliation task
         self._reconciliation_task: Optional[asyncio.Task] = None
@@ -461,19 +465,35 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 logger.debug(f"Tradovate order event: {order_id} -> {ord_status} ({event_action})")
 
                 if ord_status in ("Filled", "Cancelled", "Rejected", "Expired"):
+                    # Safe: dict.pop is atomic in CPython; the _orders_lock is
+                    # used for multi-step operations in async contexts.
                     self._open_orders.pop(order_id, None)
 
             elif entity_type == "fill":
+                contract_id = str(entity.get("contractId", ""))
                 logger.debug(
-                    f"Tradovate fill: contract={entity.get('contractId')}, "
+                    f"Tradovate fill: contract={contract_id}, "
                     f"qty={entity.get('qty')}, price={entity.get('price')}"
                 )
 
             elif entity_type == "position":
+                contract_id = str(entity.get("contractId", ""))
+                net_pos = entity.get("netPos", 0)
                 logger.debug(
-                    f"Tradovate position update: contract={entity.get('contractId')}, "
-                    f"netPos={entity.get('netPos')}"
+                    f"Tradovate position update: contract={contract_id}, "
+                    f"netPos={net_pos}"
                 )
+                # Update live position cache for faster reporting
+                if net_pos != 0:
+                    self._live_positions[contract_id] = {
+                        "contract_id": contract_id,
+                        "net_pos": net_pos,
+                        "net_price": entity.get("netPrice", 0),
+                        "open_pnl": entity.get("openPnL", 0),
+                        "timestamp": entity.get("timestamp"),
+                    }
+                else:
+                    self._live_positions.pop(contract_id, None)
 
     # ── REST order reconciliation ─────────────────────────────────────
 

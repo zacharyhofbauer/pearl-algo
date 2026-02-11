@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo Market Agent (NQ)
+Description=PearlAlgo Market Agent - IBKR Virtual (NQ)
 After=network.target ibkr-gateway.service
 Wants=ibkr-gateway.service
 

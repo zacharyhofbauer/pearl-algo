@@ -1567,8 +1567,13 @@ class MarketAgentService(ServiceNotificationsMixin):
                     except Exception as e:
                         logger.debug(f"Non-critical: {e}")  # non-fatal: stale cache is fine
 
-                # Save state periodically
-                if self.cycle_count % self.state_save_interval == 0:
+                # Save state periodically, OR immediately when a signal was
+                # generated/entered this cycle (so the API serves fresh data).
+                _signal_this_cycle = bool(
+                    self.last_signal_generated_at
+                    and self._last_signal_diagnostics is not None
+                )
+                if _signal_this_cycle or self.cycle_count % self.state_save_interval == 0:
                     self._save_state()
 
                 self.cycle_count += 1

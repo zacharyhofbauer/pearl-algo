@@ -483,6 +483,101 @@ describe('useWebSocket hook', () => {
   })
 })
 
+  describe('multiple disconnects (reconnect ref fix)', () => {
+    it('should correctly count multiple reconnect attempts without stale closure', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({
+          url: 'ws://localhost:8000/ws',
+          reconnect: true,
+          reconnectInterval: 100,
+          maxReconnectAttempts: 5,
+        })
+      )
+
+      const ws1 = getLastInstance()
+      act(() => {
+        ws1.readyState = MockWebSocket.OPEN
+        ws1.onopen?.({} as any)
+      })
+
+      // First disconnect
+      act(() => {
+        ws1.onclose?.({} as any)
+      })
+      act(() => { jest.advanceTimersByTime(150) })
+      expect(result.current.reconnectAttempts).toBe(1)
+
+      // Second disconnect
+      const ws2 = getLastInstance()
+      act(() => {
+        ws2.onclose?.({} as any)
+      })
+      act(() => { jest.advanceTimersByTime(150) })
+      expect(result.current.reconnectAttempts).toBe(2)
+
+      // Third disconnect
+      const ws3 = getLastInstance()
+      act(() => {
+        ws3.onclose?.({} as any)
+      })
+      act(() => { jest.advanceTimersByTime(150) })
+      expect(result.current.reconnectAttempts).toBe(3)
+    })
+
+    it('should stop reconnecting after maxReconnectAttempts', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({
+          url: 'ws://localhost:8000/ws',
+          reconnect: true,
+          reconnectInterval: 50,
+          maxReconnectAttempts: 2,
+        })
+      )
+
+      // First disconnect + reconnect
+      const ws1 = getLastInstance()
+      act(() => { ws1.onclose?.({} as any) })
+      act(() => { jest.advanceTimersByTime(100) })
+      expect(result.current.reconnectAttempts).toBe(1)
+
+      // Second disconnect + reconnect
+      const ws2 = getLastInstance()
+      act(() => { ws2.onclose?.({} as any) })
+      act(() => { jest.advanceTimersByTime(100) })
+      expect(result.current.reconnectAttempts).toBe(2)
+
+      // Third disconnect — should NOT create another instance
+      const ws3 = getLastInstance()
+      const instanceCountBefore = mockInstances.length
+      act(() => { ws3.onclose?.({} as any) })
+      act(() => { jest.advanceTimersByTime(100) })
+      // No new WebSocket should have been created
+      expect(mockInstances.length).toBe(instanceCountBefore)
+    })
+
+    it('should reset reconnectAttempts on manual reconnect()', () => {
+      const { result } = renderHook(() =>
+        useWebSocket({
+          url: 'ws://localhost:8000/ws',
+          reconnect: true,
+          reconnectInterval: 50,
+          maxReconnectAttempts: 10,
+        })
+      )
+
+      // Disconnect and wait for a reconnect
+      const ws1 = getLastInstance()
+      act(() => { ws1.onclose?.({} as any) })
+      act(() => { jest.advanceTimersByTime(100) })
+      expect(result.current.reconnectAttempts).toBe(1)
+
+      // Manual reconnect should reset counter
+      act(() => { result.current.reconnect() })
+      expect(result.current.reconnectAttempts).toBe(0)
+    })
+  })
+})
+
 // -- getWebSocketUrl utility --
 // jsdom defaults to http://localhost, so localhost-based tests work directly.
 // Use history.pushState to change search params (api_port, account).

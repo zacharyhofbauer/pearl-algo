@@ -501,3 +501,92 @@ class TestGetSignalRecord:
         pt = _make_performance_tracker(tmp_path)
         result = pt._get_signal_record("anything")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# signal_type root preference (append-only JSONL format)
+# ---------------------------------------------------------------------------
+
+class TestSignalTypeRootPreference:
+    """Tests that get_performance_metrics prefers root-level signal_type over nested signal.type."""
+
+    def test_signal_type_at_root_used(self, tmp_path: Path) -> None:
+        """When signal_type is at root level (append-only format), it should be used."""
+        pt = _make_performance_tracker(tmp_path)
+        # First write an "entered" record (base), then an exited status_change
+        base = {
+            "signal_id": "sig_root_type",
+            "status": "entered",
+            "timestamp": get_utc_timestamp(),
+            "signal": {"type": "momentum", "direction": "long", "entry_price": 17500},
+            "entry_price": 17500,
+            "entry_time": get_utc_timestamp(),
+        }
+        status_change = {
+            "signal_id": "sig_root_type",
+            "event": "status_change",
+            "status": "exited",
+            "timestamp": get_utc_timestamp(),  # Required for get_performance_metrics loading
+            "signal_type": "momentum",
+            "pnl": 50.0,
+            "is_win": True,
+            "exit_time": get_utc_timestamp(),
+        }
+        with open(pt.signals_file, "a") as f:
+            f.write(json.dumps(base) + "\n")
+            f.write(json.dumps(status_change) + "\n")
+
+        result = pt.get_performance_metrics()
+        assert "momentum" in result["by_signal_type"]
+
+    def test_nested_signal_type_fallback(self, tmp_path: Path) -> None:
+        """When signal_type is only under signal.type (legacy format), it should still work."""
+        pt = _make_performance_tracker(tmp_path)
+        record = {
+            "signal_id": "sig_nested_type",
+            "status": "exited",
+            "timestamp": get_utc_timestamp(),
+            "signal": {"type": "reversal", "direction": "short", "entry_price": 17600},
+            "entry_price": 17600,
+            "entry_time": get_utc_timestamp(),
+            "exit_time": get_utc_timestamp(),
+            "pnl": -30.0,
+            "is_win": False,
+        }
+        with open(pt.signals_file, "a") as f:
+            f.write(json.dumps(record) + "\n")
+
+        result = pt.get_performance_metrics()
+        assert "reversal" in result["by_signal_type"]
+
+
+# ---------------------------------------------------------------------------
+# _max_records trimming
+# ---------------------------------------------------------------------------
+
+class TestMaxRecordsTrimming:
+    """Tests that performance.json is trimmed to _max_records."""
+
+    def test_trims_old_records(self, tmp_path: Path) -> None:
+        """When records exceed _max_records, oldest should be trimmed."""
+        pt = _make_performance_tracker(tmp_path)
+        pt._max_records = 3  # Set a low limit
+
+        # Write 5 records (should keep only the last 3)
+        for i in range(5):
+            sig = _make_signal(entry_price=17500.0 + i)
+            sig_id = f"sig_{i}"
+            _write_signal_record(pt.signals_file, sig_id, sig, entry_time=f"2025-01-0{i+1}T14:00:00Z")
+            pt.track_exit(
+                signal_id=sig_id,
+                exit_price=17500.0 + i + 10,
+                exit_reason="take_profit",
+            )
+
+        # Read performance.json directly
+        perf_data = json.loads(pt.performance_file.read_text())
+        assert len(perf_data) == 3
+        # The last 3 signals should be kept
+        assert perf_data[0]["signal_id"] == "sig_2"
+        assert perf_data[1]["signal_id"] == "sig_3"
+        assert perf_data[2]["signal_id"] == "sig_4"

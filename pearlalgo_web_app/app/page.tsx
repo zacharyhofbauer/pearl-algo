@@ -115,7 +115,9 @@ function PearlAlgoWebAppInner() {
   const barSpacing = useChartStore((s) => s.barSpacing)
   const chartLoading = useChartStore((s) => s.isLoading)
   const chartError = useChartStore((s) => s.error)
-  const lastDataHash = useChartStore((s) => s.lastDataHash)
+  // lastDataHash is used only for comparison (never rendered) — use a ref
+  // to avoid it appearing in fetchData's dependency array.
+  const lastDataHashRef = useRef('')
   const setCandles = useChartStore((s) => s.setCandles)
   const setIndicators = useChartStore((s) => s.setIndicators)
   const setMarkers = useChartStore((s) => s.setMarkers)
@@ -125,7 +127,7 @@ function PearlAlgoWebAppInner() {
   const setBarSpacing = useChartStore((s) => s.setBarSpacing)
   const setChartLoading = useChartStore((s) => s.setLoading)
   const setChartError = useChartStore((s) => s.setError)
-  const setLastDataHash = useChartStore((s) => s.setLastDataHash)
+  // setLastDataHash no longer needed — using lastDataHashRef instead
 
   // UI store
   const wsStatus = useUIStore((s) => s.wsStatus)
@@ -207,7 +209,13 @@ function PearlAlgoWebAppInner() {
     reconnectInterval: 3000,
     maxReconnectAttempts: 10,
     pingInterval: 30000,
-    onStatusChange: setWsStatus,
+    onStatusChange: (status) => {
+      setWsStatus(status)
+      // Set isLive=false on disconnect or error so the UI reflects reality
+      if (status === 'disconnected' || status === 'error') {
+        setIsLive(false)
+      }
+    },
     onMessage: (message) => {
       if (message.type === 'initial_state' || message.type === 'state_update' || message.type === 'full_refresh') {
         const data = message.data
@@ -215,6 +223,18 @@ function PearlAlgoWebAppInner() {
           updateFromWebSocket(data)
           setLastUpdate(new Date())
           setIsLive(true)
+
+          // Consume positions, trades, and performance summary from WS
+          // (previously HTTP-only, now included in broadcast for ~2s latency)
+          if (data.positions !== undefined) {
+            setPositions(Array.isArray(data.positions) ? data.positions : [])
+          }
+          if (data.recent_trades !== undefined) {
+            setRecentTrades(Array.isArray(data.recent_trades) ? data.recent_trades : [])
+          }
+          if (data.performance_summary !== undefined) {
+            setPerformanceSummary(data.performance_summary || null)
+          }
         }
       }
     },
@@ -258,10 +278,13 @@ function PearlAlgoWebAppInner() {
       // Ensure we always request at least MIN_BARS
       const requestBars = Math.max(MIN_BARS, bars)
 
+      // Use config symbol from agent state, fallback to MNQ
+      const sym = agentState?.config?.symbol || 'MNQ'
+
       // Fetch all data in parallel (apiFetch includes auth headers when configured)
       const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes, tradesRes, perfSummaryRes] = await Promise.all([
-        apiFetch(`/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
-        apiFetch(`/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
+        apiFetch(`/api/candles?symbol=${sym}&timeframe=${tf}&bars=${requestBars}`),
+        apiFetch(`/api/indicators?symbol=${sym}&timeframe=${tf}&bars=${requestBars}`),
         apiFetch(`/api/markers?hours=${MARKER_HOURS}`),
         apiFetch(`/api/state`),
         apiFetch(`/api/market-status`),
@@ -303,8 +326,8 @@ function PearlAlgoWebAppInner() {
 
       // Only update if data changed (include timeframe in hash to force update on tf change)
       const dataHash = `${tf}:${JSON.stringify(candlesData.slice(-3))}`
-      if (dataHash !== lastDataHash) {
-        setLastDataHash(dataHash)
+      if (dataHash !== lastDataHashRef.current) {
+        lastDataHashRef.current = dataHash
         setCandles(candlesData)
         setIndicators(indicatorsData)
         setMarkers(filteredMarkers)
@@ -384,13 +407,12 @@ function PearlAlgoWebAppInner() {
       setIsFetching(false)
     }
   }, [
-    lastDataHash,
+    agentState?.config?.symbol,
     setAgentState,
     setCandles,
     setIndicators,
     setMarkers,
     setMarketStatus,
-    setLastDataHash,
     setChartError,
     setChartLoading,
     setIsLive,
@@ -406,6 +428,11 @@ function PearlAlgoWebAppInner() {
     const interval = setInterval(() => fetchData(timeframe, barCount), refreshInterval)
     return () => clearInterval(interval)
   }, [timeframe, barCount, wsStatus, fetchData])
+
+  // Callback for TradeDockPanel to trigger an immediate refetch after close actions
+  const handleTradeRefresh = useCallback(() => {
+    fetchData(timeframe, barCount)
+  }, [fetchData, timeframe, barCount])
 
   const formatTime = (date: Date | null) => {
     if (!date) return '--:--'
@@ -947,6 +974,8 @@ function PearlAlgoWebAppInner() {
                   dailyWins={agentState?.daily_wins}
                   dailyLosses={agentState?.daily_losses}
                   activeTradesCount={agentState?.active_trades_count}
+                  onRefresh={handleTradeRefresh}
+                  riskMetrics={agentState?.risk_metrics || null}
                 />
               }
               pearlAISection={
@@ -1082,6 +1111,8 @@ function PearlAlgoWebAppInner() {
             dailyWins={agentState?.daily_wins}
             dailyLosses={agentState?.daily_losses}
             activeTradesCount={agentState?.active_trades_count}
+            onRefresh={handleTradeRefresh}
+            riskMetrics={agentState?.risk_metrics || null}
           />
 
           {/* Post-trade panels (signals / ops / advanced analytics) */}

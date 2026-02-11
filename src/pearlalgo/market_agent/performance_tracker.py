@@ -28,6 +28,7 @@ from pearlalgo.utils.paths import (
 )
 from pearlalgo.market_agent.state_manager import _to_json_safe
 from pearlalgo.utils.state_io import (
+    atomic_write_json,
     atomic_write_jsonl,
     create_minimal_signal_record,
     file_lock,
@@ -659,9 +660,11 @@ class PerformanceTracker:
         avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0.0
 
         # Metrics by signal type
+        # For append-only JSONL events, signal_type is promoted to the root level;
+        # for legacy full-record format it's nested under signal.type.
         by_type: Dict[str, Dict] = {}
         for signal in exited_signals:
-            signal_type = signal.get("signal", {}).get("type", "unknown")
+            signal_type = signal.get("signal_type") or signal.get("signal", {}).get("type", "unknown")
             if signal_type not in by_type:
                 by_type[signal_type] = {
                     "count": 0,
@@ -890,25 +893,30 @@ class PerformanceTracker:
             return []
 
     def _save_performance(self, performance: Dict) -> None:
-        """Save performance record."""
-        # Load existing performance records
-        performances = []
-        if self.performance_file.exists():
-            try:
-                with open(self.performance_file, "r") as f:
-                    performances = json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading performance records: {e}")
+        """Save performance record with file locking and atomic write.
 
-        performances.append(performance)
-
-        # Keep only last N records (from config)
-        if len(performances) > self._max_records:
-            performances = performances[-self._max_records:]
-
+        Uses the same ``file_lock`` + ``atomic_write_json`` pattern as
+        ``_update_signal_status`` to prevent concurrent read-modify-write
+        races from dropping records.
+        """
+        lock_path = self.performance_file.with_suffix(".lock")
         try:
-            with open(self.performance_file, "w") as f:
-                json.dump(performances, f, indent=2)
+            with file_lock(lock_path):
+                performances = []
+                if self.performance_file.exists():
+                    try:
+                        with open(self.performance_file, "r") as f:
+                            performances = json.load(f)
+                    except Exception as e:
+                        logger.error(f"Error loading performance records: {e}")
+
+                performances.append(performance)
+
+                # Keep only last N records (from config)
+                if len(performances) > self._max_records:
+                    performances = performances[-self._max_records:]
+
+                atomic_write_json(self.performance_file, performances)
         except Exception as e:
             logger.error(f"Error saving performance record: {e}")
 

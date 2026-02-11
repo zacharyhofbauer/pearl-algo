@@ -62,13 +62,17 @@ interface TradeDockPanelProps {
   dailyLosses?: number
   /** Active positions count (if provided by agent state) */
   activeTradesCount?: number
+  /** Called after a close action succeeds to trigger an immediate data refetch */
+  onRefresh?: () => void
+  /** Risk metrics from agent state (Sharpe, Sortino, drawdown, streaks, etc.) */
+  riskMetrics?: Record<string, any> | null
 }
 
 type Tab = 'open' | 'recent'
 
 function getUsdPerPoint(sym?: string | null): number | null {
   const s = (sym || '').toUpperCase().trim()
-  // Common US index futures (most likely in this app)
+  // US index futures
   if (s === 'MNQ') return 2
   if (s === 'NQ') return 20
   if (s === 'MES') return 5
@@ -77,6 +81,14 @@ function getUsdPerPoint(sym?: string | null): number | null {
   if (s === 'YM') return 5
   if (s === 'M2K') return 5
   if (s === 'RTY') return 50
+  // Metals
+  if (s === 'GC') return 10
+  if (s === 'MGC') return 1
+  if (s === 'SI') return 50
+  if (s === 'HG') return 250
+  // Energy
+  if (s === 'CL') return 10
+  if (s === 'MCL') return 1
   return null
 }
 
@@ -95,6 +107,21 @@ function formatTime(ts?: string | null): string {
 function formatSigned(n: number, decimals = 2): string {
   const sign = n >= 0 ? '+' : ''
   return `${sign}${n.toFixed(decimals)}`
+}
+
+function formatRelativeTime(isoString: string): string {
+  try {
+    const d = new Date(isoString)
+    if (Number.isNaN(d.getTime())) return '—'
+    const seconds = Math.floor((Date.now() - d.getTime()) / 1000)
+    if (seconds < 5) return 'Just now'
+    if (seconds < 60) return `${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  } catch {
+    return '—'
+  }
 }
 
 function formatPnL(pnl?: number | null): string {
@@ -161,6 +188,8 @@ export default function TradeDockPanel({
   dailyWins,
   dailyLosses,
   activeTradesCount,
+  onRefresh,
+  riskMetrics,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('open')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -172,6 +201,7 @@ export default function TradeDockPanel({
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null)
   const [closeBusy, setCloseBusy] = useState(false)
   const [closeResult, setCloseResult] = useState<{ type: 'ok' | 'error'; message: string } | null>(null)
+  const [showRiskMetrics, setShowRiskMetrics] = useState(true)
 
   const openLimit = maxOpenRows ?? 6
   const recentLimit = maxRecentRows ?? 8
@@ -294,6 +324,8 @@ export default function TradeDockPanel({
       setCloseResult({ type: 'ok', message: data?.message || 'Close-all requested.' })
       setConfirmCloseAll(false)
       setConfirmCloseId(null)
+      // Trigger immediate refetch so positions list updates
+      onRefresh?.()
     } catch (e) {
       setCloseResult({ type: 'error', message: e instanceof Error ? e.message : 'Close-all failed' })
     } finally {
@@ -316,6 +348,8 @@ export default function TradeDockPanel({
       }
       setCloseResult({ type: 'ok', message: data?.message || 'Close requested.' })
       setConfirmCloseId(null)
+      // Trigger immediate refetch so the closed trade updates
+      onRefresh?.()
     } catch (e) {
       setCloseResult({ type: 'error', message: e instanceof Error ? e.message : 'Close failed' })
     } finally {
@@ -401,6 +435,81 @@ export default function TradeDockPanel({
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Risk Metrics: Sharpe, Sortino, Profit Factor, Expectancy, Streaks, Drawdown */}
+            {riskMetrics && (
+              <div className="trade-stats-summary-wrapper">
+                <button
+                  className="trade-stats-summary-toggle"
+                  onClick={() => setShowRiskMetrics(!showRiskMetrics)}
+                  type="button"
+                  aria-expanded={showRiskMetrics}
+                >
+                  <span className="trade-stats-summary-label">Risk Metrics</span>
+                  <span className="trade-stats-summary-icon" aria-hidden="true">{showRiskMetrics ? '▲' : '▼'}</span>
+                </button>
+
+                {showRiskMetrics && (
+                  <div className="trade-stats-summary" style={{ fontSize: '0.78rem' }}>
+                    {/* Row 1: Ratios */}
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Sharpe:</span>
+                      <span className="trade-stats-value">{riskMetrics.sharpe_ratio != null ? riskMetrics.sharpe_ratio : '—'}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Sortino:</span>
+                      <span className="trade-stats-value">{riskMetrics.sortino_ratio != null ? riskMetrics.sortino_ratio : '—'}</span>
+                    </div>
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Profit Factor:</span>
+                      <span className="trade-stats-value">{riskMetrics.profit_factor != null ? riskMetrics.profit_factor : '—'}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Expectancy:</span>
+                      <span className={`trade-stats-value ${(riskMetrics.expectancy || 0) >= 0 ? 'positive' : 'negative'}`}>
+                        {riskMetrics.expectancy != null ? `$${riskMetrics.expectancy}` : '—'}
+                      </span>
+                    </div>
+                    {/* Row 2: Trade quality */}
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Avg Win:</span>
+                      <span className="trade-stats-value positive">{riskMetrics.avg_win != null ? `$${riskMetrics.avg_win}` : '—'}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Avg Loss:</span>
+                      <span className="trade-stats-value negative">{riskMetrics.avg_loss != null ? `$${riskMetrics.avg_loss}` : '—'}</span>
+                    </div>
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Avg R:R:</span>
+                      <span className="trade-stats-value">{riskMetrics.avg_rr != null ? riskMetrics.avg_rr : '—'}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Best:</span>
+                      <span className="trade-stats-value positive">{riskMetrics.largest_win != null ? `$${riskMetrics.largest_win}` : '—'}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Worst:</span>
+                      <span className="trade-stats-value negative">{riskMetrics.largest_loss != null ? `$${riskMetrics.largest_loss}` : '—'}</span>
+                    </div>
+                    {/* Row 3: Drawdown */}
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Max DD:</span>
+                      <span className="trade-stats-value negative">${riskMetrics.max_drawdown ?? 0}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>DD %:</span>
+                      <span className="trade-stats-value">{riskMetrics.max_drawdown_pct ?? 0}%</span>
+                    </div>
+                    {/* Row 4: Streaks */}
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Streak:</span>
+                      <span className={`trade-stats-value ${(riskMetrics.current_streak || 0) >= 0 ? 'positive' : 'negative'}`}>
+                        {riskMetrics.current_streak ?? 0}
+                      </span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Max W:</span>
+                      <span className="trade-stats-value positive">{riskMetrics.max_consecutive_wins ?? 0}</span>
+                      <span className="trade-stats-label" style={{ marginLeft: 8 }}>Max L:</span>
+                      <span className="trade-stats-value negative">{riskMetrics.max_consecutive_losses ?? 0}</span>
+                    </div>
+                    {/* Freshness indicator */}
+                    {performanceSummary?.as_of && (
+                      <div className="trade-stats-row" style={{ opacity: 0.5 }}>
+                        <span className="trade-stats-label">Data:</span>
+                        <span className="trade-stats-value">{formatRelativeTime(performanceSummary.as_of)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

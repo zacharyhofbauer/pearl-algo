@@ -775,3 +775,74 @@ class TestAdapterFlattenAll:
         results = await adapter.flatten_all_positions()
         assert results[0].success is False
         assert "Not connected" in results[0].error_message
+
+
+class TestLivePositionsCache:
+    """Tests for _live_positions updates from WebSocket events."""
+
+    def test_position_event_updates_cache(self):
+        adapter = _make_adapter(mode="paper")
+        assert adapter._live_positions == {}
+
+        # Simulate a position WS event
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "position",
+                "entity": {
+                    "contractId": 12345,
+                    "netPos": 2,
+                    "netPrice": 20050.0,
+                    "openPnL": 25.0,
+                    "timestamp": "2025-01-15T14:30:00Z",
+                },
+            },
+        })
+
+        assert "12345" in adapter._live_positions
+        pos = adapter._live_positions["12345"]
+        assert pos["net_pos"] == 2
+        assert pos["net_price"] == 20050.0
+        assert pos["open_pnl"] == 25.0
+
+    def test_flat_position_removed_from_cache(self):
+        adapter = _make_adapter(mode="paper")
+        # Pre-populate
+        adapter._live_positions["999"] = {"contract_id": "999", "net_pos": 1}
+
+        # Simulate flat position (net_pos=0)
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "position",
+                "entity": {
+                    "contractId": 999,
+                    "netPos": 0,
+                },
+            },
+        })
+
+        assert "999" not in adapter._live_positions
+
+    def test_order_event_removes_filled_order(self):
+        adapter = _make_adapter(mode="paper")
+        adapter._open_orders["555"] = {"signal_id": "test", "direction": "long"}
+
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "order",
+                "entity": {
+                    "id": 555,
+                    "ordStatus": "Filled",
+                },
+            },
+        })
+
+        assert "555" not in adapter._open_orders
+
+    def test_orders_lock_exists(self):
+        adapter = _make_adapter(mode="paper")
+        import asyncio
+        assert hasattr(adapter, "_orders_lock")
+        assert isinstance(adapter._orders_lock, asyncio.Lock)

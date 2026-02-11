@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo API Server (NQ / Inception)
+Description=PearlAlgo API Server - IBKR Virtual (NQ, port 8000)
 After=network.target pearlalgo-agent.service
 Wants=pearlalgo-agent.service
 

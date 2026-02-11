@@ -56,7 +56,10 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   const [status, setStatus] = useState<WebSocketStatus>('disconnected')
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)
+  // Use a ref for reconnect attempts to avoid stale closures in onclose handler.
+  // The state version is kept for the return value (UI consumption).
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const reconnectAttemptsRef = useRef(0)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -95,6 +98,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       ws.onopen = () => {
         if (!mountedRef.current) return
         updateStatus('connected')
+        reconnectAttemptsRef.current = 0
         setReconnectAttempts(0)
 
         // Send authentication message if API key is configured
@@ -128,11 +132,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         updateStatus('disconnected')
         clearTimers()
 
-        // Attempt reconnection
-        if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
+        // Use the ref (not state) to avoid stale closure issues
+        if (shouldReconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              setReconnectAttempts((prev) => prev + 1)
+              reconnectAttemptsRef.current += 1
+              setReconnectAttempts(reconnectAttemptsRef.current)
               connect()
             }
           }, reconnectInterval)
@@ -147,7 +152,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       console.error('[WebSocket] Connection error:', e)
       updateStatus('error')
     }
-  }, [url, shouldReconnect, reconnectInterval, maxReconnectAttempts, pingInterval, reconnectAttempts, clearTimers, updateStatus, onMessage])
+  }, [url, shouldReconnect, reconnectInterval, maxReconnectAttempts, pingInterval, clearTimers, updateStatus, onMessage])
 
   const send = useCallback((data: string | object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -161,6 +166,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   }, [send])
 
   const manualReconnect = useCallback(() => {
+    reconnectAttemptsRef.current = 0
     setReconnectAttempts(0)
     if (wsRef.current) {
       wsRef.current.close()

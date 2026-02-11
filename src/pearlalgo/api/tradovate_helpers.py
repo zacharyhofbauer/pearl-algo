@@ -1,0 +1,229 @@
+"""
+Tradovate data helpers for the Pearl API server.
+
+Functions for loading, normalising, and transforming Tradovate fill and
+position data.  Used by both the REST endpoints and the WebSocket broadcast
+loop for MFFU (MyFundedFutures) accounts.
+
+Extracted from server.py for testability and DRY.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from pearlalgo.execution.tradovate.utils import (
+    tradovate_fills_to_trades as _raw_fills_to_trades,
+)
+
+from pearlalgo.api.data_layer import (
+    cached,
+    read_state_for_dir,
+    get_start_balance,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Fill normalisation
+# ---------------------------------------------------------------------------
+
+
+def normalize_fill(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a Tradovate fill to consistent snake_case keys.
+
+    Older fills may use camelCase (contractId, orderId) from the raw
+    Tradovate API, while newer fills from the adapter use snake_case.
+    """
+    return {
+        "id": f.get("id"),
+        "order_id": f.get("order_id") or f.get("orderId"),
+        "contract_id": f.get("contract_id") or f.get("contractId"),
+        "timestamp": f.get("timestamp"),
+        "action": f.get("action"),
+        "qty": f.get("qty", 0),
+        "price": f.get("price", 0.0),
+        "net_pos": f.get("net_pos") if f.get("net_pos") is not None else f.get("netPos"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# State loading
+# ---------------------------------------------------------------------------
+
+
+def get_tradovate_state(state_dir: Path) -> tuple:
+    """Load tradovate_account and tradovate_fills.
+
+    Fills are read from state.json first, then from the persistent
+    tradovate_fills.json file (which survives session resets since
+    Tradovate's /fill/list clears at end of day).
+
+    All fills are normalized to snake_case keys for consistency.
+
+    Returns ``(tradovate_account_dict, fills_list)``.
+    """
+    tv: Dict[str, Any] = {}
+    fills: List[Dict[str, Any]] = []
+    try:
+        data = read_state_for_dir(state_dir)
+        if data:
+            tv = data.get("tradovate_account") or {}
+            fills = data.get("tradovate_fills") or []
+    except Exception as e:
+        logger.warning(f"Non-critical: {e}")
+
+    # Fallback: read from persistent fills file when state.json has none
+    if not fills:
+        try:
+            fills_file = state_dir / "tradovate_fills.json"
+            if fills_file.exists():
+                fills = json.loads(fills_file.read_text()) or []
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
+
+    fills = [normalize_fill(f) for f in fills]
+    return tv, fills
+
+
+# ---------------------------------------------------------------------------
+# Cached paired trades (replaces 12+ raw calls)
+# ---------------------------------------------------------------------------
+
+
+def get_paired_tradovate_trades(state_dir: Path) -> List[Dict[str, Any]]:
+    """Load fills and pair them into trades with a short TTL cache.
+
+    This is the single call site for ``tradovate_fills_to_trades`` in the
+    API layer.  All endpoint/broadcast code should use this instead of
+    calling the raw pairing function directly.
+    """
+    def _pair() -> List[Dict[str, Any]]:
+        _, fills = get_tradovate_state(state_dir)
+        return _raw_fills_to_trades(fills)
+
+    return cached(f"tv_paired_trades:{state_dir}", 2.0, _pair)
+
+
+# ---------------------------------------------------------------------------
+# Position helpers
+# ---------------------------------------------------------------------------
+
+
+def tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert tradovate_account positions to the format ``/api/positions`` expects.
+
+    When individual position openPnL is 0 but account-level open_pnl is
+    non-zero (common with Tradovate REST), distribute the account open_pnl
+    across positions proportionally by contract count.
+    """
+    raw_positions = [p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0]
+    if not raw_positions:
+        return []
+
+    account_open_pnl = float(tv.get("open_pnl", 0))
+    sum_pos_pnl = sum(float(p.get("open_pnl", 0)) for p in raw_positions)
+    total_contracts = sum(abs(p.get("net_pos", 0)) for p in raw_positions)
+
+    use_account_pnl = sum_pos_pnl == 0 and account_open_pnl != 0 and total_contracts > 0
+
+    positions = []
+    for pos in raw_positions:
+        net_pos = pos.get("net_pos", 0)
+        direction = "long" if net_pos > 0 else "short"
+        if use_account_pnl:
+            pos_pnl = round(account_open_pnl * abs(net_pos) / total_contracts, 2)
+        else:
+            pos_pnl = pos.get("open_pnl", 0)
+        positions.append({
+            "signal_id": f"tv_pos_{pos.get('contract_id', '')}",
+            "symbol": "MNQ",
+            "direction": direction,
+            "position_size": abs(net_pos),
+            "entry_price": pos.get("net_price", 0),
+            "entry_time": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "open_pnl": pos_pnl,
+        })
+    return positions
+
+
+# ---------------------------------------------------------------------------
+# Performance helpers
+# ---------------------------------------------------------------------------
+
+
+def tradovate_performance_summary(
+    tv: Dict[str, Any],
+    fills: List[Dict[str, Any]],
+    state_dir: Path,
+) -> Dict[str, Any]:
+    """Build overall performance summary from Tradovate data (equity-based)."""
+    start_balance = get_start_balance(state_dir)
+
+    equity = float(tv.get("equity", 0))
+    pnl = round(equity - start_balance, 2)
+
+    trades = _raw_fills_to_trades(fills)
+    total = len(trades)
+    wins = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
+    losses = total - wins
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    return {
+        "pnl": pnl,
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "tradovate_equity": round(equity, 2),
+    }
+
+
+def tradovate_performance_for_period(
+    fills: List[Dict[str, Any]],
+    start_utc: datetime,
+    end_utc: Optional[datetime] = None,
+    commission_per_trade: float = 0.0,
+) -> Dict[str, Any]:
+    """Build performance stats from Tradovate fills filtered to a time range.
+
+    Filters completed trades whose exit_time falls within ``[start_utc, end_utc)``.
+    ``commission_per_trade``: estimated round-turn commission to deduct per trade
+    (derived from equity vs fill P&L gap).
+    """
+    trades = _raw_fills_to_trades(fills)
+    filtered = []
+    for t in trades:
+        exit_ts = t.get("exit_time", "")
+        if not exit_ts:
+            continue
+        try:
+            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        if exit_dt < start_utc:
+            continue
+        if end_utc and exit_dt >= end_utc:
+            continue
+        filtered.append(t)
+
+    total = len(filtered)
+    wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
+    losses = total - wins
+    raw_pnl = sum(t.get("pnl") or 0 for t in filtered)
+    pnl = round(raw_pnl - (total * commission_per_trade), 2)
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    return {
+        "pnl": pnl,
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+    }
