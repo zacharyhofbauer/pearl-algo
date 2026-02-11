@@ -1154,6 +1154,7 @@ async def startup_event():
 
     _init_auth()
     _init_pearl_ai()
+    _init_accounts_config()
     _init_audit_router()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
@@ -2743,23 +2744,28 @@ def _get_error_summary(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def _get_accounts_config() -> Dict[str, Any]:
-    """Return account display config from service config (config-driven names)."""
+_accounts_config_cached: Optional[Dict[str, Any]] = None
+
+
+def _init_accounts_config() -> None:
+    """Load accounts config once at startup and cache it."""
+    global _accounts_config_cached
     try:
         from pearlalgo.config.config_loader import load_service_config
         svc_cfg = load_service_config()
         accounts = svc_cfg.get("accounts", {})
         if accounts:
-            return accounts
+            _accounts_config_cached = accounts
+            return
     except Exception:
         pass
     # Defaults if config not available
-    return {
+    _accounts_config_cached = {
         "inception": {
             "display_name": "IBKR Virtual",
             "badge": "VIRTUAL",
             "badge_color": "blue",
-            "telegram_prefix": "IBKR-V",
+            "telegram_prefix": "IBKR-VIR",
             "description": "Live market data from IBKR, virtual P&L tracking",
         },
         "mffu": {
@@ -2770,6 +2776,13 @@ def _get_accounts_config() -> Dict[str, Any]:
             "description": "Live paper trading on Tradovate (demo)",
         },
     }
+
+
+def _get_accounts_config() -> Dict[str, Any]:
+    """Return cached account display config (loaded once at startup)."""
+    if _accounts_config_cached is None:
+        _init_accounts_config()
+    return _accounts_config_cached or {}
 
 
 def _get_config(state: Dict[str, Any]) -> Dict[str, Any]:

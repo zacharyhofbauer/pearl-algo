@@ -24,6 +24,7 @@ _audit_logger = None
 # Simple TTL cache for historical queries
 _cache: Dict[str, tuple] = {}  # key -> (value, expiry_timestamp)
 _CACHE_TTL_SECONDS = 60.0
+_MAX_CACHE_SIZE = 500
 
 
 def set_audit_logger(audit_logger) -> None:
@@ -33,7 +34,7 @@ def set_audit_logger(audit_logger) -> None:
 
 
 def _cached(key: str, ttl: float, fn, *args, **kwargs):
-    """Simple TTL cache wrapper."""
+    """Simple TTL cache wrapper with max-size eviction."""
     now = time.monotonic()
     if key in _cache:
         value, expiry = _cache[key]
@@ -41,6 +42,11 @@ def _cached(key: str, ttl: float, fn, *args, **kwargs):
             return value
     result = fn(*args, **kwargs)
     _cache[key] = (result, now + ttl)
+    # Evict oldest entries if cache exceeds max size
+    if len(_cache) > _MAX_CACHE_SIZE:
+        keys_to_evict = sorted(_cache.keys(), key=lambda k: _cache[k][1])[:100]
+        for k in keys_to_evict:
+            _cache.pop(k, None)
     return result
 
 

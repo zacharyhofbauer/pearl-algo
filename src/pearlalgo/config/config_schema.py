@@ -472,7 +472,7 @@ class AccountsConfig(BaseModel):
             display_name="IBKR Virtual",
             badge="VIRTUAL",
             badge_color="blue",
-            telegram_prefix="IBKR-V",
+            telegram_prefix="IBKR-VIR",
             description="Live market data from IBKR, virtual P&L tracking",
         )
     )

@@ -97,15 +97,19 @@ class TestTradovateReconciliationDrift:
         assert result.status == "drift_detected"
 
     def test_small_drift_within_tolerance(self, engine, state_dir):
-        """Small drift within threshold should be within_tolerance."""
+        """Small drift within both absolute and percentage thresholds."""
+        # Agent: 5 trades totaling $1000 P&L, broker says $998 (drift=$2, pct=0.2%)
+        # Both within thresholds: abs($2) < $5 and 0.2% < 0.5%
         _write_fills(state_dir, [
-            {"action": "Buy", "price": 18500.0, "qty": 1, "timestamp": "2025-01-15T10:00:00Z"},
-            {"action": "Sell", "price": 18510.0, "qty": 1, "timestamp": "2025-01-15T10:30:00Z"},
+            {"action": "Buy", "price": 18000.0, "qty": 1, "timestamp": "2025-01-15T10:00:00Z"},
+            {"action": "Sell", "price": 18500.0, "qty": 1, "timestamp": "2025-01-15T10:30:00Z"},
         ])
-        _write_state(state_dir, {"tradovate_account": {"realized_pnl": 17.0}})
+        _write_state(state_dir, {"tradovate_account": {"realized_pnl": 998.0}})
 
         result = engine.reconcile("2025-01-15")
-        assert result.drift == 3.0
+        assert result.agent_pnl == 1000.0
+        assert result.broker_pnl == 998.0
+        assert result.drift == 2.0
         assert result.status == "within_tolerance"
 
 

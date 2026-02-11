@@ -437,21 +437,31 @@ class StateBuilder:
                         total_upnl = 0.0
                         for rec in active:
                             sig = rec.get("signal", {}) or {}
-                            direction = str(sig.get("direction") or "long").lower()
+                            # Direction & entry_price live at top-level on the record;
+                            # fall back to the nested signal dict for older formats.
+                            direction = str(
+                                sig.get("direction") or rec.get("direction") or "long"
+                            ).lower()
                             try:
-                                entry_price = float(sig.get("entry_price") or 0.0)
+                                entry_price = float(
+                                    rec.get("entry_price") or sig.get("entry_price") or 0.0
+                                )
                             except Exception as e:
                                 logger.warning(f"Failed to parse entry price for PnL computation: {e}")
                                 entry_price = 0.0
                             if entry_price <= 0:
                                 continue
                             try:
-                                tick_value = float(sig.get("tick_value") or 2.0)
+                                tick_value = float(
+                                    sig.get("tick_value") or rec.get("tick_value") or 2.0
+                                )
                             except Exception as e:
                                 logger.warning(f"Failed to parse tick value for PnL computation: {e}")
                                 tick_value = 2.0
                             try:
-                                position_size = float(sig.get("position_size") or 1.0)
+                                position_size = float(
+                                    sig.get("position_size") or rec.get("position_size") or 1.0
+                                )
                             except Exception as e:
                                 logger.warning(f"Failed to parse position size for PnL computation: {e}")
                                 position_size = 1.0

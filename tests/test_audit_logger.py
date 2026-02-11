@@ -75,7 +75,7 @@ class TestAuditLoggerSignalEvents:
             "confidence": 0.75,
             "trade_type": "scalp",
         })
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SIGNAL_GENERATED)
         assert len(events) >= 1
         data = events[0].get("data", {})
@@ -89,7 +89,7 @@ class TestAuditLoggerSignalEvents:
             "sig_002", "circuit_breaker:consecutive_losses",
             {"consecutive_losses": 3, "max_allowed": 3},
         )
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SIGNAL_REJECTED)
         assert len(events) >= 1
         data = events[0].get("data", {})
@@ -108,7 +108,7 @@ class TestAuditLoggerTradeEvents:
             "position_size": 2,
             "execution_status": "placed",
         })
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.TRADE_ENTERED)
         assert len(events) >= 1
         assert events[0]["data"]["direction"] == "short"
@@ -123,7 +123,7 @@ class TestAuditLoggerTradeEvents:
             "hold_duration_minutes": 12.5,
             "direction": "short",
         })
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.TRADE_EXITED)
         assert len(events) >= 1
         assert events[0]["data"]["pnl"] == 40.0
@@ -135,13 +135,13 @@ class TestAuditLoggerSystemEvents:
 
     def test_log_system_start(self, logger_started):
         logger_started.log_system_event(AuditEventType.SYSTEM_START, {"symbol": "MNQ"})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SYSTEM_START)
         assert len(events) >= 1
 
     def test_log_system_stop(self, logger_started):
         logger_started.log_system_event(AuditEventType.SYSTEM_STOP, {"reason": "shutdown"})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SYSTEM_STOP)
         assert len(events) >= 1
         assert events[0]["data"]["reason"] == "shutdown"
@@ -151,7 +151,7 @@ class TestAuditLoggerSystemEvents:
             AuditEventType.CONNECTION_DROP,
             {"connection_failures": 5, "cycle": 100},
         )
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.CONNECTION_DROP)
         assert len(events) >= 1
 
@@ -160,7 +160,7 @@ class TestAuditLoggerSystemEvents:
             account="tradovate_paper", equity=50250.0,
             cash_balance=50000.0, open_pnl=250.0, realized_pnl=150.0,
         )
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.EQUITY_SNAPSHOT)
         assert len(events) >= 1
         assert events[0]["data"]["equity"] == 50250.0
@@ -170,7 +170,7 @@ class TestAuditLoggerSystemEvents:
             account="tradovate_paper", agent_pnl=500.0,
             broker_pnl=495.0, drift=5.0, details={"threshold": 10.0},
         )
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.RECONCILIATION)
         assert len(events) >= 1
         assert events[0]["data"]["drift"] == 5.0
@@ -181,19 +181,19 @@ class TestAuditLoggerEdgeCases:
 
     def test_null_signal_id(self, logger_started):
         logger_started.log_signal_generated({"signal_id": None})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SIGNAL_GENERATED)
         assert len(events) >= 1
 
     def test_empty_details(self, logger_started):
         logger_started.log_signal_rejected("sig_005", "test_reason", {})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SIGNAL_REJECTED)
         assert len(events) >= 1
 
     def test_none_details(self, logger_started):
         logger_started.log_signal_rejected("sig_006", "test_reason", None)
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(event_type=AuditEventType.SIGNAL_REJECTED)
         assert len(events) >= 1
 
@@ -204,7 +204,7 @@ class TestAuditLoggerEdgeCases:
 
     def test_account_field_populated(self, logger_started):
         logger_started.log_system_event("test_event", {})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events()
         assert len(events) >= 1
         assert events[0]["account"] == "test_account"
@@ -215,7 +215,7 @@ class TestAuditLoggerQuery:
 
     def test_query_with_account_filter(self, logger_started):
         logger_started.log_system_event("test", {"data": 1})
-        time.sleep(1)
+        logger_started.flush()
         events = logger_started.query_events(account="test_account")
         assert len(events) >= 1
         events_other = logger_started.query_events(account="other_account")
@@ -224,7 +224,7 @@ class TestAuditLoggerQuery:
     def test_query_pagination(self, logger_started):
         for i in range(10):
             logger_started.log_system_event("paginate_test", {"i": i})
-        time.sleep(2)
+        logger_started.flush()
 
         page1 = logger_started.query_events(event_type="paginate_test", limit=3, offset=0)
         page2 = logger_started.query_events(event_type="paginate_test", limit=3, offset=3)
@@ -237,7 +237,7 @@ class TestAuditLoggerQuery:
     def test_count_events(self, logger_started):
         for i in range(5):
             logger_started.log_system_event("count_test", {"i": i})
-        time.sleep(2)
+        logger_started.flush()
         count = logger_started.count_events(event_type="count_test")
         assert count >= 5
 
@@ -249,7 +249,7 @@ class TestAuditLoggerRetention:
         al = AuditLogger(db_path=tmp_db, account="test", retention_days=0)
         al.start()
         al.log_system_event("old_event", {})
-        time.sleep(1)
+        al.flush()
         result = al.run_retention()
         assert result["deleted_general"] >= 1
         al.stop(timeout=2.0)
@@ -274,6 +274,6 @@ class TestAuditLoggerRapidWrites:
     def test_rapid_writes_persisted(self, logger_started):
         for i in range(100):
             logger_started.log_system_event("rapid_test", {"i": i})
-        time.sleep(5)
+        logger_started.flush()
         count = logger_started.count_events(event_type="rapid_test")
         assert count == 100, f"Expected 100 events, got {count}"

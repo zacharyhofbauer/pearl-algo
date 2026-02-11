@@ -288,11 +288,11 @@ class TestAccountLabel:
             service_config=svc_cfg,
         )
 
-        # The notifier should have been constructed with account_label="MFFU"
+        # The notifier should have been constructed with account_label="TV-PAPER"
         mock_tg_cls.assert_called_once()
         call_kwargs = mock_tg_cls.call_args
-        assert call_kwargs.kwargs.get("account_label") == "MFFU" or (
-            call_kwargs.args and "MFFU" in call_kwargs.args
+        assert call_kwargs.kwargs.get("account_label") == "TV-PAPER" or (
+            call_kwargs.args and "TV-PAPER" in call_kwargs.args
         )
 
     @pytest.mark.parametrize(
@@ -327,6 +327,6 @@ class TestAccountLabel:
 
         mock_tg_cls.assert_called_once()
         call_kwargs = mock_tg_cls.call_args
-        assert call_kwargs.kwargs.get("account_label") == "INCEPTION" or (
-            call_kwargs.args and "INCEPTION" in call_kwargs.args
+        assert call_kwargs.kwargs.get("account_label") == "IBKR-VIR" or (
+            call_kwargs.args and "IBKR-VIR" in call_kwargs.args
         )

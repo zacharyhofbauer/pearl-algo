@@ -40,7 +40,7 @@ class TestAccountsConfig:
         assert cfg.inception.display_name == "IBKR Virtual"
         assert cfg.inception.badge == "VIRTUAL"
         assert cfg.inception.badge_color == "blue"
-        assert cfg.inception.telegram_prefix == "IBKR-V"
+        assert cfg.inception.telegram_prefix == "IBKR-VIR"
 
     def test_default_mffu(self):
         cfg = AccountsConfig()

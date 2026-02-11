@@ -1,59 +1,137 @@
-"""Tests for Telegram account label configuration."""
+"""Tests for Telegram account label derivation logic.
 
-import pytest
+Uses mocks to avoid heavy dependencies from resolve_defaults().
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
+import pytest
 
-class TestServiceFactoryAccountLabels:
-    """Test that service factory uses config-driven Telegram labels."""
+from pearlalgo.market_agent.service_factory import (
+    ServiceDependencies,
+    build_service_dependencies,
+)
 
-    def test_inception_label_from_config(self):
-        """Inception account should use telegram_prefix from config."""
-        from pearlalgo.market_agent.service_factory import ServiceDependencies
 
-        deps = ServiceDependencies(
-            service_config={
-                "accounts": {
-                    "inception": {"telegram_prefix": "MY-IBKR"},
-                    "mffu": {"telegram_prefix": "MY-TV"},
-                },
-                "challenge": {"stage": ""},
-            },
-            telegram_bot_token="test",
-            telegram_chat_id="123",
+def _mock_data_provider() -> MagicMock:
+    dp = MagicMock()
+    dp.fetch_historical = MagicMock()
+    return dp
+
+
+def _minimal_config() -> MagicMock:
+    from pearlalgo.config.config_view import ConfigView
+    return ConfigView({"symbol": "MNQ", "timeframe": "5m"})
+
+
+def _stub_service_config(**overrides: Any) -> Dict[str, Any]:
+    cfg: Dict[str, Any] = {
+        "challenge": {"stage": "inception"},
+        "telegram": {"notification_tier": "important"},
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+class TestTelegramAccountLabels:
+    """Test that the factory derives correct Telegram account labels."""
+
+    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
+    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
+    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
+    def test_inception_account_gets_ibkr_vir_label(
+        self,
+        mock_fetcher_cls,
+        mock_state_mgr_cls,
+        mock_perf_cls,
+        mock_tg_cls,
+        mock_nq_cls,
+        mock_health_cls,
+        tmp_path: Path,
+    ) -> None:
+        """Inception account should produce the IBKR-VIR label."""
+        svc_cfg = _stub_service_config(challenge={"stage": "inception"})
+
+        build_service_dependencies(
+            data_provider=_mock_data_provider(),
+            config=_minimal_config(),
+            state_dir=tmp_path,
+            service_config=svc_cfg,
         )
-        deps.resolve_defaults()
-        # The account label should come from config
-        assert deps.telegram_notifier.account_label == "MY-IBKR"
 
-    def test_mffu_label_from_config(self):
-        """MFFU account should use telegram_prefix from config."""
-        from pearlalgo.market_agent.service_factory import ServiceDependencies
-
-        deps = ServiceDependencies(
-            service_config={
-                "accounts": {
-                    "inception": {"telegram_prefix": "MY-IBKR"},
-                    "mffu": {"telegram_prefix": "MY-TV"},
-                },
-                "challenge": {"stage": "mffu_eval"},
-            },
-            telegram_bot_token="test",
-            telegram_chat_id="123",
+        mock_tg_cls.assert_called_once()
+        call_kwargs = mock_tg_cls.call_args
+        assert call_kwargs.kwargs.get("account_label") == "IBKR-VIR" or (
+            call_kwargs.args and "IBKR-VIR" in call_kwargs.args
         )
-        deps.resolve_defaults()
-        assert deps.telegram_notifier.account_label == "MY-TV"
 
-    def test_default_labels_without_config(self):
-        """Without accounts config, should use default labels."""
-        from pearlalgo.market_agent.service_factory import ServiceDependencies
+    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
+    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
+    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
+    def test_mffu_account_gets_tv_paper_label(
+        self,
+        mock_fetcher_cls,
+        mock_state_mgr_cls,
+        mock_perf_cls,
+        mock_tg_cls,
+        mock_nq_cls,
+        mock_health_cls,
+        tmp_path: Path,
+    ) -> None:
+        """MFFU account should produce the TV-PAPER label."""
+        svc_cfg = _stub_service_config(challenge={"stage": "mffu_eval"})
 
-        deps = ServiceDependencies(
-            service_config={
-                "challenge": {"stage": ""},
-            },
-            telegram_bot_token="test",
-            telegram_chat_id="123",
+        build_service_dependencies(
+            data_provider=_mock_data_provider(),
+            config=_minimal_config(),
+            state_dir=tmp_path,
+            service_config=svc_cfg,
         )
-        deps.resolve_defaults()
-        assert deps.telegram_notifier.account_label == "IBKR-V"
+
+        mock_tg_cls.assert_called_once()
+        call_kwargs = mock_tg_cls.call_args
+        assert call_kwargs.kwargs.get("account_label") == "TV-PAPER" or (
+            call_kwargs.args and "TV-PAPER" in call_kwargs.args
+        )
+
+    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
+    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
+    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
+    def test_no_accounts_config_falls_back_to_ibkr_vir(
+        self,
+        mock_fetcher_cls,
+        mock_state_mgr_cls,
+        mock_perf_cls,
+        mock_tg_cls,
+        mock_nq_cls,
+        mock_health_cls,
+        tmp_path: Path,
+    ) -> None:
+        """Without accounts config, the label should fall back to IBKR-VIR."""
+        svc_cfg = _stub_service_config(challenge={"stage": ""})
+
+        build_service_dependencies(
+            data_provider=_mock_data_provider(),
+            config=_minimal_config(),
+            state_dir=tmp_path,
+            service_config=svc_cfg,
+        )
+
+        mock_tg_cls.assert_called_once()
+        call_kwargs = mock_tg_cls.call_args
+        assert call_kwargs.kwargs.get("account_label") == "IBKR-VIR" or (
+            call_kwargs.args and "IBKR-VIR" in call_kwargs.args
+        )

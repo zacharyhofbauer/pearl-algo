@@ -372,8 +372,76 @@ def main() -> int:
         return 0
 
 
+def check_stale_display_names() -> int:
+    """Check for hardcoded old account display names in source files.
+
+    Returns the number of violations found.
+
+    Old names that should NOT appear as display text:
+    - "Inception" (display label -- NOT variable/dir names like _inception, inception/)
+    - "MFFU 50K" (display label)
+    - "MFFU Eval" (display label -- NOT file names like mffu_eval.yaml)
+    """
+    import re
+
+    violations = 0
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    src_dir = repo_root / "src" / "pearlalgo"
+    web_dir = repo_root / "pearlalgo_web_app"
+
+    # Patterns to flag (only in display/label contexts, not variables/paths)
+    stale_patterns = [
+        # Match quoted string containing "Inception" as a display label
+        (re.compile(r"""['"]Inception['"]"""), "Inception"),
+        # Match "MFFU 50K" anywhere
+        (re.compile(r"MFFU 50K"), "MFFU 50K"),
+        # Match "MFFU Eval" as display label (not mffu_eval or MFFU_EVAL)
+        (re.compile(r"MFFU Eval"), "MFFU Eval"),
+    ]
+
+    # Files to exclude (migration notes, comments explaining the rename)
+    exclude_patterns = {
+        "check_architecture_boundaries.py",  # this file
+    }
+
+    search_dirs = []
+    if src_dir.exists():
+        search_dirs.append(("src/pearlalgo", src_dir, "**/*.py"))
+    if web_dir.exists():
+        search_dirs.append(("pearlalgo_web_app", web_dir, "**/*.tsx"))
+        search_dirs.append(("pearlalgo_web_app", web_dir, "**/*.ts"))
+
+    for label, search_dir, glob_pattern in search_dirs:
+        for file_path in search_dir.glob(glob_pattern):
+            if file_path.name in exclude_patterns:
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                for pattern, name in stale_patterns:
+                    for match in pattern.finditer(content):
+                        line_num = content[:match.start()].count("\n") + 1
+                        rel_path = file_path.relative_to(repo_root)
+                        print(f"  STALE NAME: {rel_path}:{line_num} -- found '{name}'")
+                        violations += 1
+            except Exception:
+                pass
+
+    return violations
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    # Run architecture boundary checks
+    exit_code = main()
+
+    # Also run stale display name check
+    stale_count = check_stale_display_names()
+    if stale_count > 0:
+        print(f"\nSTALE NAMES: Found {stale_count} hardcoded old display names.")
+        print("Replace 'Inception' with 'IBKR Virtual', 'MFFU 50K/Eval' with 'Tradovate Paper'.")
+        if "--enforce" in sys.argv:
+            exit_code = max(exit_code, 1)
+
+    sys.exit(exit_code)
 
 
 

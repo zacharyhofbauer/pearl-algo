@@ -12,9 +12,9 @@ This repo is a **trading platform** with three hard requirements:
 - **Market data**: `src/pearlalgo/data_providers/` (IBKR provider + executor)
 - **Strategy**: `src/pearlalgo/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
 - **Execution adapters**:
-  - `src/pearlalgo/execution/ibkr/` (IBKR -- inception account)
-  - `src/pearlalgo/execution/tradovate/` (Tradovate -- MFFU prop firm account)
-- **MFFU tracker**: `src/pearlalgo/market_agent/mffu_eval_tracker.py` (prop firm rule enforcement)
+  - `src/pearlalgo/execution/ibkr/` (IBKR -- IBKR Virtual account)
+  - `src/pearlalgo/execution/tradovate/` (Tradovate -- Tradovate Paper account)
+- **Eval tracker**: `src/pearlalgo/market_agent/mffu_eval_tracker.py` (prop firm rule enforcement)
 - **Ops/UI**: Telegram notifier + command handler, Web app (pearlalgo.io)
 
 ### Two accounts
@@ -23,12 +23,12 @@ Pearl runs two isolated accounts simultaneously:
 
 | Account | Purpose | Execution | State Dir | API Port |
 |---------|---------|-----------|-----------|----------|
-| **Inception** | Since-inception data collection | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
-| **MFFU Eval** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/MFFU_EVAL/` | 8001 |
+| **IBKR Virtual** | Since-inception data collection | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
+| **Tradovate Paper** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/MFFU_EVAL/` | 8001 |
 
-**Signal flow**: Inception generates all signals via `strategy.analyze()`. MFFU reads signals from `data/shared_signals.jsonl` (written by inception) instead of running its own strategy. This guarantees both accounts trade the same signals. MFFU's circuit breaker eval gate still enforces prop firm rules (max contracts, trading hours, hedging, news blackout).
+**Signal flow**: IBKR Virtual generates all signals via `strategy.analyze()`. Tradovate Paper reads signals from `data/shared_signals.jsonl` (written by IBKR Virtual) instead of running its own strategy. This guarantees both accounts trade the same signals. Tradovate Paper's circuit breaker eval gate still enforces prop firm rules (max contracts, trading hours, hedging, news blackout).
 
-**Isolation rule**: `config/config.yaml` changes affect inception only. `config/markets/mffu_eval.yaml` changes affect MFFU only. `service.py` code changes affect both (MFFU-specific paths are gated by `self._mffu_enabled`).
+**Isolation rule**: `config/config.yaml` changes affect IBKR Virtual only. `config/markets/mffu_eval.yaml` changes affect Tradovate Paper only. `service.py` code changes affect both (Tradovate Paper-specific paths are gated by `self._mffu_enabled`).
 
 ### Quick operational checklist
 
@@ -43,19 +43,19 @@ Pearl runs two isolated accounts simultaneously:
 
 ### Web app (pearlalgo.io)
 
-- Hard refresh shows account selector (Inception vs MFFU)
+- Hard refresh shows account selector (IBKR Virtual vs Tradovate Paper)
 - Header dropdown to switch accounts anytime
-- `pearlalgo.io` = inception, `pearlalgo.io?account=mffu` = MFFU
+- `pearlalgo.io` = IBKR Virtual, `pearlalgo.io?account=mffu` = Tradovate Paper
 
 ### Telegram
 
-- `/start` shows both accounts (inception + MFFU section)
-- `[MFFU]` prefix on all MFFU notifications
+- `/start` shows both accounts (IBKR Virtual + Tradovate Paper section)
+- `[TV-PAPER]` prefix on all Tradovate Paper notifications
 
 ### Configuration
 
-- `config/config.yaml` (inception base config)
-- `config/markets/mffu_eval.yaml` (MFFU overlay)
+- `config/config.yaml` (IBKR Virtual base config)
+- `config/markets/mffu_eval.yaml` (Tradovate Paper overlay)
 - `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
 
 ### Where to go next

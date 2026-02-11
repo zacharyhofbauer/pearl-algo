@@ -26,18 +26,18 @@ interface AccountOption {
 const ACCOUNT_DEFAULTS: AccountOption[] = [
   {
     id: 'inception',
-    label: 'Inception',
-    description: 'Since-inception data collection and monitoring',
+    label: 'IBKR Virtual',
+    description: 'Live market data from IBKR, virtual P&L tracking',
     param: null,
-    badge: 'LIVE',
-    badgeColor: 'var(--accent-green, #00e676)',
+    badge: 'VIRTUAL',
+    badgeColor: 'var(--accent-blue, #448aff)',
   },
   {
     id: 'mffu_eval',
-    label: 'MFFU 50K Eval',
-    description: 'Prop firm evaluation on Tradovate paper',
+    label: 'Tradovate Paper',
+    description: 'Live paper trading on Tradovate (demo)',
     param: 'mffu',
-    badge: 'EVAL',
+    badge: 'PAPER',
     badgeColor: 'var(--accent-purple, #7c4dff)',
   },
 ]

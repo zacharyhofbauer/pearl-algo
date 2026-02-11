@@ -128,7 +128,7 @@ class ServiceDependencies:
             if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
                 account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
             else:
-                account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-V")
+                account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-VIR")
             self.telegram_notifier = MarketAgentTelegramNotifier(
                 bot_token=self.telegram_bot_token,
                 chat_id=self.telegram_chat_id,
@@ -211,7 +211,7 @@ def build_service_dependencies(
     if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
         account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
     else:
-        account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-V")
+        account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-VIR")
 
     telegram_notifier = MarketAgentTelegramNotifier(
         bot_token=telegram_bot_token,

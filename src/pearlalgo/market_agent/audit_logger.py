@@ -91,6 +91,7 @@ class AuditLogger:
         self._total_writes = 0
         self._total_drops = 0
         self._total_errors = 0
+        self._total_enqueued = 0  # Total events enqueued (for flush synchronization)
 
         # Schema initialisation (runs on the calling thread -- fast, once)
         self._init_schema()
@@ -128,6 +129,21 @@ class AuditLogger:
             if self._worker_thread.is_alive():
                 logger.warning("AuditLogger worker did not stop within timeout")
         self._running = False
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Block until all enqueued events have been written or errored (for tests).
+
+        Waits until total_writes + total_errors >= total_enqueued, meaning
+        the worker has processed every event that was put on the queue.
+        """
+        if not self._running:
+            return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            processed = self._total_writes + self._total_errors
+            if processed >= self._total_enqueued and self._queue.empty():
+                return
+            time.sleep(0.05)
 
     # ------------------------------------------------------------------
     # Typed event methods (public API)
@@ -464,6 +480,9 @@ class AuditLogger:
 
         Never raises -- audit logging must not crash the trading loop.
         """
+        if not self._running:
+            self._total_drops += 1
+            return
         try:
             event = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -473,6 +492,7 @@ class AuditLogger:
                 "source": source,
             }
             self._queue.put_nowait(event)
+            self._total_enqueued += 1
         except queue.Full:
             self._total_drops += 1
             logger.warning(
@@ -483,8 +503,12 @@ class AuditLogger:
             self._total_drops += 1
             logger.warning(f"AuditLogger enqueue error: {e}")
 
+    # Batch commit settings
+    _BATCH_SIZE = 10       # Commit after this many INSERTs
+    _BATCH_TIMEOUT = 2.0   # Commit after this many seconds even if batch is small
+
     def _worker_loop(self) -> None:
-        """Background thread: drain queue and write to SQLite."""
+        """Background thread: drain queue and write to SQLite with batch commits."""
         logger.debug("AuditLogger worker loop started")
         conn: Optional[sqlite3.Connection] = None
 
@@ -494,14 +518,22 @@ class AuditLogger:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA busy_timeout=5000")
 
+            pending = 0
+            last_commit = time.monotonic()
+
             while not self._shutdown_event.is_set():
                 try:
                     event = self._queue.get(timeout=0.5)
                 except queue.Empty:
+                    # No new event -- check if we should commit a partial batch
+                    if pending > 0 and (time.monotonic() - last_commit) >= self._BATCH_TIMEOUT:
+                        conn.commit()
+                        self._total_writes += pending
+                        pending = 0
+                        last_commit = time.monotonic()
                     continue
 
                 if event is None:
-                    # Poison pill
                     break
 
                 try:
@@ -517,11 +549,23 @@ class AuditLogger:
                             event["source"],
                         ),
                     )
-                    conn.commit()
-                    self._total_writes += 1
+                    pending += 1
                 except Exception as e:
                     self._total_errors += 1
                     logger.debug(f"AuditLogger write error (non-fatal): {e}")
+
+                # Commit when batch is full or timeout elapsed
+                if pending >= self._BATCH_SIZE or (time.monotonic() - last_commit) >= self._BATCH_TIMEOUT:
+                    conn.commit()
+                    self._total_writes += pending
+                    pending = 0
+                    last_commit = time.monotonic()
+
+            # Commit any remaining in the partial batch
+            if pending > 0:
+                conn.commit()
+                self._total_writes += pending
+                pending = 0
 
             # Flush remaining on shutdown
             flushed = 0

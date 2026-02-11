@@ -111,8 +111,11 @@ except ImportError:
     WebAppInfo = None  # type: ignore[assignment]
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
+from pearlalgo.market_agent.telegram_audit_commands import TelegramAuditCommandsMixin
+
 
 class TelegramCommandHandler(
+    TelegramAuditCommandsMixin,
     TelegramConfigCommandsMixin,
     TelegramStatusCommandsMixin,
     TelegramTradeCommandsMixin,
@@ -137,6 +140,8 @@ class TelegramCommandHandler(
         self.active_market = "NQ"
         self._repo_root = self._get_repo_root()
         self._knowledge_retriever = None
+        self._audit_logger = None  # Set via set_audit_logger() after construction
+        self._notifier_account_label = None  # Set from service/notifier for config-driven labels
 
         # If a state_dir is explicitly provided, honor it (single-market/pinned use).
         # Otherwise, default to per-market state under <repo>/data/agent_state/<MARKET>.
@@ -466,6 +471,9 @@ class TelegramCommandHandler(
                 [
                     InlineKeyboardButton(health_label, callback_data="menu:status"),
                     InlineKeyboardButton(settings_label, callback_data="menu:settings"),
+                ],
+                [
+                    InlineKeyboardButton("📋 Audit", callback_data="menu:audit"),
                 ],
             ]
         )
@@ -1152,6 +1160,8 @@ class TelegramCommandHandler(
                 await self._show_system_menu(query)
             elif action == "settings":
                 await self._show_settings_menu(query)
+            elif action == "audit":
+                await self._handle_audit_menu(query, int(self.chat_id))
             elif action == "help":
                 await self._show_help(query)
             else:
@@ -2925,6 +2935,24 @@ class TelegramCommandHandler(
                 await self._show_risk_report(query)
                 return
 
+            # Audit commands (from TelegramAuditCommandsMixin)
+            if action_type.startswith("audit_"):
+                audit_action = action_type[6:]  # Strip "audit_" prefix
+                if audit_action.startswith("trades"):
+                    period = audit_action.replace("trades_", "") or "7d"
+                    await self._handle_audit_trades(query, period=period)
+                elif audit_action.startswith("signals"):
+                    period = audit_action.replace("signals_", "") or "7d"
+                    await self._handle_audit_signals(query, period=period)
+                elif audit_action.startswith("health"):
+                    period = audit_action.replace("health_", "") or "7d"
+                    await self._handle_audit_health(query, period=period)
+                elif audit_action == "reconcile":
+                    await self._handle_audit_reconcile(query)
+                else:
+                    await self._handle_audit_menu(query, int(self.chat_id))
+                return
+
             # Alert mode presets (settings menu)
             if action_type.startswith("set_alert_mode:"):
                 mode = action_type.split(":", 1)[1]
@@ -4105,18 +4133,10 @@ class TelegramCommandHandler(
             # AI readiness - always True (legacy field, AI features integrated)
             ai_ready = True
 
-            # Derive account label from challenge stage config
-            _acct_label = None
-            try:
-                _ch_state = self.state_dir / "challenge_state.json"
-                if _ch_state.exists():
-                    import json as _json
-                    _ch = _json.loads(_ch_state.read_text())
-                    _stage = (_ch.get("mffu", {}) or {}).get("stage") or (_ch.get("config", {}) or {}).get("stage")
-                    if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
-                        _acct_label = "MFFU"
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}", exc_info=True)
+            # Derive account label from notifier (config-driven via service_factory)
+            _acct_label = getattr(self, "_notifier_account_label", None)
+            if _acct_label is None:
+                _acct_label = getattr(getattr(self, "telegram_notifier", None), "account_label", None)
 
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
@@ -4457,7 +4477,8 @@ class TelegramCommandHandler(
 
                                 message += "\n\n"
                                 message += "━━━━━━━━━━━━━━━━━━━━━\n"
-                                message += "🏆 *MFFU 50K Eval*\n"
+                                _challenge_display = _acct_label or "Tradovate Paper"
+                                message += f"🏆 *{_challenge_display} Eval*\n"
                                 message += f"Balance: `${_balance:,.2f}` | {_pnl_emoji} {_pnl_sign}${_pnl:,.2f}\n"
                                 if _outcome == "active":
                                     message += f"Target: {_progress:.0f}% (${_pnl:,.0f}/${_target:,.0f})\n"

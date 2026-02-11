@@ -137,7 +137,7 @@ if [ "$COMMAND" = "status" ]; then
         echo "Agent: stopped | API (:${API_PORT}): running | State: $STATE_DIR"
         exit 0
     else
-        echo "MFFU Eval instance not running"
+        echo "Tradovate Paper instance not running"
         exit 1
     fi
 fi
@@ -214,10 +214,10 @@ do_stop() {
 if [ "$COMMAND" = "stop" ]; then
     RESULT=$(do_stop)
     if [ "$RESULT" = "true" ]; then
-        echo "MFFU Eval instance stopped"
+        echo "Tradovate Paper instance stopped"
         exit 0
     fi
-    echo "MFFU Eval instance not running"
+    echo "Tradovate Paper instance not running"
     exit 0
 fi
 
@@ -225,7 +225,7 @@ fi
 # Restart command: stop everything, then start
 # ---------------------------------------------------------------------------
 if [ "$COMMAND" = "restart" ]; then
-    echo "Restarting MFFU Eval instance..."
+    echo "Restarting Tradovate Paper instance..."
     do_stop > /dev/null
     sleep 1
     # Fall through to start
@@ -241,7 +241,7 @@ if [ "$COMMAND" = "api" ]; then
     kill_port_holders "$API_PORT"
     rm -f "$API_PID_FILE"
 
-    echo "Starting MFFU Eval API Server"
+    echo "Starting Tradovate Paper API Server"
     echo "  State dir: $STATE_DIR"
     echo "  Port:      $API_PORT"
     echo "  Market:    $MARKET"
@@ -287,7 +287,7 @@ kill_port_holders "$API_PORT"
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if ps -p "$PID" > /dev/null 2>&1; then
-        echo "MFFU Eval agent already running (PID: $PID). Use 'restart' to replace."
+        echo "Tradovate Paper agent already running (PID: $PID). Use 'restart' to replace."
         exit 1
     else
         rm -f "$PID_FILE"
@@ -295,7 +295,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 rm -f "$API_PID_FILE"
 
-echo "Starting MFFU Eval Instance"
+echo "Starting Tradovate Paper Instance"
 echo "  State dir:  $STATE_DIR"
 echo "  API port:   $API_PORT"
 echo "  Market:     $MARKET"
@@ -318,7 +318,7 @@ if [ "$BACKGROUND_MODE" = true ]; then
     AGENT_PID=$!
     echo $AGENT_PID > "$PID_FILE"
     echo "  Agent PID:      $AGENT_PID"
-    echo "MFFU Eval instance started in background"
+    echo "Tradovate Paper instance started in background"
     exit 0
 fi
 
@@ -329,7 +329,7 @@ API_PID=$!
 echo $API_PID > "$API_PID_FILE"
 echo "  API server started (PID: $API_PID)"
 
-echo "=== Starting MFFU Eval Agent (Foreground) ==="
+echo "=== Starting Tradovate Paper Agent (Foreground) ==="
 echo "  Press Ctrl+C to stop"
 
 "$PYTHON_CMD" -m pearlalgo.market_agent.main &

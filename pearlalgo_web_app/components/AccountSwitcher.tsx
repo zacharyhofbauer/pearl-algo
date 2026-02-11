@@ -21,18 +21,18 @@ interface AccountDef {
 const ACCOUNT_DEFAULTS: AccountDef[] = [
   {
     id: 'inception',
-    label: 'Inception',
-    shortLabel: 'INC',
+    label: 'IBKR Virtual',
+    shortLabel: 'IBKR',
     accountParam: null, // default (no ?account param)
-    badge: 'LIVE',
-    badgeColor: 'var(--color-green, #00e676)',
+    badge: 'VIRTUAL',
+    badgeColor: 'var(--color-blue, #448aff)',
   },
   {
     id: 'mffu_eval',
-    label: 'Prop Firm - MFFU Eval',
-    shortLabel: 'MFFU',
+    label: 'Tradovate Paper',
+    shortLabel: 'TV',
     accountParam: 'mffu',
-    badge: 'EVAL',
+    badge: 'PAPER',
     badgeColor: 'var(--color-accent, #7c4dff)',
   },
 ]
