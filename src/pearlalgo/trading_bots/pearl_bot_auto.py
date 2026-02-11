@@ -1308,17 +1308,22 @@ def _calculate_indicators(
                            atr=atr, atr_series=atr_series, ema_fast=ema_fast, ema_slow=ema_slow,
                            vwap_series=vwap_series, vwap_val=vwap_val)
 
-    vol_signal, vol_conf = safe_check(check_volume_confirmation, ctx)
+    vol_signal, vol_conf = safe_check(check_volume_confirmation, ctx.df, ctx.config)
     volume_confirmed = vol_signal is not None
 
-    sr_signal, sr_conf = safe_check(check_sr_signals, ctx)
-    tbt_signal, tbt_conf = safe_check(check_tbt_signals, ctx)
-    sd_signal, sd_conf = safe_check(check_supply_demand_signals, ctx)
+    sr_signal, sr_conf = safe_check(check_sr_signals, ctx.df, ctx.config)
+    tbt_signal, tbt_conf = safe_check(check_tbt_signals, ctx.df, ctx.config)
+    sd_signal, sd_conf = safe_check(check_supply_demand_signals, ctx.df, ctx.config)
 
     key_levels = get_key_levels(df) if len(df) >= 5 else {}
     kl_signal, kl_conf = (None, 0.0)
     if key_levels:
-        kl_signal, kl_conf = safe_check(check_key_level_signals, close, key_levels, config)
+        try:
+            result = check_key_level_signals(df, key_levels, config)
+            if result and len(result) >= 2:
+                kl_signal, kl_conf = result[0], result[1]
+        except Exception:
+            kl_signal, kl_conf = (None, 0.0)
 
     vwap_band_signal: Optional[str] = None
     try:
@@ -1343,7 +1348,7 @@ def _calculate_indicators(
     # Aggressive triggers (optional)
     vwap_cross_sig = vwap_retest_sig = trend_brk_sig = trend_mom_sig = None
     if params.allow_vwap_cross_entries and vwap_val is not None:
-        vc_sig, _ = safe_check(detect_vwap_cross, df, vwap_series)
+        vc_sig, _ = safe_check(detect_vwap_cross, df, vwap_series=vwap_series)
         vwap_cross_sig = vc_sig
     if params.allow_vwap_retest_entries and vwap_val is not None:
         if (prev_close < vwap_val and close > vwap_val):
