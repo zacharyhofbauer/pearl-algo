@@ -124,7 +124,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
   const gapFromPeak = peakBalance - challenge.current_balance
 
   const mffu = challenge.mffu
-  const panelTitle = mffu ? `MFFU ${mffu.stage === 'evaluation' ? 'Eval' : mffu.stage === 'sim_funded' ? 'Sim' : 'Live'}` : 'Challenge'
+  const panelTitle = mffu ? (mffu.stage === 'evaluation' ? 'Tradovate Paper Eval' : mffu.stage === 'sim_funded' ? 'TV Paper SIM' : 'TV Paper LIVE') : 'Challenge'
 
   return (
     <DataPanel title={panelTitle} className="challenge-panel" variant="feature">
@@ -256,7 +256,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
           </div>
         )}
 
-        {/* MFFU-specific info */}
+        {/* TV Paper-specific info */}
         {mffu && (
           <div className="grid grid-cols-3 gap-sm">
             <StatDisplay

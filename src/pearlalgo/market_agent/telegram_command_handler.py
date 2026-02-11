@@ -136,7 +136,7 @@ class TelegramCommandHandler(
             raise ImportError("python-telegram-bot required for command handler")
         self.bot_token = bot_token
         self.chat_id = str(chat_id)
-        self._available_markets = ["NQ", "ES", "GC", "MFFU_EVAL"]
+        self._available_markets = ["NQ", "ES", "GC", "TV_PAPER_EVAL"]
         self.active_market = "NQ"
         self._repo_root = self._get_repo_root()
         self._knowledge_retriever = None
@@ -3508,9 +3508,9 @@ class TelegramCommandHandler(
 
             elif confirm_action == "reset_challenge":
                 try:
-                    if self._detect_mffu_account():
-                        from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
-                        tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
+                    if self._detect_tv_paper_account():
+                        from pearlalgo.market_agent.tv_paper_eval_tracker import TvPaperEvalTracker
+                        tracker = TvPaperEvalTracker(state_dir=self.state_dir)
                         tracker.reset_attempt(reason="telegram_reset")
                         attempt = tracker.current_attempt
                         keyboard = [
@@ -3518,7 +3518,7 @@ class TelegramCommandHandler(
                             self._nav_back_row(),
                         ]
                         await query.edit_message_text(
-                            f"✅ MFFU Challenge Reset Complete\n\n"
+                            f"✅ Tradovate Paper Challenge Reset Complete\n\n"
                             f"New attempt started: #{attempt.attempt_id}\n\n"
                             f"Starting Balance: $50,000\n"
                             f"Profit Target: +$3,000\n"
@@ -3526,7 +3526,7 @@ class TelegramCommandHandler(
                             f"Previous attempt saved to history.",
                             reply_markup=InlineKeyboardMarkup(keyboard)
                         )
-                        logger.info(f"MFFU challenge reset via Telegram: attempt #{attempt.attempt_id}")
+                        logger.info(f"Tradovate Paper challenge reset via Telegram: attempt #{attempt.attempt_id}")
                     else:
                         from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                         challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
@@ -4075,28 +4075,28 @@ class TelegramCommandHandler(
                 logger.debug(f"Non-critical: {e}", exc_info=True)
                 agent_healthy = None
             
-            # Challenge tracker for inception is disabled (MFFU has its own tracker).
+            # Challenge tracker for IBKR Virtual is disabled (Tradovate Paper has its own tracker).
             # Skip the 50k Challenge section entirely when challenge.enabled=false.
             challenge_status = None
             challenge_tracker_instance = None
-            _skip_inception_challenge = True
+            _skip_ibkr_virtual_challenge = True
             try:
                 challenge_state_file = self.state_dir / "challenge_state.json"
                 if challenge_state_file.exists():
                     import json as _cjson
                     _cdata = _cjson.loads(challenge_state_file.read_text())
                     _cenabled = (_cdata.get("config") or {}).get("enabled", False)
-                    # Only show if explicitly enabled AND not an MFFU tracker
+                    # Only show if explicitly enabled AND not an Tradovate Paper tracker
                     _cstage = (_cdata.get("config") or {}).get("stage") or (_cdata.get("mffu") or {}).get("stage")
                     if _cenabled and not _cstage:
-                        _skip_inception_challenge = False
+                        _skip_ibkr_virtual_challenge = False
                 else:
-                    _skip_inception_challenge = True
+                    _skip_ibkr_virtual_challenge = True
             except Exception as e:
                 logger.debug(f"Non-critical: {e}", exc_info=True)
-                _skip_inception_challenge = True
+                _skip_ibkr_virtual_challenge = True
 
-            if not _skip_inception_challenge:
+            if not _skip_ibkr_virtual_challenge:
                 try:
                     from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
@@ -4377,9 +4377,9 @@ class TelegramCommandHandler(
             except Exception as e:
                 logger.debug(f"Could not load 30d performance: {e}", exc_info=True)
             
-            # Inception 50k Challenge section: only show if challenge.enabled=true
-            # (disabled now -- MFFU eval is shown via the MFFU API section below)
-            if not _skip_inception_challenge and challenge_status:
+            # IBKR Virtual 50k Challenge section: only show if challenge.enabled=true
+            # (disabled now -- Tradovate Paper eval is shown via the Tradovate Paper API section below)
+            if not _skip_ibkr_virtual_challenge and challenge_status:
                 message += "\n\n" + challenge_status
 
             # Recent exits (from state or fallback to signals.jsonl)
@@ -4443,34 +4443,34 @@ class TelegramCommandHandler(
             # The header already shows "X Active | $Y.YY" which provides quick visibility
 
             # ==========================================================================
-            # MFFU EVAL ACCOUNT (query from port 8001 if running)
+            # Tradovate Paper EVAL ACCOUNT (query from port 8001 if running)
             # ==========================================================================
             try:
                 import aiohttp as _aiohttp
-                _mffu_headers = {}
-                _mffu_api_key = os.getenv("PEARL_API_KEY") or ""
-                if _mffu_api_key:
-                    _mffu_headers["X-API-Key"] = _mffu_api_key
+                _tv_paper_headers = {}
+                _tv_paper_api_key = os.getenv("PEARL_API_KEY") or ""
+                if _tv_paper_api_key:
+                    _tv_paper_headers["X-API-Key"] = _tv_paper_api_key
                 async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=3)) as _sess:
-                    async with _sess.get("http://localhost:8001/api/state", headers=_mffu_headers) as _resp:
+                    async with _sess.get("http://localhost:8001/api/state", headers=_tv_paper_headers) as _resp:
                         if _resp.status == 200:
-                            _mffu_data = await _resp.json()
-                            _mffu_ch = _mffu_data.get("challenge")
-                            if _mffu_ch and _mffu_ch.get("enabled"):
-                                _m = _mffu_ch.get("mffu", {}) or {}
-                                _balance = _mffu_ch.get("current_balance", 0)
-                                _pnl = _mffu_ch.get("pnl", 0)
-                                _target = _mffu_ch.get("profit_target", 3000)
+                            _tv_paper_data = await _resp.json()
+                            _tv_paper_ch = _tv_paper_data.get("challenge")
+                            if _tv_paper_ch and _tv_paper_ch.get("enabled"):
+                                _m = _tv_paper_ch.get("mffu", {}) or {}
+                                _balance = _tv_paper_ch.get("current_balance", 0)
+                                _pnl = _tv_paper_ch.get("pnl", 0)
+                                _target = _tv_paper_ch.get("profit_target", 3000)
                                 _floor = _m.get("current_drawdown_floor", 48000)
                                 _locked = _m.get("drawdown_locked", False)
                                 _days_done = (_m.get("min_days") or {}).get("days_traded", 0)
                                 _days_req = (_m.get("min_days") or {}).get("days_required", 2)
                                 _consist = (_m.get("consistency") or {}).get("met", True)
-                                _trades = _mffu_ch.get("trades", 0)
-                                _wins = _mffu_ch.get("wins", 0)
+                                _trades = _tv_paper_ch.get("trades", 0)
+                                _wins = _tv_paper_ch.get("wins", 0)
                                 _losses = _trades - _wins
-                                _wr = _mffu_ch.get("win_rate", 0)
-                                _outcome = _mffu_ch.get("outcome", "active")
+                                _wr = _tv_paper_ch.get("win_rate", 0)
+                                _outcome = _tv_paper_ch.get("outcome", "active")
                                 _pnl_emoji = "🟢" if _pnl >= 0 else "🔴"
                                 _pnl_sign = "+" if _pnl >= 0 else ""
                                 _progress = min(100, max(0, (_pnl / _target * 100))) if _target > 0 else 0
@@ -4479,6 +4479,10 @@ class TelegramCommandHandler(
                                 message += "━━━━━━━━━━━━━━━━━━━━━\n"
                                 _challenge_display = _acct_label or "Tradovate Paper"
                                 message += f"🏆 *{_challenge_display} Eval*\n"
+                                _tv_paper_exec = (_tv_paper_data.get("execution") or {})
+                                _tv_paper_conn = _tv_paper_exec.get("connected", False)
+                                _tv_paper_conn_label = "🟢 CONNECTED" if _tv_paper_conn else "🔴 DISCONNECTED"
+                                message += f"Execution: {_tv_paper_conn_label}\n"
                                 message += f"Balance: `${_balance:,.2f}` | {_pnl_emoji} {_pnl_sign}${_pnl:,.2f}\n"
                                 if _outcome == "active":
                                     message += f"Target: {_progress:.0f}% (${_pnl:,.0f}/${_target:,.0f})\n"
@@ -4489,9 +4493,9 @@ class TelegramCommandHandler(
                                 message += f"Floor: ${_floor:,.0f}{'🔒' if _locked else ''} | Days: {_days_done}/{_days_req} | {'✅' if _consist else '⚠️'} Consistency\n"
                                 if _trades > 0:
                                     message += f"{_wins}W/{_losses}L • {_wr:.0f}% WR"
-            except Exception as _mffu_err:
-                # MFFU API not available - silently skip
-                logger.debug(f"MFFU dashboard section skipped: {_mffu_err}")
+            except Exception as _tv_paper_err:
+                # Tradovate Paper API not available - silently skip
+                logger.debug(f"Tradovate Paper dashboard section skipped: {_tv_paper_err}")
 
             return message
             
@@ -5054,44 +5058,44 @@ class TelegramCommandHandler(
         
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    def _detect_mffu_account(self) -> bool:
-        """Detect if current account is MFFU (Tradovate-based challenge)."""
+    def _detect_tv_paper_account(self) -> bool:
+        """Detect if current account is Tradovate Paper (Tradovate-based challenge)."""
         try:
             ch_file = self.state_dir / "challenge_state.json"
             if ch_file.exists():
                 ch = json.loads(ch_file.read_text())
                 _stage = (ch.get("mffu", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
-                if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "mffu_eval"):
+                if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "tv_paper_eval", "mffu_eval"):
                     return True
         except Exception as e:
-            logger.debug(f"Non-critical MFFU detection: {e}", exc_info=True)
+            logger.debug(f"Non-critical Tradovate Paper detection: {e}", exc_info=True)
         return False
 
     async def _show_challenge_menu(self, query: CallbackQuery) -> None:
         """Show challenge submenu with current status and options."""
         try:
-            # Detect MFFU to use the correct tracker (fixes attempt number mismatch)
-            if self._detect_mffu_account():
-                from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
-                mffu_tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
-                mffu_tracker.refresh()
-                a = mffu_tracker.current_attempt
+            # Detect Tradovate Paper to use the correct tracker (fixes attempt number mismatch)
+            if self._detect_tv_paper_account():
+                from pearlalgo.market_agent.tv_paper_eval_tracker import TvPaperEvalTracker
+                tv_paper_tracker = TvPaperEvalTracker(state_dir=self.state_dir)
+                tv_paper_tracker.refresh()
+                a = tv_paper_tracker.current_attempt
                 pnl = a.pnl
                 balance = a.starting_balance + a.pnl
                 trades = a.trades
                 wins = a.wins
                 losses = a.losses
                 wr = (a.wins / a.trades * 100) if a.trades > 0 else 0.0
-                progress = min(100.0, (a.pnl / mffu_tracker.config.profit_target * 100)) if a.pnl > 0 else 0.0
+                progress = min(100.0, (a.pnl / tv_paper_tracker.config.profit_target * 100)) if a.pnl > 0 else 0.0
                 dd_used = max(0.0, a.eod_high_water_mark - balance)
-                dd_risk = min(100.0, (dd_used / mffu_tracker.config.max_loss_distance * 100)) if mffu_tracker.config.max_loss_distance > 0 else 0.0
+                dd_risk = min(100.0, (dd_used / tv_paper_tracker.config.max_loss_distance * 100)) if tv_paper_tracker.config.max_loss_distance > 0 else 0.0
                 attempt_id = a.attempt_id
 
-                # Get history from MFFU history file
+                # Get history from Tradovate Paper history file
                 history = []
                 try:
-                    if mffu_tracker.history_file.exists():
-                        with open(mffu_tracker.history_file) as f:
+                    if tv_paper_tracker.history_file.exists():
+                        with open(tv_paper_tracker.history_file) as f:
                             history = json.load(f)
                     history = [h for h in history if h.get("outcome") in ("pass", "fail")]
                 except Exception:
@@ -5168,14 +5172,14 @@ class TelegramCommandHandler(
     async def _show_challenge_history(self, query: CallbackQuery) -> None:
         """Show challenge history - past wins and losses."""
         try:
-            # Detect MFFU to read the correct history file
-            if self._detect_mffu_account():
-                from pearlalgo.market_agent.mffu_eval_tracker import MFFUEvaluationTracker
-                mffu_tracker = MFFUEvaluationTracker(state_dir=self.state_dir)
+            # Detect Tradovate Paper to read the correct history file
+            if self._detect_tv_paper_account():
+                from pearlalgo.market_agent.tv_paper_eval_tracker import TvPaperEvalTracker
+                tv_paper_tracker = TvPaperEvalTracker(state_dir=self.state_dir)
                 history = []
                 try:
-                    if mffu_tracker.history_file.exists():
-                        with open(mffu_tracker.history_file) as f:
+                    if tv_paper_tracker.history_file.exists():
+                        with open(tv_paper_tracker.history_file) as f:
                             history = json.load(f)
                 except Exception:
                     history = []
@@ -5247,11 +5251,11 @@ class TelegramCommandHandler(
         # Read state (best-effort; gateway status is still meaningful without state).
         state = self._read_state() or {}
 
-        # Detect MFFU — Tradovate does not use IBKR gateway
-        is_mffu = bool(state.get("tradovate_account")) or self._detect_mffu_account()
+        # Detect Tradovate Paper — Tradovate does not use IBKR gateway
+        is_tv_paper = bool(state.get("tradovate_account")) or self._detect_tv_paper_account()
 
-        if is_mffu:
-            # MFFU uses Tradovate WebSocket, not IBKR Gateway
+        if is_tv_paper:
+            # Tradovate Paper uses Tradovate WebSocket, not IBKR Gateway
             tv = state.get("tradovate_account", {}) or {}
             tv_connected = bool(tv.get("account_id") or tv.get("net_liq"))
             text = "🔌 *Tradovate Connection*\n\n"

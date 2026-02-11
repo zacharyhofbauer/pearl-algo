@@ -18,6 +18,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.execution.base import (
@@ -77,8 +78,12 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Live position cache updated from WebSocket events
         self._live_positions: Dict[str, Dict[str, Any]] = {}
 
+        # Path for immediate fill persistence (set by service)
+        self._fills_file: Optional[Path] = None
+
         # Background reconciliation task
         self._reconciliation_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
 
         logger.info(
             f"TradovateExecutionAdapter initialized: "
@@ -139,6 +144,13 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         """Disconnect from Tradovate."""
         self._connected = False
 
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
         if self._reconciliation_task and not self._reconciliation_task.done():
             self._reconciliation_task.cancel()
             try:
@@ -173,6 +185,63 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 signal_id=signal_id,
                 error_message=decision.reason,
             )
+
+        # ── Broker-position guard ────────────────────────────────────
+        # Tradovate rejects OSO bracket orders that conflict with existing
+        # positions (e.g. sending a short bracket while already long).
+        # Check actual broker positions before placing any order.
+        direction = signal.get("direction", "long")
+        try:
+            # Use cached live positions from WS events, or fall back to REST
+            broker_positions = list(self._live_positions.values())
+            if not broker_positions and self.is_connected():
+                try:
+                    broker_positions_raw = await self._client.get_positions()
+                    broker_positions = [
+                        {"net_pos": p.get("netPos", 0), "contract_id": p.get("contractId")}
+                        for p in (broker_positions_raw or [])
+                        if isinstance(p, dict)
+                    ]
+                except Exception:
+                    broker_positions = []
+
+            active_broker_positions = [
+                p for p in broker_positions if p.get("net_pos", 0) != 0
+            ]
+            max_net_positions = getattr(self.config, "max_net_positions", 1)
+
+            # Block if at max broker positions
+            if len(active_broker_positions) >= max_net_positions:
+                existing_dir = "long" if active_broker_positions[0].get("net_pos", 0) > 0 else "short"
+                if existing_dir == direction:
+                    logger.info(
+                        f"Broker position guard: already at max ({max_net_positions}) "
+                        f"positions in {existing_dir} direction, skipping {signal_id}"
+                    )
+                    return ExecutionResult(
+                        success=False,
+                        status=OrderStatus.REJECTED,
+                        signal_id=signal_id,
+                        error_message=f"max_broker_positions ({max_net_positions}) reached",
+                    )
+
+            # Block opposite-direction orders while in a position
+            for pos in active_broker_positions:
+                net_pos = pos.get("net_pos", 0)
+                existing_dir = "long" if net_pos > 0 else "short"
+                if existing_dir != direction:
+                    logger.info(
+                        f"Broker position guard: existing {existing_dir} position, "
+                        f"blocking {direction} order for {signal_id}"
+                    )
+                    return ExecutionResult(
+                        success=False,
+                        status=OrderStatus.REJECTED,
+                        signal_id=signal_id,
+                        error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
+                    )
+        except Exception as e:
+            logger.warning(f"Broker position guard check failed (non-fatal): {e}")
 
         # Dry-run mode
         if self.config.mode.value == "dry_run":
@@ -267,6 +336,13 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Map direction to Tradovate action
         action = "Buy" if direction == "long" else "Sell"
 
+        # ── Structured order logging ─────────────────────────────────
+        logger.info(
+            f"Tradovate place_oso request: signal={signal_id} "
+            f"action={action} symbol={self._contract_symbol} qty={position_size} "
+            f"tp={take_profit} sl={stop_loss} entry={entry_price}"
+        )
+
         try:
             result = await self._client.place_oso(
                 symbol=self._contract_symbol,
@@ -316,6 +392,10 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 )
             else:
                 error_text = result.get("errorText", "No order ID returned")
+                logger.warning(
+                    f"Tradovate place_oso REJECTED: signal={signal_id} "
+                    f"error={error_text} response={result}"
+                )
                 return ExecutionResult(
                     success=False,
                     status=OrderStatus.REJECTED,
@@ -324,7 +404,10 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 )
 
         except TradovateAPIError as e:
-            logger.error(f"Tradovate order failed: {e}", exc_info=True)
+            logger.error(
+                f"Tradovate place_oso ERROR: signal={signal_id} error={e}",
+                exc_info=True,
+            )
             return ExecutionResult(
                 success=False,
                 status=OrderStatus.ERROR,
@@ -475,6 +558,31 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     f"Tradovate fill: contract={contract_id}, "
                     f"qty={entity.get('qty')}, price={entity.get('price')}"
                 )
+                # Persist fill immediately to tradovate_fills.json
+                try:
+                    _ff = self._fills_file
+                    if _ff is None:
+                        import os
+                        state_dir = os.environ.get("PEARL_STATE_DIR")
+                        if state_dir:
+                            _ff = Path(state_dir) / "tradovate_fills.json"
+                    if _ff:
+                        fill_record = {
+                            "id": entity.get("id"),
+                            "order_id": entity.get("orderId"),
+                            "contract_id": contract_id,
+                            "timestamp": entity.get("timestamp"),
+                            "action": entity.get("action"),
+                            "qty": entity.get("qty", 0),
+                            "price": entity.get("price", 0.0),
+                            "net_pos": entity.get("netPos"),
+                        }
+                        import json as _json
+                        with open(_ff, "a") as f:
+                            _json.dump(fill_record, f)
+                            f.write("\n")
+                except Exception as e:
+                    logger.debug(f"Non-critical: could not persist fill: {e}")
 
             elif entity_type == "position":
                 contract_id = str(entity.get("contractId", ""))
@@ -555,12 +663,57 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         "WebSocket disconnected -- polling order status via REST"
                     )
                     await self._poll_order_status()
+
+                # If REST auth also failed, attempt reconnection
+                if not self._connected or not self._client.is_authenticated:
+                    if not hasattr(self, '_reconnect_task') or self._reconnect_task is None or self._reconnect_task.done():
+                        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Reconciliation loop error: {e}", exc_info=True)
                 await asyncio.sleep(5)
+
+    async def _reconnect_loop(self) -> None:
+        """Auto-reconnect with exponential backoff when disconnected.
+
+        Backoff: 30s, 60s, 120s, 240s (max 4 min between attempts).
+        Max attempts: 20, then gives up and logs a critical warning.
+        """
+        max_attempts = 20
+        base_delay = 30
+        max_delay = 240
+        attempt = 0
+
+        while attempt < max_attempts:
+            if self._connected and self._client.is_authenticated:
+                logger.info("Tradovate reconnection successful")
+                return
+
+            attempt += 1
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            logger.warning(
+                f"Tradovate disconnected — reconnect attempt {attempt}/{max_attempts} "
+                f"in {delay}s"
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                await self.connect()
+                if self._connected:
+                    logger.info(f"Tradovate reconnected after {attempt} attempt(s)")
+                    # Trigger a status reconciliation after reconnect
+                    await self._poll_order_status()
+                    return
+            except Exception as e:
+                logger.warning(f"Reconnect attempt {attempt} failed: {e}")
+
+        logger.critical(
+            f"Tradovate reconnection FAILED after {max_attempts} attempts — "
+            f"manual restart required"
+        )
 
     # ── Status ────────────────────────────────────────────────────────
 
@@ -594,8 +747,35 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             return {}
 
         result: Dict[str, Any] = {}
-        try:
-            snap = await self._client.get_cash_balance_snapshot()
+
+        # Parallelize all 3 REST calls (they're independent) for ~60% faster cycles
+        async def _fetch_cash():
+            try:
+                return await self._client.get_cash_balance_snapshot()
+            except Exception as e:
+                logger.warning(f"get_cash_balance_snapshot failed: {e}", exc_info=True)
+                return None
+
+        async def _fetch_positions():
+            try:
+                return await self._client.get_positions()
+            except Exception as e:
+                logger.warning(f"get_positions failed: {e}", exc_info=True)
+                return None
+
+        async def _fetch_fills():
+            try:
+                return await self._client.get_fills()
+            except Exception as e:
+                logger.warning(f"get_fills failed: {e}", exc_info=True)
+                return None
+
+        snap, tv_positions, raw_fills = await asyncio.gather(
+            _fetch_cash(), _fetch_positions(), _fetch_fills()
+        )
+
+        # Process cash balance
+        if snap:
             result["equity"] = snap.get("netLiq", 0.0)
             result["cash_balance"] = snap.get("totalCashValue", 0.0)
             result["open_pnl"] = snap.get("openPnL", 0.0)
@@ -603,11 +783,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             result["week_realized_pnl"] = snap.get("weekRealizedPnL", 0.0)
             result["initial_margin"] = snap.get("initialMargin", 0.0)
             result["maintenance_margin"] = snap.get("maintenanceMargin", 0.0)
-        except Exception as e:
-            logger.warning(f"Critical path error: {e}", exc_info=True)
 
-        try:
-            tv_positions = await self._client.get_positions()
+        # Process positions
+        if tv_positions is not None:
             positions = []
             for pos in tv_positions:
                 net_pos = pos.get("netPos", 0)
@@ -621,13 +799,12 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 })
             result["positions"] = positions
             result["position_count"] = len(positions)
-        except Exception as e:
-            logger.warning(f"Critical path error: {e}", exc_info=True)
+        else:
             result["positions"] = []
             result["position_count"] = 0
 
-        try:
-            raw_fills = await self._client.get_fills()
+        # Process fills
+        if raw_fills is not None:
             fills = []
             for f in raw_fills:
                 fills.append({
@@ -641,8 +818,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     "net_pos": f.get("netPos", 0),    # position after this fill
                 })
             result["fills"] = fills
-        except Exception as e:
-            logger.warning(f"Critical path error: {e}", exc_info=True)
+        else:
             result["fills"] = []
 
         result["account"] = self._client.account_name

@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -846,3 +847,439 @@ class TestLivePositionsCache:
         import asyncio
         assert hasattr(adapter, "_orders_lock")
         assert isinstance(adapter._orders_lock, asyncio.Lock)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Auto-Reconnect (exponential backoff)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAutoReconnect:
+    """Tests for exponential backoff reconnection loop."""
+
+    def test_reconnect_task_attribute_exists(self):
+        adapter = _make_adapter(mode="paper")
+        assert hasattr(adapter, '_reconnect_task')
+        assert adapter._reconnect_task is None
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_retries_on_failure(self):
+        """Mock connect to fail 2 times then succeed."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = False
+        adapter._client.is_authenticated = False
+
+        call_count = 0
+
+        async def _mock_connect():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return False
+            adapter._connected = True
+            adapter._client.is_authenticated = True
+            return True
+
+        adapter.connect = _mock_connect
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await adapter._reconnect_loop()
+
+        assert call_count == 3
+        assert adapter._connected is True
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_gives_up_after_max_attempts(self):
+        """After max_attempts failures, loop exits without connecting."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = False
+        adapter._client.is_authenticated = False
+
+        adapter.connect = AsyncMock(return_value=False)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await adapter._reconnect_loop()
+
+        assert adapter._connected is False
+        assert adapter.connect.await_count == 20
+
+    @pytest.mark.asyncio
+    async def test_reconnect_skips_if_already_connected(self):
+        """If already connected, reconnect loop returns immediately."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = True
+        adapter._client.is_authenticated = True
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await adapter._reconnect_loop()
+
+        mock_sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_reconnect_task(self):
+        """disconnect() cancels a running _reconnect_task."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = True
+
+        async def _long_running():
+            await asyncio.sleep(999)
+
+        adapter._reconnect_task = asyncio.create_task(_long_running())
+
+        await adapter.disconnect()
+
+        assert adapter._connected is False
+        assert adapter._reconnect_task.cancelled() or adapter._reconnect_task.done()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fill Persistence
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFillPersistence:
+    """Tests for immediate fill persistence."""
+
+    def test_fills_file_attribute_exists(self):
+        adapter = _make_adapter(mode="paper")
+        assert hasattr(adapter, '_fills_file')
+        assert adapter._fills_file is None
+
+    def test_fill_event_writes_to_file(self, tmp_path):
+        """Fill WS event is persisted to the fills file as JSON lines."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        fills_file = tmp_path / "tradovate_fills.json"
+        adapter._fills_file = fills_file
+
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 12345,
+                    "orderId": 42,
+                    "contractId": 999,
+                    "timestamp": "2025-06-01T10:05:00Z",
+                    "action": "Buy",
+                    "qty": 2,
+                    "price": 18005.0,
+                    "netPos": 2,
+                },
+            },
+        })
+
+        assert fills_file.exists()
+        lines = fills_file.read_text().strip().split("\n")
+        assert len(lines) == 1
+
+        record = json.loads(lines[0])
+        assert record["id"] == 12345
+        assert record["order_id"] == 42
+        assert record["contract_id"] == "999"
+        assert record["action"] == "Buy"
+        assert record["qty"] == 2
+        assert record["price"] == 18005.0
+
+    def test_multiple_fills_append(self, tmp_path):
+        """Multiple fills append as separate JSON lines."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        fills_file = tmp_path / "tradovate_fills.json"
+        adapter._fills_file = fills_file
+
+        for i in range(3):
+            adapter._handle_ws_event({
+                "e": "props",
+                "d": {
+                    "entityType": "fill",
+                    "entity": {
+                        "id": 100 + i,
+                        "orderId": 42,
+                        "contractId": 999,
+                        "timestamp": f"2025-06-01T10:0{i}:00Z",
+                        "action": "Buy",
+                        "qty": 1,
+                        "price": 18000.0 + i * 5,
+                    },
+                },
+            })
+
+        lines = fills_file.read_text().strip().split("\n")
+        assert len(lines) == 3
+
+        for i, line in enumerate(lines):
+            record = json.loads(line)
+            assert record["id"] == 100 + i
+
+    def test_fill_event_without_fills_file_uses_env(self, tmp_path, monkeypatch):
+        """When _fills_file is None, falls back to PEARL_STATE_DIR env var."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        adapter._fills_file = None
+
+        monkeypatch.setenv("PEARL_STATE_DIR", str(tmp_path))
+
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 999,
+                    "orderId": 10,
+                    "contractId": 888,
+                    "timestamp": "2025-06-01T12:00:00Z",
+                    "action": "Sell",
+                    "qty": 1,
+                    "price": 18050.0,
+                },
+            },
+        })
+
+        expected_file = tmp_path / "tradovate_fills.json"
+        assert expected_file.exists()
+        record = json.loads(expected_file.read_text().strip())
+        assert record["action"] == "Sell"
+
+    def test_fill_persistence_failure_non_fatal(self):
+        """If persistence fails (e.g. bad path), it doesn't raise."""
+        from pathlib import Path
+
+        adapter = _make_adapter(mode="paper")
+        adapter._fills_file = Path("/nonexistent/dir/fills.json")
+
+        # Should not raise
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 1,
+                    "orderId": 1,
+                    "contractId": 1,
+                    "action": "Buy",
+                    "qty": 1,
+                    "price": 18000.0,
+                },
+            },
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Auto-Reconnect (exponential backoff)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAutoReconnect:
+    """Tests for exponential backoff reconnection loop."""
+
+    def test_reconnect_task_attribute_exists(self):
+        adapter = _make_adapter(mode="paper")
+        assert hasattr(adapter, '_reconnect_task')
+        assert adapter._reconnect_task is None
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_retries_on_failure(self):
+        """Mock connect to fail 2 times then succeed."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = False
+        adapter._client.is_authenticated = False
+
+        call_count = 0
+
+        async def _mock_connect():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return False
+            adapter._connected = True
+            adapter._client.is_authenticated = True
+            return True
+
+        adapter.connect = _mock_connect
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await adapter._reconnect_loop()
+
+        assert call_count == 3
+        assert adapter._connected is True
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_gives_up_after_max_attempts(self):
+        """After max_attempts failures, loop exits without connecting."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = False
+        adapter._client.is_authenticated = False
+
+        adapter.connect = AsyncMock(return_value=False)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await adapter._reconnect_loop()
+
+        assert adapter._connected is False
+        assert adapter.connect.await_count == 20
+
+    @pytest.mark.asyncio
+    async def test_reconnect_skips_if_already_connected(self):
+        """If already connected, reconnect loop returns immediately."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = True
+        adapter._client.is_authenticated = True
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await adapter._reconnect_loop()
+
+        mock_sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_reconnect_task(self):
+        """disconnect() cancels a running _reconnect_task."""
+        adapter = _make_adapter(mode="paper")
+        adapter._connected = True
+
+        async def _long_running():
+            await asyncio.sleep(999)
+
+        adapter._reconnect_task = asyncio.create_task(_long_running())
+
+        await adapter.disconnect()
+
+        assert adapter._connected is False
+        assert adapter._reconnect_task.cancelled() or adapter._reconnect_task.done()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fill Persistence
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFillPersistence:
+    """Tests for immediate fill persistence."""
+
+    def test_fills_file_attribute_exists(self):
+        adapter = _make_adapter(mode="paper")
+        assert hasattr(adapter, '_fills_file')
+        assert adapter._fills_file is None
+
+    def test_fill_event_writes_to_file(self, tmp_path):
+        """Fill WS event is persisted to the fills file as JSON lines."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        fills_file = tmp_path / "tradovate_fills.json"
+        adapter._fills_file = fills_file
+
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 12345,
+                    "orderId": 42,
+                    "contractId": 999,
+                    "timestamp": "2025-06-01T10:05:00Z",
+                    "action": "Buy",
+                    "qty": 2,
+                    "price": 18005.0,
+                    "netPos": 2,
+                },
+            },
+        })
+
+        assert fills_file.exists()
+        lines = fills_file.read_text().strip().split("\n")
+        assert len(lines) == 1
+
+        record = json.loads(lines[0])
+        assert record["id"] == 12345
+        assert record["order_id"] == 42
+        assert record["contract_id"] == "999"
+        assert record["action"] == "Buy"
+        assert record["qty"] == 2
+        assert record["price"] == 18005.0
+
+    def test_multiple_fills_append(self, tmp_path):
+        """Multiple fills append as separate JSON lines."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        fills_file = tmp_path / "tradovate_fills.json"
+        adapter._fills_file = fills_file
+
+        for i in range(3):
+            adapter._handle_ws_event({
+                "e": "props",
+                "d": {
+                    "entityType": "fill",
+                    "entity": {
+                        "id": 100 + i,
+                        "orderId": 42,
+                        "contractId": 999,
+                        "timestamp": f"2025-06-01T10:0{i}:00Z",
+                        "action": "Buy",
+                        "qty": 1,
+                        "price": 18000.0 + i * 5,
+                    },
+                },
+            })
+
+        lines = fills_file.read_text().strip().split("\n")
+        assert len(lines) == 3
+
+        for i, line in enumerate(lines):
+            record = json.loads(line)
+            assert record["id"] == 100 + i
+
+    def test_fill_event_without_fills_file_uses_env(self, tmp_path, monkeypatch):
+        """When _fills_file is None, falls back to PEARL_STATE_DIR env var."""
+        import json
+
+        adapter = _make_adapter(mode="paper")
+        adapter._fills_file = None
+
+        monkeypatch.setenv("PEARL_STATE_DIR", str(tmp_path))
+
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 999,
+                    "orderId": 10,
+                    "contractId": 888,
+                    "timestamp": "2025-06-01T12:00:00Z",
+                    "action": "Sell",
+                    "qty": 1,
+                    "price": 18050.0,
+                },
+            },
+        })
+
+        expected_file = tmp_path / "tradovate_fills.json"
+        assert expected_file.exists()
+        record = json.loads(expected_file.read_text().strip())
+        assert record["action"] == "Sell"
+
+    def test_fill_persistence_failure_non_fatal(self):
+        """If persistence fails (e.g. bad path), it doesn't raise."""
+        from pathlib import Path
+
+        adapter = _make_adapter(mode="paper")
+        adapter._fills_file = Path("/nonexistent/dir/fills.json")
+
+        # Should not raise
+        adapter._handle_ws_event({
+            "e": "props",
+            "d": {
+                "entityType": "fill",
+                "entity": {
+                    "id": 1,
+                    "orderId": 1,
+                    "contractId": 1,
+                    "action": "Buy",
+                    "qty": 1,
+                    "price": 18000.0,
+                },
+            },
+        })

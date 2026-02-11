@@ -157,7 +157,7 @@ class ExecutionOrchestrator:
         market_open: Optional[bool],
         auto_flat_cfg: Dict[str, Any],
         last_dates: Dict[str, Any],
-        mffu_enabled: bool = False,
+        tv_paper_enabled: bool = False,
     ) -> Optional[str]:
         """Return auto-flat reason if a daily/Friday/weekend rule triggers.
 
@@ -169,7 +169,7 @@ class ExecutionOrchestrator:
                 ``timezone``, ``daily_enabled``, ``daily_time``.
             last_dates: Mutable dict tracking last-triggered date per reason
                 (prevents duplicate triggers on the same day).
-            mffu_enabled: Whether MFFU evaluation mode is active.
+            tv_paper_enabled: Whether Tradovate Paper evaluation mode is active.
 
         Returns:
             Reason string (e.g. ``"daily_auto_flat"``) or ``None``.
@@ -205,10 +205,10 @@ class ExecutionOrchestrator:
                 if last_dates.get("weekend_auto_flat") != local_now.date():
                     return "weekend_auto_flat"
 
-        if mffu_enabled:
+        if tv_paper_enabled:
             if local_now.time() >= time(16, 8) and local_now.time() < time(16, 11):
-                if last_dates.get("mffu_session_close") != local_now.date():
-                    return "mffu_session_close"
+                if last_dates.get("tv_paper_session_close") != local_now.date():
+                    return "tv_paper_session_close"
 
         return None
 

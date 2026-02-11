@@ -121,7 +121,7 @@ Notes:
 
 ### 1.2 Tradovate environment variables (from `~/.config/pearlalgo/secrets.env`)
 
-These are used by the MFFU evaluation instance only:
+These are used by the Tradovate Paper evaluation instance only:
 
 - `TRADOVATE_USERNAME` -- Tradovate account username
 - `TRADOVATE_PASSWORD` -- Tradovate account password
@@ -135,21 +135,21 @@ These are used by the MFFU evaluation instance only:
 
 **Used by**: `src/pearlalgo/execution/tradovate/config.py` (`TradovateConfig.from_env()`)
 
-### 1.3 MFFU-specific environment variables (from `scripts/lifecycle/mffu_eval.sh`)
+### 1.3 Tradovate Paper-specific environment variables (from `scripts/lifecycle/tv_paper_eval.sh`)
 
-- `IBKR_CLIENT_ID=50` -- IBKR client ID for MFFU agent (avoids clash with inception=10)
-- `IBKR_DATA_CLIENT_ID=51` -- IBKR data client ID for MFFU (avoids clash with inception=11)
-- `IB_CLIENT_ID_LIVE_CHART=97` -- Chart data client ID for MFFU API (avoids clash with inception=96)
-- `PEARLALGO_STATE_DIR=data/agent_state/MFFU_EVAL` -- Isolated state directory
-- `PEARLALGO_CONFIG_PATH=config/markets/mffu_eval.yaml` -- MFFU config overlay
-- `API_PORT=8001` -- MFFU API server port
+- `IBKR_CLIENT_ID=50` -- IBKR client ID for Tradovate Paper agent (avoids clash with IBKR Virtual=10)
+- `IBKR_DATA_CLIENT_ID=51` -- IBKR data client ID for Tradovate Paper (avoids clash with IBKR Virtual=11)
+- `IB_CLIENT_ID_LIVE_CHART=97` -- Chart data client ID for Tradovate Paper API (avoids clash with IBKR Virtual=96)
+- `PEARLALGO_STATE_DIR=data/agent_state/TV_PAPER_EVAL` -- Isolated state directory
+- `PEARLALGO_CONFIG_PATH=config/markets/tv_paper_eval.yaml` -- Tradovate Paper config overlay
+- `API_PORT=8001` -- Tradovate Paper API server port
 
 ### 1.4 Config files
 
 | File | Purpose |
 |------|---------|
-| `config/config.yaml` | Base config (inception). All settings. |
-| `config/markets/mffu_eval.yaml` | MFFU overlay. Merged on top of base via deep merge. |
+| `config/config.yaml` | Base config (IBKR Virtual). All settings. |
+| `config/markets/tv_paper_eval.yaml` | Tradovate Paper overlay. Merged on top of base via deep merge. |
 | `~/.config/pearlalgo/secrets.env` | Secrets (Telegram, Tradovate, API keys). Never committed. |
 | `.env` | Non-sensitive defaults (IBKR ports, data provider). |
 | `pearlalgo_web_app/.env.local` | Web app API key (auto-synced from secrets by pearl.sh). |

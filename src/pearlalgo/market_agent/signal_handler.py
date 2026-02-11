@@ -269,6 +269,84 @@ class SignalHandler:
             logger.error(f"Error processing signal: {e}", exc_info=True)
             self.error_count += 1
 
+    async def follower_execute(self, signal: Dict, *, tv_paper_equity: Optional[float] = None, tv_paper_tracker: Optional[Any] = None) -> None:
+        """Streamlined execution path for signal forwarding (Tradovate Paper follower).
+
+        Skips ML filter, bandit policy, and contextual policy since these are
+        inception-specific. Only runs: circuit breaker -> tracking -> virtual entry ->
+        execution -> notification.
+
+        Args:
+            signal: Signal dictionary from shared_signals.jsonl
+            tv_paper_equity: Current Tradovate Paper equity for intraday breach check
+            tv_paper_tracker: TvPaperEvalTracker instance for drawdown check
+        """
+        try:
+            # Circuit breaker check
+            if not self._check_circuit_breaker(signal, None):
+                return
+
+            # Intraday breach check (Tradovate Paper drawdown floor)
+            if tv_paper_equity is not None and tv_paper_tracker is not None:
+                try:
+                    if tv_paper_tracker.check_intraday_breach(tv_paper_equity):
+                        logger.warning(
+                            f"Tradovate Paper intraday breach: equity=${tv_paper_equity:.2f}, "
+                            f"blocking execution for signal {signal.get('signal_id', '?')[:16]}"
+                        )
+                        return
+                except Exception as e:
+                    logger.warning(f"Intraday breach check failed (non-fatal): {e}")
+
+            # Track signal generation
+            signal_id = self.performance_tracker.track_signal_generated(signal)
+            self.last_signal_generated_at = get_utc_timestamp()
+            self.last_signal_id_prefix = str(signal_id)[:16]
+
+            # Guard: entry price validation (same as process_signal)
+            raw_entry_price = signal.get("entry_price")
+            if raw_entry_price is None:
+                logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price is None")
+                return
+            try:
+                _entry_val = float(raw_entry_price)
+                if math.isnan(_entry_val):
+                    logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price is NaN")
+                    return
+            except (TypeError, ValueError):
+                logger.warning(f"Rejecting forwarded signal {str(signal_id)[:16]}: entry_price={raw_entry_price!r} invalid")
+                return
+
+            # Virtual entry
+            entry_price = self._track_virtual_entry(signal, signal_id)
+
+            # Audit: trade entered
+            if self._audit_logger is not None:
+                try:
+                    self._audit_logger.log_trade_entered(
+                        str(signal_id),
+                        {
+                            "entry_price": float(entry_price),
+                            "direction": str(signal.get("direction", "")),
+                            "position_size": int(signal.get("position_size", 1)),
+                            "execution_status": "follower",
+                        },
+                    )
+                except Exception:
+                    pass
+
+            # Execute directly (no bandit/ML gating)
+            await self._execute_signal(signal, policy_decision=None)
+
+            # Queue notification
+            await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data=None)
+
+            self.signal_count += 1
+
+        except Exception as e:
+            logger.error(f"Error in follower_execute: {e}", exc_info=True)
+            self.error_count += 1
+
     def _check_circuit_breaker(
         self,
         signal: Dict,

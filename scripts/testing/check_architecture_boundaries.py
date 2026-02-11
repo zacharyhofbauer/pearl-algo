@@ -378,9 +378,11 @@ def check_stale_display_names() -> int:
     Returns the number of violations found.
 
     Old names that should NOT appear as display text:
-    - "Inception" (display label -- NOT variable/dir names like _inception, inception/)
     - "MFFU 50K" (display label)
     - "MFFU Eval" (display label -- NOT file names like mffu_eval.yaml)
+
+    Note: The old name "IBKR Virtual" (formerly displayed as a different label) is no longer
+    checked since the rename is complete.
     """
     import re
 
@@ -391,8 +393,6 @@ def check_stale_display_names() -> int:
 
     # Patterns to flag (only in display/label contexts, not variables/paths)
     stale_patterns = [
-        # Match quoted string containing "Inception" as a display label
-        (re.compile(r"""['"]Inception['"]"""), "Inception"),
         # Match "MFFU 50K" anywhere
         (re.compile(r"MFFU 50K"), "MFFU 50K"),
         # Match "MFFU Eval" as display label (not mffu_eval or MFFU_EVAL)
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     stale_count = check_stale_display_names()
     if stale_count > 0:
         print(f"\nSTALE NAMES: Found {stale_count} hardcoded old display names.")
-        print("Replace 'Inception' with 'IBKR Virtual', 'MFFU 50K/Eval' with 'Tradovate Paper'.")
+        print("Replace 'MFFU 50K/Eval' with 'Tradovate Paper'.")
         if "--enforce" in sys.argv:
             exit_code = max(exit_code, 1)
 

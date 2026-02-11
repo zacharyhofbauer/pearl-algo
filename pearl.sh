@@ -164,8 +164,8 @@ check_chart_status() {
     fi
 }
 
-check_mffu_status() {
-    local pidfile="$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid"
+check_tv_paper_status() {
+    local pidfile="$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid"
     local api_ok=$(curl -s http://localhost:8001/health 2>/dev/null | grep -c "ok" || echo 0)
     
     if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
@@ -173,11 +173,11 @@ check_mffu_status() {
         local uptime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
         local api_label=""
         [ "$api_ok" -gt 0 ] && api_label=" | API :8001" || api_label=" | API down"
-        echo -e "${GREEN}●${NC} MFFU Eval - PID $pid, uptime: $uptime$api_label"
+        echo -e "${GREEN}●${NC} Tradovate Paper Eval - PID $pid, uptime: $uptime$api_label"
     elif [ "$api_ok" -gt 0 ]; then
-        echo -e "${YELLOW}●${NC} MFFU Eval - API only (agent stopped)"
+        echo -e "${YELLOW}●${NC} Tradovate Paper Eval - API only (agent stopped)"
     else
-        echo -e "${RED}●${NC} MFFU Eval"
+        echo -e "${RED}●${NC} Tradovate Paper Eval"
         return 1
     fi
 }
@@ -224,7 +224,7 @@ show_status() {
     echo -e "${CYAN}Services:${NC}"
     check_gateway_status || true
     check_agent_status || true
-    check_mffu_status || true
+    check_tv_paper_status || true
     check_telegram_status || true
     check_chart_status || true
     check_tunnel_status || true
@@ -244,12 +244,12 @@ show_quick_status() {
     local agent_status=$([ -f "$agent_pid_file" ] && kill -0 "$(cat "$agent_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
-    local mffu_pid_file="$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid"
-    local mffu_status=$([ -f "$mffu_pid_file" ] && kill -0 "$(cat "$mffu_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
+    local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid"
+    local tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
     
-    echo -e "PEARL: GW $gw_status | Agent $agent_status | MFFU $mffu_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
+    echo -e "PEARL: GW $gw_status | Agent $agent_status | TV-Paper $tv_paper_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
 }
 
 # ============================================================================
@@ -301,7 +301,7 @@ start_chart() {
     local API_PORT="${PEARL_API_PORT:-8000}"
     local CHART_PORT="${PEARL_CHART_PORT:-3001}"
 
-    # Start inception API server on port 8000 (only if not already running)
+    # Start IBKR Virtual API server on port 8000 (only if not already running)
     if ! pgrep -f "api_server.py.*--port $API_PORT" &>/dev/null && ! pgrep -f "api_server.py$" &>/dev/null; then
         python3 scripts/pearlalgo_web_app/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/web_app_api.log" 2>&1 &
         echo "   API server started (port $API_PORT)"
@@ -425,10 +425,10 @@ start_all() {
     sleep 2
     start_agent
     sleep 2
-    # Start MFFU if config exists
-    if [ -f "$SCRIPT_DIR/config/markets/mffu_eval.yaml" ]; then
-        echo -e "${CYAN}▶ Starting MFFU Eval...${NC}"
-        ./scripts/lifecycle/mffu_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   MFFU start failed (non-critical)${NC}"
+    # Start Tradovate Paper if config exists
+    if [ -f "$SCRIPT_DIR/config/markets/tv_paper_eval.yaml" ]; then
+        echo -e "${CYAN}▶ Starting Tradovate Paper Eval...${NC}"
+        ./scripts/lifecycle/tv_paper_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   Tradovate Paper start failed (non-critical)${NC}"
         echo ""
     fi
     sleep 1
@@ -469,10 +469,10 @@ stop_telegram() {
 
 stop_chart() {
     echo -e "${CYAN}■ Stopping Web App...${NC}"
-    # Kill only the inception API server (port 8000), NOT MFFU (port 8001)
+    # Kill only the IBKR Virtual API server (port 8000), NOT Tradovate Paper (port 8001)
     local api_pids=$(pgrep -f "api_server.py" 2>/dev/null || true)
     for pid in $api_pids; do
-        # Check if this is the MFFU API (port 8001) -- skip it
+        # Check if this is the Tradovate Paper API (port 8001) -- skip it
         if grep -q "8001" /proc/$pid/cmdline 2>/dev/null; then
             continue
         fi
@@ -523,10 +523,10 @@ stop_all() {
     # Stop in reverse dependency order
     stop_tunnel
     stop_chart
-    # Stop MFFU if running
-    if [ -f "$SCRIPT_DIR/logs/agent_MFFU_EVAL.pid" ] || [ -f "$SCRIPT_DIR/logs/api_MFFU_EVAL.pid" ]; then
-        echo -e "${CYAN}■ Stopping MFFU Eval...${NC}"
-        ./scripts/lifecycle/mffu_eval.sh stop 2>/dev/null || true
+    # Stop Tradovate Paper if running
+    if [ -f "$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid" ] || [ -f "$SCRIPT_DIR/logs/api_TV_PAPER_EVAL.pid" ]; then
+        echo -e "${CYAN}■ Stopping Tradovate Paper Eval...${NC}"
+        ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
         echo ""
     fi
     stop_agent
@@ -652,37 +652,37 @@ handle_chart() {
     esac
 }
 
-handle_mffu() {
+handle_tv_paper() {
     local subcmd="${1:-status}"
     activate_venv
     load_env_files
     case "$subcmd" in
         start)
-            echo -e "${CYAN}▶ Starting MFFU Eval...${NC}"
-            ./scripts/lifecycle/mffu_eval.sh start --background
+            echo -e "${CYAN}▶ Starting Tradovate Paper Eval...${NC}"
+            ./scripts/lifecycle/tv_paper_eval.sh start --background
             ;;
         stop)
-            echo -e "${CYAN}■ Stopping MFFU Eval...${NC}"
-            ./scripts/lifecycle/mffu_eval.sh stop
+            echo -e "${CYAN}■ Stopping Tradovate Paper Eval...${NC}"
+            ./scripts/lifecycle/tv_paper_eval.sh stop
             ;;
         status)
-            check_mffu_status || echo "   Not running"
+            check_tv_paper_status || echo "   Not running"
             ;;
         restart)
-            echo -e "${CYAN}🔄 Restarting MFFU Eval...${NC}"
-            ./scripts/lifecycle/mffu_eval.sh stop 2>/dev/null || true
+            echo -e "${CYAN}🔄 Restarting Tradovate Paper Eval...${NC}"
+            ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
             sleep 3
-            ./scripts/lifecycle/mffu_eval.sh start --background
+            ./scripts/lifecycle/tv_paper_eval.sh start --background
             ;;
         api)
-            echo -e "${CYAN}▶ Starting MFFU API only...${NC}"
-            ./scripts/lifecycle/mffu_eval.sh api --background
+            echo -e "${CYAN}▶ Starting Tradovate Paper API only...${NC}"
+            ./scripts/lifecycle/tv_paper_eval.sh api --background
             ;;
         logs)
-            tail -f "$SCRIPT_DIR/logs/agent_MFFU_EVAL.log"
+            tail -f "$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.log"
             ;;
         *)
-            echo "Usage: ./pearl.sh mffu <start|stop|status|restart|api|logs>"
+            echo "Usage: ./pearl.sh tv-paper <start|stop|status|restart|api|logs>"
             ;;
     esac
 }
@@ -749,8 +749,9 @@ show_help() {
     echo ""
     echo -e "${CYAN}Individual Services:${NC}"
     echo "  gateway <start|stop|status>    Control IB Gateway"
-    echo "  agent <start|stop|status>      Control Market Agent (Inception)"
-    echo "  mffu <start|stop|status|restart|api|logs>  Control MFFU Eval"
+    echo "  agent <start|stop|status>      Control Market Agent (IBKR Virtual)"
+    echo "  tv-paper <start|stop|status|restart|api|logs>  Control Tradovate Paper Eval"
+    echo "    (alias: mffu — kept for backward compatibility)"
     echo "  telegram <start|stop|status>   Control Telegram Handler"
     echo "  chart <start|stop|status|build|deploy>  Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
@@ -812,8 +813,8 @@ case "$COMMAND" in
     chart)
         handle_chart "${1:-status}"
         ;;
-    mffu)
-        handle_mffu "${1:-status}"
+    tv-paper|mffu)
+        handle_tv_paper "${1:-status}"
         ;;
     tunnel)
         handle_tunnel "${1:-status}"

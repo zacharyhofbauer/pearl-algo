@@ -245,10 +245,10 @@ class ScheduledTasks:
 
             acct_label = getattr(self.telegram_notifier, "account_label", None)
             acct_prefix = f"[{acct_label}] " if acct_label else ""
-            is_mffu = acct_label == "MFFU"
+            is_tv_paper = acct_label == "Tradovate Paper"
 
             today_trades: list = []
-            if is_mffu:
+            if is_tv_paper:
                 today_trades = self._get_tradovate_today_trades(today_str)
 
             if not today_trades:
@@ -300,19 +300,19 @@ class ScheduledTasks:
                         f"\u2197\ufe0f Longs: {long_sign}${long_pnl:.0f} \u2022 \u2198\ufe0f Shorts: {short_sign}${short_pnl:.0f}"
                     )
 
-                if is_mffu:
+                if is_tv_paper:
                     try:
                         _reader = StateReader(self.state_manager.state_dir)
                         ch_data = _reader.read_challenge_state()
                         if ch_data:
-                            mffu_cfg = ch_data.get("mffu", {}) or ch_data.get("config", {}) or {}
+                            tv_paper_cfg = ch_data.get("mffu", {}) or ch_data.get("config", {}) or {}
                             current = ch_data.get("current_attempt", {}) or {}
-                            profit_target = float(mffu_cfg.get("profit_target", 3000))
+                            profit_target = float(tv_paper_cfg.get("profit_target", 3000))
                             cum_pnl = float(current.get("cumulative_pnl", 0))
                             remaining = profit_target - cum_pnl
                             hwm = float(current.get("equity_hwm", 0))
-                            drawdown_limit = float(mffu_cfg.get("max_drawdown", 2000))
-                            starting_bal = float(mffu_cfg.get("starting_balance", 50000))
+                            drawdown_limit = float(tv_paper_cfg.get("max_drawdown", 2000))
+                            starting_bal = float(tv_paper_cfg.get("starting_balance", 50000))
                             trail_floor = hwm - drawdown_limit if hwm > 0 else starting_bal - drawdown_limit
                             msg_parts.append("")
                             msg_parts.append(f"\U0001f3c6 *Challenge:* ${remaining:,.0f} to target")
@@ -450,8 +450,8 @@ class ScheduledTasks:
         msg = (
             f"\u26a0\ufe0f *Signal Forwarding Stale*\n\n"
             f"No forwarded signals received in `{int(gap_minutes)}` minutes.\n"
-            f"Inception may have stopped writing to `shared_signals.jsonl`.\n\n"
-            f"Check Inception agent status: `./pearl.sh agent status`"
+            f"IBKR Virtual may have stopped writing to `shared_signals.jsonl`.\n\n"
+            f"Check IBKR Virtual agent status: `./pearl.sh agent status`"
         )
         logger.warning(f"Follower heartbeat: no signals for {int(gap_minutes)}m (timeout={self._follower_heartbeat_timeout_minutes}m)")
         try:

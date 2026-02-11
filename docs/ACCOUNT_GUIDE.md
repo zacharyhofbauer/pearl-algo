@@ -13,10 +13,10 @@ PearlAlgo runs two isolated account types side by side:
 | **Purpose** | Data collection + virtual P&L tracking | Paper trading on Tradovate demo |
 | **Broker orders** | None — all P&L is simulated | Real bracket orders on Tradovate demo account |
 | **Signal role** | Writer (generates signals) | Follower (reads forwarded signals) |
-| **State directory** | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` |
+| **State directory** | `data/agent_state/NQ/` | `data/agent_state/TV_PAPER_EVAL/` |
 | **API port** | 8000 | 8001 |
 | **Telegram label** | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
-| **Dashboard URL** | `https://pearlalgo.io` | `https://pearlalgo.io/?account=mffu` |
+| **Dashboard URL** | `https://pearlalgo.io` | `https://pearlalgo.io/?account=tv_paper` |
 
 ### IBKR Virtual
 
@@ -30,7 +30,7 @@ PearlAlgo runs two isolated account types side by side:
 - Receives forwarded signals from IBKR Virtual (does NOT run its own strategy).
 - Places real bracket orders (entry + stop loss + take profit) on a Tradovate demo/paper account.
 - All dashboard numbers come directly from Tradovate fills and equity — no virtual tracking.
-- Used for prop firm evaluation attempts (e.g., MFFU 50K Rapid).
+- Used for prop firm evaluation attempts (e.g., Tradovate Paper 50K Rapid).
 
 ---
 
@@ -111,8 +111,8 @@ The architecture is designed to scale beyond two accounts:
 ```
 IBKR Virtual (signal source)
        │
-       ├──► Tradovate Paper #1 (MFFU 50K Eval - Attempt 1)
-       ├──► Tradovate Paper #2 (MFFU 50K Eval - Attempt 2)
+       ├──► Tradovate Paper #1 (Tradovate Paper 50K Eval - Attempt 1)
+       ├──► Tradovate Paper #2 (Tradovate Paper 50K Eval - Attempt 2)
        └──► Tradovate Paper #3 (TopStep Combine)
 ```
 
@@ -124,7 +124,7 @@ Each follower account:
 ### What's Needed
 
 - Per-account config sections in `config.yaml` (structure already exists).
-- Lifecycle scripts for each account (based on `mffu_eval.sh` template).
+- Lifecycle scripts for each account (based on `tv_paper_eval.sh` template).
 - Dashboard account switcher already supports arbitrary accounts via URL parameter.
 
 ---
@@ -135,7 +135,7 @@ Each follower account:
 
 ```yaml
 accounts:
-  inception:
+  ibkr_virtual:
     display_name: "IBKR Virtual"
     badge: "VIRTUAL"
     badge_color: "blue"
@@ -145,13 +145,13 @@ accounts:
     api_port: 8000
     signal_role: "writer"
 
-  mffu:
+  tv_paper:
     display_name: "Tradovate Paper"
     badge: "PAPER"
     badge_color: "orange"
     telegram_prefix: "[TRADOVATE PAPER]"
     description: "Paper trading on Tradovate demo — real bracket orders"
-    state_dir: "MFFU_EVAL"
+    state_dir: "TV_PAPER_EVAL"
     api_port: 8001
     signal_role: "follower"
     execution:
@@ -174,10 +174,10 @@ accounts:
 | Identifier | Type | Used For |
 |------------|------|----------|
 | `NQ` | State directory | IBKR Virtual (`data/agent_state/NQ/`) |
-| `MFFU_EVAL` | State directory | Tradovate Paper (`data/agent_state/MFFU_EVAL/`) |
-| `?account=mffu` | URL parameter | Switch dashboard to Tradovate Paper view |
-| `inception` | Config key | References IBKR Virtual in `config.yaml` |
-| `mffu` | Config key | References Tradovate Paper in `config.yaml` |
+| `TV_PAPER_EVAL` | State directory | Tradovate Paper (`data/agent_state/TV_PAPER_EVAL/`) |
+| `?account=tv_paper` | URL parameter | Switch dashboard to Tradovate Paper view |
+| `ibkr_virtual` | Config key | References IBKR Virtual in `config.yaml` |
+| `tv_paper` | Config key | References Tradovate Paper in `config.yaml` |
 
 ---
 

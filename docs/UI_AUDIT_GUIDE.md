@@ -9,7 +9,7 @@
 Access the Audit Panel by clicking the **"Audit"** tab in the main dashboard navigation.
 
 - IBKR Virtual: `https://pearlalgo.io` → Audit tab
-- Tradovate Paper: `https://pearlalgo.io/?account=mffu` → Audit tab
+- Tradovate Paper: `https://pearlalgo.io/?account=tv_paper` → Audit tab
 
 The Audit Panel has five sub-tabs:
 

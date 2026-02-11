@@ -459,7 +459,7 @@ class TestPerformanceSummaryEndpoint:
         self, client, _patch_globals, state_dir,
     ):
         """Performance summary returns td, yday, wtd, mtd, ytd, all buckets."""
-        # Create a minimal performance.json (inception mode)
+        # Create a minimal performance.json (IBKR Virtual mode)
         perf = [
             {
                 "exit_time": datetime.now(timezone.utc).isoformat(),
@@ -601,17 +601,17 @@ class TestMarketStatusEndpoint:
 
 
 class TestPathPrefixStripping:
-    """/mffu/ prefix should be stripped transparently."""
+    """/tv_paper/ prefix should be stripped transparently."""
 
-    def test_mffu_health_works(self, client, _patch_globals):
-        """GET /mffu/health should route to /health."""
-        resp = client.get("/mffu/health")
+    def test_tv_paper_health_works(self, client, _patch_globals):
+        """GET /tv_paper/health should route to /health."""
+        resp = client.get("/tv_paper/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_mffu_api_state_works(self, client, _patch_globals):
-        """GET /mffu/api/state should route to /api/state."""
-        resp = client.get("/mffu/api/state")
+    def test_tv_paper_api_state_works(self, client, _patch_globals):
+        """GET /tv_paper/api/state should route to /api/state."""
+        resp = client.get("/tv_paper/api/state")
         assert resp.status_code == 200
         assert "running" in resp.json()
 

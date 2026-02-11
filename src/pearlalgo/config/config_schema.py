@@ -467,7 +467,7 @@ class AuditConfig(BaseModel):
 
 class AccountsConfig(BaseModel):
     """Account registry with display names and metadata."""
-    inception: AccountDisplayConfig = Field(
+    ibkr_virtual: AccountDisplayConfig = Field(
         default_factory=lambda: AccountDisplayConfig(
             display_name="IBKR Virtual",
             badge="VIRTUAL",
@@ -476,7 +476,7 @@ class AccountsConfig(BaseModel):
             description="Live market data from IBKR, virtual P&L tracking",
         )
     )
-    mffu: AccountDisplayConfig = Field(
+    tv_paper: AccountDisplayConfig = Field(
         default_factory=lambda: AccountDisplayConfig(
             display_name="Tradovate Paper",
             badge="PAPER",
@@ -485,6 +485,11 @@ class AccountsConfig(BaseModel):
             description="Live paper trading on Tradovate (demo)",
         )
     )
+
+    @property
+    def mffu(self) -> AccountDisplayConfig:
+        """Backward-compatible alias for ``tv_paper``."""
+        return self.tv_paper
 
 
 class FullServiceConfig(BaseModel):

@@ -128,16 +128,16 @@ class TradingCircuitBreakerConfig:
     ml_chop_shield_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
 
     # =========================================================================
-    # MFFU Evaluation Gate (prop firm rule enforcement)
+    # Tradovate Paper Evaluation Gate (prop firm rule enforcement)
     # =========================================================================
-    enable_mffu_eval_gate: bool = False  # Enable for MFFU prop firm accounts
-    mffu_max_contracts_mini: int = 5
-    mffu_max_contracts_micro: int = 50
-    mffu_trading_start_hour_et: int = 18  # 6 PM ET (session open)
-    mffu_trading_end_hour_et: int = 16    # 4 PM ET
-    mffu_trading_end_minute_et: int = 10  # 4:10 PM ET (session close)
-    mffu_near_max_loss_buffer: float = 200.0  # Block new entries within $200 of floor
-    mffu_enable_news_blackout: bool = True
+    enable_tv_paper_eval_gate: bool = False  # Enable for Tradovate Paper prop firm accounts
+    tv_paper_max_contracts_mini: int = 5
+    tv_paper_max_contracts_micro: int = 50
+    tv_paper_trading_start_hour_et: int = 18  # 6 PM ET (session open)
+    tv_paper_trading_end_hour_et: int = 16    # 4 PM ET
+    tv_paper_trading_end_minute_et: int = 10  # 4:10 PM ET (session close)
+    tv_paper_near_max_loss_buffer: float = 200.0  # Block new entries within $200 of floor
+    tv_paper_enable_news_blackout: bool = True
 
 
 class TradingCircuitBreaker:
@@ -330,10 +330,10 @@ class TradingCircuitBreaker:
                 return decision
 
         # =======================================================================
-        # MFFU Evaluation Gate (prop firm rule enforcement)
+        # Tradovate Paper Evaluation Gate (prop firm rule enforcement)
         # =======================================================================
-        if self.config.enable_mffu_eval_gate:
-            decision = self._check_mffu_eval_gate(signal, active_positions)
+        if self.config.enable_tv_paper_eval_gate:
+            decision = self._check_tv_paper_eval_gate(signal, active_positions)
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
@@ -1155,13 +1155,13 @@ class TradingCircuitBreaker:
         )
 
 
-    def _check_mffu_eval_gate(
+    def _check_tv_paper_eval_gate(
         self,
         signal: Dict[str, Any],
         active_positions: Optional[List[Dict[str, Any]]] = None,
     ) -> CircuitBreakerDecision:
         """
-        MFFU Evaluation Gate: enforce prop firm rules before order placement.
+        Tradovate Paper Evaluation Gate: enforce prop firm rules before order placement.
 
         Checks:
         1. Max contracts (5 mini / 50 micro)
@@ -1178,15 +1178,15 @@ class TradingCircuitBreaker:
 
         # ── Check 1: Trading hours ────────────────────────────────────
         et_time = now_et.time()
-        session_open = _time_cls(self.config.mffu_trading_start_hour_et, 0)
-        session_close = _time_cls(self.config.mffu_trading_end_hour_et, self.config.mffu_trading_end_minute_et)
+        session_open = _time_cls(self.config.tv_paper_trading_start_hour_et, 0)
+        session_close = _time_cls(self.config.tv_paper_trading_end_hour_et, self.config.tv_paper_trading_end_minute_et)
 
         # Trading window: 6 PM ET -> 4:10 PM ET next day (crosses midnight)
         in_session = (et_time >= session_open) or (et_time < session_close)
         if not in_session:
             return CircuitBreakerDecision(
                 allowed=False,
-                reason="mffu_outside_trading_hours",
+                reason="tv_paper_outside_trading_hours",
                 severity="warning",
                 details={
                     "current_time_et": str(et_time),
@@ -1202,15 +1202,15 @@ class TradingCircuitBreaker:
                 for p in active_positions
             )
             new_qty = int(signal.get("position_size", 1))
-            if total_qty + new_qty > self.config.mffu_max_contracts_mini:
+            if total_qty + new_qty > self.config.tv_paper_max_contracts_mini:
                 return CircuitBreakerDecision(
                     allowed=False,
-                    reason="mffu_max_contracts_exceeded",
+                    reason="tv_paper_max_contracts_exceeded",
                     severity="critical",
                     details={
                         "current_contracts": total_qty,
                         "new_contracts": new_qty,
-                        "max_allowed": self.config.mffu_max_contracts_mini,
+                        "max_allowed": self.config.tv_paper_max_contracts_mini,
                     },
                 )
 
@@ -1222,17 +1222,17 @@ class TradingCircuitBreaker:
                 if pos_direction and signal_direction and pos_direction != signal_direction:
                     return CircuitBreakerDecision(
                         allowed=False,
-                        reason="mffu_hedging_prohibited",
+                        reason="tv_paper_hedging_prohibited",
                         severity="critical",
                         details={
                             "signal_direction": signal_direction,
                             "existing_direction": pos_direction,
-                            "message": "MFFU prohibits hedging (simultaneous long + short on same underlying)",
+                            "message": "Tradovate Paper prohibits hedging (simultaneous long + short on same underlying)",
                         },
                     )
 
         # ── Check 4: News blackout ────────────────────────────────────
-        if self.config.mffu_enable_news_blackout:
+        if self.config.tv_paper_enable_news_blackout:
             try:
                 from pearlalgo.utils.news_calendar import get_news_calendar
                 calendar = get_news_calendar()
@@ -1240,7 +1240,7 @@ class TradingCircuitBreaker:
                 if in_blackout:
                     return CircuitBreakerDecision(
                         allowed=False,
-                        reason="mffu_news_blackout",
+                        reason="tv_paper_news_blackout",
                         severity="warning",
                         details={
                             "event": event_name,
@@ -1252,7 +1252,7 @@ class TradingCircuitBreaker:
 
         return CircuitBreakerDecision(
             allowed=True,
-            reason="mffu_eval_gate_passed",
+            reason="tv_paper_eval_gate_passed",
             severity="info",
         )
 
@@ -1308,15 +1308,15 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         ml_min_scored_trades=config.get("ml_min_scored_trades", 50),
         ml_min_winrate_delta=config.get("ml_min_winrate_delta", 0.15),
         ml_chop_shield_regimes=config.get("ml_chop_shield_regimes", ["ranging", "volatile"]),
-        # MFFU Evaluation Gate
-        enable_mffu_eval_gate=config.get("enable_mffu_eval_gate", False),
-        mffu_max_contracts_mini=config.get("mffu_max_contracts_mini", 5),
-        mffu_max_contracts_micro=config.get("mffu_max_contracts_micro", 50),
-        mffu_trading_start_hour_et=config.get("mffu_trading_start_hour_et", 18),
-        mffu_trading_end_hour_et=config.get("mffu_trading_end_hour_et", 16),
-        mffu_trading_end_minute_et=config.get("mffu_trading_end_minute_et", 10),
-        mffu_near_max_loss_buffer=config.get("mffu_near_max_loss_buffer", 200.0),
-        mffu_enable_news_blackout=config.get("mffu_enable_news_blackout", True),
+        # Tradovate Paper Evaluation Gate
+        enable_tv_paper_eval_gate=config.get("enable_tv_paper_eval_gate", False),
+        tv_paper_max_contracts_mini=config.get("tv_paper_max_contracts_mini", 5),
+        tv_paper_max_contracts_micro=config.get("tv_paper_max_contracts_micro", 50),
+        tv_paper_trading_start_hour_et=config.get("tv_paper_trading_start_hour_et", 18),
+        tv_paper_trading_end_hour_et=config.get("tv_paper_trading_end_hour_et", 16),
+        tv_paper_trading_end_minute_et=config.get("tv_paper_trading_end_minute_et", 10),
+        tv_paper_near_max_loss_buffer=config.get("tv_paper_near_max_loss_buffer", 200.0),
+        tv_paper_enable_news_blackout=config.get("tv_paper_enable_news_blackout", True),
     )
     
     return TradingCircuitBreaker(cb_config)

@@ -33,7 +33,7 @@ CREATE TABLE audit_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TEXT    NOT NULL,   -- ISO 8601 (UTC)
     event_type  TEXT    NOT NULL,   -- e.g. 'signal_generated', 'trade_entry', 'circuit_breaker_trip'
-    account     TEXT    NOT NULL,   -- e.g. 'inception', 'mffu'
+    account     TEXT    NOT NULL,   -- e.g. 'ibkr_virtual', 'tv_paper'
     data_json   TEXT    NOT NULL,   -- structured JSON payload (event-specific)
     source      TEXT    NOT NULL    -- e.g. 'strategy', 'execution', 'system', 'reconciliation'
 );
@@ -116,7 +116,7 @@ Query the full event log with filters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `account` | string | all | Filter by account (`inception`, `mffu`) |
+| `account` | string | all | Filter by account (`ibkr_virtual`, `tv_paper`) |
 | `event_type` | string | all | Filter by event type |
 | `start` | ISO 8601 | 24h ago | Start of time range |
 | `end` | ISO 8601 | now | End of time range |
@@ -125,7 +125,7 @@ Query the full event log with filters.
 
 ```bash
 curl -H "X-API-Key: $PEARL_API_KEY" \
-  "http://localhost:8000/api/audit/events?account=mffu&event_type=trade_entry&start=2026-02-01T00:00:00Z&limit=50"
+  "http://localhost:8000/api/audit/events?account=tv_paper&event_type=trade_entry&start=2026-02-01T00:00:00Z&limit=50"
 ```
 
 ### GET /api/audit/equity-history
@@ -210,12 +210,12 @@ WHERE event_type = 'signal_rejected'
 GROUP BY reason
 ORDER BY count DESC;
 
-# Daily equity for MFFU
+# Daily equity for Tradovate Paper
 SELECT json_extract(data_json, '$.date') as date,
        json_extract(data_json, '$.balance') as balance
 FROM audit_events
 WHERE event_type = 'equity_snapshot'
-  AND account = 'mffu'
+  AND account = 'tv_paper'
 ORDER BY timestamp DESC
 LIMIT 30;
 
@@ -241,29 +241,29 @@ from pearlalgo.audit import AuditLogger
 audit = AuditLogger(db_path="data/trades.db")
 
 # Signals
-audit.log_signal_generated(account="inception", direction="LONG", confidence=0.82,
+audit.log_signal_generated(account="ibkr_virtual", direction="LONG", confidence=0.82,
                            bar_timestamp="2026-02-11T14:30:00Z", price=21450.25)
-audit.log_signal_rejected(account="mffu", direction="LONG", confidence=0.65,
+audit.log_signal_rejected(account="tv_paper", direction="LONG", confidence=0.65,
                           bar_timestamp="2026-02-11T14:30:00Z",
                           rejection_reason="circuit_breaker_daily_loss")
 
 # Trades
-audit.log_trade_entry(account="mffu", direction="LONG", entry_price=21450.25,
+audit.log_trade_entry(account="tv_paper", direction="LONG", entry_price=21450.25,
                       quantity=1, order_type="bracket", broker_order_id="TV-123456")
-audit.log_trade_exit(account="mffu", direction="LONG", exit_price=21465.00,
+audit.log_trade_exit(account="tv_paper", direction="LONG", exit_price=21465.00,
                      quantity=1, pnl=14.75, exit_reason="target")
 
 # System events
-audit.log_agent_start(account="inception", version="0.2.4")
-audit.log_agent_stop(account="inception", reason="clean_shutdown")
-audit.log_circuit_breaker_trip(account="mffu", rule="max_daily_loss",
+audit.log_agent_start(account="ibkr_virtual", version="0.2.4")
+audit.log_agent_stop(account="ibkr_virtual", reason="clean_shutdown")
+audit.log_circuit_breaker_trip(account="tv_paper", rule="max_daily_loss",
                                threshold=-2000, current_value=-2100)
 audit.log_connection_drop(broker="ibkr", duration_seconds=12, reconnected=True)
 
 # Equity & reconciliation
-audit.log_equity_snapshot(account="mffu", balance=50250.00, equity=50250.00,
+audit.log_equity_snapshot(account="tv_paper", balance=50250.00, equity=50250.00,
                           unrealized_pnl=0.0, date="2026-02-11")
-audit.log_reconciliation(account="mffu", agent_pnl=250.00, broker_pnl=248.50,
+audit.log_reconciliation(account="tv_paper", agent_pnl=250.00, broker_pnl=248.50,
                          difference=1.50, status="match")
 ```
 

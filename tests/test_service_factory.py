@@ -40,7 +40,7 @@ def _minimal_config(**overrides: Any) -> ConfigView:
 def _stub_service_config(**overrides: Any) -> Dict[str, Any]:
     """Service config dict with safe defaults."""
     cfg: Dict[str, Any] = {
-        "challenge": {"stage": "inception"},
+        "challenge": {"stage": "ibkr_virtual"},
         "telegram": {"notification_tier": "important"},
     }
     cfg.update(overrides)
@@ -252,7 +252,7 @@ class TestBuildServiceDependencies:
 
 
 # ---------------------------------------------------------------------------
-# account_label derivation (MFFU vs INCEPTION)
+# account_label derivation (Tradovate Paper vs IBKR Virtual)
 # ---------------------------------------------------------------------------
 
 class TestAccountLabel:
@@ -260,7 +260,7 @@ class TestAccountLabel:
 
     @pytest.mark.parametrize(
         "stage",
-        ["mffu_eval", "evaluation", "sim_funded", "live"],
+        ["tv_paper_eval", "evaluation", "sim_funded", "live"],
     )
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
@@ -268,7 +268,7 @@ class TestAccountLabel:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_mffu_stages_produce_mffu_label(
+    def test_tv_paper_stages_produce_tv_paper_label(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,
@@ -297,7 +297,7 @@ class TestAccountLabel:
 
     @pytest.mark.parametrize(
         "stage",
-        ["inception", "", "unknown", "paper"],
+        ["ibkr_virtual", "", "unknown", "paper"],
     )
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
@@ -305,7 +305,7 @@ class TestAccountLabel:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_non_mffu_stages_produce_inception_label(
+    def test_non_tv_paper_stages_produce_ibkr_virtual_label(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,

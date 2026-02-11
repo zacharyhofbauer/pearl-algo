@@ -229,18 +229,19 @@ export function getWebSocketUrl(): string {
   const urlParams = new URLSearchParams(window.location.search)
   const apiPort = urlParams.get('api_port')
 
-  // Account-based switching: ?account=mffu uses /mffu/ws prefix on production
+  // Account-based switching: ?account=tv_paper uses /tv_paper/ws prefix on production
+  // Backward compat: ?account=mffu still accepted
   const urlParams2 = new URLSearchParams(window.location.search)
   const account = urlParams2.get('account')
   const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
-  if (account === 'mffu') {
+  if (account === 'mffu' || account === 'tv_paper') {
     if (isLocal) {
       return 'ws://localhost:8001/ws'
     }
-    // Production: /mffu/ws routed by Cloudflare tunnel to port 8001
+    // Production: /tv_paper/ws routed by Cloudflare tunnel to port 8001
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${hostname}/mffu/ws`
+    return `${protocol}//${hostname}/tv_paper/ws`
   }
 
   if (apiPort) {

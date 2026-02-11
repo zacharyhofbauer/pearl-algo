@@ -1,7 +1,7 @@
 """
 Data layer for the Pearl API server.
 
-Provides TTL-cached file I/O, state reading, MFFU account detection, and
+Provides TTL-cached file I/O, state reading, Tradovate Paper account detection, and
 signal/performance data loading.  All functions are synchronous unless noted.
 
 This module was extracted from server.py to improve testability and reduce
@@ -104,14 +104,14 @@ def read_state_for_dir(state_dir: Path) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# MFFU account detection
+# Tradovate Paper account detection
 # ---------------------------------------------------------------------------
 
-def is_mffu_account(state_dir: Path) -> bool:
-    """Check if this state_dir has live Tradovate account data (MFFU mode).
+def is_tv_paper_account(state_dir: Path) -> bool:
+    """Check if this state_dir has live Tradovate account data (Tradovate Paper mode).
 
     Uses key-presence (``"equity" in tv``) rather than truthiness so that
-    equity == 0 during initialisation is still detected as MFFU.
+    equity == 0 during initialisation is still detected as Tradovate Paper.
     """
     try:
         data = read_state_for_dir(state_dir)
@@ -121,7 +121,7 @@ def is_mffu_account(state_dir: Path) -> bool:
                 equity = tv.get("equity")
                 if equity == 0:
                     logger.warning(
-                        "MFFU account detected with equity=0 — "
+                        "Tradovate Paper account detected with equity=0 — "
                         "Tradovate data may still be initialising"
                     )
                 return True
@@ -138,7 +138,7 @@ _DEFAULT_START_BALANCE = 50_000.0
 
 
 def get_start_balance(state_dir: Path) -> float:
-    """Read MFFU start balance from challenge_state.json, or return default."""
+    """Read Tradovate Paper start balance from challenge_state.json, or return default."""
     try:
         ch_file = state_dir / "challenge_state.json"
         if ch_file.exists():
@@ -202,3 +202,9 @@ def get_signals(state_dir: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
         return _load_jsonl_file(signals_file, max_lines=max_lines)
 
     return cached(f"signals:{state_dir}:{max_lines}", 2.0, _read_signals)
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility aliases
+# ---------------------------------------------------------------------------
+is_mffu_account = is_tv_paper_account

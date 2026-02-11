@@ -191,7 +191,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # AI integrations
     "ai_chat",
     "ai_briefings",
-    # Signal forwarding (inception -> MFFU)
+    # Signal forwarding (IBKR Virtual -> Tradovate Paper)
     "signal_forwarding",
 })
 

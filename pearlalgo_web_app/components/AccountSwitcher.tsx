@@ -11,7 +11,7 @@ interface AccountDef {
   id: string
   label: string
   shortLabel: string
-  /** URL param value for ?account= (null = default/inception) */
+  /** URL param value for ?account= (null = default/ibkr_virtual) */
   accountParam: string | null
   badge?: string
   badgeColor?: string
@@ -20,7 +20,7 @@ interface AccountDef {
 /** Fallback defaults used when the store has no accounts config yet */
 const ACCOUNT_DEFAULTS: AccountDef[] = [
   {
-    id: 'inception',
+    id: 'ibkr_virtual',
     label: 'IBKR Virtual',
     shortLabel: 'IBKR',
     accountParam: null, // default (no ?account param)
@@ -28,10 +28,10 @@ const ACCOUNT_DEFAULTS: AccountDef[] = [
     badgeColor: 'var(--color-blue, #448aff)',
   },
   {
-    id: 'mffu_eval',
+    id: 'tv_paper_eval',
     label: 'Tradovate Paper',
     shortLabel: 'TV',
-    accountParam: 'mffu',
+    accountParam: 'tv_paper',
     badge: 'PAPER',
     badgeColor: 'var(--color-accent, #7c4dff)',
   },
@@ -58,7 +58,7 @@ export default function AccountSwitcher() {
   const accounts = useMemo(() => {
     if (!storeAccounts) return ACCOUNT_DEFAULTS
     return ACCOUNT_DEFAULTS.map((def) => {
-      // Map to API key: inception→'inception', mffu_eval→'mffu' (the param value)
+      // Map to API key: ibkr_virtual→'ibkr_virtual', tv_paper_eval→'tv_paper' (the param value)
       const configKey = def.accountParam || def.id
       const cfg = storeAccounts[configKey]
       if (!cfg) return def

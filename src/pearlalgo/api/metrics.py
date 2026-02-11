@@ -3,7 +3,7 @@ Pure risk-metric computation functions for the Pearl API server.
 
 All functions in this module are pure (no I/O, no side effects) and operate
 on lists of P&L values and/or trade dicts.  This makes them trivially testable
-and shared between the MFFU (Tradovate) and Inception (IBKR) code paths.
+and shared between the Tradovate Paper and IBKR Virtual code paths.
 
 Extracted from server.py to eliminate duplicated math.
 """

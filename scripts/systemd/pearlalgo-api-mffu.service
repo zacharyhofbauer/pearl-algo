@@ -1,3 +1,5 @@
+# DEPRECATED: Use pearlalgo-api-tv-paper.service instead. This file is kept
+# for backward compatibility and will be removed in a future version.
 [Unit]
 Description=PearlAlgo API Server - Tradovate Paper (MFFU_EVAL, port 8001)
 After=network.target pearlalgo-agent.service

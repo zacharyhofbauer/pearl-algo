@@ -49,13 +49,14 @@ export function getApiUrl(): string {
   const apiPort = urlParams.get('api_port')
   const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
-  // Account-based switching: ?account=mffu uses /mffu/ prefix on production
-  if (account === 'mffu') {
+  // Account-based switching: ?account=tv_paper uses /tv_paper/ prefix on production
+  // Backward compat: ?account=mffu still accepted
+  if (account === 'mffu' || account === 'tv_paper') {
     if (isLocal) {
       return 'http://localhost:8001'
     }
-    // On production: use /mffu path prefix (routed by Cloudflare tunnel)
-    return '/mffu'
+    // On production: use /tv_paper path prefix (routed by Cloudflare tunnel)
+    return '/tv_paper'
   }
 
   // Legacy port-based switching: ?api_port=8001 (for local dev)

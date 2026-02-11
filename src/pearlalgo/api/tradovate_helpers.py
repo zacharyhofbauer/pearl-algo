@@ -106,7 +106,8 @@ def get_paired_tradovate_trades(state_dir: Path) -> List[Dict[str, Any]]:
         _, fills = get_tradovate_state(state_dir)
         return _raw_fills_to_trades(fills)
 
-    return cached(f"tv_paired_trades:{state_dir}", 2.0, _pair)
+    # TTL of 10s is safe — fills arrive at most every 30s (cooldown_seconds).
+    return cached(f"tv_paired_trades:{state_dir}", 10.0, _pair)
 
 
 # ---------------------------------------------------------------------------

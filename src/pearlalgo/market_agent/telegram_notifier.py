@@ -102,12 +102,12 @@ class MarketAgentTelegramNotifier:
             bot_token: Telegram bot token (required if enabled)
             chat_id: Telegram chat ID (required if enabled)
             enabled: Whether Telegram notifications are enabled
-            account_label: Optional label prefix for multi-account setups (e.g. "MFFU")
+            account_label: Optional label prefix for multi-account setups (e.g. "Tradovate Paper")
         """
         self.enabled = enabled
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.account_label = account_label  # e.g. "MFFU" or None for inception
+        self.account_label = account_label  # e.g. "Tradovate Paper" or None for IBKR Virtual
         self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
         
@@ -534,7 +534,7 @@ class MarketAgentTelegramNotifier:
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
             
-            # Execution status (for accounts with live execution e.g. MFFU/Tradovate)
+            # Execution status (for accounts with live execution e.g. Tradovate Paper/Tradovate)
             exec_status = signal.get("_execution_status", "")
             if exec_status:
                 if not message.endswith("\n"):

@@ -123,12 +123,12 @@ class ServiceDependencies:
 
         if self.telegram_notifier is None:
             challenge_cfg = self.service_config.get("challenge", {}) or {}
-            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
             accounts_cfg = self.service_config.get("accounts", {}) or {}
-            if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+            if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live"):
                 account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
             else:
-                account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-VIR")
+                account_label = (accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR")
             self.telegram_notifier = MarketAgentTelegramNotifier(
                 bot_token=self.telegram_bot_token,
                 chat_id=self.telegram_chat_id,
@@ -152,10 +152,10 @@ class ServiceDependencies:
 
         if self.audit_logger is None and self.state_manager is not None:
             challenge_cfg_al = self.service_config.get("challenge", {}) or {}
-            mffu_stage_al = str(challenge_cfg_al.get("stage", "") or "").strip().lower()
+            tv_paper_stage_al = str(challenge_cfg_al.get("stage", "") or "").strip().lower()
             al_account = (
                 "tradovate_paper"
-                if mffu_stage_al in ("mffu_eval", "evaluation", "sim_funded", "live")
+                if tv_paper_stage_al in ("tv_paper_eval", "evaluation", "sim_funded", "live")
                 else "ibkr_virtual"
             )
             audit_cfg = self.service_config.get("audit", {}) or {}
@@ -206,12 +206,12 @@ def build_service_dependencies(
 
     # Derive account label for Telegram messages
     challenge_cfg = service_config.get("challenge", {}) or {}
-    mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
     accounts_cfg = service_config.get("accounts", {}) or {}
-    if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+    if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live"):
         account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
     else:
-        account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-VIR")
+        account_label = (accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR")
 
     telegram_notifier = MarketAgentTelegramNotifier(
         bot_token=telegram_bot_token,
@@ -235,7 +235,7 @@ def build_service_dependencies(
     # Audit logger
     al_account = (
         "tradovate_paper"
-        if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
+        if tv_paper_stage in ("tv_paper_eval", "evaluation", "sim_funded", "live")
         else "ibkr_virtual"
     )
     audit_cfg = service_config.get("audit", {}) or {}

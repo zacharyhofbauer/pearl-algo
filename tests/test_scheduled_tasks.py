@@ -3,7 +3,7 @@ Tests for ScheduledTasks - Time-based tasks for the MarketAgentService.
 
 Tests cover:
 - Morning briefing: timing logic, already-sent guard, AI disabled
-- Market close summary: timing window, already-sent guard, trades/no trades, MFFU
+- Market close summary: timing window, already-sent guard, trades/no trades, Tradovate Paper
 - Follower heartbeat: non-follower no-op, within-tolerance, timeout, warned guard, market-closed
 - Tradovate trade reconstruction: empty fills, FIFO matching, today-only filtering
 - record_follower_signal: timestamp tracking
@@ -324,9 +324,9 @@ class TestCheckMarketCloseSummary:
         assert "2" in msg  # 2 trades
 
     @pytest.mark.asyncio
-    async def test_mffu_challenge_context(self, tasks, tmp_path):
-        """Should add MFFU challenge context when account_label is MFFU."""
-        tasks.telegram_notifier.account_label = "MFFU"
+    async def test_tv_paper_challenge_context(self, tasks, tmp_path):
+        """Should add Tradovate Paper challenge context when account_label is Tradovate Paper."""
+        tasks.telegram_notifier.account_label = "Tradovate Paper"
         et_time = _make_et_datetime(15, 58)
         utc_time = et_time.astimezone(timezone.utc)
         today_str = et_time.strftime("%Y-%m-%d")
@@ -337,7 +337,7 @@ class TestCheckMarketCloseSummary:
         tasks.performance_tracker.performance_file.write_text(json.dumps(perf_data))
 
         challenge_state = {
-            "mffu": {"profit_target": 3000, "max_drawdown": 2000, "starting_balance": 50000},
+            "tv_paper": {"profit_target": 3000, "max_drawdown": 2000, "starting_balance": 50000},
             "current_attempt": {"cumulative_pnl": 1500, "equity_hwm": 51500},
         }
         ch_file = tmp_path / "challenge_state.json"

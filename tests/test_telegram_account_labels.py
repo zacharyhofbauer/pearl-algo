@@ -30,7 +30,7 @@ def _minimal_config() -> MagicMock:
 
 def _stub_service_config(**overrides: Any) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {
-        "challenge": {"stage": "inception"},
+        "challenge": {"stage": "ibkr_virtual"},
         "telegram": {"notification_tier": "important"},
     }
     cfg.update(overrides)
@@ -46,7 +46,7 @@ class TestTelegramAccountLabels:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_inception_account_gets_ibkr_vir_label(
+    def test_ibkr_virtual_account_gets_ibkr_vir_label(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,
@@ -56,8 +56,8 @@ class TestTelegramAccountLabels:
         mock_health_cls,
         tmp_path: Path,
     ) -> None:
-        """Inception account should produce the IBKR-VIR label."""
-        svc_cfg = _stub_service_config(challenge={"stage": "inception"})
+        """IBKR Virtual account should produce the IBKR-VIR label."""
+        svc_cfg = _stub_service_config(challenge={"stage": "ibkr_virtual"})
 
         build_service_dependencies(
             data_provider=_mock_data_provider(),
@@ -78,7 +78,7 @@ class TestTelegramAccountLabels:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_mffu_account_gets_tv_paper_label(
+    def test_tv_paper_account_gets_tv_paper_label(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,
@@ -88,8 +88,8 @@ class TestTelegramAccountLabels:
         mock_health_cls,
         tmp_path: Path,
     ) -> None:
-        """MFFU account should produce the TV-PAPER label."""
-        svc_cfg = _stub_service_config(challenge={"stage": "mffu_eval"})
+        """Tradovate Paper account should produce the TV-PAPER label."""
+        svc_cfg = _stub_service_config(challenge={"stage": "tv_paper_eval"})
 
         build_service_dependencies(
             data_provider=_mock_data_provider(),

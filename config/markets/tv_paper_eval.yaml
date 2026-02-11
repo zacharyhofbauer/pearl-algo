@@ -1,0 +1,116 @@
+# ============================================================================
+# Tradovate Paper 50K Rapid Plan - Evaluation Stage Configuration
+#
+# This config overlay is used by the Tradovate Paper Eval instance (port 8001).
+# It extends the base config.yaml with prop-firm-specific settings.
+#
+# Launch: ./scripts/lifecycle/mffu_eval.sh start --background
+# Web:    http://localhost:3000?api_port=8001
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Challenge: Tradovate Paper 50K Rapid Evaluation
+# ---------------------------------------------------------------------------
+challenge:
+  enabled: true
+  stage: tv_paper_eval          # Activates TvPaperEvaluationTracker instead of ChallengeTracker
+  start_balance: 50000.0
+  profit_target: 3000.0
+  max_drawdown: 2000.0      # EOD trailing distance
+  max_contracts_mini: 5
+  max_contracts_micro: 50
+  consistency_pct: 0.50      # No single day > 50% of total profit
+  min_trading_days: 2
+  t1_news_allowed: true      # Evaluation allows T1 news trading
+  auto_reset_on_pass: true
+  auto_reset_on_fail: true
+
+# ---------------------------------------------------------------------------
+# Session & Strategy (must match base config for signal generation)
+# ---------------------------------------------------------------------------
+session:
+  start_time: '18:00'
+  end_time: '15:45'
+  timezone: 'America/New_York'
+
+virtual_pnl:
+  enabled: true
+  intrabar_tiebreak: take_profit
+  notify_entry: true
+  notify_exit: true
+
+# ---------------------------------------------------------------------------
+# Execution: Tradovate Paper (Demo)
+# ---------------------------------------------------------------------------
+# Credentials are loaded from environment variables (secrets.env):
+#   TRADOVATE_USERNAME, TRADOVATE_PASSWORD, TRADOVATE_CID, TRADOVATE_SEC
+#
+execution:
+  enabled: true              # LIVE on Tradovate paper
+  armed: true                # Auto-armed for paper trading
+  mode: paper                # paper = Tradovate demo simulation
+  adapter: tradovate         # Use TradovateExecutionAdapter
+  max_positions: 20          # MNQ micro: up to 20 concurrent positions (within 50 micro limit)
+  max_orders_per_day: 500     # Paper account: no practical limit needed
+  max_daily_loss: 1800.0     # Safety: slightly below $2000 Tradovate Paper limit
+  cooldown_seconds: 30
+  symbol_whitelist:
+    - MNQ
+  # IBKR data connection (separate client IDs to avoid clash with IBKR Virtual NQ agent)
+  ibkr_trading_client_id: 50
+  ibkr_host: "127.0.0.1"
+  ibkr_port: 4001
+
+# IBKR data provider override (avoid client ID clash with IBKR Virtual agent)
+data:
+  ibkr_data_client_id: 51
+
+# ---------------------------------------------------------------------------
+# Trading Circuit Breaker: Tradovate Paper Evaluation Gate
+# ---------------------------------------------------------------------------
+trading_circuit_breaker:
+  mode: warn_only    # Standard checks log-only (same as IBKR Virtual); Tradovate Paper gate still enforces
+  enable_tv_paper_eval_gate: true
+  tv_paper_max_contracts_mini: 5
+  tv_paper_max_contracts_micro: 50
+  tv_paper_trading_start_hour_et: 18    # 6 PM ET
+  tv_paper_trading_end_hour_et: 16      # 4 PM ET
+  tv_paper_trading_end_minute_et: 10    # 4:10 PM ET
+  tv_paper_near_max_loss_buffer: 200.0  # Block entries within $200 of floor
+  tv_paper_enable_news_blackout: true
+  # Standard circuit breaker settings
+  max_consecutive_losses: 5
+  max_session_drawdown: 1800.0
+  max_daily_drawdown: 1800.0
+  max_concurrent_positions: 20
+  # Disable session filter -- Tradovate Paper eval gate handles hours, allow all sessions
+  enable_session_filter: false
+  # Direction gating ENABLED -- broker only allows one-side positions
+  # Re-enabled 2026-02-10: Tradovate rejects opposite-side orders
+  enable_direction_gating: true
+
+# ---------------------------------------------------------------------------
+# Telegram: notification tier
+# ---------------------------------------------------------------------------
+telegram:
+  notification_tier: important   # critical | important | debug
+
+# ---------------------------------------------------------------------------
+# Auto-Flat: Tradovate Paper session close at 4:08 PM ET
+# ---------------------------------------------------------------------------
+auto_flat:
+  enabled: false              # Disabled -- Tradovate bracket orders handle exits
+  daily_enabled: false
+  friday_enabled: false
+  weekend_enabled: false
+  notify: false
+
+# ---------------------------------------------------------------------------
+# Signal Forwarding: Tradovate Paper reads signals from IBKR Virtual instead of
+# running its own strategy.analyze() (which fails due to IBKR data connection
+# issues).
+# ---------------------------------------------------------------------------
+signal_forwarding:
+  enabled: true
+  mode: follower                        # writer | follower | off
+  shared_file: data/shared_signals.jsonl

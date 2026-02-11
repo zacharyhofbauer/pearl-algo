@@ -22,26 +22,26 @@ export interface AIStatus {
   }
 }
 
-export interface MFFUConsistency {
+export interface TvPaperConsistency {
   met: boolean
   best_day_pnl: number
   best_day_pct: number
   best_day_date: string | null
 }
 
-export interface MFFUMinDays {
+export interface TvPaperMinDays {
   met: boolean
   days_traded: number
   days_required: number
 }
 
-export interface MFFUExtensions {
+export interface TvPaperExtensions {
   stage: 'evaluation' | 'sim_funded' | 'live'
   eod_high_water_mark?: number
   current_drawdown_floor?: number
   drawdown_locked?: boolean
-  consistency?: MFFUConsistency
-  min_days?: MFFUMinDays
+  consistency?: TvPaperConsistency
+  min_days?: TvPaperMinDays
   trading_days_count?: number
   max_contracts_mini?: number
 }
@@ -58,8 +58,8 @@ export interface ChallengeStatus {
   profit_target: number
   max_drawdown: number
   attempt_number?: number
-  /** MFFU-specific extensions (present only for prop firm accounts) */
-  mffu?: MFFUExtensions
+  /** TV Paper-specific extensions (present only for prop firm accounts) */
+  mffu?: TvPaperExtensions
 }
 
 export interface PeriodStats {

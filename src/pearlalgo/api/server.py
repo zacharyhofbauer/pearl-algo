@@ -108,7 +108,7 @@ from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tr
 from pearlalgo.api.data_layer import (
     cached as _cached_new,
     read_state_for_dir as _read_state_for_dir_new,
-    is_mffu_account as _is_mffu_account_new,
+    is_tv_paper_account as _is_tv_paper_account_new,
     get_start_balance as _get_start_balance_new,
     get_cached_performance_data as _get_cached_performance_data_new,
     load_performance_data as _load_performance_data_new,
@@ -734,12 +734,17 @@ async def limit_request_body_size(request: Request, call_next):
 
 
 # Path prefix stripping middleware for reverse-proxy deployments
-# (e.g., Cloudflare Tunnel routes /mffu/api/* to port 8001)
+# (e.g., Cloudflare Tunnel routes /tv_paper/api/* to port 8001)
 @app.middleware("http")
 async def strip_path_prefix(request, call_next):
-    """Strip /mffu prefix so routes match when behind a reverse proxy."""
+    """Strip /tv_paper (or legacy /mffu) prefix so routes match when behind a reverse proxy."""
     path = request.scope.get("path", "")
-    if path.startswith("/mffu/"):
+    if path.startswith("/tv_paper/"):
+        request.scope["path"] = path[9:]  # Remove "/tv_paper" prefix, keep the "/"
+    elif path == "/tv_paper":
+        request.scope["path"] = "/"
+    # Backward compat: also strip legacy /mffu prefix
+    elif path.startswith("/mffu/"):
         request.scope["path"] = path[5:]  # Remove "/mffu" prefix, keep the "/"
     elif path == "/mffu":
         request.scope["path"] = "/"
@@ -831,7 +836,7 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
     Reuses the same logic as ``/api/positions`` but via cached data.
     """
     try:
-        if _is_mffu_account(state_dir):
+        if _is_tv_paper_account(state_dir):
             tv, _ = _get_tradovate_state(state_dir)
             positions = _tradovate_positions_for_api(tv)
             # Enrich with TP/SL from virtual signals
@@ -859,7 +864,7 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
                     pass
             return positions
 
-        # Inception: from signals.jsonl
+        # IBKR Virtual: from signals.jsonl
         signals = _get_signals(state_dir, max_lines=500)
         positions = []
         for s in signals:
@@ -893,7 +898,7 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
 def _get_trades_for_broadcast(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
     """Build recent trades list for the WS broadcast payload."""
     try:
-        if _is_mffu_account(state_dir):
+        if _is_tv_paper_account(state_dir):
             trades = _get_paired_tradovate_trades(state_dir)
             return trades[-limit:]
 
@@ -930,7 +935,7 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
     """
     def _compute() -> Optional[Dict[str, Any]]:
         try:
-            if _is_mffu_account(state_dir):
+            if _is_tv_paper_account(state_dir):
                 tv, fills = _get_tradovate_state(state_dir)
                 equity_stats = _tradovate_performance_summary(tv, fills, state_dir)
 
@@ -966,7 +971,7 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                     "all": all_fill_stats,
                 }
 
-            # Inception
+            # IBKR Virtual
             cached_perf = _get_cached_performance_data(state_dir)
             trades = cached_perf.get("trades")
             if trades is None:
@@ -1177,7 +1182,7 @@ class ConnectionManager:
                                 "daily_trades": daily_stats["daily_trades"],
                                 "daily_wins": daily_stats["daily_wins"],
                                 "daily_losses": daily_stats["daily_losses"],
-                                # For MFFU: use Tradovate position count & open PnL
+                                # For Tradovate Paper: use Tradovate position count & open PnL
                                 "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                                 "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                 "futures_market_open": state.get("futures_market_open", False),
@@ -1336,7 +1341,8 @@ async def startup_event():
 
 
 @app.websocket("/ws")
-@app.websocket("/mffu/ws")
+@app.websocket("/tv_paper/ws")
+@app.websocket("/mffu/ws")  # backward compat
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
     """WebSocket endpoint for real-time state updates."""
     # Verify API key if authentication is enabled.
@@ -1634,7 +1640,7 @@ def _get_trading_day_start() -> datetime:
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     """Compute daily P&L and trade stats.
 
-    Priority order for MFFU accounts:
+    Priority order for Tradovate Paper accounts:
     1. Tradovate live account data (realized PnL from broker)
     2. Shared stats_computation module (signals.jsonl with caching)
     3. Challenge state fallback
@@ -1748,7 +1754,7 @@ def _get_previous_trading_day_bounds() -> tuple:
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     """Compute performance stats for yesterday, 24h, 72h, and 30d periods.
 
-    When Tradovate live account data is available (MFFU), use the broker's
+    When Tradovate live account data is available (Tradovate Paper), use the broker's
     equity-based P&L as the single source of truth for ALL periods.  This
     avoids the mismatch between virtual exit grading and real fills.
     """
@@ -1763,7 +1769,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Priority 1: Tradovate live data (MFFU accounts)
+    # Priority 1: Tradovate live data (Tradovate Paper accounts)
     try:
         _sd = _read_state_for_dir(state_dir)
         if _sd:
@@ -1924,15 +1930,15 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
 
 
 # ==========================================================================
-# TRADOVATE DATA HELPERS (MFFU: broker as single source of truth)
+# TRADOVATE DATA HELPERS (Tradovate Paper: broker as single source of truth)
 # ==========================================================================
 
-def _is_mffu_account(state_dir: Path) -> bool:
-    """Check if this state_dir has live Tradovate account data (MFFU mode).
+def _is_tv_paper_account(state_dir: Path) -> bool:
+    """Check if this state_dir has live Tradovate account data (Tradovate Paper mode).
 
-    Delegates to :func:`pearlalgo.api.data_layer.is_mffu_account`.
+    Delegates to :func:`pearlalgo.api.data_layer.is_tv_paper_account`.
     """
-    return _is_mffu_account_new(state_dir)
+    return _is_tv_paper_account_new(state_dir)
 
 
 def _normalize_fill(f: Dict[str, Any]) -> Dict[str, Any]:
@@ -1970,9 +1976,9 @@ def _tradovate_performance_for_period(
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
-    """Get recent exits. MFFU: from Tradovate fills. Inception: from signals.jsonl."""
-    # MFFU: use Tradovate fills
-    if _is_mffu_account(state_dir):
+    """Get recent exits. Tradovate Paper: from Tradovate fills. IBKR Virtual: from signals.jsonl."""
+    # Tradovate Paper: use Tradovate fills
+    if _is_tv_paper_account(state_dir):
         _, fills = _get_tradovate_state(state_dir)
         trades = _tradovate_fills_to_trades(fills)
         recent = []
@@ -2070,7 +2076,7 @@ def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
-    """Get challenge status from challenge_state.json (supports both inception + MFFU)."""
+    """Get challenge status from challenge_state.json (supports both IBKR Virtual + Tradovate Paper)."""
     challenge_file = state_dir / "challenge_state.json"
     if not challenge_file.exists():
         return None
@@ -2102,7 +2108,7 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
             "attempt_number": current.get("attempt_id"),
         }
 
-        # MFFU extensions (present when stage is set in challenge_state.json)
+        # Tradovate Paper extensions (present when stage is set in challenge_state.json)
         mffu = data.get("mffu")
         if mffu and isinstance(mffu, dict):
             result["mffu"] = {
@@ -2116,8 +2122,8 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
                 "max_contracts_mini": mffu.get("max_contracts_mini", 5),
             }
 
-        # MFFU: override balance/pnl/trades with Tradovate live data
-        if _is_mffu_account(state_dir):
+        # Tradovate Paper: override balance/pnl/trades with Tradovate live data
+        if _is_tv_paper_account(state_dir):
             tv, fills = _get_tradovate_state(state_dir)
             if tv.get("equity"):
                 start_balance = config.get("start_balance", 50000.0)
@@ -2264,11 +2270,11 @@ def _load_performance_data(state_dir: Path) -> Optional[list]:
 def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
     """Get equity curve data (cumulative P&L over time) for the mini chart.
 
-    MFFU accounts use Tradovate fills as the data source (real broker data).
-    Inception accounts use performance.json (virtual trade exits).
+    Tradovate Paper accounts use Tradovate fills as the data source (real broker data).
+    IBKR Virtual accounts use performance.json (virtual trade exits).
     """
-    # MFFU: use Tradovate fills for equity curve (real broker data)
-    if _is_mffu_account(state_dir):
+    # Tradovate Paper: use Tradovate fills for equity curve (real broker data)
+    if _is_tv_paper_account(state_dir):
         try:
             _, fills = _get_tradovate_state(state_dir)
             if fills:
@@ -2339,12 +2345,12 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
 def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
     """Calculate risk metrics via the shared :func:`compute_risk_metrics` function.
 
-    MFFU: uses Tradovate paired trades.  Inception: uses performance.json.
+    Tradovate Paper: uses Tradovate paired trades.  IBKR Virtual: uses performance.json.
     Exposure metrics (max concurrent positions, stop-risk) are calculated
     from signals.jsonl when available.
     """
     # -- Gather P&L list and trades list depending on account type ----------
-    if _is_mffu_account(state_dir):
+    if _is_tv_paper_account(state_dir):
         try:
             trades = _get_paired_tradovate_trades(state_dir)
             pnls = [t.get("pnl", 0) or 0 for t in trades]
@@ -2365,7 +2371,7 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
 
     # -- Exposure metrics (require signals.jsonl entry/exit timestamps) -----
     signals_file = state_dir / "signals.jsonl"
-    if signals_file.exists() and not _is_mffu_account(state_dir):
+    if signals_file.exists() and not _is_tv_paper_account(state_dir):
         try:
             signals = _get_signals(state_dir, max_lines=2000)
             max_concurrent = 0
@@ -2675,7 +2681,7 @@ def _init_accounts_config() -> None:
         pass
     # Defaults if config not available
     _accounts_config_cached = {
-        "inception": {
+        "ibkr_virtual": {
             "display_name": "IBKR Virtual",
             "badge": "VIRTUAL",
             "badge_color": "blue",
@@ -2818,7 +2824,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "daily_trades": daily_stats["daily_trades"],
         "daily_wins": daily_stats["daily_wins"],
         "daily_losses": daily_stats["daily_losses"],
-        # For MFFU: use Tradovate position count & open PnL when available
+        # For Tradovate Paper: use Tradovate position count & open PnL when available
         "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
         "futures_market_open": state.get("futures_market_open", False),
@@ -2893,7 +2899,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         # NEW: Extended data quality
         "data_quality": _get_data_quality(state),
 
-        # Tradovate live account data (MFFU)
+        # Tradovate live account data (Tradovate Paper)
         "tradovate_account": state.get("tradovate_account"),
 
         # Account display config (config-driven names for UI)
@@ -3268,12 +3274,12 @@ def _get_year_to_date_start(now_utc: datetime) -> datetime:
 @app.get("/api/performance-summary")
 async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     """
-    Performance summary. MFFU: from Tradovate equity/fills. Inception: from performance.json.
+    Performance summary. Tradovate Paper: from Tradovate equity/fills. IBKR Virtual: from performance.json.
     """
     _require_state_dir()
 
-    # MFFU: bucket Tradovate fills by time period for proper breakdowns
-    if _is_mffu_account(_state_dir):
+    # Tradovate Paper: bucket Tradovate fills by time period for proper breakdowns
+    if _is_tv_paper_account(_state_dir):
         tv, fills = _get_tradovate_state(_state_dir)
         equity_stats = _tradovate_performance_summary(tv, fills, _state_dir)
 
@@ -3312,7 +3318,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
             "all": all_fill_stats,
         }
 
-    # Inception: existing performance.json logic (cached read)
+    # IBKR Virtual: existing performance.json logic (cached read)
     cached_perf = await asyncio.get_event_loop().run_in_executor(None, _get_cached_performance_data, _state_dir)
     trades = cached_perf.get("trades")
     if trades is None:
@@ -3346,16 +3352,16 @@ async def get_trades(
     limit: int = Query(default=20, ge=1, le=100, description="Max trades to return"),
     api_key: Optional[str] = Depends(verify_api_key),
 ):
-    """Get recent trades. MFFU: from Tradovate fills. Inception: from signals.jsonl."""
+    """Get recent trades. Tradovate Paper: from Tradovate fills. IBKR Virtual: from signals.jsonl."""
     _require_state_dir()
 
-    # MFFU: reconstruct trades from Tradovate fills
-    if _is_mffu_account(_state_dir):
+    # Tradovate Paper: reconstruct trades from Tradovate fills
+    if _is_tv_paper_account(_state_dir):
         _, fills = _get_tradovate_state(_state_dir)
         trades = _tradovate_fills_to_trades(fills)
         return trades[-limit:]
 
-    # Inception: existing signals.jsonl logic
+    # IBKR Virtual: existing signals.jsonl logic
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=max(500, limit * 10))
     
@@ -3397,12 +3403,12 @@ async def get_positions(
     """Get currently open positions with entry price, stop loss, and take profit.
 
     Returns positions for display on chart as price lines.
-    MFFU: uses live Tradovate positions instead of virtual signals.jsonl.
+    Tradovate Paper: uses live Tradovate positions instead of virtual signals.jsonl.
     """
     _require_state_dir()
 
-    # MFFU: return live Tradovate positions, enriched with TP/SL from virtual signals
-    if _is_mffu_account(_state_dir):
+    # Tradovate Paper: return live Tradovate positions, enriched with TP/SL from virtual signals
+    if _is_tv_paper_account(_state_dir):
         tv, _ = _get_tradovate_state(_state_dir)
         positions = _tradovate_positions_for_api(tv)
 
@@ -3431,11 +3437,11 @@ async def get_positions(
                         pos["stop_loss"] = sig.get("stop_loss")
                         pos["take_profit"] = sig.get("take_profit")
             except Exception as e:
-                logger.debug(f"Non-critical: could not enrich MFFU positions with TP/SL: {e}")
+                logger.debug(f"Non-critical: could not enrich Tradovate Paper positions with TP/SL: {e}")
 
         return positions
 
-    # Inception: existing signals.jsonl logic
+    # IBKR Virtual: existing signals.jsonl logic
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=500)
 
@@ -3612,12 +3618,12 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
 async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
     """
     Session and time-based performance analytics.
-    MFFU: direction breakdown from Tradovate fills. Inception: from performance.json.
+    Tradovate Paper: direction breakdown from Tradovate fills. IBKR Virtual: from performance.json.
     """
     _require_state_dir()
 
-    # MFFU: build full analytics from Tradovate fills
-    if _is_mffu_account(_state_dir):
+    # Tradovate Paper: build full analytics from Tradovate fills
+    if _is_tv_paper_account(_state_dir):
         tv, fills = _get_tradovate_state(_state_dir)
         trades = _tradovate_fills_to_trades(fills)
         long_trades = [t for t in trades if t.get("direction") == "long"]
@@ -3708,7 +3714,7 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
             wr = round(d["wins"] / tot * 100, 1) if tot > 0 else 0.0
             hold_duration.append({"id": k, "name": d["name"], "pnl": round(d["pnl"], 2), "wins": d["wins"], "losses": d["losses"], "win_rate": wr})
 
-        # MFFU calendar from fills
+        # Tradovate Paper calendar from fills
         from collections import defaultdict as _dd
         mffu_cal: Dict[str, Dict[str, float]] = _dd(lambda: {"pnl": 0.0, "trades": 0})
         for t in trades:

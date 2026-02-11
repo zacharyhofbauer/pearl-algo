@@ -1,9 +1,9 @@
 """
-Signal Forwarder – Inception -> MFFU signal sharing via JSONL file.
+Signal Forwarder – IBKR Virtual -> Tradovate Paper signal sharing via JSONL file.
 
 Extracted from service.py to isolate the shared-signal read/write concern.
-Writer mode (inception): appends signals to a JSONL file after processing.
-Follower mode (MFFU): reads signals from the shared file instead of running
+Writer mode (IBKR Virtual): appends signals to a JSONL file after processing.
+Follower mode (Tradovate Paper): reads signals from the shared file instead of running
 strategy.analyze() locally.
 """
 
@@ -27,7 +27,7 @@ _DEDUP_TRIM_TARGET = 1000
 
 
 class SignalForwarder:
-    """Manages reading/writing shared signals between inception and MFFU agents.
+    """Manages reading/writing shared signals between IBKR Virtual and Tradovate Paper agents.
 
     Lifecycle:
       1. Constructed with the ``signal_forwarding`` config section.
@@ -53,6 +53,7 @@ class SignalForwarder:
         # OrderedDict preserves insertion order so we can trim oldest keys
         # when the dedup set grows too large.  Values are unused (always True).
         self._processed_keys: OrderedDict[tuple[str, str], bool] = OrderedDict()
+        self._last_read_offset: int = 0
 
     # ------------------------------------------------------------------
     # Startup helpers
@@ -64,6 +65,7 @@ class SignalForwarder:
             if self.shared_signals_path.exists():
                 self.shared_signals_path.unlink()
                 logger.info("Cleared stale shared_signals.jsonl on follower startup")
+            self._last_read_offset = 0
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
 
@@ -74,11 +76,11 @@ class SignalForwarder:
     def write_shared_signal(
         self, signal: Dict, signal_id: str, bar_timestamp: str
     ) -> None:
-        """Write a signal to the shared JSONL file for the MFFU agent to read.
+        """Write a signal to the shared JSONL file for the Tradovate Paper agent to read.
 
-        Called by inception (writer mode) after signal processing and
+        Called by IBKR Virtual (writer mode) after signal processing and
         ``signal_id`` assignment.  Non-fatal: errors are logged but never
-        crash the inception agent.
+        crash the IBKR Virtual agent.
         """
         try:
             self.shared_signals_path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,16 +151,18 @@ class SignalForwarder:
     # ------------------------------------------------------------------
 
     def read_shared_signals(self) -> list[Dict]:
-        """Read new signals from the shared JSONL file (MFFU follower mode).
+        """Read new signals from the shared JSONL file (Tradovate Paper follower mode).
 
-        Deduplicates by ``(direction, bar_timestamp)`` so the same EMA cross
-        signal is processed at most once per bar per direction, regardless of
-        how many cycles the inception agent emits it.
+        Uses byte-offset tracking so only new lines since the last read are
+        processed.  Deduplicates by ``(direction, bar_timestamp)`` as a safety
+        net so the same EMA cross signal is processed at most once per bar per
+        direction.
 
         Returns:
             List of signal dicts ready for processing.
         """
         if not self.shared_signals_path.exists():
+            self._last_read_offset = 0
             return []
 
         new_signals: list[Dict] = []
@@ -168,7 +172,9 @@ class SignalForwarder:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_SH)  # shared (read) lock
                 try:
                     with open(self.shared_signals_path, "r") as f:
+                        f.seek(self._last_read_offset)
                         lines = f.readlines()
+                        self._last_read_offset = f.tell()
                 finally:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
@@ -224,10 +230,10 @@ class SignalForwarder:
         sync_counters: Callable[[], None],
         market_data: Optional[Dict] = None,
     ) -> None:
-        """Read and process forwarded signals from inception (MFFU follower mode).
+        """Read and process forwarded signals from IBKR Virtual (Tradovate Paper follower mode).
 
         Called in the main loop's early-exit paths (connection error, fetch
-        exception, empty data) so the MFFU agent never misses a signal even
+        exception, empty data) so the Tradovate Paper agent never misses a signal even
         when its own IBKR data connection is broken.
 
         Args:
@@ -248,7 +254,7 @@ class SignalForwarder:
             if not forwarded:
                 return
             logger.info(
-                f"MFFU: Processing {len(forwarded)} forwarded signal(s) from inception"
+                f"Tradovate Paper: Processing {len(forwarded)} forwarded signal(s) from IBKR Virtual"
             )
             buffer: Optional[Any] = None
             if isinstance(market_data, dict):
@@ -259,4 +265,4 @@ class SignalForwarder:
                 await signal_handler.process_signal(sig, buffer_data=buffer)
                 sync_counters()
         except Exception as e:
-            logger.warning(f"MFFU signal forwarding error: {e}")
+            logger.warning(f"Tradovate Paper signal forwarding error: {e}")

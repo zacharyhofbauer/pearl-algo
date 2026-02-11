@@ -13,8 +13,8 @@ function useActiveAccountName(): string {
   if (!accounts) return 'Pearl AI'
   if (typeof window === 'undefined') return 'Pearl AI'
   const param = new URLSearchParams(window.location.search).get('account')
-  // param is null for inception (default), 'mffu' for prop firm, etc.
-  const key = param || 'inception'
+  // param is null for ibkr_virtual (default), 'tv_paper' for prop firm, etc.
+  const key = param || 'ibkr_virtual'
   return accounts[key]?.display_name || 'Pearl AI'
 }
 

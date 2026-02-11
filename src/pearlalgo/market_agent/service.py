@@ -77,7 +77,7 @@ except ImportError:
     ExecutionConfig = None  # type: ignore
     IBKRExecutionAdapter = None  # type: ignore
 
-# Tradovate execution adapter (optional - only for prop firm / MFFU)
+# Tradovate execution adapter (optional - only for prop firm / Tradovate Paper)
 try:
     from pearlalgo.execution.tradovate.adapter import TradovateExecutionAdapter
     from pearlalgo.execution.tradovate.config import TradovateConfig
@@ -256,7 +256,7 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._strategy_settings = service_config.get("strategy", {}) or {}
 
         # ==========================================================================
-        # SIGNAL FORWARDING (inception -> MFFU)
+        # SIGNAL FORWARDING (IBKR Virtual -> Tradovate Paper)
         # ==========================================================================
         sf_cfg = service_config.get("signal_forwarding", {}) or {}
         self.signal_forwarder = SignalForwarder(config=sf_cfg)
@@ -274,7 +274,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                 f"Signal forwarding: FOLLOWER mode | "
                 f"shared_file={self.signal_forwarder.shared_signals_path} | "
                 f"heartbeat_timeout={self._follower_heartbeat_timeout_minutes}m | "
-                f"strategy.analyze() will be SKIPPED -- reading from inception"
+                f"strategy.analyze() will be SKIPPED -- reading from IBKR Virtual"
             )
             self.signal_forwarder.clear_stale_signals()
         elif self._signal_writer_mode:
@@ -379,11 +379,11 @@ class MarketAgentService(ServiceNotificationsMixin):
             
             challenge_cfg = service_config.get("challenge", {}) or {}
             self._challenge_enabled = bool(challenge_cfg.get("enabled", False))
-            # Skip ChallengeTracker for MFFU accounts — MFFUEvaluationTracker handles
+            # Skip ChallengeTracker for Tradovate Paper accounts — TvPaperEvalTracker handles
             # challenge state for those. Running both causes them to overwrite the same
             # challenge_state.json with incompatible formats.
-            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            is_mffu = mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
+            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            is_mffu = tv_paper_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
             if self._challenge_enabled and not is_mffu:
                 cfg = ChallengeConfig(
                     enabled=True,
@@ -403,28 +403,28 @@ class MarketAgentService(ServiceNotificationsMixin):
                     f"target=+${cfg.profit_target:,.0f}, max_dd=-${cfg.max_drawdown:,.0f}"
                 )
             elif is_mffu:
-                logger.info("ChallengeTracker skipped — MFFU account uses MFFUEvaluationTracker")
+                logger.info("ChallengeTracker skipped — Tradovate Paper account uses TvPaperEvalTracker")
         except Exception as e:
             logger.warning(f"Challenge tracker init failed (continuing without): {e}")
             self._challenge_tracker = None
             self._challenge_enabled = False
 
         # ==========================================================================
-        # MFFU EVALUATION TRACKER (Prop Firm Rules)
+        # Tradovate Paper EVALUATION TRACKER (Prop Firm Rules)
         # ==========================================================================
-        self._mffu_tracker = None
-        self._mffu_enabled = False
+        self._tv_paper_tracker = None
+        self._tv_paper_enabled = False
         try:
             challenge_cfg = service_config.get("challenge", {}) or {}
-            mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
-                from pearlalgo.market_agent.mffu_eval_tracker import (
-                    MFFUEvaluationTracker,
+            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
+            if tv_paper_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+                from pearlalgo.market_agent.tv_paper_eval_tracker import (
+                    TvPaperEvalTracker,
                     MFFUEvalConfig,
                 )
-                mffu_cfg = MFFUEvalConfig(
+                tv_paper_cfg = MFFUEvalConfig(
                     enabled=True,
-                    stage=mffu_stage if mffu_stage != "mffu_eval" else "evaluation",
+                    stage=tv_paper_stage if tv_paper_stage != "mffu_eval" else "evaluation",
                     start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
                     profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
                     max_loss_distance=float(challenge_cfg.get("max_drawdown", 2_000.0)),
@@ -436,23 +436,24 @@ class MarketAgentService(ServiceNotificationsMixin):
                     auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
                     auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
                 )
-                self._mffu_tracker = MFFUEvaluationTracker(
-                    config=mffu_cfg,
+                self._tv_paper_tracker = TvPaperEvalTracker(
+                    config=tv_paper_cfg,
                     state_dir=self.state_manager.state_dir,
                 )
-                self._mffu_enabled = True
+                self._tv_paper_enabled = True
                 logger.info(
-                    f"MFFU Eval Tracker enabled: stage={mffu_cfg.stage}, "
-                    f"target=+${mffu_cfg.profit_target:,.0f}, "
-                    f"max_loss=-${mffu_cfg.max_loss_distance:,.0f}"
+                    f"Tradovate Paper Eval Tracker enabled: stage={tv_paper_cfg.stage}, "
+                    f"target=+${tv_paper_cfg.profit_target:,.0f}, "
+                    f"max_loss=-${tv_paper_cfg.max_loss_distance:,.0f}"
                 )
         except Exception as e:
-            logger.warning(f"MFFU tracker init failed (continuing without): {e}")
-            self._mffu_tracker = None
-            self._mffu_enabled = False
+            logger.warning(f"Tradovate Paper tracker init failed (continuing without): {e}")
+            self._tv_paper_tracker = None
+            self._tv_paper_enabled = False
 
         # Tradovate account cache (polled each cycle when execution adapter is Tradovate)
         self._tradovate_account: Dict[str, Any] = {}
+        self._tv_paper_was_connected: Optional[bool] = None
 
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
@@ -602,7 +603,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             bandit_policy=getattr(self, "bandit_policy", None),
             contextual_policy=getattr(self, "contextual_policy", None),
             challenge_tracker=getattr(self, "_challenge_tracker", None),
-            mffu_tracker=getattr(self, "_mffu_tracker", None),
+            tv_paper_tracker=getattr(self, "_tv_paper_tracker", None),
             virtual_pnl_enabled=getattr(self.config, "virtual_pnl_enabled", True),
             virtual_pnl_tiebreak=getattr(self.config, "virtual_pnl_tiebreak", "stop_loss"),
             virtual_pnl_notify_exit=getattr(self.config, "virtual_pnl_notify_exit", False),
@@ -1196,7 +1197,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                             self.paused = True
                             self.pause_reason = "connection_failures"
 
-                        # MFFU follower: still read shared signals on connection error
+                        # Tradovate Paper follower: still read shared signals on connection error
                         await self.signal_forwarder.process_forwarded_signals(
                             self._signal_handler, self._sync_signal_handler_counters, market_data,
                         )
@@ -1269,7 +1270,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                         await self._interruptible_sleep(self.config.scan_interval * 2)
                     else:
                         await self._sleep_until_next_cycle()
-                    # MFFU follower: still read shared signals on data fetch error
+                    # Tradovate Paper follower: still read shared signals on data fetch error
                     await self.signal_forwarder.process_forwarded_signals(
                         self._signal_handler, self._sync_signal_handler_counters,
                     )
@@ -1308,7 +1309,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     await self._check_dashboard(market_data, quiet_reason=quiet_reason)
                     self.cycle_count += 1
                     
-                    # MFFU follower: still read shared signals when data is empty
+                    # Tradovate Paper follower: still read shared signals when data is empty
                     await self.signal_forwarder.process_forwarded_signals(
                         self._signal_handler, self._sync_signal_handler_counters, market_data,
                     )
@@ -1361,7 +1362,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                 else:
                     # Full analysis: new bar arrived
                     if self._signal_follower_mode:
-                        # MFFU follower: read from shared file instead of strategy
+                        # Tradovate Paper follower: read from shared file instead of strategy
                         # Guard: never process signals when market is closed
                         _market_open_for_signals = True
                         try:
@@ -1373,7 +1374,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                             self._follower_last_signal_at = datetime.now(timezone.utc)
                             self._follower_heartbeat_warned = False
                             logger.info(
-                                f"MFFU: Read {len(signals)} forwarded signal(s) "
+                                f"Tradovate Paper: Read {len(signals)} forwarded signal(s) "
                                 f"from {self.signal_forwarder.shared_signals_path.name}"
                             )
                     else:
@@ -1497,9 +1498,20 @@ class MarketAgentService(ServiceNotificationsMixin):
                             )
                         except Exception as e:
                             logger.debug(f"Non-critical: {e}")
-                        await self._signal_handler.process_signal(signal, buffer_data=buffer_data)
+                        if self._signal_follower_mode:
+                            # Follower: use streamlined path (skips ML/bandit)
+                            _tv_equity = None
+                            if hasattr(self, '_tradovate_account') and self._tradovate_account:
+                                _tv_equity = self._tradovate_account.get("equity")
+                            await self._signal_handler.follower_execute(
+                                signal,
+                                tv_paper_equity=_tv_equity,
+                                tv_paper_tracker=self._tv_paper_tracker if hasattr(self, '_tv_paper_tracker') else None,
+                            )
+                        else:
+                            await self._signal_handler.process_signal(signal, buffer_data=buffer_data)
                         self._sync_signal_handler_counters()
-                        # Signal forwarding: write to shared file for MFFU (writer mode)
+                        # Signal forwarding: write to shared file for Tradovate Paper (writer mode)
                         if self._signal_writer_mode:
                             bar_ts = signal.get("_bar_timestamp")
                             if bar_ts and self._signal_handler.last_signal_id_prefix:
@@ -1560,12 +1572,36 @@ class MarketAgentService(ServiceNotificationsMixin):
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
 
-                # Poll Tradovate account data (MFFU: real broker values for dashboard)
+                # Poll Tradovate account data (Tradovate Paper: real broker values for dashboard)
                 if self.execution_adapter is not None and hasattr(self.execution_adapter, "get_account_summary"):
                     try:
                         self._tradovate_account = await self.execution_adapter.get_account_summary()
                     except Exception as e:
                         logger.debug(f"Non-critical: {e}")  # non-fatal: stale cache is fine
+
+                # Detect Tradovate Paper connection state changes for Telegram alerts
+                if self.execution_adapter is not None and hasattr(self.execution_adapter, 'is_connected'):
+                    _now_connected = self.execution_adapter.is_connected()
+                    if self._tv_paper_was_connected is not None and _now_connected != self._tv_paper_was_connected:
+                        if _now_connected:
+                            logger.info("Tradovate Paper execution reconnected")
+                            try:
+                                await self.notification_queue.enqueue_raw_message(
+                                    "✅ Tradovate Paper execution reconnected.",
+                                    priority=Priority.NORMAL,
+                                )
+                            except Exception:
+                                pass
+                        else:
+                            logger.warning("Tradovate Paper execution disconnected")
+                            try:
+                                await self.notification_queue.enqueue_raw_message(
+                                    "🚨 Tradovate Paper execution DISCONNECTED. Auto-reconnect will attempt.",
+                                    priority=Priority.HIGH,
+                                )
+                            except Exception:
+                                pass
+                    self._tv_paper_was_connected = _now_connected
 
                 # Save state periodically, OR immediately when a signal was
                 # generated/entered this cycle (so the API serves fresh data).
@@ -3491,11 +3527,11 @@ class MarketAgentService(ServiceNotificationsMixin):
                 if self._auto_flat_last_dates.get("weekend_auto_flat") != local_now.date():
                     return "weekend_auto_flat"
 
-        # MFFU Evaluation: auto-flatten at 4:08 PM ET (2 min before 4:10 session close)
-        if self._mffu_enabled and self._mffu_tracker is not None:
+        # Tradovate Paper Evaluation: auto-flatten at 4:08 PM ET (2 min before 4:10 session close)
+        if self._tv_paper_enabled and self._tv_paper_tracker is not None:
             if local_now.time() >= time(16, 8) and local_now.time() < time(16, 11):
-                if self._auto_flat_last_dates.get("mffu_session_close") != local_now.date():
-                    return "mffu_session_close"
+                if self._auto_flat_last_dates.get("tv_paper_session_close") != local_now.date():
+                    return "tv_paper_session_close"
 
         return None
 
@@ -3801,13 +3837,13 @@ class MarketAgentService(ServiceNotificationsMixin):
                 reason="manual_close_requested"
             )
             # Always clear the requests (even if no virtual trades matched --
-            # the signal_id may be a Tradovate position ID for MFFU, not a
+            # the signal_id may be a Tradovate position ID for Tradovate Paper, not a
             # virtual trade signal_id).
             self._clear_close_signals_requested(close_signal_ids)
 
-            # Also close the corresponding broker positions (Tradovate/MFFU).
+            # Also close the corresponding broker positions (Tradovate/Tradovate Paper).
             # This runs regardless of whether virtual trades matched, because
-            # for MFFU the real Tradovate position may exist without a
+            # for Tradovate Paper the real Tradovate position may exist without a
             # matching virtual trade (e.g. after auto-flat closed virtuals
             # but the broker position stayed open).
             if self.execution_adapter is not None:
@@ -3882,12 +3918,12 @@ class MarketAgentService(ServiceNotificationsMixin):
                         logger.warning(f"Failed to record auto-flat date: {e}")
                         self._auto_flat_last_dates[reason] = now.date()
 
-                    # MFFU: update EOD high-water mark after session close flatten
-                    if reason == "mffu_session_close" and self._mffu_tracker is not None:
+                    # Tradovate Paper: update EOD high-water mark after session close flatten
+                    if reason == "tv_paper_session_close" and self._tv_paper_tracker is not None:
                         try:
-                            self._mffu_tracker.update_eod_hwm()
+                            self._tv_paper_tracker.update_eod_hwm()
                         except Exception as e:
-                            logger.debug(f"Could not update MFFU EOD HWM: {e}")
+                            logger.debug(f"Could not update Tradovate Paper EOD HWM: {e}")
 
     # Signal forwarding methods now live in SignalForwarder (signal_forwarder.py).
     # Call sites use self.signal_forwarder.write_shared_signal / read_shared_signals /

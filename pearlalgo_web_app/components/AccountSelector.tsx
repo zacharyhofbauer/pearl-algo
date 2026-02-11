@@ -17,7 +17,7 @@ interface AccountOption {
   id: string
   label: string
   description: string
-  param: string | null  // URL ?account= value (null = default/inception)
+  param: string | null  // URL ?account= value (null = default/ibkr_virtual)
   badge: string
   badgeColor: string
 }
@@ -25,7 +25,7 @@ interface AccountOption {
 /** Fallback defaults used when the store has no accounts config yet */
 const ACCOUNT_DEFAULTS: AccountOption[] = [
   {
-    id: 'inception',
+    id: 'ibkr_virtual',
     label: 'IBKR Virtual',
     description: 'Live market data from IBKR, virtual P&L tracking',
     param: null,
@@ -33,10 +33,10 @@ const ACCOUNT_DEFAULTS: AccountOption[] = [
     badgeColor: 'var(--accent-blue, #448aff)',
   },
   {
-    id: 'mffu_eval',
+    id: 'tv_paper_eval',
     label: 'Tradovate Paper',
     description: 'Live paper trading on Tradovate (demo)',
-    param: 'mffu',
+    param: 'tv_paper',
     badge: 'PAPER',
     badgeColor: 'var(--accent-purple, #7c4dff)',
   },
@@ -57,7 +57,7 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
   const accounts = useMemo(() => {
     if (!storeAccounts) return ACCOUNT_DEFAULTS
     return ACCOUNT_DEFAULTS.map((def) => {
-      // Map to API key: inception→'inception', mffu_eval→'mffu' (the param value)
+      // Map to API key: ibkr_virtual→'ibkr_virtual', tv_paper_eval→'tv_paper' (the param value)
       const configKey = def.param || def.id
       const cfg = storeAccounts[configKey]
       if (!cfg) return def

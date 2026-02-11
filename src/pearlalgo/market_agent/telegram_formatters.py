@@ -326,7 +326,7 @@ def format_compact_signal(
 
     Args:
         signal: Signal dictionary with full context.
-        account_label: Optional account prefix (e.g. 'MFFU').
+        account_label: Optional account prefix (e.g. 'Tradovate Paper').
 
     Returns:
         Formatted message string (< ~1000 chars).

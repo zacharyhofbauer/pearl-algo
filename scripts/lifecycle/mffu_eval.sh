@@ -1,11 +1,14 @@
 #!/bin/bash
 # ============================================================================
+# DEPRECATED: Use tv_paper_eval.sh instead. This file is kept for backward
+# compatibility and will be removed in a future version.
+# ============================================================================
 # Category: Lifecycle
 # Purpose: Start/Stop/Status for MFFU 50K Rapid Evaluation instance
 #
 # This script launches a separate Pearl agent + API server pair that:
-#   - Writes state to data/agent_state/MFFU_EVAL/ (isolated from inception)
-#   - Runs the API server on port 8001 (separate from inception on 8000)
+#   - Writes state to data/agent_state/MFFU_EVAL/ (isolated from IBKR Virtual)
+#   - Runs the API server on port 8001 (separate from IBKR Virtual on 8000)
 #   - Uses Tradovate as the execution adapter (paper/demo)
 #
 # Usage:
@@ -73,7 +76,7 @@ export PEARLALGO_MARKET="$MARKET"
 export PEARLALGO_STATE_DIR="$STATE_DIR"
 export API_PORT="$API_PORT"
 
-# Use unique IBKR client IDs to avoid clashing with inception agent (10/11)
+# Use unique IBKR client IDs to avoid clashing with IBKR Virtual agent (10/11)
 export IBKR_CLIENT_ID=50
 export IBKR_DATA_CLIENT_ID=51
 export IB_CLIENT_ID_LIVE_CHART=97

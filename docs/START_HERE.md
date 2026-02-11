@@ -14,7 +14,7 @@ This repo is a **trading platform** with three hard requirements:
 - **Execution adapters**:
   - `src/pearlalgo/execution/ibkr/` (IBKR -- IBKR Virtual account)
   - `src/pearlalgo/execution/tradovate/` (Tradovate -- Tradovate Paper account)
-- **Eval tracker**: `src/pearlalgo/market_agent/mffu_eval_tracker.py` (prop firm rule enforcement)
+- **Eval tracker**: `src/pearlalgo/market_agent/tv_paper_eval_tracker.py` (prop firm rule enforcement)
 - **Ops/UI**: Telegram notifier + command handler, Web app (pearlalgo.io)
 
 ### Two accounts
@@ -23,12 +23,12 @@ Pearl runs two isolated accounts simultaneously:
 
 | Account | Purpose | Execution | State Dir | API Port |
 |---------|---------|-----------|-----------|----------|
-| **IBKR Virtual** | Since-inception data collection | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
-| **Tradovate Paper** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/MFFU_EVAL/` | 8001 |
+| **IBKR Virtual** | Live market data, virtual P&L tracking | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
+| **Tradovate Paper** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/TV_PAPER_EVAL/` | 8001 |
 
 **Signal flow**: IBKR Virtual generates all signals via `strategy.analyze()`. Tradovate Paper reads signals from `data/shared_signals.jsonl` (written by IBKR Virtual) instead of running its own strategy. This guarantees both accounts trade the same signals. Tradovate Paper's circuit breaker eval gate still enforces prop firm rules (max contracts, trading hours, hedging, news blackout).
 
-**Isolation rule**: `config/config.yaml` changes affect IBKR Virtual only. `config/markets/mffu_eval.yaml` changes affect Tradovate Paper only. `service.py` code changes affect both (Tradovate Paper-specific paths are gated by `self._mffu_enabled`).
+**Isolation rule**: `config/config.yaml` changes affect IBKR Virtual only. `config/markets/tv_paper_eval.yaml` changes affect Tradovate Paper only. `service.py` code changes affect both (Tradovate Paper-specific paths are gated by `self._tv_paper_enabled`).
 
 ### Quick operational checklist
 
@@ -37,15 +37,15 @@ Pearl runs two isolated accounts simultaneously:
 ./pearl.sh stop           # Stop everything
 ./pearl.sh restart        # Restart everything
 ./pearl.sh quick          # One-liner status
-./pearl.sh mffu restart   # Restart MFFU independently
-./pearl.sh mffu logs      # Tail MFFU agent log
+./pearl.sh tv_paper restart   # Restart Tradovate Paper independently
+./pearl.sh tv_paper logs      # Tail Tradovate Paper agent log
 ```
 
 ### Web app (pearlalgo.io)
 
 - Hard refresh shows account selector (IBKR Virtual vs Tradovate Paper)
 - Header dropdown to switch accounts anytime
-- `pearlalgo.io` = IBKR Virtual, `pearlalgo.io?account=mffu` = Tradovate Paper
+- `pearlalgo.io` = IBKR Virtual, `pearlalgo.io?account=tv_paper` = Tradovate Paper
 
 ### Telegram
 
@@ -55,7 +55,7 @@ Pearl runs two isolated accounts simultaneously:
 ### Configuration
 
 - `config/config.yaml` (IBKR Virtual base config)
-- `config/markets/mffu_eval.yaml` (Tradovate Paper overlay)
+- `config/markets/tv_paper_eval.yaml` (Tradovate Paper overlay)
 - `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
 
 ### Where to go next

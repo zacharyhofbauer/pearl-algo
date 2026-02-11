@@ -1,4 +1,7 @@
 # ============================================================================
+# DEPRECATED: Use tv_paper_eval.yaml instead. This file is kept for backward
+# compatibility only.
+# ============================================================================
 # MFFU 50K Rapid Plan - Evaluation Stage Configuration
 #
 # This config overlay is used by the MFFU Eval instance (port 8001).
@@ -56,12 +59,12 @@ execution:
   cooldown_seconds: 30
   symbol_whitelist:
     - MNQ
-  # IBKR data connection (separate client IDs to avoid clash with inception NQ agent)
+  # IBKR data connection (separate client IDs to avoid clash with IBKR Virtual NQ agent)
   ibkr_trading_client_id: 50
   ibkr_host: "127.0.0.1"
   ibkr_port: 4001
 
-# IBKR data provider override (avoid client ID clash with inception agent)
+# IBKR data provider override (avoid client ID clash with IBKR Virtual agent)
 data:
   ibkr_data_client_id: 51
 
@@ -69,7 +72,7 @@ data:
 # Trading Circuit Breaker: MFFU Evaluation Gate
 # ---------------------------------------------------------------------------
 trading_circuit_breaker:
-  mode: warn_only    # Standard checks log-only (same as inception); MFFU gate still enforces
+  mode: warn_only    # Standard checks log-only (same as IBKR Virtual); MFFU gate still enforces
   enable_mffu_eval_gate: true
   mffu_max_contracts_mini: 5
   mffu_max_contracts_micro: 50
@@ -106,7 +109,7 @@ auto_flat:
   notify: false
 
 # ---------------------------------------------------------------------------
-# Signal Forwarding: MFFU reads signals from inception instead of running
+# Signal Forwarding: MFFU reads signals from IBKR Virtual instead of running
 # its own strategy.analyze() (which fails due to IBKR data connection issues).
 # ---------------------------------------------------------------------------
 signal_forwarding:

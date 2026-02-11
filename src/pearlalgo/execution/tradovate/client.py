@@ -550,7 +550,7 @@ class TradovateClient:
         self,
         total_by: str = "Overall",
         exposed_limit: int = 5,
-        description: str = "Pearl MFFU max contracts",
+        description: str = "Pearl Tradovate Paper max contracts",
     ) -> Dict[str, Any]:
         """POST /userAccountPositionLimit/create -- set a position limit."""
         url = f"{self.config.rest_url}/userAccountPositionLimit/create"

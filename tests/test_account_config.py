@@ -35,19 +35,19 @@ class TestAccountDisplayConfig:
 class TestAccountsConfig:
     """Test AccountsConfig with default account entries."""
 
-    def test_default_inception(self):
+    def test_default_ibkr_virtual(self):
         cfg = AccountsConfig()
-        assert cfg.inception.display_name == "IBKR Virtual"
-        assert cfg.inception.badge == "VIRTUAL"
-        assert cfg.inception.badge_color == "blue"
-        assert cfg.inception.telegram_prefix == "IBKR-VIR"
+        assert cfg.ibkr_virtual.display_name == "IBKR Virtual"
+        assert cfg.ibkr_virtual.badge == "VIRTUAL"
+        assert cfg.ibkr_virtual.badge_color == "blue"
+        assert cfg.ibkr_virtual.telegram_prefix == "IBKR-VIR"
 
-    def test_default_mffu(self):
+    def test_default_tv_paper(self):
         cfg = AccountsConfig()
-        assert cfg.mffu.display_name == "Tradovate Paper"
-        assert cfg.mffu.badge == "PAPER"
-        assert cfg.mffu.badge_color == "purple"
-        assert cfg.mffu.telegram_prefix == "TV-PAPER"
+        assert cfg.tv_paper.display_name == "Tradovate Paper"
+        assert cfg.tv_paper.badge == "PAPER"
+        assert cfg.tv_paper.badge_color == "purple"
+        assert cfg.tv_paper.telegram_prefix == "TV-PAPER"
 
 
 class TestAuditConfig:
@@ -74,7 +74,7 @@ class TestFullServiceConfigAccounts:
     def test_accounts_present_in_full_config(self):
         cfg = FullServiceConfig()
         assert hasattr(cfg, "accounts")
-        assert cfg.accounts.inception.display_name == "IBKR Virtual"
+        assert cfg.accounts.ibkr_virtual.display_name == "IBKR Virtual"
 
     def test_audit_present_in_full_config(self):
         cfg = FullServiceConfig()
@@ -84,17 +84,17 @@ class TestFullServiceConfigAccounts:
     def test_validate_config_with_accounts(self):
         config_dict = {
             "accounts": {
-                "inception": {"display_name": "My Virtual"},
-                "mffu": {"display_name": "My Paper"},
+                "ibkr_virtual": {"display_name": "My Virtual"},
+                "tv_paper": {"display_name": "My Paper"},
             },
             "audit": {"retention_days": 60},
         }
         cfg = validate_config(config_dict)
-        assert cfg.accounts.inception.display_name == "My Virtual"
+        assert cfg.accounts.ibkr_virtual.display_name == "My Virtual"
         assert cfg.audit.retention_days == 60
 
     def test_validate_config_without_accounts(self):
         """Config without accounts section should use defaults."""
         cfg = validate_config({})
-        assert cfg.accounts.inception.display_name == "IBKR Virtual"
-        assert cfg.accounts.mffu.display_name == "Tradovate Paper"
+        assert cfg.accounts.ibkr_virtual.display_name == "IBKR Virtual"
+        assert cfg.accounts.tv_paper.display_name == "Tradovate Paper"

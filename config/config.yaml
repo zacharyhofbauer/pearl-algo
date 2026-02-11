@@ -138,7 +138,7 @@ storage:
   async_queue_max_size: 1000
   async_queue_priority_trades: true
 challenge:
-  enabled: false     # Disabled for inception -- MFFU eval uses its own tracker
+  enabled: false     # Disabled for IBKR Virtual -- Tradovate Paper eval uses its own tracker
   start_balance: 50000.0
   max_drawdown: 2000.0
   profit_target: 3000.0
@@ -432,9 +432,9 @@ ai_briefings:
   eod_time: "16:00"       # ET - End of day summary (uses existing 3:55-4:05 window)
 
 # ==========================================================================
-# SIGNAL FORWARDING (Inception -> MFFU)
+# SIGNAL FORWARDING (IBKR Virtual -> Tradovate Paper)
 # ==========================================================================
-# Write signals to a shared JSONL file so the MFFU agent can read them
+# Write signals to a shared JSONL file so the Tradovate Paper agent can read them
 # instead of running its own strategy.analyze() against a broken IBKR data
 # connection.
 signal_forwarding:
@@ -447,13 +447,15 @@ signal_forwarding:
 # ACCOUNT DISPLAY (Config-driven names for UI and Telegram)
 # ==========================================================================
 accounts:
-  inception:
+  # Primary IBKR Virtual account config
+  ibkr_virtual:
     display_name: "IBKR Virtual"
     badge: "VIRTUAL"
     badge_color: "blue"
     telegram_prefix: "IBKR-VIR"
     description: "Live market data from IBKR, virtual P&L tracking"
-  mffu:
+  # Renamed from 'mffu' to 'tv_paper' (2026-02-11) -- legacy code may still reference 'mffu'
+  tv_paper:
     display_name: "Tradovate Paper"
     badge: "PAPER"
     badge_color: "purple"

@@ -47,7 +47,7 @@ class VirtualTradeManager:
         bandit_policy: Optional[Any] = None,
         contextual_policy: Optional[Any] = None,
         challenge_tracker: Optional[Any] = None,
-        mffu_tracker: Optional[Any] = None,
+        tv_paper_tracker: Optional[Any] = None,
         # Config values
         virtual_pnl_enabled: bool = True,
         virtual_pnl_tiebreak: str = "stop_loss",
@@ -68,7 +68,7 @@ class VirtualTradeManager:
         self.bandit_policy = bandit_policy
         self.contextual_policy = contextual_policy
         self._challenge_tracker = challenge_tracker
-        self._mffu_tracker = mffu_tracker
+        self._tv_paper_tracker = tv_paper_tracker
         self._audit_logger = audit_logger
 
         # Config
@@ -369,12 +369,12 @@ class VirtualTradeManager:
             except Exception as challenge_err:
                 logger.debug(f"Could not record challenge trade: {challenge_err}")
 
-        # --- MFFU tracker ---
+        # --- Tradovate Paper tracker ---
         # DISABLED: Virtual trade P&L does NOT match actual Tradovate fills.
-        # The MFFU challenge state is now driven by Tradovate equity (in the
+        # The Tradovate Paper challenge state is now driven by Tradovate equity (in the
         # API server / service polling), not by virtual signal P&L.
         # Feeding virtual P&L here caused false pass/fail triggers.
-        # See: api_server.py _get_challenge_status() for actual MFFU tracking.
+        # See: api_server.py _get_challenge_status() for actual Tradovate Paper tracking.
 
         # --- Bandit policy ---
         if self.bandit_policy is not None:

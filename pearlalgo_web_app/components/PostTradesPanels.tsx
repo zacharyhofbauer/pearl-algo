@@ -11,7 +11,6 @@ import MarketContextPanel from './MarketContextPanel'
 import SystemHealthPanel from './SystemHealthPanel'
 import AnalyticsPanel from './AnalyticsPanel'
 import ConfigPanel from './ConfigPanel'
-import HelpPanel from './HelpPanel'
 
 interface PostTradesPanelsProps {
   agentState: AgentState
@@ -88,8 +87,6 @@ export default function PostTradesPanels({ agentState }: PostTradesPanelsProps) 
 
         {agentState.config && <ConfigPanel config={agentState.config} />}
       </DataPanelsContainer>
-
-      <HelpPanel />
     </div>
   )
 }

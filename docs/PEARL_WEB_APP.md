@@ -59,7 +59,7 @@ node --version  # v20.x.x
 | **Passcode Gate** | Optional passcode login screen for shared/public dashboards |
 | **Pearl AI Chat (LLM)** | Optional LLM chat box (local/Ollama + Claude) backed by `/api/pearl/*` |
 | **Accessibility** | WCAG AA contrast, focus indicators, ARIA roles/labels, keyboard navigation, skip-link, reduced-motion support |
-| **Commission Handling** | MFFU fill P&L auto-adjusted against Tradovate equity to account for broker fees |
+| **Commission Handling** | Tradovate Paper fill P&L auto-adjusted against Tradovate equity to account for broker fees |
 
 ---
 
