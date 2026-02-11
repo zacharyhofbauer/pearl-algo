@@ -1121,6 +1121,26 @@ def _init_pearl_ai() -> None:
         print(f"[Pearl AI] Disabled (init failed): {e}")
 
 
+def _init_audit_router() -> None:
+    """Mount audit API router and connect to AuditLogger if available."""
+    try:
+        from pearlalgo.api.audit_router import audit_router, set_audit_logger
+        from pearlalgo.market_agent.audit_logger import AuditLogger
+
+        app.include_router(audit_router)
+
+        # Try to create an AuditLogger connected to the trades.db for this market
+        if _state_dir:
+            db_path = _state_dir / "trades.db"
+            audit_logger = AuditLogger(db_path=db_path, account="api_reader")
+            set_audit_logger(audit_logger)
+            print("[Audit] Router mounted at /api/audit")
+        else:
+            print("[Audit] Router mounted (no state_dir - read-only)")
+    except Exception as e:
+        print(f"[Audit] Router disabled: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize authentication and start WebSocket broadcast loop."""
@@ -1134,6 +1154,7 @@ async def startup_event():
 
     _init_auth()
     _init_pearl_ai()
+    _init_audit_router()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
 
@@ -2722,6 +2743,35 @@ def _get_error_summary(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+def _get_accounts_config() -> Dict[str, Any]:
+    """Return account display config from service config (config-driven names)."""
+    try:
+        from pearlalgo.config.config_loader import load_service_config
+        svc_cfg = load_service_config()
+        accounts = svc_cfg.get("accounts", {})
+        if accounts:
+            return accounts
+    except Exception:
+        pass
+    # Defaults if config not available
+    return {
+        "inception": {
+            "display_name": "IBKR Virtual",
+            "badge": "VIRTUAL",
+            "badge_color": "blue",
+            "telegram_prefix": "IBKR-V",
+            "description": "Live market data from IBKR, virtual P&L tracking",
+        },
+        "mffu": {
+            "display_name": "Tradovate Paper",
+            "badge": "PAPER",
+            "badge_color": "purple",
+            "telegram_prefix": "TV-PAPER",
+            "description": "Live paper trading on Tradovate (demo)",
+        },
+    }
+
+
 def _get_config(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract agent configuration for display.
@@ -2918,6 +2968,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 
         # Tradovate live account data (MFFU)
         "tradovate_account": state.get("tradovate_account"),
+
+        # Account display config (config-driven names for UI)
+        "accounts": _get_accounts_config(),
     }
 
 

@@ -39,6 +39,7 @@ from typing import Any, Dict, Optional
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.base import DataProvider
+from pearlalgo.market_agent.audit_logger import AuditLogger
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.notification_queue import NotificationQueue
@@ -77,6 +78,9 @@ class ServiceDependencies:
 
     # ---- monitoring ----
     health_monitor: Optional[HealthMonitor] = None
+
+    # ---- audit ----
+    audit_logger: Optional[AuditLogger] = None
 
     # ---- credentials (passed through for lazy construction) ----
     telegram_bot_token: Optional[str] = None
@@ -120,11 +124,11 @@ class ServiceDependencies:
         if self.telegram_notifier is None:
             challenge_cfg = self.service_config.get("challenge", {}) or {}
             mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            account_label = (
-                "MFFU"
-                if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
-                else "INCEPTION"
-            )
+            accounts_cfg = self.service_config.get("accounts", {}) or {}
+            if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+                account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
+            else:
+                account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-V")
             self.telegram_notifier = MarketAgentTelegramNotifier(
                 bot_token=self.telegram_bot_token,
                 chat_id=self.telegram_chat_id,
@@ -145,6 +149,22 @@ class ServiceDependencies:
 
         if self.health_monitor is None:
             self.health_monitor = HealthMonitor(state_dir=self.state_dir)
+
+        if self.audit_logger is None and self.state_manager is not None:
+            challenge_cfg_al = self.service_config.get("challenge", {}) or {}
+            mffu_stage_al = str(challenge_cfg_al.get("stage", "") or "").strip().lower()
+            al_account = (
+                "tradovate_paper"
+                if mffu_stage_al in ("mffu_eval", "evaluation", "sim_funded", "live")
+                else "ibkr_virtual"
+            )
+            audit_cfg = self.service_config.get("audit", {}) or {}
+            self.audit_logger = AuditLogger(
+                db_path=self.state_manager.state_dir / "trades.db",
+                account=al_account,
+                retention_days=int(audit_cfg.get("retention_days", 90)),
+                snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
+            )
 
         return self
 
@@ -187,11 +207,11 @@ def build_service_dependencies(
     # Derive account label for Telegram messages
     challenge_cfg = service_config.get("challenge", {}) or {}
     mffu_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-    account_label = (
-        "MFFU"
-        if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
-        else "INCEPTION"
-    )
+    accounts_cfg = service_config.get("accounts", {}) or {}
+    if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live"):
+        account_label = (accounts_cfg.get("mffu", {}).get("telegram_prefix") or "TV-PAPER")
+    else:
+        account_label = (accounts_cfg.get("inception", {}).get("telegram_prefix") or "IBKR-V")
 
     telegram_notifier = MarketAgentTelegramNotifier(
         bot_token=telegram_bot_token,
@@ -212,6 +232,21 @@ def build_service_dependencies(
 
     health_monitor = HealthMonitor(state_dir=state_dir)
 
+    # Audit logger
+    al_account = (
+        "tradovate_paper"
+        if mffu_stage in ("mffu_eval", "evaluation", "sim_funded", "live")
+        else "ibkr_virtual"
+    )
+    audit_cfg = service_config.get("audit", {}) or {}
+    audit_db_path = state_manager.state_dir / "trades.db" if state_manager.state_dir else Path("trades.db")
+    audit_logger = AuditLogger(
+        db_path=audit_db_path,
+        account=al_account,
+        retention_days=int(audit_cfg.get("retention_days", 90)),
+        snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
+    )
+
     logger.debug("ServiceDependencies built via factory")
 
     return ServiceDependencies(
@@ -225,6 +260,7 @@ def build_service_dependencies(
         telegram_notifier=telegram_notifier,
         notification_queue=notification_queue,
         health_monitor=health_monitor,
+        audit_logger=audit_logger,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
     )

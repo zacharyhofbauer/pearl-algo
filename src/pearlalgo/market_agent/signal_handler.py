@@ -58,6 +58,7 @@ class SignalHandler:
         ml_shadow_threshold: Optional[float] = None,
         execution_adapter: Optional[Any] = None,
         telegram_notifier: Optional[Any] = None,
+        audit_logger: Optional[Any] = None,
     ):
         """
         Initialize the signal handler.
@@ -77,6 +78,7 @@ class SignalHandler:
             ml_shadow_threshold: Optional shadow threshold for ML filter
             execution_adapter: Optional execution adapter for order placement
             telegram_notifier: Optional Telegram notifier
+            audit_logger: Optional AuditLogger for persistent audit events
         """
         self.state_manager = state_manager
         self.performance_tracker = performance_tracker
@@ -100,6 +102,9 @@ class SignalHandler:
         # Execution
         self.execution_adapter = execution_adapter
         self.telegram_notifier = telegram_notifier
+
+        # Audit
+        self._audit_logger = audit_logger
 
         # Tracking
         self.signal_count = 0
@@ -179,6 +184,8 @@ class SignalHandler:
                 logger.warning(
                     f"Rejecting signal {str(signal_id)[:16]}: entry_price is None"
                 )
+                if self._audit_logger is not None:
+                    self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_none", {})
                 return
             try:
                 _entry_val = float(raw_entry_price)
@@ -186,12 +193,16 @@ class SignalHandler:
                     logger.warning(
                         f"Rejecting signal {str(signal_id)[:16]}: entry_price is NaN"
                     )
+                    if self._audit_logger is not None:
+                        self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_nan", {})
                     return
             except (TypeError, ValueError):
                 logger.warning(
                     f"Rejecting signal {str(signal_id)[:16]}: "
                     f"entry_price={raw_entry_price!r} is not a valid number"
                 )
+                if self._audit_logger is not None:
+                    self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_invalid", {"value": str(raw_entry_price)})
                 return
 
             # Guard: reject signals with timestamps more than 5 minutes in the future
@@ -218,6 +229,21 @@ class SignalHandler:
 
             # Virtual entry: enter immediately at the signal's entry price
             entry_price = self._track_virtual_entry(signal, signal_id)
+
+            # Audit: trade entered
+            if self._audit_logger is not None:
+                try:
+                    self._audit_logger.log_trade_entered(
+                        str(signal_id),
+                        {
+                            "entry_price": float(entry_price),
+                            "direction": str(signal.get("direction", "")),
+                            "position_size": int(signal.get("position_size", 1)),
+                            "execution_status": "virtual",
+                        },
+                    )
+                except Exception:
+                    pass  # non-fatal
 
             # ==========================================================================
             # BANDIT POLICY: Evaluate signal type and decide whether to execute
@@ -328,6 +354,13 @@ class SignalHandler:
                             cb_decision.details,
                             priority=Priority.HIGH,
                         )
+                    )
+                # Audit: signal rejected by circuit breaker
+                if self._audit_logger is not None:
+                    self._audit_logger.log_signal_rejected(
+                        str(signal.get("signal_id", "")),
+                        f"circuit_breaker:{cb_decision.reason}",
+                        cb_decision.details or {},
                     )
                 return False  # Block in enforce mode
 

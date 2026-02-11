@@ -394,6 +394,14 @@ export interface PearlInsights {
   accuracy_7d: number
 }
 
+export interface AccountConfig {
+  display_name: string
+  badge: string
+  badge_color: string
+  telegram_prefix: string
+  description: string
+}
+
 export interface PearlFeedMessage {
   id: string
   content: string
@@ -481,6 +489,7 @@ export interface AgentState {
 interface AgentStore {
   // State
   agentState: AgentState | null
+  accounts: Record<string, AccountConfig> | null
   lastUpdated: Date | null
   isLoading: boolean
   error: string | null
@@ -541,28 +550,37 @@ export const useAgentStore = create<AgentStore>()(
   subscribeWithSelector((set) => ({
     // Initial state
     agentState: null,
+    accounts: null,
     lastUpdated: null,
     isLoading: true,
     error: null,
 
     // Actions
     setAgentState: (state) =>
-      set((prev) => ({
-        agentState: prev.agentState
-          ? { ...prev.agentState, ...state }
-          : { ...initialAgentState, ...state },
-        lastUpdated: new Date(),
-        isLoading: false,
-        error: null,
-      })),
+      set((prev) => {
+        const { accounts, ...agentFields } = state as any
+        return {
+          agentState: prev.agentState
+            ? { ...prev.agentState, ...agentFields }
+            : { ...initialAgentState, ...agentFields },
+          ...(accounts !== undefined ? { accounts } : {}),
+          lastUpdated: new Date(),
+          isLoading: false,
+          error: null,
+        }
+      }),
 
     updateFromWebSocket: (data) =>
-      set((prev) => ({
-        agentState: prev.agentState
-          ? { ...prev.agentState, ...data }
-          : { ...initialAgentState, ...data },
-        lastUpdated: new Date(),
-      })),
+      set((prev) => {
+        const { accounts, ...agentFields } = data as any
+        return {
+          agentState: prev.agentState
+            ? { ...prev.agentState, ...agentFields }
+            : { ...initialAgentState, ...agentFields },
+          ...(accounts !== undefined ? { accounts } : {}),
+          lastUpdated: new Date(),
+        }
+      }),
 
     setLoading: (loading) => set({ isLoading: loading }),
 
@@ -571,6 +589,7 @@ export const useAgentStore = create<AgentStore>()(
     reset: () =>
       set({
         agentState: null,
+        accounts: null,
         lastUpdated: null,
         isLoading: true,
         error: null,
@@ -599,3 +618,4 @@ export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.cir
 export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
 export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
 export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
+export const selectAccounts = (state: AgentStore) => state.accounts

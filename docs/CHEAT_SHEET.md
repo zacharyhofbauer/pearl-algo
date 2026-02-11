@@ -14,7 +14,7 @@
 ./pearl.sh status               # Full status dashboard
 ./pearl.sh quick                # One-liner: Gateway OK | Agent OK | ...
 
-# MFFU (prop firm eval -- most used)
+# Tradovate Paper (prop firm eval -- most used)
 ./scripts/lifecycle/mffu_eval.sh restart --background   # Clean restart (kills stale processes)
 ./scripts/lifecycle/mffu_eval.sh start --background     # Start agent + API
 ./scripts/lifecycle/mffu_eval.sh stop                   # Stop everything
@@ -22,8 +22,8 @@
 
 # Individual services
 ./pearl.sh gateway start|stop|status
-./pearl.sh agent start|stop|status         # Inception (NQ)
-./pearl.sh mffu start|stop|restart|status  # MFFU Eval
+./pearl.sh agent start|stop|status         # IBKR Virtual (NQ)
+./pearl.sh mffu start|stop|restart|status  # Tradovate Paper
 ./pearl.sh telegram start|stop|status
 ./pearl.sh chart start|stop|status         # Web app (pearlalgo.io)
 ./pearl.sh chart deploy                    # Build + restart (after code changes)
@@ -33,40 +33,40 @@
 
 **After any code change:**
 - Web app (frontend): `./pearl.sh chart deploy` (builds + restarts in production mode)
-- MFFU (backend): `./scripts/lifecycle/mffu_eval.sh restart --background`
-- Inception: `./pearl.sh restart`
+- Tradovate Paper (backend): `./scripts/lifecycle/mffu_eval.sh restart --background`
+- IBKR Virtual: `./pearl.sh restart`
 
 ---
 
-## 2. MFFU 50K Rapid Evaluation
+## 2. Tradovate Paper — 50K Rapid Evaluation
 
 Pearl runs two isolated accounts:
-- **Inception** (port 8000): Virtual PnL on IBKR, no real orders
-- **MFFU Eval** (port 8001): Real orders on Tradovate paper (demo)
+- **IBKR Virtual** (port 8000): Virtual PnL on IBKR, no real orders
+- **Tradovate Paper** (port 8001): Real orders on Tradovate paper (demo)
 
-### Signal Forwarding (Inception -> MFFU)
+### Signal Forwarding (IBKR Virtual -> Tradovate Paper)
 
-Inception generates signals. MFFU reads them from a shared file -- it does NOT run its own strategy.
+IBKR Virtual generates signals. Tradovate Paper reads them from a shared file -- it does NOT run its own strategy.
 
 ```
-Inception (WRITER)                    MFFU (FOLLOWER)
+IBKR Virtual (WRITER)                 Tradovate Paper (FOLLOWER)
   IBKR -> strategy.analyze()            _read_shared_signals()
        |                                      |
   shared_signals.jsonl  ----------->  dedup (direction, bar_ts)
        |                                      |
-  virtual PnL + [INCEPTION] TG         MFFU eval gate -> Tradovate bracket order
+  virtual PnL + [IBKR VIRTUAL] TG      eval gate -> Tradovate bracket order
                                               |
-                                        [MFFU] Telegram
+                                        [TRADOVATE PAPER] Telegram
 ```
 
 **Safety guards:**
-- Shared signals file cleared on MFFU restart (no replay)
+- Shared signals file cleared on Tradovate Paper restart (no replay)
 - Market-closed check before processing any forwarded signal
 - Auto-flat disabled (Tradovate bracket orders handle exits)
 
 ### Dashboard: Tradovate Only
 
-Every number on the MFFU dashboard comes from Tradovate. No virtual tracking.
+Every number on the Tradovate Paper dashboard comes from Tradovate. No virtual tracking.
 
 | Panel | Source |
 |-------|--------|
@@ -82,7 +82,7 @@ Every number on the MFFU dashboard comes from Tradovate. No virtual tracking.
 
 Fills persist to `tradovate_fills.json` across sessions (Tradovate clears `/fill/list` daily).
 
-**Commission handling:** Tradovate fills don't include fees. The dashboard derives the per-trade commission from the gap between total fill P&L and actual Tradovate equity, then deducts it from all period summaries so numbers match the broker.
+**Commission handling:** Tradovate fills don't include fees. The Tradovate Paper dashboard derives the per-trade commission from the gap between total fill P&L and actual Tradovate equity, then deducts it from all period summaries so numbers match the broker.
 
 ### Evaluation Rules
 
@@ -124,11 +124,11 @@ TRADOVATE_SEC=...
 ```bash
 # Local
 http://localhost:3001                        # Web app
-http://localhost:3001?account=mffu           # MFFU dashboard
+http://localhost:3001?account=mffu           # Tradovate Paper dashboard
 
 # Public
-https://pearlalgo.io                         # Inception
-https://pearlalgo.io/?account=mffu           # MFFU
+https://pearlalgo.io                         # IBKR Virtual
+https://pearlalgo.io/?account=mffu           # Tradovate Paper
 ```
 
 Account switcher dropdown in the header bar toggles between accounts.
@@ -137,12 +137,12 @@ Account switcher dropdown in the header bar toggles between accounts.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `IB_CLIENT_ID_LIVE_CHART` | `96` | IBKR chart client ID (inception) |
+| `IB_CLIENT_ID_LIVE_CHART` | `96` | IBKR chart client ID (IBKR Virtual) |
 | `PEARL_API_KEY` | secrets.env | API authentication |
-| `PEARL_API_PORT` | `8000` | Inception API |
+| `PEARL_API_PORT` | `8000` | IBKR Virtual API |
 | `PEARL_CHART_PORT` | `3001` | Next.js web app |
 
-MFFU uses client ID 97, set by `mffu_eval.sh`.
+Tradovate Paper uses client ID 97, set by `mffu_eval.sh`.
 
 ### Tunnel Commands
 
@@ -160,25 +160,25 @@ First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 
 | Problem | Fix |
 |---------|-----|
-| MFFU dashboard wrong data | `./scripts/lifecycle/mffu_eval.sh restart --background` |
+| Tradovate Paper dashboard wrong data | `./scripts/lifecycle/mffu_eval.sh restart --background` |
 | No signals forwarded | Check `logs/agent_NQ.log` -- `NoOpportunity` = normal (no crossover) |
 | Chart shows CACHE not LIVE | Restart via lifecycle script (fixes client ID conflicts) |
 | pearlalgo.io unreachable | `./pearl.sh tunnel status` then `sudo ./scripts/setup-cloudflared-service.sh` |
 | No market data | `./scripts/gateway/gateway.sh status` -- gateway may be down |
 | Telegram not responding | `./pearl.sh telegram status` then `./pearl.sh telegram restart` |
 | "client id already in use" | Another process holds the IBKR client ID -- restart the conflicting service |
-| MFFU signals on restart | Fixed: shared file cleared on startup + market-closed guard |
+| Tradovate Paper signals on restart | Fixed: shared file cleared on startup + market-closed guard |
 | Fills show 0 after restart | Normal if market closed -- fills persist in `tradovate_fills.json` |
-| Telegram shows wrong attempt # | Fixed: Telegram now uses `MFFUEvaluationTracker` (not `ChallengeTracker`) for MFFU accounts |
+| Telegram shows wrong attempt # | Fixed: Telegram now uses `MFFUEvaluationTracker` (not `ChallengeTracker`) for Tradovate Paper accounts |
 | Header P&L doesn't match Today | Fixed: header now uses today's fill-paired P&L (was using all-time equity delta) |
 | All Time P&L doesn't match Tradovate | Fixed: commission auto-derived from equity vs fill gap and deducted from all periods |
 
 ### Logs
 
 ```bash
-tail -f logs/agent_NQ.log          # Inception agent
-tail -f logs/agent_MFFU_EVAL.log   # MFFU agent
-tail -f logs/api_MFFU_EVAL.log     # MFFU API server
+tail -f logs/agent_NQ.log          # IBKR Virtual agent
+tail -f logs/agent_MFFU_EVAL.log   # Tradovate Paper agent
+tail -f logs/api_MFFU_EVAL.log     # Tradovate Paper API server
 tail -f logs/web_app.log           # Next.js
 ```
 
@@ -190,47 +190,47 @@ tail -f logs/web_app.log           # Next.js
 
 | What | Where |
 |------|-------|
-| Inception config | `config/config.yaml` |
-| MFFU config | `config/markets/mffu_eval.yaml` |
+| IBKR Virtual config | `config/config.yaml` |
+| Tradovate Paper config | `config/markets/mffu_eval.yaml` |
 | Credentials | `~/.config/pearlalgo/secrets.env` |
 | Env defaults | `.env` |
-| Inception state | `data/agent_state/NQ/` |
-| MFFU state | `data/agent_state/MFFU_EVAL/` |
+| IBKR Virtual state | `data/agent_state/NQ/` |
+| Tradovate Paper state | `data/agent_state/MFFU_EVAL/` |
 | Signal forwarding | `data/shared_signals.jsonl` |
-| MFFU fills (persistent) | `data/agent_state/MFFU_EVAL/tradovate_fills.json` |
+| Tradovate Paper fills (persistent) | `data/agent_state/MFFU_EVAL/tradovate_fills.json` |
 | Scripts | `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/` |
 
 ### IBKR Client ID Map
 
 | Service | Client ID | Port |
 |---------|-----------|------|
-| Inception agent (trading) | 10 | 4001 |
-| Inception agent (data) | 11 | 4001 |
-| Inception chart API | 96 | 4001 |
-| MFFU agent (trading) | 50 | 4001 |
-| MFFU agent (data) | 51 | 4001 |
-| MFFU chart API | 97 | 4001 |
+| IBKR Virtual agent (trading) | 10 | 4001 |
+| IBKR Virtual agent (data) | 11 | 4001 |
+| IBKR Virtual chart API | 96 | 4001 |
+| Tradovate Paper agent (trading) | 50 | 4001 |
+| Tradovate Paper agent (data) | 51 | 4001 |
+| Tradovate Paper chart API | 97 | 4001 |
 
 ### Key Code Files
 
 | File | Purpose | Affects |
 |------|---------|---------|
 | `service.py` | Agent orchestrator (inherits `ServiceNotificationsMixin`), signal forwarding, Tradovate polling. Virtual trade exits delegated to `virtual_trade_manager.py` | Both |
-| `mffu_eval_tracker.py` | Challenge state tracking (eval: fixed floor $48K, no lock; sim_funded: intraday trailing, locks at $100) | MFFU |
-| `tradovate/adapter.py` | Execution + `get_account_summary()` | MFFU |
-| `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | MFFU |
-| `trading_circuit_breaker.py` | Risk management + MFFU eval gate | Both |
+| `mffu_eval_tracker.py` | Challenge state tracking (eval: fixed floor $48K, no lock; sim_funded: intraday trailing, locks at $100) | Tradovate Paper |
+| `tradovate/adapter.py` | Execution + `get_account_summary()` | Tradovate Paper |
+| `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | Tradovate Paper |
+| `trading_circuit_breaker.py` | Risk management + eval gate | Both |
 | `config_loader.py` | Config loading, signal_forwarding defaults | Both |
-| `mffu_eval.sh` | MFFU lifecycle (port cleanup, restart) | MFFU |
+| `mffu_eval.sh` | Tradovate Paper lifecycle (port cleanup, restart) | Tradovate Paper |
 | `api_server.py` | API server (auth, rate-limiting, `StateReader`). Header/performance stats use today's fills with auto-derived commission deduction | Dashboard |
-| `tradovate/utils.py` | FIFO fill pairing for Tradovate trades | MFFU |
+| `tradovate/utils.py` | FIFO fill pairing for Tradovate trades | Tradovate Paper |
 | `telegram_command_handler.py` | Telegram bot commands. Uses `_detect_mffu_account()` to pick correct tracker | Both |
-| `ChallengePanel.tsx` | MFFU eval display | Dashboard |
+| `ChallengePanel.tsx` | Tradovate Paper eval display | Dashboard |
 | `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
 
 ### Isolation Model
 
-| Component | Inception | MFFU |
+| Component | IBKR Virtual | Tradovate Paper |
 |-----------|-----------|------|
 | Config | `config/config.yaml` | `config/markets/mffu_eval.yaml` |
 | State dir | `data/agent_state/NQ/` | `data/agent_state/MFFU_EVAL/` |
@@ -238,9 +238,9 @@ tail -f logs/web_app.log           # Next.js
 | Signal gen | `strategy.analyze()` | Reads shared file |
 | Dashboard data | `signals.jsonl` + `performance.json` | Tradovate API |
 | Execution | Disabled (virtual) | Tradovate paper (armed) |
-| Telegram label | `[INCEPTION]` | `[MFFU]` |
+| Telegram label | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
 
-**Rule:** `config.yaml` changes only affect inception. `mffu_eval.yaml` only affects MFFU. `service.py` changes affect both.
+**Rule:** `config.yaml` changes only affect IBKR Virtual. `mffu_eval.yaml` only affects Tradovate Paper. `service.py` changes affect both.
 
 ---
 
@@ -303,6 +303,51 @@ python3 scripts/testing/test_all.py telegram
 
 - **StrategySessionOpen**: When the strategy generates signals (config session window)
 - **FuturesMarketOpen**: When CME data flows (Sun 6 PM ET - Fri 5 PM ET, with daily 5-6 PM break)
-- **Signal forwarding**: Inception writes signals, MFFU reads them. One-way, deduped by `(direction, bar_timestamp)`
+- **Signal forwarding**: IBKR Virtual writes signals, Tradovate Paper reads them. One-way, deduped by `(direction, bar_timestamp)`
 - **Tradovate bracket order**: Entry + stop loss + take profit placed as OSO (one-sends-other)
 - **FIFO fill pairing**: Tradovate fills matched oldest-first to compute per-trade P&L
+
+---
+
+## Audit Quick Reference
+
+> Full docs: [`docs/AUDIT_SYSTEM.md`](AUDIT_SYSTEM.md) and [`docs/UI_AUDIT_GUIDE.md`](UI_AUDIT_GUIDE.md)
+
+### Telegram Commands
+
+```
+/audit                    # Open interactive audit menu
+/audit trades [7d|30d]    # Trade summary
+/audit signals [7d|30d]   # Signal decisions (generated vs rejected)
+/audit health [7d|30d]    # System health (restarts, drops, trips)
+/audit reconcile          # Agent vs broker P&L comparison
+/audit export             # Download CSV
+```
+
+### API Endpoints
+
+```
+GET /api/audit/events           # Full event log (filterable)
+GET /api/audit/equity-history   # Daily balance snapshots
+GET /api/audit/reconciliation   # Agent vs broker P&L
+GET /api/audit/signals          # Signal generation summary
+GET /api/audit/export           # CSV export
+```
+
+### Web Dashboard
+
+Click the **Audit** tab in the dashboard navigation:
+
+| Sub-tab | Shows |
+|---------|-------|
+| Trade Ledger | All trades, filterable + exportable |
+| Signal Decisions | Generated vs rejected signals |
+| System Events | Timeline of starts, stops, drops, trips |
+| Equity History | Daily balance chart per account |
+| Reconciliation | Agent P&L vs broker P&L |
+
+### Direct SQL
+
+```bash
+sqlite3 data/trades.db "SELECT * FROM audit_events WHERE event_type='trade_entry' ORDER BY timestamp DESC LIMIT 10;"
+```

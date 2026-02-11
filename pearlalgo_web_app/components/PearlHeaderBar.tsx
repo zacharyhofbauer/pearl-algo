@@ -7,6 +7,17 @@ import AccountSwitcher from './AccountSwitcher'
 import { useAgentStore, useOperatorStore } from '@/stores'
 import { derivePearlMode, deriveHeadline } from '@/types/pearl'
 
+/** Resolve active account display_name from the store accounts config */
+function useActiveAccountName(): string {
+  const accounts = useAgentStore((s) => s.accounts)
+  if (!accounts) return 'Pearl AI'
+  if (typeof window === 'undefined') return 'Pearl AI'
+  const param = new URLSearchParams(window.location.search).get('account')
+  // param is null for inception (default), 'mffu' for prop firm, etc.
+  const key = param || 'inception'
+  return accounts[key]?.display_name || 'Pearl AI'
+}
+
 /** Chevron icon component for consistent rendering */
 function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
   return (
@@ -37,6 +48,7 @@ function truncateText(text: string, maxLength: number): string {
 export default function PearlHeaderBar() {
   const agentState = useAgentStore((s) => s.agentState)
   const tickOperator = useOperatorStore((s) => s.tick)
+  const accountName = useActiveAccountName()
 
   const [expanded, setExpanded] = useState(false)
   const [carouselIndex, setCarouselIndex] = useState(0)
@@ -154,7 +166,7 @@ export default function PearlHeaderBar() {
       tabIndex={0}
       aria-expanded={expanded}
       aria-controls="pearl-dropdown"
-      aria-label={`Pearl AI panel, ${expanded ? 'expanded' : 'collapsed'}. ${previewText}`}
+      aria-label={`${accountName} — Pearl AI panel, ${expanded ? 'expanded' : 'collapsed'}. ${previewText}`}
     >
       <div className="pearl-header-icon" aria-hidden="true">
         <Image src="/pearl-emoji.png" alt="" width={20} height={20} priority />

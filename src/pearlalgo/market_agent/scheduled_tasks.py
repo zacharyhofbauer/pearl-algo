@@ -21,6 +21,7 @@ from pearlalgo.market_agent.notification_queue import Priority
 from pearlalgo.market_agent.state_reader import StateReader
 
 if TYPE_CHECKING:
+    from pearlalgo.market_agent.audit_logger import AuditLogger
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.performance_tracker import PerformanceTracker
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
@@ -48,6 +49,9 @@ class ScheduledTasks:
         self.performance_tracker = performance_tracker
         self._service_config = service_config
 
+        # Audit logger (optional)
+        self._audit_logger: Optional["AuditLogger"] = None
+
         # Follower heartbeat state
         self._signal_follower_mode = signal_follower_mode
         self._follower_heartbeat_timeout_minutes = follower_heartbeat_timeout_minutes
@@ -68,9 +72,19 @@ class ScheduledTasks:
             service_config.get("signals", {}).get("retention_days", 90)
         )
 
+        # Audit retention (once per day)
+        self._last_audit_retention_date: Optional[str] = None
+
+        # Equity snapshot (once per day at market close)
+        self._last_equity_snapshot_date: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Public: called by service each cycle
     # ------------------------------------------------------------------
+
+    def set_audit_logger(self, audit_logger: "AuditLogger") -> None:
+        """Inject the audit logger (late-binding to avoid circular deps)."""
+        self._audit_logger = audit_logger
 
     def record_follower_signal(self) -> None:
         """Call when a forwarded signal is received to reset heartbeat."""
@@ -579,3 +593,99 @@ class ScheduledTasks:
         os.replace(tmp_path, signals_file)
 
         return len(prune_lines), len(keep_lines)
+
+    # ------------------------------------------------------------------
+    # Audit Retention
+    # ------------------------------------------------------------------
+
+    async def check_audit_retention(self) -> None:
+        """Run audit event retention once per day.
+
+        Deletes old events per the configured retention policy.
+        Non-blocking: offloaded to a thread.
+        """
+        if self._audit_logger is None:
+            return
+
+        try:
+            now_utc = datetime.now(timezone.utc)
+            today_str = now_utc.strftime("%Y-%m-%d")
+
+            if self._last_audit_retention_date == today_str:
+                return
+            self._last_audit_retention_date = today_str
+
+            result = await asyncio.to_thread(self._audit_logger.run_retention)
+            deleted = result.get("deleted_general", 0) + result.get("deleted_snapshots", 0)
+            if deleted > 0:
+                logger.info(f"Audit retention complete: {result}")
+        except Exception as e:
+            logger.debug(f"Audit retention error: {e}")
+
+    # ------------------------------------------------------------------
+    # Equity Snapshot
+    # ------------------------------------------------------------------
+
+    async def check_equity_snapshot(self) -> None:
+        """Record a daily equity snapshot at market close (4:10 PM ET).
+
+        Reads the current equity from state.json (IBKR Virtual) or the cached
+        Tradovate account summary (Tradovate Paper) and logs it via AuditLogger.
+        """
+        if self._audit_logger is None:
+            return
+
+        try:
+            now_utc = datetime.now(timezone.utc)
+            try:
+                from zoneinfo import ZoneInfo
+                et_tz = ZoneInfo("America/New_York")
+                now_et = now_utc.astimezone(et_tz)
+            except Exception:
+                now_et = now_utc - timedelta(hours=5)
+
+            today_str = now_et.strftime("%Y-%m-%d")
+
+            if self._last_equity_snapshot_date == today_str:
+                return
+
+            # Fire at 4:10-4:20 PM ET (after market close)
+            et_hour = now_et.hour
+            et_minute = now_et.minute
+            if not (et_hour == 16 and 10 <= et_minute <= 20):
+                return
+
+            self._last_equity_snapshot_date = today_str
+
+            state = self.state_manager.load_state()
+            account = self._audit_logger.account
+
+            # Try Tradovate account data first (real broker values)
+            tv_account = state.get("tradovate_account", {}) or {}
+            if tv_account.get("equity"):
+                self._audit_logger.log_equity_snapshot(
+                    account=account,
+                    equity=float(tv_account.get("equity", 0)),
+                    cash_balance=float(tv_account.get("cash_balance", 0)),
+                    open_pnl=float(tv_account.get("open_pnl", 0)),
+                    realized_pnl=float(tv_account.get("realized_pnl", 0)),
+                )
+            else:
+                # Fall back to virtual equity from state
+                challenge = state.get("challenge", {}) or {}
+                equity = float(
+                    challenge.get("current_balance", 0)
+                    or state.get("daily_pnl", 0)
+                )
+                self._audit_logger.log_equity_snapshot(
+                    account=account,
+                    equity=equity,
+                    cash_balance=0.0,
+                    open_pnl=0.0,
+                    realized_pnl=float(state.get("daily_pnl", 0)),
+                )
+
+            logger.info(f"Equity snapshot recorded for {today_str}")
+
+        except Exception as e:
+            logger.debug(f"Equity snapshot error: {e}")

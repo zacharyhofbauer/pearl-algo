@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAgentStore } from '@/stores'
 
 /**
  * Account definition for the switcher.
@@ -16,7 +17,8 @@ interface AccountDef {
   badgeColor?: string
 }
 
-const ACCOUNTS: AccountDef[] = [
+/** Fallback defaults used when the store has no accounts config yet */
+const ACCOUNT_DEFAULTS: AccountDef[] = [
   {
     id: 'inception',
     label: 'Inception',
@@ -43,18 +45,36 @@ function getAccountFromUrl(): string | null {
   return params.get('account')
 }
 
-function findAccountByParam(param: string | null): AccountDef {
-  return ACCOUNTS.find((a) => a.accountParam === param) || ACCOUNTS[0]
+function findAccountByParam(param: string | null, list: AccountDef[]): AccountDef {
+  return list.find((a) => a.accountParam === param) || list[0]
 }
 
 export default function AccountSwitcher() {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const storeAccounts = useAgentStore((s) => s.accounts)
+
+  // Merge store config over fallback defaults (display_name, badge, etc.)
+  const accounts = useMemo(() => {
+    if (!storeAccounts) return ACCOUNT_DEFAULTS
+    return ACCOUNT_DEFAULTS.map((def) => {
+      // Map to API key: inception→'inception', mffu_eval→'mffu' (the param value)
+      const configKey = def.accountParam || def.id
+      const cfg = storeAccounts[configKey]
+      if (!cfg) return def
+      return {
+        ...def,
+        label: cfg.display_name,
+        badge: cfg.badge,
+        badgeColor: cfg.badge_color,
+      }
+    })
+  }, [storeAccounts])
 
   // Derive current account from URL
   const currentAccount = useMemo(() => {
-    return findAccountByParam(getAccountFromUrl())
-  }, [])
+    return findAccountByParam(getAccountFromUrl(), accounts)
+  }, [accounts])
 
   // Close on outside click
   useEffect(() => {
@@ -157,7 +177,7 @@ export default function AccountSwitcher() {
 
       {open && (
         <div className="account-switcher-dropdown" role="listbox">
-          {ACCOUNTS.map((account) => (
+          {accounts.map((account) => (
             <button
               key={account.id}
               className={`account-switcher-option ${account.id === currentAccount.id ? 'active' : ''}`}

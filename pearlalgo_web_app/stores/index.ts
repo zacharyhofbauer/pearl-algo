@@ -39,6 +39,7 @@ export type {
   MLFilterPerformance,
   SessionContext,
   SignalActivity,
+  AccountConfig,
 } from './agentStore'
 
 // Export selectors
@@ -64,6 +65,7 @@ export {
   selectMLFilterPerformance,
   selectSessionContext,
   selectSignalActivity,
+  selectAccounts,
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'

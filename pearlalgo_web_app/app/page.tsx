@@ -14,6 +14,7 @@ import AnalyticsPanel from '@/components/AnalyticsPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import PostTradesPanels from '@/components/PostTradesPanels'
+import AuditPanel from '@/components/AuditPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
@@ -1085,6 +1086,15 @@ function PearlAlgoWebAppInner() {
 
           {/* Post-trade panels (signals / ops / advanced analytics) */}
           {agentState && <PostTradesPanels agentState={agentState} />}
+
+          {/* Audit panel — trade ledger, signals, system events, equity, reconciliation */}
+          <div className="data-panels" style={{ marginTop: '4px' }}>
+            <div className="data-panels-grid">
+              <div className="panel-span-all">
+                <AuditPanel />
+              </div>
+            </div>
+          </div>
         </div>
       </main>
     </>

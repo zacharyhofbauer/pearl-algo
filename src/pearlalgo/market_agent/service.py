@@ -55,6 +55,7 @@ from pearlalgo.utils.volume_pressure import (
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
 from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
 from pearlalgo.market_agent.ml_manager import MLManager
+from pearlalgo.market_agent.audit_logger import AuditLogger, AuditEventType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
 from pearlalgo.market_agent.order_manager import OrderManager
@@ -243,6 +244,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             )
 
         self.health_monitor = deps.health_monitor
+        self.audit_logger: Optional[AuditLogger] = deps.audit_logger
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         trading_circuit_breaker_settings = service_config.get("trading_circuit_breaker", {}) or {}
@@ -605,6 +607,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             virtual_pnl_tiebreak=getattr(self.config, "virtual_pnl_tiebreak", "stop_loss"),
             virtual_pnl_notify_exit=getattr(self.config, "virtual_pnl_notify_exit", False),
             symbol=getattr(self.config, "symbol", "MNQ"),
+            audit_logger=self.audit_logger,
         )
         
         # Daily summary tracking (sent at safety close 3:55 PM ET)
@@ -648,6 +651,8 @@ class MarketAgentService(ServiceNotificationsMixin):
             signal_follower_mode=self._signal_follower_mode,
             follower_heartbeat_timeout_minutes=self._follower_heartbeat_timeout_minutes,
         )
+        if self.audit_logger is not None:
+            self.scheduled_tasks.set_audit_logger(self.audit_logger)
         self.operator_handler = OperatorHandler(
             state_manager=self.state_manager,
             notification_queue=self.notification_queue,
@@ -780,6 +785,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             ml_shadow_threshold=self._ml_manager.shadow_threshold,
             execution_adapter=self.execution_adapter,
             telegram_notifier=self.telegram_notifier,
+            audit_logger=self.audit_logger,
         )
         # Propagate persisted counters so handler continues from saved state
         self._signal_handler.signal_count = self.signal_count
@@ -844,6 +850,14 @@ class MarketAgentService(ServiceNotificationsMixin):
         signal.signal(signal.SIGTERM, self._os_signal_handler)
 
         logger.info("NQ Agent Service starting...")
+
+        # Start audit logger background writer
+        if self.audit_logger is not None:
+            self.audit_logger.start()
+            self.audit_logger.log_system_event(
+                AuditEventType.SYSTEM_START,
+                {"symbol": self.symbol, "timeframe": self.timeframe},
+            )
 
         # Start notification queue for async Telegram delivery
         await self.notification_queue.start()
@@ -934,6 +948,17 @@ class MarketAgentService(ServiceNotificationsMixin):
 
         logger.info(f"Stopping NQ Agent Service... ({shutdown_reason})")
         self.shutdown_requested = True
+
+        # Log shutdown audit event and stop audit logger
+        if self.audit_logger is not None:
+            try:
+                self.audit_logger.log_system_event(
+                    AuditEventType.SYSTEM_STOP,
+                    {"reason": shutdown_reason, "cycle_count": self.cycle_count},
+                )
+                self.audit_logger.stop(timeout=3.0)
+            except Exception as e:
+                logger.warning(f"Error stopping audit logger: {e}")
 
         # Flush async SQLite queue before shutdown
         if self._async_sqlite_queue is not None:
@@ -1050,6 +1075,10 @@ class MarketAgentService(ServiceNotificationsMixin):
             # Prune old signals from signals.jsonl (once per day)
             await self.scheduled_tasks.check_signal_pruning()
 
+            # Audit scheduled tasks: retention + equity snapshot (once per day each)
+            await self.scheduled_tasks.check_audit_retention()
+            await self.scheduled_tasks.check_equity_snapshot()
+
             # Adaptive cadence: compute effective interval for this cycle (includes velocity mode)
             if self._adaptive_cadence_enabled:
                 self._effective_interval = self._compute_effective_interval()
@@ -1145,6 +1174,16 @@ class MarketAgentService(ServiceNotificationsMixin):
                                     "cycle": self.cycle_count,
                                 },
                             )
+                            # Audit: connection drop threshold
+                            if self.audit_logger is not None:
+                                self.audit_logger.log_system_event(
+                                    AuditEventType.CONNECTION_DROP,
+                                    {
+                                        "connection_failures": self.connection_failures,
+                                        "max_connection_failures": self.max_connection_failures,
+                                        "cycle": self.cycle_count,
+                                    },
+                                )
                             await self.notification_queue.enqueue_circuit_breaker(
                                 "IB Gateway connection lost",
                                 {
@@ -1212,6 +1251,16 @@ class MarketAgentService(ServiceNotificationsMixin):
                                 "cycle": self.cycle_count,
                             },
                         )
+                        # Audit: error threshold reached
+                        if self.audit_logger is not None:
+                            self.audit_logger.log_system_event(
+                                AuditEventType.ERROR_THRESHOLD,
+                                {
+                                    "data_fetch_errors": self.data_fetch_errors,
+                                    "max_data_fetch_errors": self.max_data_fetch_errors,
+                                    "cycle": self.cycle_count,
+                                },
+                            )
                         await self._notify_error("Data fetch failures", f"{self.data_fetch_errors} consecutive errors")
                         # Backoff: sleep longer than normal cycle, reset cadence scheduler
                         if self.cadence_scheduler:
@@ -1422,6 +1471,14 @@ class MarketAgentService(ServiceNotificationsMixin):
 
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
+
+                        # Audit: signal generated
+                        if self.audit_logger is not None:
+                            try:
+                                self.audit_logger.log_signal_generated(signal)
+                            except Exception:
+                                pass  # non-fatal
+
                         try:
                             self.state_manager.append_event(
                                 "signal_generated",

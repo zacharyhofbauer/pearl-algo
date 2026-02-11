@@ -450,6 +450,43 @@ class KnowledgeConfig(BaseModel):
     top_k: int = Field(default=6, ge=1)
 
 
+class AccountDisplayConfig(BaseModel):
+    """Display metadata for a trading account."""
+    display_name: str = "Unknown"
+    badge: str = "UNKNOWN"
+    badge_color: str = "gray"
+    telegram_prefix: str = ""
+    description: str = ""
+
+
+class AuditConfig(BaseModel):
+    """Audit system configuration."""
+    retention_days: int = Field(default=90, ge=1)
+    snapshot_retention_days: int = Field(default=365, ge=1)
+
+
+class AccountsConfig(BaseModel):
+    """Account registry with display names and metadata."""
+    inception: AccountDisplayConfig = Field(
+        default_factory=lambda: AccountDisplayConfig(
+            display_name="IBKR Virtual",
+            badge="VIRTUAL",
+            badge_color="blue",
+            telegram_prefix="IBKR-V",
+            description="Live market data from IBKR, virtual P&L tracking",
+        )
+    )
+    mffu: AccountDisplayConfig = Field(
+        default_factory=lambda: AccountDisplayConfig(
+            display_name="Tradovate Paper",
+            badge="PAPER",
+            badge_color="purple",
+            telegram_prefix="TV-PAPER",
+            description="Live paper trading on Tradovate (demo)",
+        )
+    )
+
+
 class FullServiceConfig(BaseModel):
     """
     Complete service configuration schema.
@@ -482,6 +519,8 @@ class FullServiceConfig(BaseModel):
     swing_trading: SwingTradingConfig = Field(default_factory=SwingTradingConfig)
     ml_filter: MLFilterConfig = Field(default_factory=MLFilterConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
+    accounts: AccountsConfig = Field(default_factory=AccountsConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
 
     @model_validator(mode="after")
     def validate_cross_field_constraints(self) -> "FullServiceConfig":

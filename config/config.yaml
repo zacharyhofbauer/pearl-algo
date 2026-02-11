@@ -442,3 +442,27 @@ signal_forwarding:
   mode: writer                          # writer | follower | off
   shared_file: data/shared_signals.jsonl
   max_lines: 500                        # Cap file at 500 lines (rotate oldest)
+
+# ==========================================================================
+# ACCOUNT DISPLAY (Config-driven names for UI and Telegram)
+# ==========================================================================
+accounts:
+  inception:
+    display_name: "IBKR Virtual"
+    badge: "VIRTUAL"
+    badge_color: "blue"
+    telegram_prefix: "IBKR-V"
+    description: "Live market data from IBKR, virtual P&L tracking"
+  mffu:
+    display_name: "Tradovate Paper"
+    badge: "PAPER"
+    badge_color: "purple"
+    telegram_prefix: "TV-PAPER"
+    description: "Live paper trading on Tradovate (demo)"
+
+# ==========================================================================
+# AUDIT SYSTEM (Persistent audit event logging)
+# ==========================================================================
+audit:
+  retention_days: 90              # General events retained for 90 days
+  snapshot_retention_days: 365    # Equity snapshots retained for 1 year

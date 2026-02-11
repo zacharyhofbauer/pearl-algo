@@ -9,8 +9,9 @@
  * the user explicitly clears it or switches via the header dropdown.
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import Image from 'next/image'
+import { useAgentStore } from '@/stores'
 
 interface AccountOption {
   id: string
@@ -21,7 +22,8 @@ interface AccountOption {
   badgeColor: string
 }
 
-const ACCOUNTS: AccountOption[] = [
+/** Fallback defaults used when the store has no accounts config yet */
+const ACCOUNT_DEFAULTS: AccountOption[] = [
   {
     id: 'inception',
     label: 'Inception',
@@ -49,6 +51,25 @@ interface AccountSelectorProps {
 export default function AccountSelector({ onSelect }: AccountSelectorProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const firstButtonRef = useRef<HTMLButtonElement>(null)
+  const storeAccounts = useAgentStore((s) => s.accounts)
+
+  // Merge store config over fallback defaults (display_name, badge, etc.)
+  const accounts = useMemo(() => {
+    if (!storeAccounts) return ACCOUNT_DEFAULTS
+    return ACCOUNT_DEFAULTS.map((def) => {
+      // Map to API key: inception→'inception', mffu_eval→'mffu' (the param value)
+      const configKey = def.param || def.id
+      const cfg = storeAccounts[configKey]
+      if (!cfg) return def
+      return {
+        ...def,
+        label: cfg.display_name,
+        description: cfg.description,
+        badge: cfg.badge,
+        badgeColor: cfg.badge_color,
+      }
+    })
+  }, [storeAccounts])
 
   // Focus trap: keep focus within the dialog
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -101,7 +122,7 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
           Choose which account to view. You can switch anytime using the dropdown in the header bar.
         </p>
         <div className="account-selector-options" role="group" aria-label="Account options">
-          {ACCOUNTS.map((acct, idx) => (
+          {accounts.map((acct, idx) => (
             <button
               key={acct.id}
               ref={idx === 0 ? firstButtonRef : undefined}

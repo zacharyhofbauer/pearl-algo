@@ -54,6 +54,7 @@ class VirtualTradeManager:
         virtual_pnl_notify_exit: bool = False,
         symbol: str = "MNQ",
         streak_alert_threshold: int = 3,
+        audit_logger: Optional[Any] = None,
     ):
         # Core dependencies
         self.state_manager = state_manager
@@ -68,6 +69,7 @@ class VirtualTradeManager:
         self.contextual_policy = contextual_policy
         self._challenge_tracker = challenge_tracker
         self._mffu_tracker = mffu_tracker
+        self._audit_logger = audit_logger
 
         # Config
         self._virtual_pnl_enabled = virtual_pnl_enabled
@@ -295,6 +297,23 @@ class VirtualTradeManager:
             "Virtual exit: %s | %s | exit=%s | pnl=%s",
             sig_id[:16], exit_reason, f"{exit_price:.2f}", f"{pnl_value:.2f}",
         )
+
+        # --- Audit: trade exited ---
+        if self._audit_logger is not None:
+            try:
+                self._audit_logger.log_trade_exited(
+                    sig_id,
+                    {
+                        "exit_price": float(exit_price),
+                        "exit_reason": str(exit_reason),
+                        "pnl": pnl_value,
+                        "is_win": is_win,
+                        "hold_duration_minutes": float(perf.get("hold_duration_minutes", 0)),
+                        "direction": direction,
+                    },
+                )
+            except Exception:
+                pass  # non-fatal
 
         # --- Circuit breaker ---
         if self.trading_circuit_breaker is not None:
