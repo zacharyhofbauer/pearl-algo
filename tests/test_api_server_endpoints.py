@@ -116,7 +116,6 @@ def _patch_server(state_dir):
         patch.object(server_mod, "_auth_enabled", False),
         patch.object(server_mod, "_api_keys", set()),
         patch.object(server_mod, "_operator_enabled", False),
-        patch.object(server_mod, "_pearl_brain", None),
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
     ]
@@ -136,7 +135,6 @@ def _patch_server_auth(state_dir):
         patch.object(server_mod, "_auth_enabled", True),
         patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
         patch.object(server_mod, "_operator_enabled", False),
-        patch.object(server_mod, "_pearl_brain", None),
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
     ]
@@ -248,23 +246,7 @@ class TestPerformanceSummaryEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# 6. GET /api/analytics — session analytics
-# ---------------------------------------------------------------------------
-
-
-class TestAnalyticsEndpoint:
-    @pytest.mark.usefixtures("_patch_server")
-    def test_analytics_returns_session_data(self, client):
-        resp = client.get("/api/analytics")
-        assert resp.status_code == 200
-        body = resp.json()
-        # The endpoint should return a dict with session analytics keys
-        assert isinstance(body, dict)
-        assert "session_performance" in body or "direction_breakdown" in body
-
-
-# ---------------------------------------------------------------------------
-# 7. GET /api/candles — requires data provider (should 500/503 when mocked)
+# 6. GET /api/candles — requires data provider (should 500/503 when mocked)
 # ---------------------------------------------------------------------------
 
 

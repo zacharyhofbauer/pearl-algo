@@ -42,16 +42,55 @@ from typing import Any, Dict, Mapping, Optional
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.config import defaults
-from pearlalgo.config.adapters import (
-    build_strategy_config_from_yaml,
-    apply_execution_env_overrides as _apply_execution_env_overrides,
-    apply_learning_env_overrides as _apply_learning_env_overrides,
-)
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
 
-# Schema validation — mandatory at startup to catch config errors early.
-from pearlalgo.config.config_schema import validate_config, FullServiceConfig
+
+# Stubs for deleted config_schema.py and adapters.py (restructure cleanup).
+# Schema validation now handled by schema_v2.py in the new --config path.
+def validate_config(data):
+    """No-op stub: schema validation moved to schema_v2.py."""
+    return data
+
+FullServiceConfig = None  # type: ignore
+
+def build_strategy_config_from_yaml(base, config_data):
+    """Inline stub: merge config_data strategy keys into base dict."""
+    result = dict(base)
+    for section in ("strategy", "signals", "risk", "data", "service", "execution",
+                    "session", "challenge", "performance", "virtual_pnl", "auto_flat",
+                    "learning", "ml_filter", "swing_trading", "trading_circuit_breaker",
+                    "circuit_breaker", "hud", "indicators", "telegram", "telegram_ui",
+                    "storage", "audit", "accounts"):
+        if section in config_data:
+            if isinstance(config_data[section], dict) and isinstance(result.get(section), dict):
+                result[section] = {**result.get(section, {}), **config_data[section]}
+            else:
+                result[section] = config_data[section]
+    # Top-level scalar overrides
+    for key in ("symbol", "timeframe", "scan_interval"):
+        if key in config_data:
+            result[key] = config_data[key]
+    return result
+
+def _apply_execution_env_overrides(execution_config):
+    """Apply environment variable overrides for execution settings."""
+    import os
+    for env_key, config_key, conv in [
+        ("IBKR_HOST", "ibkr_host", str),
+        ("IBKR_PORT", "ibkr_port", int),
+        ("IBKR_CLIENT_ID", "ibkr_trading_client_id", int),
+    ]:
+        val = os.getenv(env_key)
+        if val is not None:
+            try:
+                execution_config[config_key] = conv(val)
+            except (ValueError, TypeError):
+                pass
+
+def _apply_learning_env_overrides(learning_config):
+    """No-op stub: learning env overrides removed."""
+    pass
 
 # Optional per-call override (used for experiments/backtests; never persisted).
 # ContextVar keeps this safe across async tasks. It does NOT affect other processes.

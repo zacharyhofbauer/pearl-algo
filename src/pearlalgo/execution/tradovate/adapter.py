@@ -605,7 +605,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     if _ff:
                         fill_record = {
                             "id": entity.get("id"),
-                            "order_id": order_id,
+                            "order_id": entity.get("orderId"),
                             "contract_id": contract_id,
                             "timestamp": entity.get("timestamp"),
                             "action": entity.get("action"),

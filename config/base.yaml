@@ -202,7 +202,7 @@ auto_flat:
   notify: true
 
 learning:
-  enabled: true
+  enabled: false
   mode: shadow
   feature_engineer_enabled: true
   features:

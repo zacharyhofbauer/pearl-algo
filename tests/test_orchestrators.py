@@ -485,21 +485,22 @@ class TestExecutionOrchestrator:
     def test_clear_close_signals_requested(
         self, execution_orchestrator, state_manager
     ):
-        """clear_close_signals_requested writes an empty list to state."""
+        """clear_close_signals_requested clears close_signals_requested from state."""
         execution_orchestrator.clear_close_signals_requested()
 
-        state_manager.update_state.assert_called_once_with(
-            {"close_signals_requested": []}
-        )
+        state_manager.save_state.assert_called_once()
+        saved = state_manager.save_state.call_args[0][0]
+        assert "close_signals_requested" not in saved
 
     def test_clear_close_all_flag(self, execution_orchestrator, state_manager):
-        """clear_close_all_flag resets both close_all fields in state."""
+        """clear_close_all_flag removes close_all fields from state."""
         execution_orchestrator.clear_close_all_flag()
 
-        state_manager.update_state.assert_called_once_with({
-            "close_all_requested": False,
-            "close_all_requested_at": None,
-        })
+        state_manager.save_state.assert_called_once()
+        saved = state_manager.save_state.call_args[0][0]
+        assert "close_all_requested" not in saved
+        assert "close_all_requested_time" not in saved
+        assert "close_all_requested_at" not in saved
 
 
 # ===========================================================================

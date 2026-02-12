@@ -137,8 +137,8 @@ class TestCloseRequestHelpers:
 
     def test_clear_close_signals(self, orch, mock_state_mgr):
         orch.clear_close_signals_requested()
-        mock_state_mgr.update_state.assert_called_once()
+        mock_state_mgr.save_state.assert_called_once()
 
     def test_clear_close_all_flag(self, orch, mock_state_mgr):
         orch.clear_close_all_flag()
-        mock_state_mgr.update_state.assert_called_once()
+        mock_state_mgr.save_state.assert_called_once()

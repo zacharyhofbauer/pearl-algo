@@ -812,11 +812,6 @@ def _read_state_for_dir(state_dir: Path) -> Dict[str, Any]:
             reader = _state_reader_cache[key]
     return reader.read_state()
 
-# Pearl AI observability for UI heartbeat (updated by broadcast loop)
-_pearl_last_state_seen_time: Optional[str] = None
-_pearl_last_state_sync_time: Optional[str] = None
-_pearl_last_state_sync_error: Optional[str] = None
-
 
 # ---------------------------------------------------------------------------
 # WebSocket Connection Manager
@@ -1017,8 +1012,6 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
         self._broadcast_task: Optional[asyncio.Task] = None
         self._last_state_hash: str = ""
-        # Track raw agent state changes separately from Pearl AI feed/chat changes.
-        self._last_raw_state_hash: str = ""
         # File mtime fingerprint to avoid unnecessary disk reads + json.dumps
         self._last_state_mtime_ns: int = 0
         self._last_state_size: int = 0
@@ -1072,8 +1065,6 @@ class ConnectionManager:
         """Start broadcasting state updates at regular intervals."""
         while True:
             try:
-                global _pearl_last_state_seen_time, _pearl_last_state_sync_time, _pearl_last_state_sync_error
-
                 if _state_dir:
                     # Get current state (use empty dict as fallback so we can
                     # still broadcast challenge/performance data when the agent
@@ -1098,83 +1089,8 @@ class ConnectionManager:
                     state = self._cached_state
 
                     if state or _get_challenge_status(_state_dir):
-                        # Heartbeat: the API server can see agent state
-                        _pearl_last_state_seen_time = datetime.now(timezone.utc).isoformat()
-
-                        # Detect raw agent state.json changes via mtime fingerprint
-                        raw_state_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}"
-
-                        # Keep Pearl AI brain in sync ONLY when raw state changes.
-                        if raw_state_hash != self._last_raw_state_hash:
-                            self._last_raw_state_hash = raw_state_hash
-                            if _pearl_brain is not None:
-                                try:
-                                    # Enrich state with computed fields so Pearl has the same
-                                    # context the UI sees (daily stats, recent exits, regime, etc).
-                                    enriched = dict(state)
-                                    try:
-                                        daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-                                        enriched.update({
-                                            "daily_pnl": daily_stats.get("daily_pnl"),
-                                            "daily_trades": daily_stats.get("daily_trades"),
-                                            "daily_wins": daily_stats.get("daily_wins"),
-                                            "daily_losses": daily_stats.get("daily_losses"),
-                                        })
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    try:
-                                        enriched["recent_exits"] = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    try:
-                                        enriched["market_regime"] = _get_market_regime(state)
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    try:
-                                        enriched["signal_rejections_24h"] = _get_signal_rejections_24h(state)
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    try:
-                                        enriched["last_signal_decision"] = _get_last_signal_decision(state)
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    try:
-                                        enriched["risk_metrics"] = _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir)
-                                    except Exception as e:
-                                        logger.debug(f"Non-critical: {e}")
-
-                                    _pearl_brain.update_state(enriched)
-                                    _pearl_last_state_sync_time = datetime.now(timezone.utc).isoformat()
-                                    _pearl_last_state_sync_error = None
-                                except Exception as e:
-                                    _pearl_last_state_sync_error = str(e)
-                                    print(f"[Pearl AI] State update failed: {e}")
-
-                        # Include Pearl AI feed/chat changes in the broadcast hash so the UI can
-                        # update even when trading state.json hasn't changed (e.g. user chat).
-                        pearl_fingerprint = ""
-                        if _pearl_brain is not None:
-                            try:
-                                msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
-                                last_ts = ""
-                                if msgs:
-                                    try:
-                                        last_ts = msgs[-1].timestamp.isoformat() if msgs[-1].timestamp else ""
-                                    except Exception:
-                                        logger.debug("Failed to format Pearl message timestamp", exc_info=True)
-                                        last_ts = str(getattr(msgs[-1], "timestamp", "")) or ""
-                                pearl_fingerprint = f"{len(msgs)}:{last_ts}"
-                            except Exception:
-                                logger.debug("Failed to compute Pearl AI fingerprint", exc_info=True)
-                                pearl_fingerprint = "error"
-
                         # -- Fingerprint-first: only compute payload when state changed --
-                        combined_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}:{pearl_fingerprint}"
+                        combined_hash = f"{self._last_state_mtime_ns}:{self._last_state_size}"
 
                         if self.active_connections and combined_hash != self._last_state_hash:
                             self._last_state_hash = combined_hash
@@ -1229,13 +1145,13 @@ class ConnectionManager:
                                 "ml_filter_performance": state.get("ml_filter_performance"),
                                 "session_context": state.get("session_context"),
                                 "signal_activity": state.get("signal_activity"),
-                                # Pearl AI (read-only)
-                                "pearl_suggestion": _get_pearl_suggestion(),
-                                "pearl_insights": state.get("pearl_insights"),
-                                "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                                "pearl_feed": _get_pearl_feed(limit=40),
-                                "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
-                                "pearl_ai_debug": _get_pearl_ai_debug(),
+                                # Pearl AI (removed – keys retained for web-app compat)
+                                "pearl_suggestion": None,
+                                "pearl_insights": None,
+                                "pearl_ai_available": False,
+                                "pearl_feed": [],
+                                "pearl_ai_heartbeat": None,
+                                "pearl_ai_debug": None,
                                 "operator_lock_enabled": bool(_operator_enabled),
                             }
 
@@ -1252,43 +1168,6 @@ class ConnectionManager:
 # Global connection manager
 ws_manager = ConnectionManager()
 
-# ---------------------------------------------------------------------------
-# Pearl AI (optional) - LLM chat + metrics API
-# ---------------------------------------------------------------------------
-
-_pearl_ai_enabled: bool = os.getenv("PEARL_AI_API_ENABLED", "false").lower() == "true"
-_pearl_ai_mounted: bool = False
-_pearl_brain = None
-
-
-def _init_pearl_ai() -> None:
-    """
-    Pearl AI module has been removed.  This stub is kept because it is
-    called during startup; it now simply marks the subsystem as disabled.
-    """
-    global _pearl_ai_mounted
-    _pearl_ai_mounted = False
-
-
-def _init_audit_router() -> None:
-    """Mount audit API router and connect to AuditLogger if available."""
-    try:
-        from pearlalgo.api.audit_router import audit_router, set_audit_logger
-        from pearlalgo.market_agent.audit_logger import AuditLogger
-
-        app.include_router(audit_router)
-
-        # Try to create an AuditLogger connected to the trades.db for this market
-        if _state_dir:
-            db_path = _state_dir / "trades.db"
-            audit_logger = AuditLogger(db_path=db_path, account="api_reader")
-            set_audit_logger(audit_logger)
-            print("[Audit] Router mounted at /api/audit")
-        else:
-            print("[Audit] Router mounted (no state_dir - read-only)")
-    except Exception as e:
-        print(f"[Audit] Router disabled: {e}")
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -1302,9 +1181,7 @@ async def startup_event():
         _state_dir = _resolve_state_dir(_market)
 
     _init_auth()
-    _init_pearl_ai()
     _init_accounts_config()
-    _init_audit_router()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
 
@@ -1411,12 +1288,12 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "error_summary": _get_error_summary(_state_dir, state),
                         "config": _get_config(state),
                         "data_quality": _get_data_quality(state),
-                        "pearl_suggestion": _get_pearl_suggestion(),
-                        "pearl_insights": state.get("pearl_insights"),
-                        "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                        "pearl_feed": _get_pearl_feed(limit=40),
-                        "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
-                        "pearl_ai_debug": _get_pearl_ai_debug(),
+                        "pearl_suggestion": None,
+                        "pearl_insights": None,
+                        "pearl_ai_available": False,
+                        "pearl_feed": [],
+                        "pearl_ai_heartbeat": None,
+                        "pearl_ai_debug": None,
                         "operator_lock_enabled": bool(_operator_enabled),
                     }
                 }
@@ -1489,12 +1366,12 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "error_summary": _get_error_summary(_state_dir, state),
                                     "config": _get_config(state),
                                     "data_quality": _get_data_quality(state),
-                                    "pearl_suggestion": _get_pearl_suggestion(),
-                                    "pearl_insights": state.get("pearl_insights"),
-                                    "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-                                    "pearl_feed": _get_pearl_feed(limit=40),
-                                    "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
-                                    "pearl_ai_debug": _get_pearl_ai_debug(),
+                                    "pearl_suggestion": None,
+                                    "pearl_insights": None,
+                                    "pearl_ai_available": False,
+                                    "pearl_feed": [],
+                                    "pearl_ai_heartbeat": None,
+                                    "pearl_ai_debug": None,
                                     "operator_lock_enabled": bool(_operator_enabled),
                                 }
                             }
@@ -2111,13 +1988,6 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_pearl_suggestion() -> Optional[Dict[str, Any]]:
-    """Get current Pearl suggestion if any. Placeholder for actual suggestion logic."""
-    # Pearl suggestions are generated dynamically - return None for now
-    # In future, this could read from a suggestion queue or state file
-    return None
-
-
 def _json_sanitize(obj: Any) -> Any:
     """
     Best-effort conversion to a JSON-serializable structure.
@@ -2128,60 +1998,6 @@ def _json_sanitize(obj: Any) -> Any:
         return json.loads(json.dumps(obj, default=str))
     except Exception:
         return str(obj)
-
-
-def _get_pearl_feed(limit: int = 10) -> List[Dict[str, Any]]:
-    """
-    Recent Pearl AI feed messages for UI display.
-
-    This is separate from the shadow-mode "pearl_insights" block in state.json; it
-    reflects PearlBrain's narrations / insights / alerts / chat responses.
-    """
-    if _pearl_brain is None:
-        return []
-
-    try:
-        msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
-    except Exception:
-        msgs = []
-
-    if not msgs:
-        return []
-
-    try:
-        n = max(1, int(limit))
-    except Exception:
-        n = 10
-
-    start = max(0, len(msgs) - n)
-    out: List[Dict[str, Any]] = []
-    for idx, msg in enumerate(msgs[start:], start=start):
-        try:
-            ts = msg.timestamp.isoformat() if getattr(msg, "timestamp", None) else None
-        except Exception:
-            ts = str(getattr(msg, "timestamp", None))
-
-        out.append({
-            "id": f"pearl-{idx}",
-            "content": getattr(msg, "content", "") or "",
-            "type": getattr(msg, "message_type", None) or getattr(msg, "type", None) or "message",
-            "priority": getattr(msg, "priority", None),
-            "timestamp": ts,
-            "trade_id": getattr(msg, "related_trade_id", None),
-            "metadata": _json_sanitize(getattr(msg, "metadata", None) or {}),
-        })
-
-    return out
-
-
-def _get_pearl_ai_debug() -> Optional[Dict[str, Any]]:
-    """Pearl AI module removed; always returns None."""
-    return None
-
-
-def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
-    """Pearl AI module removed; always returns None."""
-    return None
 
 
 def _load_performance_data(state_dir: Path) -> Optional[list]:
@@ -2765,19 +2581,13 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         # NEW: Performance stats
         "performance": _compute_performance_stats(_state_dir),
 
-        # NEW: Pearl suggestion
-        "pearl_suggestion": _get_pearl_suggestion(),
-
-        # NEW: Pearl insights (shadow mode metrics + active suggestion) from agent state.json
-        "pearl_insights": state.get("pearl_insights"),
-
-        # NEW: Whether LLM chat endpoints are available on this server
-        "pearl_ai_available": bool(_pearl_ai_mounted and _pearl_brain is not None),
-
-        # NEW: Pearl AI transparency (feed + heartbeat + last debug snapshot)
-        "pearl_feed": _get_pearl_feed(limit=40),
-        "pearl_ai_heartbeat": _get_pearl_ai_heartbeat(),
-        "pearl_ai_debug": _get_pearl_ai_debug(),
+        # Pearl AI (removed – keys retained for web-app compat)
+        "pearl_suggestion": None,
+        "pearl_insights": None,
+        "pearl_ai_available": False,
+        "pearl_feed": [],
+        "pearl_ai_heartbeat": None,
+        "pearl_ai_debug": None,
 
         # NEW: Whether operator passphrase locking is configured on this server
         "operator_lock_enabled": bool(_operator_enabled),
@@ -2965,32 +2775,6 @@ async def close_trade(
         raise HTTPException(status_code=500, detail=f"Failed to request close: {str(e)[:200]}")
 
 
-# ---------------------------------------------------------------------------
-# Pearl suggestion feedback (operator-only, shadow-mode training)
-# ---------------------------------------------------------------------------
-
-def _resolve_active_suggestion_id(state: Dict[str, Any]) -> Optional[str]:
-    """Best-effort: extract the currently active suggestion id from agent state."""
-    try:
-        insights = state.get("pearl_insights") or {}
-        if isinstance(insights, dict):
-            cur = insights.get("current_suggestion") or {}
-            if isinstance(cur, dict):
-                sid = str(cur.get("id") or "").strip()
-                if sid:
-                    return sid
-            metrics = insights.get("shadow_metrics") or {}
-            if isinstance(metrics, dict):
-                active = metrics.get("active_suggestion") or {}
-                if isinstance(active, dict):
-                    sid = str(active.get("id") or "").strip()
-                    if sid:
-                        return sid
-    except Exception:
-        return None
-    return None
-
-
 def _write_operator_request(state_dir: Path, prefix: str, payload: Dict[str, Any]) -> Path:
     """
     Write an operator request file into the state directory (atomic best-effort).
@@ -3027,83 +2811,6 @@ async def _wait_for_ack(flag_path: Path, timeout: float = 10.0) -> bool:
             return True
         await asyncio.sleep(0.5)
     return False
-
-
-@app.post("/api/pearl-suggestion/accept")
-async def pearl_suggestion_accept(
-    payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_or_api_key),
-):
-    """
-    Operator action: accept the current Pearl suggestion (shadow mode feedback).
-
-    Writes an operator request file for the agent to consume and apply to the
-    shadow tracker (mark_followed).
-    """
-    _require_state_dir()
-
-    state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
-
-    suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
-    if not suggestion_id:
-        suggestion_id = _resolve_active_suggestion_id(state or {}) or ""
-
-    if not suggestion_id:
-        raise HTTPException(status_code=409, detail="No active suggestion to accept.")
-
-    req_payload = {
-        "type": "pearl_suggestion_feedback",
-        "action": "accept",
-        "suggestion_id": suggestion_id,
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "source": "web",
-    }
-    try:
-        _write_operator_request(_state_dir, "pearl_suggestion_feedback", req_payload)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write feedback request: {str(e)[:200]}")
-
-    return {"ok": True, "message": "Suggestion accepted (queued).", "suggestion_id": suggestion_id}
-
-
-@app.post("/api/pearl-suggestion/dismiss")
-async def pearl_suggestion_dismiss(
-    payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_or_api_key),
-):
-    """
-    Operator action: dismiss the current Pearl suggestion (shadow mode feedback).
-
-    Writes an operator request file for the agent to consume and apply to the
-    shadow tracker (mark_dismissed).
-    """
-    _require_state_dir()
-
-    state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
-
-    suggestion_id = str((payload or {}).get("suggestion_id") or "").strip()
-    if not suggestion_id:
-        suggestion_id = _resolve_active_suggestion_id(state or {}) or ""
-
-    if not suggestion_id:
-        raise HTTPException(status_code=409, detail="No active suggestion to dismiss.")
-
-    dismiss_reason = str((payload or {}).get("dismiss_reason") or "").strip() or None
-
-    req_payload = {
-        "type": "pearl_suggestion_feedback",
-        "action": "dismiss",
-        "suggestion_id": suggestion_id,
-        "dismiss_reason": dismiss_reason,
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-        "source": "web",
-    }
-    try:
-        _write_operator_request(_state_dir, "pearl_suggestion_feedback", req_payload)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write feedback request: {str(e)[:200]}")
-
-    return {"ok": True, "message": "Suggestion dismissed (queued).", "suggestion_id": suggestion_id}
 
 
 def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime, end: datetime = None) -> Dict[str, Any]:
@@ -3526,195 +3233,6 @@ async def get_markers(
     return markers
 
 
-def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
-    """
-    Compute session and time-based performance analytics from performance.json.
-
-    Delegates to :func:`pearlalgo.analytics.session_analytics.compute_session_analytics`.
-    """
-    from pearlalgo.analytics.session_analytics import compute_session_analytics
-
-    signals_file = state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=5000) if signals_file.exists() else []
-
-    cached_perf = _get_cached_performance_data(state_dir)
-    performance_trades = cached_perf.get("trades") or []
-
-    return compute_session_analytics(signals=signals, performance_trades=performance_trades)
-
-
-@app.get("/api/analytics")
-async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
-    """
-    Session and time-based performance analytics.
-    Tradovate Paper: direction breakdown from Tradovate fills. IBKR Virtual: from performance.json.
-    """
-    _require_state_dir()
-
-    # Tradovate Paper: build full analytics from Tradovate fills
-    if _is_tv_paper_account(_state_dir):
-        tv, fills = _get_tradovate_state(_state_dir)
-        trades = _tradovate_fills_to_trades(fills)
-        long_trades = [t for t in trades if t.get("direction") == "long"]
-        short_trades = [t for t in trades if t.get("direction") == "short"]
-        long_pnl = sum(t.get("pnl", 0) for t in long_trades)
-        short_pnl = sum(t.get("pnl", 0) for t in short_trades)
-        total = len(trades)
-        open_count = len([p for p in tv.get("positions", []) if p.get("net_pos", 0) != 0])
-        entered = total + open_count
-
-        # Session performance (bucket trades by ET hour)
-        _et = ZoneInfo("America/New_York")
-        _sessions = {
-            "overnight": {"start": 18, "end": 4, "name": "Overnight", "pnl": 0.0, "wins": 0, "losses": 0},
-            "premarket": {"start": 4, "end": 6, "name": "Premarket", "pnl": 0.0, "wins": 0, "losses": 0},
-            "morning":   {"start": 6, "end": 10, "name": "Morning", "pnl": 0.0, "wins": 0, "losses": 0},
-            "midday":    {"start": 10, "end": 14, "name": "Midday", "pnl": 0.0, "wins": 0, "losses": 0},
-            "afternoon": {"start": 14, "end": 17, "name": "Afternoon", "pnl": 0.0, "wins": 0, "losses": 0},
-            "close":     {"start": 17, "end": 18, "name": "Close", "pnl": 0.0, "wins": 0, "losses": 0},
-        }
-        _hourly: Dict[int, Dict[str, Any]] = {h: {"pnl": 0.0, "trades": 0, "wins": 0} for h in range(24)}
-        _duration = {
-            "quick":  {"name": "Quick (<30m)", "pnl": 0.0, "wins": 0, "losses": 0},
-            "medium": {"name": "Medium (30-60m)", "pnl": 0.0, "wins": 0, "losses": 0},
-            "long":   {"name": "Long (60m+)", "pnl": 0.0, "wins": 0, "losses": 0},
-        }
-
-        for t in trades:
-            pnl = t.get("pnl", 0) or 0
-            is_win = pnl > 0
-            # Parse exit time to ET
-            try:
-                exit_ts = t.get("exit_time", "")
-                exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00")).astimezone(_et)
-                et_hour = exit_dt.hour
-            except Exception:
-                et_hour = 12  # fallback
-
-            # Session bucketing
-            for _sk, _sv in _sessions.items():
-                s, e = _sv["start"], _sv["end"]
-                in_sess = (et_hour >= s and et_hour < e) if s < e else (et_hour >= s or et_hour < e)
-                if in_sess:
-                    _sv["pnl"] += pnl
-                    if is_win: _sv["wins"] += 1
-                    else: _sv["losses"] += 1
-                    break
-
-            # Hourly
-            _hourly[et_hour]["pnl"] += pnl
-            _hourly[et_hour]["trades"] += 1
-            if is_win: _hourly[et_hour]["wins"] += 1
-
-            # Duration
-            try:
-                entry_ts = t.get("entry_time", "")
-                entry_dt = datetime.fromisoformat(entry_ts.replace("Z", "+00:00"))
-                dur_min = (exit_dt - entry_dt.astimezone(_et)).total_seconds() / 60
-                if dur_min < 30:
-                    dk = "quick"
-                elif dur_min < 60:
-                    dk = "medium"
-                else:
-                    dk = "long"
-                _duration[dk]["pnl"] += pnl
-                if is_win: _duration[dk]["wins"] += 1
-                else: _duration[dk]["losses"] += 1
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-
-        # Format session_performance
-        session_performance = []
-        for k, s in _sessions.items():
-            tot = s["wins"] + s["losses"]
-            wr = round(s["wins"] / tot * 100, 1) if tot > 0 else 0.0
-            session_performance.append({"id": k, "name": s["name"], "pnl": round(s["pnl"], 2), "wins": s["wins"], "losses": s["losses"], "win_rate": wr})
-
-        # Best/worst hours
-        qualified = [{"hour": h, **st} for h, st in _hourly.items() if st["trades"] >= 1]
-        sorted_h = sorted(qualified, key=lambda x: x["pnl"], reverse=True)
-        best_hours = [{"hour": h["hour"], "hour_label": f"{h['hour']:02d}:00 ET", "pnl": round(h["pnl"], 2), "trades": h["trades"], "win_rate": round(h["wins"]/h["trades"]*100, 1) if h["trades"] else 0} for h in sorted_h[:3]]
-        worst_hours = [{"hour": h["hour"], "hour_label": f"{h['hour']:02d}:00 ET", "pnl": round(h["pnl"], 2), "trades": h["trades"], "win_rate": round(h["wins"]/h["trades"]*100, 1) if h["trades"] else 0} for h in sorted_h[-3:][::-1] if h["pnl"] < 0]
-
-        # Hold duration
-        hold_duration = []
-        for k, d in _duration.items():
-            tot = d["wins"] + d["losses"]
-            wr = round(d["wins"] / tot * 100, 1) if tot > 0 else 0.0
-            hold_duration.append({"id": k, "name": d["name"], "pnl": round(d["pnl"], 2), "wins": d["wins"], "losses": d["losses"], "win_rate": wr})
-
-        # Tradovate Paper calendar from fills
-        from collections import defaultdict as _dd
-        tv_paper_cal: Dict[str, Dict[str, float]] = _dd(lambda: {"pnl": 0.0, "trades": 0})
-        for t in trades:
-            xt = t.get("exit_time", "")
-            if xt:
-                dk = str(xt)[:10]
-                tv_paper_cal[dk]["pnl"] += (t.get("pnl") or 0)
-                tv_paper_cal[dk]["trades"] += 1
-        calendar_data = [{"date": d, "pnl": round(v["pnl"], 2), "trades": int(v["trades"])} for d, v in sorted(tv_paper_cal.items())]
-
-        # Use equity-based total (accounts for fees) instead of fill sum
-        start_balance = _get_start_balance(_state_dir)
-        equity_pnl = round(float(tv.get("equity", 0)) - start_balance, 2) if tv.get("equity") else None
-
-        return {
-            "session_performance": session_performance,
-            "best_hours": best_hours,
-            "worst_hours": worst_hours,
-            "hold_duration": hold_duration,
-            "direction_breakdown": {
-                "long": {"count": len(long_trades), "pnl": round(long_pnl, 2)},
-                "short": {"count": len(short_trades), "pnl": round(short_pnl, 2)},
-            },
-            "status_breakdown": {
-                "generated": entered,
-                "entered": entered,
-                "exited": total,
-                "cancelled": 0,
-            },
-            "calendar_data": calendar_data,
-            "calendar_total_pnl": equity_pnl,
-        }
-
-    return _get_session_analytics(_state_dir)
-
-
-@app.get("/api/sessions")
-async def get_sessions(
-    hours: int = Query(default=6, ge=1, le=24),
-    _key: Optional[str] = Depends(verify_api_key),
-):
-    """Get session boundaries for RTH/ETH shading."""
-    now = datetime.now(timezone.utc)
-    
-    sessions = []
-    # Check the past 'hours' hours for session boundaries
-    # RTH: 9:30 AM - 4:00 PM ET (13:30 - 20:00 UTC, adjust for DST)
-    # For simplicity, we'll return time ranges
-    
-    for day_offset in range(2):  # Check today and yesterday
-        day = now - timedelta(days=day_offset)
-        # RTH session (simplified UTC times - should adjust for DST)
-        rth_start = day.replace(hour=14, minute=30, second=0, microsecond=0)  # ~9:30 ET
-        rth_end = day.replace(hour=21, minute=0, second=0, microsecond=0)    # ~4:00 ET
-        
-        start_ts = rth_start.timestamp()
-        end_ts = rth_end.timestamp()
-        
-        # Only include if within our window
-        cutoff = (now - timedelta(hours=hours)).timestamp()
-        if end_ts >= cutoff:
-            sessions.append({
-                "start": int(max(start_ts, cutoff)),
-                "end": int(min(end_ts, now.timestamp())),
-                "type": "rth",
-                "color": "rgba(0, 150, 136, 0.05)",  # Subtle teal
-            })
-    
-    return sessions
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -3750,7 +3268,6 @@ def main():
     print(f"  GET /api/candles?symbol=MNQ&timeframe=5m&bars=72")
     print(f"  GET /api/indicators?symbol=MNQ&timeframe=5m&bars=72")
     print(f"  GET /api/markers?hours=6")
-    print(f"  GET /api/sessions?hours=6")
     print(f"  GET /api/state")
     print(f"  GET /api/trades")
     print(f"  GET /health")

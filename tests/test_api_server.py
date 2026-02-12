@@ -168,7 +168,6 @@ def _patch_globals(state_dir):
         patch.object(_server_impl, "_auth_enabled", False),
         patch.object(_server_impl, "_api_keys", set()),
         patch.object(_server_impl, "_operator_enabled", False),
-        patch.object(_server_impl, "_pearl_brain", None),
         patch.object(_server_impl, "_data_provider", None),
         patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
@@ -189,7 +188,6 @@ def _patch_globals_empty(empty_state_dir):
         patch.object(_server_impl, "_auth_enabled", False),
         patch.object(_server_impl, "_api_keys", set()),
         patch.object(_server_impl, "_operator_enabled", False),
-        patch.object(_server_impl, "_pearl_brain", None),
         patch.object(_server_impl, "_data_provider", None),
         patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
@@ -210,7 +208,6 @@ def _patch_globals_auth(state_dir):
         patch.object(_server_impl, "_auth_enabled", True),
         patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
         patch.object(_server_impl, "_operator_enabled", False),
-        patch.object(_server_impl, "_pearl_brain", None),
         patch.object(_server_impl, "_data_provider", None),
         patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
