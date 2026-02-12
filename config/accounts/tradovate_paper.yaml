@@ -1,0 +1,82 @@
+# ==========================================================================
+# Tradovate Paper Account Configuration
+# ==========================================================================
+# Extends config/base.yaml with account-specific overrides.
+#
+# Usage: python -m pearlalgo.market_agent.main \
+#          --config config/accounts/tradovate_paper.yaml \
+#          --data-dir data/tradovate/paper
+# ==========================================================================
+
+# Account identity
+account:
+  name: tradovate_paper
+  display_name: "Tradovate Paper"
+  badge: "PAPER"
+  badge_color: "purple"
+  telegram_prefix: "TV-PAPER"
+
+# Challenge: Tradovate Paper 50K Rapid Evaluation
+challenge:
+  enabled: true
+  stage: tv_paper_eval
+  start_balance: 50000.0
+  profit_target: 3000.0
+  max_drawdown: 2000.0
+  max_contracts_mini: 5
+  max_contracts_micro: 50
+  consistency_pct: 0.50
+  min_trading_days: 2
+  t1_news_allowed: true
+  auto_reset_on_pass: true
+  auto_reset_on_fail: true
+
+# Execution: Tradovate Demo
+execution:
+  enabled: true
+  armed: true
+  mode: paper
+  adapter: tradovate
+  max_positions: 20
+  max_orders_per_day: 500
+  max_daily_loss: 1800.0
+  cooldown_seconds: 30
+  symbol_whitelist:
+    - MNQ
+  ibkr_trading_client_id: 50
+  ibkr_host: "127.0.0.1"
+  ibkr_port: 4002
+
+# IBKR data provider override (avoid client ID clash)
+data:
+  ibkr_data_client_id: 51
+
+# Trading circuit breaker overrides
+trading_circuit_breaker:
+  mode: warn_only
+  enable_tv_paper_eval_gate: true
+  tv_paper_max_contracts_mini: 5
+  tv_paper_max_contracts_micro: 50
+  tv_paper_trading_start_hour_et: 18
+  tv_paper_trading_end_hour_et: 16
+  tv_paper_trading_end_minute_et: 10
+  tv_paper_near_max_loss_buffer: 200.0
+  tv_paper_enable_news_blackout: true
+  max_consecutive_losses: 5
+  max_session_drawdown: 1800.0
+  max_daily_drawdown: 1800.0
+  max_concurrent_positions: 20
+  enable_session_filter: false
+  enable_direction_gating: true
+
+# Telegram notification tier
+telegram:
+  notification_tier: important
+
+# Auto-flat: disabled (Tradovate bracket orders handle exits)
+auto_flat:
+  enabled: false
+  daily_enabled: false
+  friday_enabled: false
+  weekend_enabled: false
+  notify: false

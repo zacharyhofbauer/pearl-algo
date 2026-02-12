@@ -1,0 +1,41 @@
+# ==========================================================================
+# IBKR Paper (Virtual) Account Configuration
+# ==========================================================================
+# Extends config/base.yaml with account-specific overrides.
+#
+# Usage: python -m pearlalgo.market_agent.main \
+#          --config config/accounts/ibkr_paper.yaml \
+#          --data-dir data/ibkr/paper
+# ==========================================================================
+
+# Account identity
+account:
+  name: ibkr_paper
+  display_name: "IBKR Virtual"
+  badge: "VIRTUAL"
+  badge_color: "blue"
+  telegram_prefix: "IBKR-VIR"
+
+# Challenge disabled for IBKR Virtual
+challenge:
+  enabled: false
+
+# Execution: IBKR (disabled -- virtual P&L only)
+execution:
+  enabled: false
+  armed: false
+  mode: dry_run
+  adapter: ibkr
+  max_positions: 1
+  max_orders_per_day: 20
+  max_daily_loss: 500.0
+  cooldown_seconds: 60
+  symbol_whitelist:
+    - MNQ
+  ibkr_trading_client_id: 20
+  ibkr_host: "127.0.0.1"
+  ibkr_port: 4002
+
+# Storage path override
+storage:
+  db_path: data/ibkr/paper/trades.db
