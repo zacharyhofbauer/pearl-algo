@@ -1,0 +1,98 @@
+[
+  {
+    "signal_id": "pearlbot_pinescript_1000000001.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "long",
+    "entry_price": 21450.0,
+    "exit_price": 21495.0,
+    "pnl": 90.0,
+    "is_win": true,
+    "exit_reason": "take_profit",
+    "hold_duration_minutes": 29.98,
+    "exit_time": "2026-01-15T14:35:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000002.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "short",
+    "entry_price": 21520.0,
+    "exit_price": 21550.0,
+    "pnl": -60.0,
+    "is_win": false,
+    "exit_reason": "stop_loss",
+    "hold_duration_minutes": 34.98,
+    "exit_time": "2026-01-15T15:45:00+00:00"
+  },
+  {
+    "signal_id": "unified_strategy_1000000006.0",
+    "signal_type": "unified_strategy",
+    "direction": "long",
+    "entry_price": 21380.0,
+    "exit_price": 21420.0,
+    "pnl": 80.0,
+    "is_win": true,
+    "exit_reason": "take_profit",
+    "hold_duration_minutes": 15.5,
+    "exit_time": "2026-01-15T12:15:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000007.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "long",
+    "entry_price": 21300.0,
+    "exit_price": 21280.0,
+    "pnl": -40.0,
+    "is_win": false,
+    "exit_reason": "stop_loss",
+    "hold_duration_minutes": 8.2,
+    "exit_time": "2026-01-15T11:08:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000008.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "short",
+    "entry_price": 21350.0,
+    "exit_price": 21300.0,
+    "pnl": 100.0,
+    "is_win": true,
+    "exit_reason": "take_profit",
+    "hold_duration_minutes": 22.0,
+    "exit_time": "2026-01-15T10:22:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000009.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "long",
+    "entry_price": 21250.0,
+    "exit_price": 21230.0,
+    "pnl": -40.0,
+    "is_win": false,
+    "exit_reason": "daily_auto_flat",
+    "hold_duration_minutes": 120.5,
+    "exit_time": "2026-01-14T21:10:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000010.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "long",
+    "entry_price": 21200.0,
+    "exit_price": 21260.0,
+    "pnl": 120.0,
+    "is_win": true,
+    "exit_reason": "take_profit",
+    "hold_duration_minutes": 45.0,
+    "exit_time": "2026-01-14T19:45:00+00:00"
+  },
+  {
+    "signal_id": "pearlbot_pinescript_1000000011.0",
+    "signal_type": "pearlbot_pinescript",
+    "direction": "short",
+    "entry_price": 21180.0,
+    "exit_price": 21200.0,
+    "pnl": -40.0,
+    "is_win": false,
+    "exit_reason": "stop_loss",
+    "hold_duration_minutes": 5.0,
+    "exit_time": "2026-01-14T18:05:00+00:00"
+  }
+]

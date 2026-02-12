@@ -65,6 +65,57 @@ def tmp_state_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Golden Fixture Data
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def sample_state():
+    """Load the golden sample state.json data."""
+    from tests.fixtures import load_sample_state
+    return load_sample_state()
+
+
+@pytest.fixture(scope="session")
+def sample_signals():
+    """Load the golden sample signals.jsonl data (all lines)."""
+    from tests.fixtures import load_sample_signals
+    return load_sample_signals()
+
+
+@pytest.fixture(scope="session")
+def sample_performance():
+    """Load the golden sample performance.json data."""
+    from tests.fixtures import load_sample_performance
+    return load_sample_performance()
+
+
+@pytest.fixture(scope="session")
+def sample_config_text():
+    """Load the golden sample config.yaml as raw text."""
+    from tests.fixtures import load_sample_config_text
+    return load_sample_config_text()
+
+
+@pytest.fixture
+def populated_state_dir(tmp_path, sample_state, sample_signals, sample_performance):
+    """Temp state directory pre-populated with golden fixture data."""
+    import json
+    state_dir = tmp_path / "agent_state"
+    state_dir.mkdir()
+
+    (state_dir / "state.json").write_text(json.dumps(sample_state, indent=2))
+
+    signals_lines = []
+    for sig in sample_signals:
+        signals_lines.append(json.dumps(sig))
+    (state_dir / "signals.jsonl").write_text("\n".join(signals_lines) + "\n")
+
+    (state_dir / "performance.json").write_text(json.dumps(sample_performance, indent=2))
+
+    return state_dir
+
+
+# ---------------------------------------------------------------------------
 # Mock Data Provider Fixture
 # ---------------------------------------------------------------------------
 

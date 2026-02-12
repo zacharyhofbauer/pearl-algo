@@ -1,0 +1,138 @@
+symbol: MNQ
+timeframe: 1m
+scan_interval: 30
+
+session:
+  start_time: "18:00"
+  end_time: "16:10"
+  timezone: America/New_York
+
+telegram:
+  enabled: false
+  bot_token: "TEST_TOKEN"
+  chat_id: "TEST_CHAT_ID"
+  notification_tier: important
+
+telegram_ui:
+  compact_metrics_enabled: true
+  show_progress_bars: false
+  show_volume_metrics: true
+  compact_metric_width: 10
+
+risk:
+  max_risk_per_trade: 0.015
+  max_drawdown: 0.05
+  stop_loss_atr_multiplier: 1.5
+  take_profit_risk_reward: 1.5
+  min_position_size: 1
+  max_position_size: 3
+
+service:
+  status_update_interval: 300
+  heartbeat_interval: 600
+  state_save_interval: 30
+  adaptive_cadence_enabled: true
+  scan_interval_active_seconds: 5.0
+  scan_interval_idle_seconds: 30.0
+  scan_interval_market_closed_seconds: 300.0
+  scan_interval_paused_seconds: 60.0
+
+circuit_breaker:
+  max_consecutive_errors: 10
+  max_connection_failures: 5
+  max_data_fetch_errors: 10
+
+trading_circuit_breaker:
+  enabled: true
+  mode: warn_only
+  max_consecutive_losses: 5
+  max_session_drawdown: 500.0
+  max_daily_drawdown: 1000.0
+  max_concurrent_positions: 3
+  enable_session_filter: true
+  allowed_sessions:
+    - overnight
+    - premarket
+    - morning
+    - midday
+    - afternoon
+    - close
+  enable_direction_gating: true
+  direction_gating_min_confidence: 0.7
+
+data:
+  buffer_size: 300
+  buffer_size_5m: 60
+  buffer_size_15m: 30
+  stale_data_threshold_minutes: 10
+  connection_timeout_minutes: 30
+  enable_base_cache: true
+  base_refresh_seconds: 25
+
+signals:
+  duplicate_window_seconds: 300
+  min_confidence: 0.5
+  min_risk_reward: 1.0
+  quality_score:
+    enabled: true
+    threshold: 0.6
+
+strategy:
+  enabled_signals:
+    - pearlbot_pinescript
+    - unified_strategy
+  enable_dynamic_sizing: true
+  base_contracts: 1
+  high_conf_contracts: 2
+  max_conf_contracts: 3
+  high_conf_threshold: 0.75
+  max_conf_threshold: 0.90
+
+performance:
+  max_records: 1000
+  default_lookback_days: 7
+
+virtual_pnl:
+  enabled: true
+  intrabar_tiebreak: take_profit
+  notify_entry: true
+  notify_exit: true
+
+auto_flat:
+  enabled: true
+  daily_enabled: true
+  daily_time: "16:10"
+  friday_enabled: true
+  friday_time: "15:55"
+  timezone: America/New_York
+  notify: true
+
+execution:
+  enabled: false
+  armed: false
+  mode: dry_run
+  adapter: ibkr
+  max_positions: 3
+  max_orders_per_day: 20
+  max_daily_loss: 1000.0
+  cooldown_seconds: 60
+
+learning:
+  enabled: true
+  mode: shadow
+  min_samples_per_type: 10
+  explore_rate: 0.1
+  decision_threshold: 0.3
+
+ml_filter:
+  enabled: true
+  mode: shadow
+  require_lift_to_block: true
+  lift_min_trades: 50
+  min_probability: 0.5
+
+storage:
+  sqlite_enabled: false
+
+challenge:
+  enabled: false

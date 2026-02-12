@@ -4386,7 +4386,7 @@ class TelegramCommandHandler(
                     dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
                     sig_type = safe_label(str(t.get("type") or "unknown"))
                     reason = safe_label(str(t.get("exit_reason") or "")).strip()
-                    line = f"\n{pnl_emoji_str} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
+                    line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
                     if reason:
                         line += f" • {reason}"
                     message += line
