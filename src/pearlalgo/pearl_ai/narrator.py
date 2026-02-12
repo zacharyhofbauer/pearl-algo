@@ -67,6 +67,8 @@ class PearlNarrator:
     def _get_pressure_description(self, state: Dict) -> str:
         """Get order flow pressure description."""
         pressure = state.get("buy_sell_pressure", {})
+        if not isinstance(pressure, dict):
+            return "balanced flow"
         bias = pressure.get("bias", "neutral")
         intensity = pressure.get("intensity", 0)
 

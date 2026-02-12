@@ -30,6 +30,12 @@ Primary environment variables:
 - `PEARLALGO_IB_HOST`, `PEARLALGO_IB_PORT`, `PEARLALGO_IB_CLIENT_ID`, `PEARLALGO_IB_DATA_CLIENT_ID`
   - **Used by**: `pearlalgo.config.settings.Settings` (fallbacks when `IBKR_*` are not set).
   - **Purpose**: Alternative namespaced IBKR settings.
+- `IB_CLIENT_ID_LIVE_CHART`
+  - **Used by**: Web chart API (IBKR client ID for live chart data). IBKR Virtual typically uses `96`; Tradovate Paper uses `97` to avoid clash.
+  - **Purpose**: Separate client ID for chart/data requests when running multiple agents.
+- `PEARL_API_KEY`
+  - **Used by**: Web app and API server for authenticating dashboard requests (optional; required if auth is enabled).
+  - **Purpose**: Shared secret for API key auth (see `pearlalgo_web_app` and `api_server.py`).
 
 Optional logging environment variables (for systemd/journald):
 
@@ -85,6 +91,15 @@ Key sections and their consumers:
     - `high_probability`: threshold for “high opportunity”
     - `adjust_sizing`: enable ML-driven sizing/priority (no gate bypass)
     - `size_multiplier_min`, `size_multiplier_max`: bounds for ML sizing multiplier
+- `accounts.*` (display and Telegram labels)
+  - **Used by**: Telegram notifier, web dashboard, and multi-account UI to resolve display names and prefixes.
+  - **Structure**: `accounts.ibkr_virtual` and `accounts.tv_paper` with `display_name`, `badge`, `badge_color`, `telegram_prefix`, `description`.
+  - **Purpose**: Config-driven account labels so UI and Telegram show consistent names (e.g. `IBKR-VIR`, `TV-PAPER`) without hardcoding.
+- `audit.*`
+  - **Used by**: `pearlalgo.market_agent.audit_logger` and audit retention/cleanup logic.
+  - **Key fields**: `retention_days` (general events, default 90), `snapshot_retention_days` (equity snapshots, default 365).
+  - **Purpose**: How long audit events and snapshots are kept before pruning.
+- **Tradovate Paper overlay** (`config/markets/tv_paper_eval.yaml`): Overrides for challenge (e.g. `challenge.stage: tv_paper_eval`), `trading_circuit_breaker` (e.g. `enable_tv_paper_eval_gate`, `tv_paper_*` limits), `data.ibkr_data_client_id`, session, execution, and signal_forwarding. See `docs/ACCOUNT_GUIDE.md` and the overlay file for full list.
 
 Notes:
 - Base config `config/config.yaml` is merged with optional overlays from `PEARLALGO_CONFIG_PATH`

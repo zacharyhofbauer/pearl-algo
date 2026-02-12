@@ -268,10 +268,10 @@ class TestSignalOrchestrator:
         assert signal_orchestrator._ml_signal_filter is mock_filter
         assert signal_orchestrator._ml_filter_enabled is True
         assert signal_orchestrator._ml_filter_mode == "live"
-        # Propagated to signal handler
-        assert signal_handler.ml_signal_filter is mock_filter
-        assert signal_handler.ml_filter_enabled is True
-        assert signal_handler.ml_filter_mode == "live"
+        # Propagated to signal handler via configure_ml_filter()
+        signal_handler.configure_ml_filter.assert_called_once_with(
+            mock_filter, enabled=True, mode="live"
+        )
         # Propagated to order manager
         order_manager.configure_ml_sizing.assert_called_once_with(mock_filter)
 

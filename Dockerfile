@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Default env (override in docker-compose or runtime)
 ENV PYTHONUNBUFFERED=1 \
-    PEARLALGO_DATA_PROVIDER=ibkr
+    PEARLALGO_DATA_PROVIDER=ibkr \
+    PEARLALGO_MARKET=NQ
 
 # The container expects IBKR Gateway to be reachable via host networking or another container.
 # Entrypoint runs the NQ agent service in the foreground.

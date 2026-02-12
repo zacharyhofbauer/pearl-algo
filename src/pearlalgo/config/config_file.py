@@ -204,8 +204,8 @@ def toggle_strategy_in_config(
         config["strategy"] = {}
 
     strategy_config = config["strategy"]
-    enabled_signals = list(strategy_config.get("enabled_signals", []))
-    disabled_signals = list(strategy_config.get("disabled_signals", []))
+    enabled_signals = list(strategy_config.get("enabled_signals") or [])
+    disabled_signals = list(strategy_config.get("disabled_signals") or [])
 
     # Toggle the strategy
     if strategy_name in enabled_signals:

@@ -2894,6 +2894,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         # Tradovate live account data (Tradovate Paper)
         "tradovate_account": state.get("tradovate_account"),
 
+        # Execution adapter status (for Tradovate Paper connection status)
+        "execution": state.get("execution"),
+
         # Account display config (config-driven names for UI)
         "accounts": _get_accounts_config(),
     }

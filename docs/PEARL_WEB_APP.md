@@ -67,7 +67,7 @@ node --version  # v20.x.x
 
 ### 1. FastAPI API Server (`scripts/pearlalgo_web_app/api_server.py`)
 - **Port**: 8000 (default)
-- **IBKR Client ID**: 88 (configurable via `IB_CLIENT_ID_LIVE_CHART`)
+- **IBKR Client ID**: 96 (configurable via `IB_CLIENT_ID_LIVE_CHART`)
 - **Auth**: Enabled by default (`PEARL_API_AUTH_ENABLED=true`). Set `PEARL_API_AUTH_ENABLED=false` to disable for local dev.
 - **Rate limiting**: Operator endpoints (`/api/kill-switch`, `/api/close-all-trades`, `/api/close-trade`) are rate-limited to 5 requests per 60 seconds.
 - **State reads**: Uses `StateReader` with shared file locks for safe concurrent reads of `state.json` (prevents torn reads during agent writes).

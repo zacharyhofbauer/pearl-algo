@@ -10,7 +10,7 @@ Group=pearl
 WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.telegram_handler
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.telegram_command_handler
 Restart=always
 RestartSec=5
 

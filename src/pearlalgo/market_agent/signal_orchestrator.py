@@ -140,9 +140,7 @@ class SignalOrchestrator:
         self._ml_filter_mode = mode
 
         # Propagate to handler and order manager
-        self._signal_handler.ml_signal_filter = ml_signal_filter
-        self._signal_handler.ml_filter_enabled = enabled
-        self._signal_handler.ml_filter_mode = mode
+        self._signal_handler.configure_ml_filter(ml_signal_filter, enabled=enabled, mode=mode)
         self._order_manager.configure_ml_sizing(ml_signal_filter)
 
         logger.info(

@@ -74,7 +74,10 @@ def _is_ignorable(path_str: str) -> bool:
         return True
     if path_str.startswith(("/", "~")):
         return True
-    if any(token in path_str for token in ("<", ">", "{", "}", "*", "$")):
+    # User config dir (e.g. ~/.config/pearlalgo/); tokenizer may see config/pearlalgo/...
+    if path_str.startswith("config/pearlalgo/"):
+        return True
+    if any(token in path_str for token in ("<", ">", "{", "}", "*", "$", "(", ")", "|")):
         return True
     return False
 

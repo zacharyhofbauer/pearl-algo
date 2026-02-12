@@ -6094,12 +6094,10 @@ class TelegramCommandHandler(
 
     def _get_repo_root(self) -> Path:
         """Get repository root from this file location (or cached value)."""
-        try:
-            root = Path(getattr(self, "_repo_root"))
-            return root.resolve()
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}", exc_info=True)
-            return Path(__file__).resolve().parent.parent.parent.parent
+        if hasattr(self, "_repo_root"):
+            return Path(self._repo_root).resolve()
+        # Fallback: compute from this file's location
+        return Path(__file__).resolve().parent.parent.parent.parent
 
     def _get_reports_dir(self) -> Path:
         """Directory where Telegram backtest reports are stored (shared with report viewer)."""

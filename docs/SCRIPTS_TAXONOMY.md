@@ -7,6 +7,9 @@ This document standardizes the roles of all scripts under `scripts/` and identif
 - `agent.sh`
   - **Role**: Canonical market-aware agent lifecycle CLI (start/stop/restart/status).
   - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
+- `tv_paper_eval.sh`
+  - **Role**: Lifecycle for Tradovate Paper eval (start/stop/restart/status). Runs agent + API on port 8001 with market `TV_PAPER_EVAL`.
+  - **Behavior**: Uses `config/markets/tv_paper_eval.yaml`, state in `data/agent_state/TV_PAPER_EVAL/`.
 
 ## Gateway (`scripts/gateway/`)
 
@@ -56,6 +59,8 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Documentation reference audit; verifies doc paths exist in repo.
 - `report_orphan_modules.py`
   - **Role**: Orphan-module report; lists src modules not reachable from entry points/tests/scripts.
+- `check_config_defaults.py`
+  - **Role**: Validates consistency between config defaults and schema (run via `make ci` or manually).
 
 ## Git hooks / CI guardrails (`scripts/`)
 
@@ -99,6 +104,8 @@ they do **not** contain trading or strategy logic.
 - `doctor_cli.py`
   - **Role**: Operator CLI "doctor" for a compact rollup of recent behavior (signals, rejects, sizing, stops).
   - **Usage**: `python3 scripts/monitoring/doctor_cli.py --hours 24`
+- `incident_report.py`
+  - **Role**: Generate incident reports from state/signals for post-mortem analysis.
 
 ## Knowledge (`scripts/knowledge/`)
 

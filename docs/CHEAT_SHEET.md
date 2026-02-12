@@ -349,5 +349,6 @@ Click the **Audit** tab in the dashboard navigation:
 ### Direct SQL
 
 ```bash
-sqlite3 data/trades.db "SELECT * FROM audit_events WHERE event_type='trade_entry' ORDER BY timestamp DESC LIMIT 10;"
+# Replace <MARKET> with NQ, TV_PAPER_EVAL, etc.
+sqlite3 data/agent_state/<MARKET>/trades.db "SELECT * FROM audit_events WHERE event_type='trade_entry' ORDER BY timestamp DESC LIMIT 10;"
 ```

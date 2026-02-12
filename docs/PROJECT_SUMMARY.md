@@ -305,9 +305,9 @@ The MNQ Trading Agent is designed to:
 ```yaml
 knowledge:
   enabled: true
-  index_path: data/knowledge/index
-  chunk_size: 1000
-  chunk_overlap: 200
+  index_dir: data/knowledge_index
+  chunk_max_chars: 2000
+  chunk_overlap_chars: 200
 ```
 
 ### 7. Challenge Tracker (`src/pearlalgo/market_agent/challenge_tracker.py`)
@@ -325,9 +325,9 @@ knowledge:
 ```yaml
 challenge:
   enabled: true
-  starting_balance: 50000
-  profit_target: 3000  # 6%
-  max_drawdown: 2500   # 5%
+  start_balance: 50000.0
+  profit_target: 3000.0
+  max_drawdown: 2000.0
 ```
 
 ### 8. Trading Circuit Breaker (`src/pearlalgo/market_agent/trading_circuit_breaker.py`)
@@ -346,9 +346,9 @@ challenge:
 ```yaml
 trading_circuit_breaker:
   enabled: true
-  max_consecutive_losses: 3
-  session_drawdown_limit: 500
-  cooldown_minutes: 30
+  max_consecutive_losses: 5
+  max_session_drawdown: 500.0
+  max_daily_drawdown: 1000.0
 ```
 
 ### 9. Notification Queue (`src/pearlalgo/market_agent/notification_queue.py`)
@@ -383,10 +383,6 @@ trading_circuit_breaker:
 - OpenAI API integration wrapper
 - Used by CLI/terminal AI assistance
 - Supports streaming responses
-
-**Absolute Mode** (`utils/absolute_mode.py`):
-- Utilities for absolute vs relative path handling
-- Cross-platform path normalization
 
 ---
 

@@ -238,7 +238,6 @@ There are two separate AI-related modules in this repository, serving different 
   - `pearlalgo.utils.telegram_alerts` – Core Telegram messaging
   - `pearlalgo.utils.telegram_ui_contract` – Telegram UI contract
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
-  - `pearlalgo.utils.absolute_mode` – Absolute mode utilities
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (components and cross‑cutting sections)

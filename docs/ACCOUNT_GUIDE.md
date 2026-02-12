@@ -15,7 +15,7 @@ PearlAlgo runs two isolated account types side by side:
 | **Signal role** | Writer (generates signals) | Follower (reads forwarded signals) |
 | **State directory** | `data/agent_state/NQ/` | `data/agent_state/TV_PAPER_EVAL/` |
 | **API port** | 8000 | 8001 |
-| **Telegram label** | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
+| **Telegram label** | `IBKR-VIR` | `TV-PAPER` |
 | **Dashboard URL** | `https://pearlalgo.io` | `https://pearlalgo.io/?account=tv_paper` |
 
 ### IBKR Virtual
@@ -81,9 +81,9 @@ IBKR Virtual (WRITER)                 Tradovate Paper (FOLLOWER)
        |                                      |
   shared_signals.jsonl  ----------->  dedup (direction, bar_ts)
        |                                      |
-  virtual P&L + [IBKR VIRTUAL] TG      eval gate -> Tradovate bracket order
+  virtual P&L + IBKR-VIR TG             eval gate -> Tradovate bracket order
                                               |
-                                        [TRADOVATE PAPER] Telegram
+                                        TV-PAPER Telegram
 ```
 
 **How it works:**

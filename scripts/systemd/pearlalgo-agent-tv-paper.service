@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo Market Agent - IBKR Virtual (NQ)
+Description=PearlAlgo Market Agent - Tradovate Paper (TV_PAPER_EVAL)
 After=network.target ibkr-gateway.service
 Wants=ibkr-gateway.service
 
@@ -9,8 +9,14 @@ User=pearl
 Group=pearl
 WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="PEARLALGO_MARKET=NQ"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
+EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
+Environment="PEARLALGO_MARKET=TV_PAPER_EVAL"
+Environment="PEARLALGO_CONFIG_PATH=config/markets/tv_paper_eval.yaml"
+Environment="PEARLALGO_STATE_DIR=data/agent_state/TV_PAPER_EVAL"
+Environment="IBKR_CLIENT_ID=50"
+Environment="IBKR_DATA_CLIENT_ID=51"
+Environment="IB_CLIENT_ID_LIVE_CHART=97"
 ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.main
 Restart=always
 RestartSec=10

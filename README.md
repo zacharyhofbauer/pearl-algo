@@ -1,6 +1,6 @@
 # PearlAlgo Market Trading Agent
 
-![Coverage](docs/coverage-badge.svg)
+![Coverage](docs/assets/coverage-badge.svg)
 
 Production-ready market trading agent with a modular architecture:
 data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
