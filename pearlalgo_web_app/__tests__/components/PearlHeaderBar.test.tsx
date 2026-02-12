@@ -28,7 +28,6 @@ const mockAgentState = {
   agentState: {
     running: true,
     futures_market_open: true,
-    pearl_ai_available: true,
     ai_status: {
       bandit_mode: 'live',
       contextual_mode: 'live',
@@ -159,7 +158,6 @@ describe('PearlHeaderBar', () => {
         ...mockAgentState,
         agentState: {
           ...mockAgentState.agentState,
-          pearl_ai_available: false,
           ai_status: null,
         },
       }

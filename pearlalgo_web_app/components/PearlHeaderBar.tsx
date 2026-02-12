@@ -55,7 +55,7 @@ export default function PearlHeaderBar() {
   const headerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const hasAI = Boolean(agentState?.pearl_ai_available || agentState?.ai_status)
+  const hasAI = Boolean(agentState?.ai_status)
   const isConnected = Boolean(agentState?.running)
 
   // Use centralized helper to derive AI mode

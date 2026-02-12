@@ -1263,50 +1263,11 @@ _pearl_brain = None
 
 def _init_pearl_ai() -> None:
     """
-    Optionally mount the Pearl AI API router under /api/pearl.
-
-    Safe-by-default: disabled unless PEARL_AI_API_ENABLED=true.
+    Pearl AI module has been removed.  This stub is kept because it is
+    called during startup; it now simply marks the subsystem as disabled.
     """
-    global _pearl_ai_mounted, _pearl_brain
-
-    if _pearl_ai_mounted or not _pearl_ai_enabled:
-        return
-
-    try:
-        from pearlalgo.pearl_ai.api_router import create_pearl_router
-        from pearlalgo.pearl_ai.brain import PearlBrain
-
-        claude_key = os.getenv("ANTHROPIC_API_KEY") or None
-        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        ollama_model = os.getenv("PEARL_OLLAMA_MODEL", "llama3.1:8b")
-
-        # Optional: attach trade DB for RAG grounding if available for this market
-        trade_db_path = None
-        if _state_dir:
-            db_path = _state_dir / "trades.db"
-            if db_path.exists():
-                trade_db_path = str(db_path)
-
-        _pearl_brain = PearlBrain(
-            claude_api_key=claude_key,
-            ollama_model=ollama_model,
-            ollama_host=ollama_host,
-            enable_local=True,
-            enable_claude=True,
-            trade_db_path=trade_db_path,
-        )
-
-        app.include_router(
-            create_pearl_router(_pearl_brain, auth_dependency=require_operator_or_api_key),
-            prefix="/api/pearl",
-        )
-
-        _pearl_ai_mounted = True
-        print("[Pearl AI] Enabled at /api/pearl")
-    except Exception as e:
-        _pearl_brain = None
-        _pearl_ai_mounted = False
-        print(f"[Pearl AI] Disabled (init failed): {e}")
+    global _pearl_ai_mounted
+    _pearl_ai_mounted = False
 
 
 def _init_audit_router() -> None:
@@ -2214,48 +2175,13 @@ def _get_pearl_feed(limit: int = 10) -> List[Dict[str, Any]]:
 
 
 def _get_pearl_ai_debug() -> Optional[Dict[str, Any]]:
-    """Last Pearl AI debug info (routing/model/tools/latency/cache), sanitized for JSON."""
-    if _pearl_brain is None:
-        return None
-    try:
-        info = _pearl_brain.get_last_debug_info()
-        return _json_sanitize(info)
-    except Exception:
-        return None
+    """Pearl AI module removed; always returns None."""
+    return None
 
 
 def _get_pearl_ai_heartbeat() -> Optional[Dict[str, Any]]:
-    """Lightweight 'heartbeat' snapshot for the dropdown UI."""
-    if _pearl_brain is None:
-        return None
-
-    try:
-        msgs = getattr(getattr(_pearl_brain, "memory", None), "pearl_messages", None) or []
-        last = msgs[-1] if msgs else None
-        last_ts = None
-        last_type = None
-        if last is not None:
-            try:
-                last_ts = last.timestamp.isoformat() if getattr(last, "timestamp", None) else None
-            except Exception:
-                last_ts = str(getattr(last, "timestamp", None))
-            last_type = getattr(last, "message_type", None)
-
-        return {
-            "enabled": True,
-            "mounted": bool(_pearl_ai_mounted and _pearl_brain is not None),
-            "feed_total": len(msgs),
-            "last_message_time": last_ts,
-            "last_message_type": last_type,
-            "last_state_seen_time": _pearl_last_state_seen_time,
-            "last_state_sync_time": _pearl_last_state_sync_time,
-            "last_state_sync_error": _pearl_last_state_sync_error,
-        }
-    except Exception:
-        return {
-            "enabled": True,
-            "mounted": bool(_pearl_ai_mounted and _pearl_brain is not None),
-        }
+    """Pearl AI module removed; always returns None."""
+    return None
 
 
 def _load_performance_data(state_dir: Path) -> Optional[list]:

@@ -17,7 +17,6 @@ recursive-exclude .next *
 
 # Local outputs
 prune eval-reports
-prune pearl_ai/eval/reports
 prune dist
 prune build
 

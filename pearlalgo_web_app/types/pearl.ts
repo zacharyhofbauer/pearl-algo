@@ -292,7 +292,7 @@ export function derivePearlStatus(
     heartbeatRecent,
     lastActivityTs,
     mounted: heartbeat?.mounted ?? false,
-    chatAvailable: Boolean(agentState?.pearl_ai_available),
+    chatAvailable: false,
     operatorLockEnabled: agentState?.operator_lock_enabled ?? null,
   }
 }
@@ -307,8 +307,8 @@ export function createPearlPanelData(
   const feed = agentState?.pearl_feed || []
   const suggestion = agentState?.pearl_suggestion || null
   const insights = agentState?.pearl_insights || null
-  const heartbeat = agentState?.pearl_ai_heartbeat || null
-  const debug = agentState?.pearl_ai_debug || null
+  const heartbeat: PearlAIHeartbeat | null = null
+  const debug: PearlAIDebugInfo | null = null
   
   return {
     status: derivePearlStatus(agentState, heartbeat, feed, nowMs),

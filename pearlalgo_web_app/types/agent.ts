@@ -467,14 +467,8 @@ export interface AgentState {
   analytics: AnalyticsData | null
   pearl_suggestion: PearlSuggestion | null
   pearl_insights: PearlInsights | null
-  /** Whether `/api/pearl/*` LLM endpoints are mounted on the API server */
-  pearl_ai_available?: boolean
   /** Recent Pearl AI feed messages (narrations, insights, alerts, chat responses) */
   pearl_feed?: PearlFeedMessage[]
-  /** Lightweight 'heartbeat' snapshot (last activity, feed size) */
-  pearl_ai_heartbeat?: PearlAIHeartbeat | null
-  /** Last Pearl AI debug snapshot (routing/model/tools/latency/cache) */
-  pearl_ai_debug?: PearlAIDebugInfo | null
   /** Whether operator passphrase locking is configured on the API server */
   operator_lock_enabled?: boolean
   // New fields for enhanced transparency

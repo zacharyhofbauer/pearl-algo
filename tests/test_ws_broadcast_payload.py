@@ -57,13 +57,11 @@ REQUIRED_WS_KEYS = {
     "error_summary",
     "config",
     "data_quality",
-    # Pearl AI
+    # Pearl AI  (pearl_ai_heartbeat / pearl_ai_debug removed — always None now)
     "pearl_suggestion",
     "pearl_insights",
     "pearl_ai_available",
     "pearl_feed",
-    "pearl_ai_heartbeat",
-    "pearl_ai_debug",
     # Operator
     "operator_lock_enabled",
 }
