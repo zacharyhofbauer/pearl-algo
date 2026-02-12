@@ -48,7 +48,7 @@ else
   echo "  ❌ Agent (${MARKET}): NOT RUNNING (no PID file)"
 fi
 
-if pgrep -f "telegram_command_handler" > /dev/null 2>&1; then
+if pgrep -f "pearlalgo.telegram.main" > /dev/null 2>&1; then
   echo "  ✅ Telegram Handler: RUNNING"
 else
   echo "  ❌ Telegram Handler: NOT RUNNING"

@@ -9,8 +9,10 @@ User=pearl
 Group=pearl
 WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PEARLALGO_API_URL=http://localhost:8001"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.telegram_command_handler
+EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.telegram.main
 Restart=always
 RestartSec=5
 

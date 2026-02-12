@@ -39,10 +39,11 @@ done
 # ---------------------------------------------------------------------------
 # Fixed configuration for the Tradovate Paper Evaluation instance
 # ---------------------------------------------------------------------------
-INSTANCE_NAME="TV_PAPER_EVAL"
+INSTANCE_NAME="TV_PAPER"
 MARKET="MNQ"
 API_PORT=8001
-STATE_DIR="$PROJECT_DIR/data/agent_state/${INSTANCE_NAME}"
+CONFIG_FILE="$PROJECT_DIR/config/accounts/tradovate_paper.yaml"
+STATE_DIR="$PROJECT_DIR/data/tradovate/paper"
 
 PID_FILE="$PROJECT_DIR/logs/agent_${INSTANCE_NAME}.pid"
 API_PID_FILE="$PROJECT_DIR/logs/api_${INSTANCE_NAME}.pid"
@@ -78,12 +79,8 @@ export IBKR_CLIENT_ID=50
 export IBKR_DATA_CLIENT_ID=51
 export IB_CLIENT_ID_LIVE_CHART=97
 
-# Use Tradovate Paper-specific config overlay if it exists, otherwise base config
-if [ -f "$PROJECT_DIR/config/markets/tv_paper_eval.yaml" ]; then
-    export PEARLALGO_CONFIG_PATH="$PROJECT_DIR/config/markets/tv_paper_eval.yaml"
-else
-    export PEARLALGO_CONFIG_PATH="$PROJECT_DIR/config/config.yaml"
-fi
+# New parameterized config path
+export PEARLALGO_CONFIG_PATH="$CONFIG_FILE"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -249,7 +246,7 @@ if [ "$COMMAND" = "api" ]; then
 
     if [ "$BACKGROUND_MODE" = true ]; then
         nohup "$PYTHON_CMD" scripts/pearlalgo_web_app/api_server.py \
-            --market "$MARKET" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
+            --data-dir "$STATE_DIR" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
         API_PID=$!
         echo $API_PID > "$API_PID_FILE"
         echo "API server started in background (PID: $API_PID)"
@@ -259,7 +256,7 @@ if [ "$COMMAND" = "api" ]; then
     fi
 
     "$PYTHON_CMD" scripts/pearlalgo_web_app/api_server.py \
-        --market "$MARKET" --port "$API_PORT"
+        --data-dir "$STATE_DIR" --port "$API_PORT"
     exit 0
 fi
 
@@ -305,7 +302,7 @@ echo "  Web app:    http://localhost:3000?api_port=$API_PORT"
 if [ "$BACKGROUND_MODE" = true ]; then
     # Start API server in background
     nohup "$PYTHON_CMD" scripts/pearlalgo_web_app/api_server.py \
-        --market "$MARKET" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
+        --data-dir "$STATE_DIR" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
     API_PID=$!
     echo $API_PID > "$API_PID_FILE"
     echo "  API server PID: $API_PID"
@@ -314,7 +311,8 @@ if [ "$BACKGROUND_MODE" = true ]; then
     if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
         mv "$LOG_FILE" "${LOG_FILE}.1"
     fi
-    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.main >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.main \
+        --config "$CONFIG_FILE" --data-dir "$STATE_DIR" >> "$LOG_FILE" 2>&1 &
     AGENT_PID=$!
     echo $AGENT_PID > "$PID_FILE"
     echo "  Agent PID:      $AGENT_PID"
@@ -324,7 +322,7 @@ fi
 
 # Foreground: start API server in background, agent in foreground
 "$PYTHON_CMD" scripts/pearlalgo_web_app/api_server.py \
-    --market "$MARKET" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
+    --data-dir "$STATE_DIR" --port "$API_PORT" >> "$API_LOG_FILE" 2>&1 &
 API_PID=$!
 echo $API_PID > "$API_PID_FILE"
 echo "  API server started (PID: $API_PID)"
@@ -332,7 +330,8 @@ echo "  API server started (PID: $API_PID)"
 echo "=== Starting Tradovate Paper Agent (Foreground) ==="
 echo "  Press Ctrl+C to stop"
 
-"$PYTHON_CMD" -m pearlalgo.market_agent.main &
+"$PYTHON_CMD" -m pearlalgo.market_agent.main \
+    --config "$CONFIG_FILE" --data-dir "$STATE_DIR" &
 AGENT_PID=$!
 echo $AGENT_PID > "$PID_FILE"
 

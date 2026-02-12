@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo API Server - IBKR Virtual (NQ, port 8000)
+Description=PearlAlgo API Server - IBKR Paper (port 8000)
 After=network.target pearlalgo-agent.service
 Wants=pearlalgo-agent.service
 
@@ -11,7 +11,7 @@ WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
 EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market NQ --port 8000
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --data-dir data/ibkr/paper --port 8000
 Restart=always
 RestartSec=5
 

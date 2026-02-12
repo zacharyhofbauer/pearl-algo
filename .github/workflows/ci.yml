@@ -25,9 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Pearl AI prompt eval (mock)
-        run: |
-          python -m pearlalgo.pearl_ai.eval.ci --mock --output-dir eval-reports
+      # Pearl AI eval removed (restructure Phase 2D)
 
       - name: IBKR vendor guard
         run: |

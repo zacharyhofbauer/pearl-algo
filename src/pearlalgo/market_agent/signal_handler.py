@@ -243,7 +243,7 @@ class SignalHandler:
         execution -> notification.
 
         Args:
-            signal: Signal dictionary from shared_signals.jsonl
+            signal: Signal dictionary from strategy or forwarded source
             tv_paper_equity: Current Tradovate Paper equity for intraday breach check
             tv_paper_tracker: TvPaperEvalTracker instance for drawdown check
         """

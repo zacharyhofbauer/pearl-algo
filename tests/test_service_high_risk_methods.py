@@ -55,7 +55,6 @@ MINIMAL_SERVICE_CONFIG = {
     "ml_filter": {"enabled": False},
     "learning": {"enabled": False},
     "execution": {"enabled": False},
-    "signal_forwarding": {},
 }
 
 

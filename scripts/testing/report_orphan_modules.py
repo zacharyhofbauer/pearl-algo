@@ -28,7 +28,7 @@ SCRIPTS_ROOT = REPO_ROOT / "scripts"
 ENTRYPOINTS = {
     "pearlalgo",
     "pearlalgo.market_agent.main",
-    "pearlalgo.market_agent.telegram_command_handler",
+    "pearlalgo.telegram.main",
 }
 
 

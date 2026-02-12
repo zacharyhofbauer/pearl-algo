@@ -290,12 +290,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "auto_reset_on_pass": defaults.CHALLENGE_AUTO_RESET_ON_PASS,
         "auto_reset_on_fail": defaults.CHALLENGE_AUTO_RESET_ON_FAIL,
     },
-    "signal_forwarding": {
-        "enabled": defaults.SIGNAL_FORWARDING_ENABLED,
-        "mode": defaults.SIGNAL_FORWARDING_MODE,
-        "shared_file": defaults.SIGNAL_FORWARDING_SHARED_FILE,
-        "max_lines": defaults.SIGNAL_FORWARDING_MAX_LINES,
-    },
 }
 
 

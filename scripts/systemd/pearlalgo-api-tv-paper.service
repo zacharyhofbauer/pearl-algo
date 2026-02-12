@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo API Server - Tradovate Paper (TV_PAPER_EVAL, port 8001)
+Description=PearlAlgo API Server - Tradovate Paper (port 8001)
 After=network.target pearlalgo-agent-tv-paper.service
 Wants=pearlalgo-agent-tv-paper.service
 
@@ -9,11 +9,9 @@ User=pearl
 Group=pearl
 WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="PEARLALGO_MARKET=TV_PAPER_EVAL"
-Environment="PEARLALGO_STATE_DIR=data/agent_state/TV_PAPER_EVAL"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
 EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market TV_PAPER_EVAL --port 8001
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --data-dir data/tradovate/paper --port 8001
 Restart=always
 RestartSec=5
 

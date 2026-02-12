@@ -389,50 +389,7 @@ ml_filter:
   max_depth: 6
   learning_rate: 0.1
   calibrate_probabilities: true
-knowledge:
-  enabled: true
-  index_dir: data/knowledge_index
-  include_paths:
-    - src
-    - docs
-    - config
-    - scripts
-    - pyproject.toml
-  exclude_globs:
-    - .env*
-    - data/**
-    - logs/**
-    - tests/artifacts/**
-    - .venv/**
-    - ibkr/**
-    - .git/**
-  max_file_size_kb: 512
-  chunk_max_chars: 2000
-  chunk_overlap_chars: 200
-  embedding_provider: auto
-  embedding_model: text-embedding-3-small
-  embedding_dim: 384
-  use_faiss: false
-  top_k: 6
-
-# ==========================================================================
-# AI COMMUNICATION (Pearl AI Chat + Briefings)
-# ==========================================================================
-# Pearl AI provides conversational chat and proactive briefings via Telegram.
-# Requires OPENAI_API_KEY environment variable.
-ai_chat:
-  enabled: false    # Disabled in Telegram -- available on web app only
-  model: gpt-4o-mini
-  rate_limit_per_minute: 5
-  max_response_length: 280
-  temperature: 0.7
-ai_briefings:
-  enabled: false    # Disabled -- no morning/EOD briefings in Telegram
-  morning_time: "06:30"   # ET - Morning market prep
-  eod_time: "16:00"       # ET - End of day summary (uses existing 3:55-4:05 window)
-
-# Signal forwarding removed (restructure Phase 1D).
-# Each agent now runs its own strategy with its own broker data.
+# knowledge, ai_chat, ai_briefings, signal_forwarding removed (restructure Phase 2D/1D)
 
 # ==========================================================================
 # ACCOUNT DISPLAY (Config-driven names for UI and Telegram)

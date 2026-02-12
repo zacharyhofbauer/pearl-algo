@@ -275,10 +275,7 @@ MARKET_HOURS_EARLY_CLOSES: dict = {}
 # SIGNAL FORWARDING DEFAULTS
 # =============================================================================
 
-SIGNAL_FORWARDING_ENABLED: bool = False
-SIGNAL_FORWARDING_MODE: str = "off"
-SIGNAL_FORWARDING_SHARED_FILE: str = "data/shared_signals.jsonl"
-SIGNAL_FORWARDING_MAX_LINES: int = 500
+# Signal forwarding removed (restructure Phase 1D)
 
 
 # =============================================================================

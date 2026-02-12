@@ -34,7 +34,7 @@ done
 echo "=== Restarting Telegram Command Handler ==="
 echo ""
 
-PATTERN="telegram_command_handler"
+PATTERN="pearlalgo.telegram.main"
 
 if pgrep -f "$PATTERN" >/dev/null 2>&1; then
   echo "Stopping existing handler process(es)..."

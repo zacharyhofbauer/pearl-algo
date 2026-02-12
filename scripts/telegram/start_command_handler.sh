@@ -21,10 +21,10 @@ if [ -f .venv/bin/activate ]; then
     echo "Activating virtual environment..."
     # shellcheck source=/dev/null
     source .venv/bin/activate
-    echo "✅ Virtual environment activated"
+    echo "Virtual environment activated"
     echo ""
 else
-    echo "⚠️  No virtual environment found at .venv/bin/activate"
+    echo "No virtual environment found at .venv/bin/activate"
     echo "   Ensure dependencies are installed in the Python environment."
     echo ""
 fi
@@ -37,16 +37,16 @@ fi
 
 # Verify pearlalgo is importable
 if ! "$PYTHON_CMD" -c "import pearlalgo" 2>/dev/null; then
-    echo "❌ ERROR: pearlalgo package not found in this Python environment."
+    echo "ERROR: pearlalgo package not found in this Python environment."
     echo "   Activate the correct virtual environment or run: pip install -e ."
     exit 1
 fi
 
 # Check if already running
-PIDS=$(pgrep -f "telegram_command_handler")
+PIDS=$(pgrep -f "pearlalgo.telegram.main")
 if [ -n "$PIDS" ]; then
-    echo "⚠️  Command Handler is already running (PID: $PIDS)"
-    echo "   Stop it first with: pkill -f telegram_command_handler"
+    echo "Command Handler is already running (PID: $PIDS)"
+    echo "   Stop it first with: pkill -f 'pearlalgo.telegram.main'"
     echo "   Or restart safely with: ./scripts/telegram/restart_command_handler.sh --background"
     exit 1
 fi
@@ -65,15 +65,15 @@ if [ "$BACKGROUND" = true ]; then
     echo "  PID file: $PID_FILE"
     echo ""
 
-    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.telegram_command_handler \
+    nohup "$PYTHON_CMD" -m pearlalgo.telegram.main \
         > "$LOG_FILE" 2>&1 &
     SERVICE_PID=$!
     echo "$SERVICE_PID" > "$PID_FILE"
 
-    echo "✅ Command Handler started (background)"
+    echo "Command Handler started (background)"
     echo "   PID: $SERVICE_PID"
     echo "   To check status: ./scripts/telegram/check_command_handler.sh"
-    echo "   To stop: pkill -f telegram_command_handler"
+    echo "   To stop: pkill -f 'pearlalgo.telegram.main'"
     exit 0
 fi
 
@@ -83,7 +83,4 @@ echo "Use /start in Telegram to open the dashboard"
 echo "Press Ctrl+C to stop"
 echo ""
 
-"$PYTHON_CMD" -m pearlalgo.market_agent.telegram_command_handler
-
-
-
+"$PYTHON_CMD" -m pearlalgo.telegram.main

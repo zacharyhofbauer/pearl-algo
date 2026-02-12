@@ -58,14 +58,7 @@ docs:
 config-defaults:
 	$(PYTHON) scripts/testing/check_config_defaults.py
 
-eval:
-	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --mock
-
-eval-expanded:
-	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --dataset golden_expanded.json --mock
-
-eval-changed:
-	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --changed-only --mock
+# Pearl AI eval removed (restructure Phase 2D)
 
 ci: ruff-bugs arch secrets docs config-defaults smoke audit test
 
