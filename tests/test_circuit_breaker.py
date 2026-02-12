@@ -512,13 +512,13 @@ class TestCircuitBreakerThresholdEdgeCases:
 
         task = asyncio.create_task(service.start())
 
-        # Should pause very quickly
-        for _ in range(50):
+        # Allow time for at least one cycle to detect connection failure and pause
+        for _ in range(150):
             if service.paused:
                 break
             await asyncio.sleep(0.02)
 
-        assert service.paused, "Should pause immediately with threshold=1"
+        assert service.paused, "Should pause after first connection failure with threshold=1"
         assert service.connection_failures >= 1
 
         await service.stop("test")

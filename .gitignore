@@ -59,7 +59,5 @@ live-chart/node_modules/
 .idea/
 .vscode/
 *.swp
-secrets.env
-
-# Junk files created by MagicMock state_dir in tests
+secrets.env# Junk files created by MagicMock state_dir in tests
 <MagicMock*

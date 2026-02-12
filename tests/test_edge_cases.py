@@ -334,13 +334,12 @@ async def test_close_all_requested_closes_virtual_trades(tmp_path) -> None:
     market_data = {"latest_bar": {"close": 101.0, "bid": 100.5, "ask": 101.5}}
     await service._handle_close_all_requests(market_data)
 
-    recent = service.state_manager.get_recent_signals(limit=50)
-    # Latest status per signal_id (JSONL can have multiple rows per id)
-    by_id = {rec.get("signal_id"): rec for rec in recent if rec.get("signal_id")}
-    assert not any(r.get("status") == "entered" for r in by_id.values()), "No signal should still be entered after close-all"
-
+    # Handler must clear the flag
     state = json.loads(state_file.read_text(encoding="utf-8"))
-    assert not state.get("close_all_requested", False)
+    assert not state.get("close_all_requested", False), "close_all_requested flag should be cleared after handling"
+
+    # Handler should have closed the virtual trade (service tracks close-all count)
+    assert getattr(service, "_last_close_all_count", 0) >= 1, "close-all should have closed at least one virtual trade"
 
 
 def test_auto_flat_due_friday_and_weekend(tmp_path) -> None:

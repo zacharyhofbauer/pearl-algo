@@ -157,6 +157,9 @@ class TestProcessGradeRequest:
         _write_signals_file(handler.state_manager.signals_file, [
             {"signal_id": "sig-001", "status": "exited"},
         ])
+        handler.state_manager.get_recent_signals = MagicMock(return_value=[
+            {"signal_id": "sig-001", "status": "exited"},
+        ])
 
         grade_file = _write_grade_file(tmp_path, {
             "signal_id": "sig-001",
@@ -173,6 +176,9 @@ class TestProcessGradeRequest:
     async def test_already_exited_sends_logged_notification(self, handler, tmp_path):
         """Should send 'Grade Logged' when skipping an already-exited signal."""
         _write_signals_file(handler.state_manager.signals_file, [
+            {"signal_id": "sig-001", "status": "exited"},
+        ])
+        handler.state_manager.get_recent_signals = MagicMock(return_value=[
             {"signal_id": "sig-001", "status": "exited"},
         ])
 

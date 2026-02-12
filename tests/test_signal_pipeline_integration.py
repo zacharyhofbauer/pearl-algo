@@ -578,7 +578,7 @@ class TestSignalExecutionPipeline:
         signal with rejection metadata.  Execution adapter preconditions also
         reject → ``place_bracket`` is never called (no order placed).
         """
-        # ML filter mock → rejects
+        # ML filter mock → rejects (handler uses should_execute_async)
         mock_ml = MagicMock()
         mock_pred = MagicMock()
         mock_pred.to_dict.return_value = {
@@ -586,7 +586,7 @@ class TestSignalExecutionPipeline:
             "pass_filter": False,
         }
         mock_pred.win_probability = 0.30
-        mock_ml.should_execute.return_value = (False, mock_pred)
+        mock_ml.should_execute_async = AsyncMock(return_value=(False, mock_pred))
 
         # Execution adapter mock → preconditions fail
         mock_adapter = MagicMock()
@@ -611,7 +611,7 @@ class TestSignalExecutionPipeline:
         assert signal.get("_ml_prediction") is not None
 
         # ML filter was consulted
-        mock_ml.should_execute.assert_called_once()
+        mock_ml.should_execute_async.assert_called_once()
 
         # No order was placed
         mock_adapter.place_bracket.assert_not_called()

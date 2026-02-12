@@ -508,75 +508,81 @@ class TestCircuitBreaker:
 class TestMLFilter:
     """Tests for _apply_ml_filter."""
 
-    def test_disabled_filter_skips(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_disabled_filter_skips(self, handler, valid_signal):
         """Disabled ML filter should not modify the signal at all."""
         handler._ml_filter_enabled = False
 
-        handler._apply_ml_filter(valid_signal)
+        await handler._apply_ml_filter(valid_signal)
 
         assert "_ml_prediction" not in valid_signal
 
-    def test_none_filter_skips_even_if_enabled(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_none_filter_skips_even_if_enabled(self, handler, valid_signal):
         """Enabled flag with None filter object should skip without error."""
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = None
 
-        handler._apply_ml_filter(valid_signal)
+        await handler._apply_ml_filter(valid_signal)
 
         assert "_ml_prediction" not in valid_signal
 
-    def test_filter_attaches_prediction_in_shadow_mode(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_filter_attaches_prediction_in_shadow_mode(self, handler, valid_signal):
         """Enabled ML filter should attach _ml_prediction and _ml_shadow_pass_filter."""
         mock_pred = MagicMock()
         mock_pred.to_dict.return_value = {"win_probability": 0.72, "model": "xgb_v3"}
         mock_pred.win_probability = 0.72
 
         mock_filter = MagicMock()
-        mock_filter.should_execute.return_value = (True, mock_pred)
+        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
 
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = mock_filter
         handler._ml_filter_mode = "shadow"
 
-        handler._apply_ml_filter(valid_signal)
+        await handler._apply_ml_filter(valid_signal)
 
         assert valid_signal["_ml_prediction"] == {"win_probability": 0.72, "model": "xgb_v3"}
         assert valid_signal["_ml_shadow_pass_filter"] is True
 
-    def test_shadow_threshold_gates_pass_filter(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_shadow_threshold_gates_pass_filter(self, handler, valid_signal):
         """When shadow threshold is set, _ml_shadow_pass_filter should reflect the gate."""
         mock_pred = MagicMock()
         mock_pred.to_dict.return_value = {"win_probability": 0.45}
         mock_pred.win_probability = 0.45
 
         mock_filter = MagicMock()
-        mock_filter.should_execute.return_value = (True, mock_pred)
+        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
 
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = mock_filter
         handler._ml_filter_mode = "shadow"
         handler._ml_shadow_threshold = 0.60  # Above the prediction
 
-        handler._apply_ml_filter(valid_signal)
+        await handler._apply_ml_filter(valid_signal)
 
         # 0.45 < 0.60 => should NOT pass the shadow filter
         assert valid_signal["_ml_shadow_pass_filter"] is False
         assert valid_signal["_ml_shadow_threshold"] == 0.60
 
-    def test_filter_error_handled_gracefully(self, handler, valid_signal):
+    @pytest.mark.asyncio
+    async def test_filter_error_handled_gracefully(self, handler, valid_signal):
         """ML filter error should not propagate; signal stays processable."""
         mock_filter = MagicMock()
-        mock_filter.should_execute.side_effect = RuntimeError("model load failed")
+        mock_filter.should_execute_async = AsyncMock(side_effect=RuntimeError("model load failed"))
 
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = mock_filter
 
         # Must not raise
-        handler._apply_ml_filter(valid_signal)
+        await handler._apply_ml_filter(valid_signal)
 
         assert "_ml_prediction" not in valid_signal
 
-    def test_filter_extracts_regime_context(self, handler):
+    @pytest.mark.asyncio
+    async def test_filter_extracts_regime_context(self, handler):
         """ML filter should build regime/volatility/session context from signal."""
         signal = make_valid_signal()
         signal["market_regime"] = {
@@ -590,19 +596,20 @@ class TestMLFilter:
         mock_pred.win_probability = 0.8
 
         mock_filter = MagicMock()
-        mock_filter.should_execute.return_value = (True, mock_pred)
+        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
 
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = mock_filter
 
-        handler._apply_ml_filter(signal)
+        await handler._apply_ml_filter(signal)
 
-        ctx = mock_filter.should_execute.call_args[0][1]  # 2nd positional arg
+        ctx = mock_filter.should_execute_async.call_args[0][1]  # 2nd positional arg
         assert ctx["regime"]["regime"] == "trending"
         assert ctx["regime"]["volatility"] == "low"
         assert ctx["regime"]["session"] == "US_regular"
 
-    def test_filter_high_volatility_bucket(self, handler):
+    @pytest.mark.asyncio
+    async def test_filter_high_volatility_bucket(self, handler):
         """Volatility ratio > 1.5 should map to 'high' bucket."""
         signal = make_valid_signal()
         signal["market_regime"] = {"regime": "volatile", "volatility_ratio": 2.0, "session": ""}
@@ -612,14 +619,14 @@ class TestMLFilter:
         mock_pred.win_probability = 0.5
 
         mock_filter = MagicMock()
-        mock_filter.should_execute.return_value = (True, mock_pred)
+        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
 
         handler._ml_filter_enabled = True
         handler._ml_signal_filter = mock_filter
 
-        handler._apply_ml_filter(signal)
+        await handler._apply_ml_filter(signal)
 
-        ctx = mock_filter.should_execute.call_args[0][1]
+        ctx = mock_filter.should_execute_async.call_args[0][1]
         assert ctx["regime"]["volatility"] == "high"
 
 

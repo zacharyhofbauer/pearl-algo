@@ -362,8 +362,8 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
             state_dir=tmp_path,
         )
         
-        # Mock the Telegram notifier
-        service.telegram_notifier.send_dashboard = AsyncMock(return_value=True)
+        # Dashboard is sent via notification_queue.enqueue_dashboard (notifier.send_dashboard is called by queue worker)
+        service.notification_queue.enqueue_dashboard = AsyncMock(return_value=True)
         
         # Run service briefly
         task = asyncio.create_task(service.start())
@@ -371,11 +371,11 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
         await service.stop("test")
         await asyncio.wait_for(task, timeout=2.0)
         
-        # Verify dashboard was called
-        assert service.telegram_notifier.send_dashboard.called
+        # Verify dashboard was enqueued (service emits even when data is empty)
+        assert service.notification_queue.enqueue_dashboard.called
         
-        # Check that a quiet_reason was passed
-        call_args = service.telegram_notifier.send_dashboard.call_args
+        # Check that status (with optional quiet_reason) was passed
+        call_args = service.notification_queue.enqueue_dashboard.call_args
         status_arg = call_args[0][0]  # First positional arg
         # Status should have been passed (could be empty dict or None)
         # The key test is that dashboard was called despite empty data
