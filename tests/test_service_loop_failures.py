@@ -51,7 +51,6 @@ class TestServiceLoopFailures:
         service.notification_queue.enqueue_heartbeat = AsyncMock()
 
         # Stub out signal forwarder process to avoid side effects
-        service.signal_forwarder.process_forwarded_signals = AsyncMock()
 
         # Record initial error state
         initial_errors = service.data_fetch_errors
@@ -130,7 +129,6 @@ class TestServiceLoopFailures:
         service.notification_queue.enqueue_heartbeat = AsyncMock()
         service.notification_queue.enqueue_circuit_breaker = AsyncMock()
         service.notification_queue.enqueue_raw_message = AsyncMock()
-        service.signal_forwarder.process_forwarded_signals = AsyncMock()
         service.execution_orchestrator = MagicMock()
         service.execution_orchestrator.check_daily_reset = MagicMock()
         service.execution_orchestrator.check_execution_health = AsyncMock()
