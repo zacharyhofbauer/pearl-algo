@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
-import PearlInsightsPanel from './PearlInsightsPanel'
 import AccountSwitcher from './AccountSwitcher'
 import { useAgentStore, useOperatorStore } from '@/stores'
 import { derivePearlMode, deriveHeadline } from '@/types/pearl'
@@ -200,22 +199,9 @@ export default function PearlHeaderBar() {
         aria-label="Pearl AI Controls"
       >
         <div className="pearl-dropdown-panel">
-          <PearlInsightsPanel
-            insights={agentState?.pearl_insights ?? null}
-            suggestion={agentState?.pearl_suggestion ?? null}
-            agentState={agentState ?? null}
-            aiStatus={agentState?.ai_status ?? null}
-            shadowCounters={agentState?.shadow_counters ?? null}
-            mlFilterPerformance={agentState?.ml_filter_performance ?? null}
-            chatAvailable={Boolean(agentState?.pearl_ai_available)}
-            operatorLockEnabled={agentState?.operator_lock_enabled ?? null}
-            pearlFeed={agentState?.pearl_feed ?? []}
-            pearlAIHeartbeat={agentState?.pearl_ai_heartbeat ?? null}
-            pearlAIDebug={agentState?.pearl_ai_debug ?? null}
-            layout="dropdown"
-            dropdownActive={expanded}
-            initialChatOpen={false}
-          />
+          <p style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+            AI insights panel removed during restructure.
+          </p>
         </div>
       </div>
     </div>
