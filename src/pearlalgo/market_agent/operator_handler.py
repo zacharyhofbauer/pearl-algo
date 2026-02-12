@@ -18,7 +18,7 @@ from pearlalgo.market_agent.notification_queue import Priority
 if TYPE_CHECKING:
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-    from pearlalgo.ai.shadow_tracker import PearlShadowTracker
+    pass  # AI shadow_tracker removed (Phase 2D)
 
 
 class OperatorHandler:

@@ -22,8 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "pytest-cov>=4.1.0", "ruff>=0.6", "mypy>=1.11.0", "pandas-stubs>=2.0", "types-PyYAML>=6.0", "types-pytz>=2024.1"]
-llm = ["openai>=1.40.0", "anthropic>=0.40.0", "httpx>=0.27.0"]
-all = ["openai>=1.40.0", "anthropic>=0.40.0", "httpx>=0.27.0"]
+# llm extras removed (restructure Phase 2D -- AI code deleted)
+all = ["httpx>=0.27.0"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -41,5 +41,5 @@ namespaces = false
 exclude = ["pearlalgo_web_app*"]
 
 [tool.setuptools.package-data]
-"pearlalgo.pearl_ai" = ["eval/datasets/*.json"]
+# Pearl AI data removed (restructure Phase 2D)
 

@@ -54,7 +54,16 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
-from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
+# AI shadow tracker removed (restructure Phase 2D)
+# Stub replacements for removed AI module
+def get_shadow_tracker():
+    """No-op stub: AI shadow tracker was removed."""
+    return None
+
+class SuggestionType:
+    """No-op stub: AI suggestion types were removed."""
+    RISK_WARNING = "risk_warning"
+    STRATEGY_HINT = "strategy_hint"
 from pearlalgo.market_agent.ml_manager import MLManager
 from pearlalgo.market_agent.audit_logger import AuditLogger, AuditEventType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks

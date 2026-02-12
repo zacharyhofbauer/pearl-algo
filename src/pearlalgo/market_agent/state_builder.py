@@ -357,13 +357,7 @@ class StateBuilder:
             active_suggestion = self.service.shadow_tracker.get_active_suggestion()
 
             # Get AI chat status
-            ai_enabled = False
-            try:
-                from pearlalgo.ai.chat import get_ai_chat
-                ai_chat = get_ai_chat()
-                ai_enabled = ai_chat.enabled
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
+            ai_enabled = False  # AI chat removed (restructure Phase 2D)
 
             state["pearl_insights"] = {
                 "current_suggestion": active_suggestion,

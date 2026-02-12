@@ -168,10 +168,8 @@ class ScheduledTasks:
                 msg_parts.append(f"Session P&L: {pnl_sign}${pnl_to_show:.0f}")
 
             try:
-                from pearlalgo.ai.chat import get_ai_chat
-                ai_config = self._service_config.get("ai_chat", {})
-                ai_chat = get_ai_chat(config=ai_config)
-                if ai_chat.enabled:
+                # AI chat removed (restructure Phase 2D)
+                if False:
                     context = {
                         "daily_pnl": daily_pnl,
                         "session_pnl": session_pnl,
@@ -309,11 +307,8 @@ class ScheduledTasks:
 
                 try:
                     briefing_config = self._service_config.get("ai_briefings", {})
-                    if briefing_config.get("enabled", True):
-                        from pearlalgo.ai.chat import get_ai_chat
-                        ai_config = self._service_config.get("ai_chat", {})
-                        ai_chat = get_ai_chat(config=ai_config)
-                        if ai_chat.enabled:
+                    if False:  # AI briefings removed (Phase 2D)
+                        if False:
                             context = {
                                 "daily_pnl": total_pnl,
                                 "wins_today": wins,

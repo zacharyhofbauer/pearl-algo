@@ -70,14 +70,10 @@ except ImportError:
     get_ml_signal_filter = None  # type: ignore
     MLSignalFilter = None  # type: ignore
 
-# Shadow tracker (AI suggestion outcome tracking)
-try:
-    from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
-    SHADOW_TRACKER_AVAILABLE = True
-except ImportError:
-    SHADOW_TRACKER_AVAILABLE = False
-    get_shadow_tracker = None  # type: ignore
-    SuggestionType = None  # type: ignore
+# Shadow tracker removed (restructure Phase 2D)
+SHADOW_TRACKER_AVAILABLE = False
+get_shadow_tracker = None  # type: ignore
+SuggestionType = None  # type: ignore
 
 
 class MLManager:
