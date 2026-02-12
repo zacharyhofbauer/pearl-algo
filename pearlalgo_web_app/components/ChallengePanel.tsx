@@ -4,6 +4,7 @@ import { useEffect, useRef, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import type { EquityCurvePoint, ChallengeStatus } from '@/stores'
+import { formatPnL } from '@/utils/formatting'
 
 interface ChallengePanelProps {
   challenge: ChallengeStatus | null
@@ -91,10 +92,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
     return null
   }
 
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
+  // formatPnL imported from utils/formatting
 
   const getOutcomeStyle = () => {
     switch (challenge.outcome) {

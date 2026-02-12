@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import TradeDockPanel from '@/components/TradeDockPanel'
 import type { Position } from '@/stores'
-import type { RecentTradeRow } from '@/components/TradeDockPanel'
+import type { RecentTradeRow, PerformanceSummary } from '@/components/TradeDockPanel'
 
 // Mock DataPanelsContainer – render children with title for assertions
 jest.mock('@/components/DataPanelsContainer', () => ({
@@ -323,6 +323,110 @@ describe('TradeDockPanel', () => {
       // Should not crash, dashes should be present
       const dashes = screen.getAllByText('—')
       expect(dashes.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('performance summary', () => {
+    const SAMPLE_PERFORMANCE: PerformanceSummary = {
+      as_of: new Date().toISOString(),
+      td: { pnl: 150, trades: 3, wins: 2, losses: 1, win_rate: 66.7 },
+      yday: { pnl: -50, trades: 2, wins: 0, losses: 2, win_rate: 0 },
+      wtd: { pnl: 300, trades: 8, wins: 5, losses: 3, win_rate: 62.5 },
+      mtd: { pnl: 500, trades: 20, wins: 12, losses: 8, win_rate: 60 },
+      ytd: { pnl: 1200, trades: 50, wins: 30, losses: 20, win_rate: 60 },
+      all: { pnl: 2500, trades: 100, wins: 60, losses: 40, win_rate: 60 },
+    }
+
+    it('should not render performance section when performanceSummary is null', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          performanceSummary={null}
+        />
+      )
+      expect(screen.queryByText('Performance')).not.toBeInTheDocument()
+    })
+
+    it('should render performance section when data is provided', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          performanceSummary={SAMPLE_PERFORMANCE}
+        />
+      )
+      expect(screen.getByText('Performance')).toBeInTheDocument()
+    })
+
+    it('should show Today, Yesterday, Week, Month, Year, All Time', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          performanceSummary={SAMPLE_PERFORMANCE}
+        />
+      )
+      expect(screen.getByText('Today')).toBeInTheDocument()
+      expect(screen.getByText('Yesterday')).toBeInTheDocument()
+      expect(screen.getByText('Week')).toBeInTheDocument()
+      expect(screen.getByText('Month')).toBeInTheDocument()
+      expect(screen.getByText('Year')).toBeInTheDocument()
+      expect(screen.getByText('All Time')).toBeInTheDocument()
+    })
+  })
+
+  describe('risk metrics section', () => {
+    const SAMPLE_RISK_METRICS = {
+      sharpe_ratio: 1.5,
+      sortino_ratio: 2.1,
+      profit_factor: 1.8,
+      expectancy: 25.0,
+      avg_win: 80.0,
+      avg_loss: -40.0,
+      avg_rr: 2.0,
+      largest_win: 200.0,
+      largest_loss: -100.0,
+      max_drawdown: 300.0,
+      max_drawdown_pct: 5.5,
+      current_streak: 3,
+      max_consecutive_wins: 7,
+      max_consecutive_losses: 4,
+    }
+
+    const SAMPLE_PERFORMANCE: PerformanceSummary = {
+      as_of: new Date().toISOString(),
+      td: { pnl: 150, trades: 3, wins: 2, losses: 1, win_rate: 66.7 },
+      yday: { pnl: -50, trades: 2, wins: 0, losses: 2, win_rate: 0 },
+      wtd: { pnl: 300, trades: 8, wins: 5, losses: 3, win_rate: 62.5 },
+      mtd: { pnl: 500, trades: 20, wins: 12, losses: 8, win_rate: 60 },
+      ytd: { pnl: 1200, trades: 50, wins: 30, losses: 20, win_rate: 60 },
+      all: { pnl: 2500, trades: 100, wins: 60, losses: 40, win_rate: 60 },
+    }
+
+    it('should render risk metrics when provided', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          performanceSummary={SAMPLE_PERFORMANCE}
+          riskMetrics={SAMPLE_RISK_METRICS}
+        />
+      )
+      expect(screen.getByText('Risk Metrics')).toBeInTheDocument()
+      expect(screen.getByText('Sharpe:')).toBeInTheDocument()
+      expect(screen.getByText('1.5')).toBeInTheDocument()
+    })
+
+    it('should not render risk metrics when null', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          riskMetrics={null}
+        />
+      )
+      expect(screen.queryByText('Risk Metrics')).not.toBeInTheDocument()
     })
   })
 })

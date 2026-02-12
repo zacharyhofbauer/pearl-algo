@@ -28,15 +28,15 @@ export function useViewportType(): ViewportConfig {
   })
 
   useEffect(() => {
+    // Cache URL params and touch detection (they don't change during resize)
+    const urlParams = new URLSearchParams(window.location.search)
+    const forceUltrawide = urlParams.get('ultrawide') === 'true'
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+
     const detectViewport = () => {
       const width = window.innerWidth
       const height = window.innerHeight
       const aspectRatio = width / height
-      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-
-      // Check for URL parameter override: ?ultrawide=true
-      const urlParams = new URLSearchParams(window.location.search)
-      const forceUltrawide = urlParams.get('ultrawide') === 'true'
 
       // Ultrawide detection: min 2400px width, max 800px height, aspect ratio 3:1+
       // OR forced via URL parameter for testing
@@ -63,9 +63,27 @@ export function useViewportType(): ViewportConfig {
       })
     }
 
+    // Initial detection
     detectViewport()
-    window.addEventListener('resize', detectViewport)
-    return () => window.removeEventListener('resize', detectViewport)
+
+    // Debounced resize handler (150ms delay)
+    let resizeTimeout: NodeJS.Timeout | null = null
+    const handleResize = () => {
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout)
+      }
+      resizeTimeout = setTimeout(() => {
+        detectViewport()
+      }, 150)
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout)
+      }
+    }
   }, [])
 
   return config

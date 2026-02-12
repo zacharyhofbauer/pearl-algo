@@ -2,6 +2,7 @@
 
 import { DataPanel } from './DataPanelsContainer'
 import type { SignalRejections, LastSignalDecision } from '@/stores'
+import { formatTime } from '@/utils/formatting'
 
 interface SignalDecisionsPanelProps {
   rejections: SignalRejections | null
@@ -36,19 +37,7 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
     'Session Filter': 'var(--text-tertiary)',
   }
 
-  const formatTime = (timestamp: string | null) => {
-    if (!timestamp) return '--:--'
-    try {
-      const date = new Date(timestamp)
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })
-    } catch {
-      return '--:--'
-    }
-  }
+  // formatTime imported from utils/formatting
 
   const totalRejections = rejections
     ? rejections.direction_gating +
@@ -94,7 +83,7 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
           <div className="last-signal-section">
             <div className="last-signal-header">
               <span className="last-signal-label">Last Signal</span>
-              <span className="last-signal-time">{formatTime(lastDecision.timestamp)}</span>
+              <span className="last-signal-time">{formatTime(lastDecision.timestamp) || '--:--'}</span>
             </div>
             <div className="last-signal-details">
               <span className="signal-type">{formatSignalType(lastDecision.signal_type)}</span>

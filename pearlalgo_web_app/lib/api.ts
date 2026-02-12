@@ -122,11 +122,76 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
 }
 
 /**
+ * Normalized API error shape for consistent error handling
+ */
+export interface ApiError {
+  message: string
+  status: number
+  detail?: unknown
+}
+
+/**
+ * Normalize an error response into a consistent shape
+ */
+export function normalizeApiError(response: Response, raw?: string): ApiError {
+  let detail: unknown = null
+  let message = `API Error: ${response.status}`
+
+  if (raw) {
+    try {
+      const body = JSON.parse(raw)
+      // Try multiple common error message fields
+      const errorMessage =
+        (typeof body?.detail === 'string' ? body.detail : null) ||
+        (typeof body?.detail?.message === 'string' ? body.detail?.message : null) ||
+        (typeof body?.message === 'string' ? body.message : null) ||
+        (typeof body?.error === 'string' ? body.error : null)
+      
+      if (errorMessage) {
+        message = errorMessage
+      }
+      detail = body?.detail || body
+    } catch {
+      // If JSON parsing fails, use raw text as message
+      if (raw) {
+        message = raw
+        detail = raw
+      }
+    }
+  }
+
+  // Handle specific status codes with user-friendly messages
+  if (response.status === 401) {
+    message = message || 'Authentication required.'
+  } else if (response.status === 403) {
+    if (typeof detail === 'object' && detail !== null && 'message' in detail) {
+      const detailMsg = String((detail as any).message)
+      if (detailMsg.toLowerCase().includes('operator')) {
+        message = 'Operator access required.'
+      } else {
+        message = message || 'Forbidden.'
+      }
+    } else {
+      message = message || 'Forbidden.'
+    }
+  } else if (response.status === 503) {
+    message = message || 'Service unavailable.'
+  }
+
+  return {
+    message,
+    status: response.status,
+    detail,
+  }
+}
+
+/**
  * Fetch JSON from API with authentication.
  *
  * @param path - API path (e.g., '/api/state')
  * @param options - Optional fetch options
  * @returns Promise<T> - Parsed JSON response
+ * @throws ApiError - Normalized error with message, status, and detail
  */
 export async function apiFetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, options)
@@ -138,27 +203,14 @@ export async function apiFetchJson<T>(path: string, options: RequestInit = {}): 
     } catch {
       raw = ''
     }
-    let detail: string | null = null
-    try {
-      const body = raw ? JSON.parse(raw) : null
-      detail =
-        (typeof body?.detail === 'string' ? body.detail : null) ||
-        (typeof body?.message === 'string' ? body.message : null)
-    } catch {
-      detail = raw || null
-    }
-
-    // Handle auth errors specifically
-    if (response.status === 401) {
-      throw new Error(detail || 'Authentication required.')
-    }
-    if (response.status === 403) {
-      if (detail && detail.toLowerCase().includes('operator')) {
-        throw new Error('Operator access required.')
-      }
-      throw new Error(detail || 'Forbidden.')
-    }
-    throw new Error(detail || `API Error: ${response.status}`)
+    
+    const error = normalizeApiError(response, raw)
+    
+    // Throw Error with message for backward compatibility, but include status/details
+    const err = new Error(error.message) as Error & ApiError
+    err.status = error.status
+    err.detail = error.detail
+    throw err
   }
 
   return response.json()

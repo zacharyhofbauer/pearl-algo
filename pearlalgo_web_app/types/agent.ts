@@ -1,7 +1,6 @@
-import { create } from 'zustand'
-import { subscribeWithSelector } from 'zustand/middleware'
+// Types for agent state and related structures
+// Extracted from stores/agentStore.ts for better organization
 
-// Types for agent state
 export interface AIStatus {
   bandit_mode: 'off' | 'shadow' | 'live'
   contextual_mode: 'off' | 'shadow' | 'live'
@@ -106,7 +105,6 @@ export interface RiskMetrics {
   max_drawdown: number
   max_drawdown_pct: number
   sharpe_ratio: number | null
-  sortino_ratio?: number | null
   profit_factor: number | null
   avg_win: number
   avg_loss: number
@@ -114,9 +112,6 @@ export interface RiskMetrics {
   largest_win: number
   largest_loss: number
   expectancy: number
-  current_streak?: number | null
-  max_consecutive_wins?: number | null
-  max_consecutive_losses?: number | null
   // Exposure metrics
   max_concurrent_positions_peak?: number
   max_stop_risk_exposure?: number
@@ -406,15 +401,6 @@ export interface AccountConfig {
   description: string
 }
 
-export interface PearlFeedMessageMetadata {
-  details?: {
-    text?: string
-    title?: string
-    lines?: string[]
-  }
-  [key: string]: unknown
-}
-
 export interface PearlFeedMessage {
   id: string
   content: string
@@ -422,14 +408,14 @@ export interface PearlFeedMessage {
   priority?: string | null
   timestamp?: string | null
   trade_id?: string | null
-  metadata?: PearlFeedMessageMetadata
+  metadata?: any
 }
 
 export interface PearlAIDebugInfo {
-  routing?: Record<string, unknown>
+  routing?: any
   model_used?: string | null
-  tool_calls?: Array<Record<string, unknown>>
-  tool_results?: Array<Record<string, unknown>>
+  tool_calls?: any[]
+  tool_results?: any[]
   input_tokens?: number | null
   output_tokens?: number | null
   latency_ms?: number | null
@@ -499,136 +485,44 @@ export interface AgentState {
   signal_activity: SignalActivity | null
 }
 
-interface AgentStore {
-  // State
-  agentState: AgentState | null
-  accounts: Record<string, AccountConfig> | null
-  lastUpdated: Date | null
-  isLoading: boolean
-  error: string | null
-
-  // Actions
-  setAgentState: (state: Partial<AgentState> & { accounts?: Record<string, AccountConfig> }) => void
-  updateFromWebSocket: (data: Partial<AgentState> & { accounts?: Record<string, AccountConfig> }) => void
-  setLoading: (loading: boolean) => void
-  setError: (error: string | null) => void
-  reset: () => void
+/**
+ * Lightweight runtime validation for incoming WebSocket/API data.
+ * Checks that data is an object and has expected structure.
+ */
+export function validateAgentStateData(data: unknown): data is Partial<AgentState> & { accounts?: Record<string, AccountConfig> } {
+  if (typeof data !== 'object' || data === null) {
+    return false
+  }
+  
+  // Basic shape check - at minimum, it should be an object
+  // More specific validation can be added later if needed
+  return true
 }
 
-const initialAgentState: AgentState = {
-  running: false,
-  paused: false,
-  daily_pnl: 0,
-  daily_trades: 0,
-  daily_wins: 0,
-  daily_losses: 0,
-  active_trades_count: 0,
-  active_trades_unrealized_pnl: null,
-  futures_market_open: false,
-  data_fresh: false,
-  ai_status: null,
-  challenge: null,
-  recent_exits: [],
-  performance: null,
-  equity_curve: [],
-  risk_metrics: null,
-  buy_sell_pressure: null,
-  cadence_metrics: null,
-  market_regime: null,
-  signal_rejections_24h: null,
-  last_signal_decision: null,
-  shadow_counters: null,
-  gateway_status: null,
-  connection_health: null,
-  error_summary: null,
-  config: null,
-  data_quality: null,
-  analytics: null,
-  pearl_suggestion: null,
-  pearl_insights: null,
-  pearl_ai_available: false,
-  pearl_feed: [],
-  pearl_ai_heartbeat: null,
-  pearl_ai_debug: null,
-  operator_lock_enabled: false,
-  // New fields for enhanced transparency
-  execution_state: null,
-  circuit_breaker: null,
-  ml_filter_performance: null,
-  session_context: null,
-  signal_activity: null,
+/**
+ * Merge incoming agent state data with existing state.
+ * Handles accounts extraction and state merging safely.
+ */
+export function mergeAgentState(
+  prev: AgentState | null,
+  incoming: Partial<AgentState> & { accounts?: Record<string, AccountConfig> },
+  initialAgentState: AgentState
+): { agentState: AgentState; accounts?: Record<string, AccountConfig> } {
+  // Extract accounts if present
+  const { accounts, ...agentFields } = incoming
+  
+  // Merge agent state
+  const mergedAgentState: AgentState = prev
+    ? { ...prev, ...agentFields }
+    : { ...initialAgentState, ...agentFields }
+  
+  const result: { agentState: AgentState; accounts?: Record<string, AccountConfig> } = {
+    agentState: mergedAgentState,
+  }
+  
+  if (accounts !== undefined) {
+    result.accounts = accounts
+  }
+  
+  return result
 }
-
-export const useAgentStore = create<AgentStore>()(
-  subscribeWithSelector((set) => ({
-    // Initial state
-    agentState: null,
-    accounts: null,
-    lastUpdated: null,
-    isLoading: true,
-    error: null,
-
-    // Actions
-    setAgentState: (state) =>
-      set((prev) => {
-        const { accounts, ...agentFields } = state
-        return {
-          agentState: prev.agentState
-            ? { ...prev.agentState, ...agentFields }
-            : { ...initialAgentState, ...agentFields },
-          ...(accounts !== undefined ? { accounts } : {}),
-          lastUpdated: new Date(),
-          isLoading: false,
-          error: null,
-        }
-      }),
-
-    updateFromWebSocket: (data) =>
-      set((prev) => {
-        const { accounts, ...agentFields } = data
-        return {
-          agentState: prev.agentState
-            ? { ...prev.agentState, ...agentFields }
-            : { ...initialAgentState, ...agentFields },
-          ...(accounts !== undefined ? { accounts } : {}),
-          lastUpdated: new Date(),
-        }
-      }),
-
-    setLoading: (loading) => set({ isLoading: loading }),
-
-    setError: (error) => set({ error, isLoading: false }),
-
-    reset: () =>
-      set({
-        agentState: null,
-        accounts: null,
-        lastUpdated: null,
-        isLoading: true,
-        error: null,
-      }),
-  }))
-)
-
-// Selectors for common use cases
-export const selectIsRunning = (state: AgentStore) => state.agentState?.running ?? false
-export const selectDailyPnL = (state: AgentStore) => state.agentState?.daily_pnl ?? 0
-export const selectActiveTradesCount = (state: AgentStore) => state.agentState?.active_trades_count ?? 0
-export const selectPerformance = (state: AgentStore) => state.agentState?.performance
-export const selectChallenge = (state: AgentStore) => state.agentState?.challenge
-export const selectAIStatus = (state: AgentStore) => state.agentState?.ai_status
-export const selectCadenceMetrics = (state: AgentStore) => state.agentState?.cadence_metrics
-export const selectGatewayStatus = (state: AgentStore) => state.agentState?.gateway_status
-export const selectAnalytics = (state: AgentStore) => state.agentState?.analytics
-export const selectRecentExits = (state: AgentStore) => state.agentState?.recent_exits ?? []
-export const selectRiskMetrics = (state: AgentStore) => state.agentState?.risk_metrics
-export const selectEquityCurve = (state: AgentStore) => state.agentState?.equity_curve ?? []
-export const selectMarketRegime = (state: AgentStore) => state.agentState?.market_regime
-export const selectBuySellPressure = (state: AgentStore) => state.agentState?.buy_sell_pressure
-export const selectConfig = (state: AgentStore) => state.agentState?.config
-export const selectExecutionState = (state: AgentStore) => state.agentState?.execution_state
-export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.circuit_breaker
-export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
-export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
-export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
-export const selectAccounts = (state: AgentStore) => state.accounts

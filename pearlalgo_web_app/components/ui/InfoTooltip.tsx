@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useState, useRef, useEffect } from 'react'
+import { ReactNode, useState, useRef, useEffect, useId } from 'react'
 
 interface InfoTooltipProps {
   text: string
@@ -13,6 +13,22 @@ export function InfoTooltip({ text, position = 'top', children }: InfoTooltipPro
   const [adjustedPosition, setAdjustedPosition] = useState(position)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLSpanElement>(null)
+  const tooltipId = useId()
+  const triggerId = `tooltip-trigger-${tooltipId}`
+
+  // Handle Escape key to dismiss tooltip
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isVisible) {
+        setIsVisible(false)
+      }
+    }
+
+    if (isVisible) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isVisible])
 
   useEffect(() => {
     if (isVisible && tooltipRef.current && containerRef.current) {
@@ -52,15 +68,28 @@ export function InfoTooltip({ text, position = 'top', children }: InfoTooltipPro
     }
   }, [isVisible, position])
 
+  // Handle touch/click toggle
+  const handleClick = () => {
+    setIsVisible((prev) => !prev)
+  }
+
   return (
     <span
       ref={containerRef}
       className="info-tooltip-container"
+      id={triggerId}
+      aria-describedby={isVisible ? tooltipId : undefined}
       onMouseEnter={() => setIsVisible(true)}
       onMouseLeave={() => setIsVisible(false)}
+      onFocus={() => setIsVisible(true)}
+      onBlur={() => setIsVisible(false)}
+      onClick={handleClick}
+      tabIndex={0}
+      role="button"
+      aria-label={`Show tooltip: ${text}`}
     >
       {children || (
-        <span className="info-tooltip-icon">
+        <span className="info-tooltip-icon" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm1 12H7V7h2v5zM8 6a1 1 0 110-2 1 1 0 010 2z"/>
           </svg>
@@ -69,11 +98,13 @@ export function InfoTooltip({ text, position = 'top', children }: InfoTooltipPro
       {isVisible && (
         <div
           ref={tooltipRef}
+          id={tooltipId}
           className={`info-tooltip info-tooltip-${adjustedPosition}`}
           role="tooltip"
+          aria-live="polite"
         >
           {text}
-          <span className="info-tooltip-arrow" />
+          <span className="info-tooltip-arrow" aria-hidden="true" />
         </div>
       )}
     </span>

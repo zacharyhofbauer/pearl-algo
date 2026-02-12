@@ -29,6 +29,31 @@ Design tokens are CSS custom properties defined in `app/globals.css` that provid
 --space-7: 24px;  /* Large spacing */
 ```
 
+### Border Radius Scale
+
+```css
+--radius-xs: 2px;      /* Minimal rounding */
+--radius-sm: 4px;      /* Small elements, badges */
+--radius-md: 6px;      /* Default panels, buttons */
+--radius-lg: 8px;      /* Cards, larger panels */
+--radius-xl: 10px;     /* Tooltips, modals */
+--radius-2xl: 12px;    /* Large containers */
+--radius-full: 50%;    /* Circular elements (avatars, dots) */
+--radius-pill: 999px;  /* Pill-shaped buttons */
+```
+
+### Z-Index Layer Scale
+
+```css
+--z-base: 1;        /* Base stacking context */
+--z-above: 2;       /* Slightly elevated elements */
+--z-dropdown: 100;  /* Dropdown menus, selectors */
+--z-sticky: 200;    /* Sticky headers, fixed elements */
+--z-modal: 1000;    /* Modals, tooltips, overlays */
+--z-overlay: 9999;  /* Full-screen overlays */
+--z-max: 10000;     /* Maximum stacking (rarely used) */
+```
+
 ### Motion Scale
 
 ```css

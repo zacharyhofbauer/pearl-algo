@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch, apiFetchJson } from '@/lib/api'
+import { formatAgo as formatAgoFromLib } from '@/lib/formatters'
 import { useOperatorStore } from '@/stores'
 import type { AgentState, PearlFeedMessage } from '@/stores'
 import type {
@@ -294,19 +295,9 @@ export function usePearlPanel({ agentState, dropdownActive = false, initialTab =
     return () => window.clearInterval(id)
   }, [])
   
-  // Format time ago
+  // Format time ago using shared formatter
   const formatAgo = useCallback((iso?: string | null): string => {
-    if (!iso) return '—'
-    const t = Date.parse(iso)
-    if (!Number.isFinite(t)) return '—'
-    const s = Math.max(0, Math.floor((nowMs - t) / 1000))
-    if (s < 60) return `${s}s ago`
-    const m = Math.floor(s / 60)
-    if (m < 60) return `${m}m ago`
-    const h = Math.floor(m / 60)
-    if (h < 48) return `${h}h ago`
-    const d = Math.floor(h / 24)
-    return `${d}d ago`
+    return formatAgoFromLib(iso, nowMs)
   }, [nowMs])
   
   // Unified panel data
@@ -355,7 +346,7 @@ export function usePearlPanel({ agentState, dropdownActive = false, initialTab =
       
       if (!q) return true
       
-      const details = (m as any)?.metadata?.details
+      const details = m?.metadata?.details
       const detailsText = typeof details?.text === 'string' ? details.text : ''
       const detailsTitle = typeof details?.title === 'string' ? details.title : ''
       const detailsLines = Array.isArray(details?.lines) ? details.lines.join(' ') : ''

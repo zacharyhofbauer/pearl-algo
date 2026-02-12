@@ -142,8 +142,8 @@ describe('useWebSocket hook', () => {
   })
 
   describe('message parsing', () => {
-    it('should parse JSON messages and update lastMessage', () => {
-      const { result } = renderHook(() => useWebSocket({ url: TEST_URL }))
+    it('should parse JSON messages and update lastMessage when trackLastMessage is true', () => {
+      const { result } = renderHook(() => useWebSocket({ url: TEST_URL, trackLastMessage: true }))
       const ws = getLastInstance()
 
       act(() => {
@@ -157,6 +157,23 @@ describe('useWebSocket hook', () => {
       })
 
       expect(result.current.lastMessage).toEqual(testMessage)
+    })
+
+    it('should not update lastMessage when trackLastMessage is false (default)', () => {
+      const { result } = renderHook(() => useWebSocket({ url: TEST_URL, trackLastMessage: false }))
+      const ws = getLastInstance()
+
+      act(() => {
+        ws.readyState = MockWebSocket.OPEN
+        ws.onopen?.({})
+      })
+
+      const testMessage = { type: 'state_update', data: { running: true } }
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify(testMessage) })
+      })
+
+      expect(result.current.lastMessage).toBeNull()
     })
 
     it('should call onMessage callback with parsed message', () => {

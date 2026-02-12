@@ -1,0 +1,798 @@
+/* Ultrawide Layouts - Xeneon Edge, V2, 3-Column */
+
+/* ============================================
+   XENEON EDGE ULTRAWIDE LAYOUT (2560x720, 32:9)
+   Optimized for bar monitor readability
+   ============================================ */
+
+/* Always apply ultrawide styles when ultrawide-mode class is present */
+.dashboard.ultrawide-mode {
+  /* Boosted typography for bar monitor - readable at arm's length */
+  --font-size-xs: 12px;   /* was 10px */
+  --font-size-sm: 14px;   /* was 11px */
+  --font-size-md: 15px;   /* was 12px */
+  --font-size-lg: 17px;   /* was 14px */
+  --font-size-xl: 24px;   /* was 18px */
+  --font-size-2xl: 32px;  /* was 24px */
+  
+  padding: 6px 10px;
+  gap: 6px;
+  overflow: hidden;
+  /* Account for pearl header bar height so content doesn't overlap */
+  height: calc(100vh - var(--pearl-header-height, 32px));
+  max-height: calc(100vh - var(--pearl-header-height, 32px));
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr;
+}
+
+/* Ultra-compact single-row header */
+.dashboard.ultrawide-mode .header-combined {
+  padding: 0;
+}
+
+.dashboard.ultrawide-mode .header-row-main {
+  padding: 6px 12px;
+  gap: 16px;
+}
+
+/* Hide secondary header row - not needed on bar monitor */
+.dashboard.ultrawide-mode .header-row-secondary {
+  display: none;
+}
+
+.dashboard.ultrawide-mode .stale-warning {
+  padding: 4px 12px;
+  font-size: var(--font-size-sm);
+}
+
+.dashboard.ultrawide-mode .header-brand {
+  gap: 8px;
+}
+
+.dashboard.ultrawide-mode .header-logo {
+  width: 24px;
+  height: 24px;
+}
+
+.dashboard.ultrawide-mode .header-symbol {
+  font-size: 18px;
+}
+
+.dashboard.ultrawide-mode .header-app-name {
+  display: none;
+}
+
+.dashboard.ultrawide-mode .header-stats-row {
+  gap: 16px;
+}
+
+.dashboard.ultrawide-mode .header-stats-row .stat-item {
+  gap: 6px;
+}
+
+.dashboard.ultrawide-mode .header-stats-row .stat-label {
+  font-size: var(--font-size-xs);
+}
+
+.dashboard.ultrawide-mode .header-stats-row .stat-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.dashboard.ultrawide-mode .header-timeframe {
+  gap: 4px;
+}
+
+.dashboard.ultrawide-mode .tf-btn {
+  padding: 6px 14px;
+  font-size: var(--font-size-md);
+  min-width: 48px;
+}
+
+.dashboard.ultrawide-mode .header-status {
+  gap: 8px;
+}
+
+.dashboard.ultrawide-mode .status-indicator {
+  padding: 4px 10px;
+  font-size: var(--font-size-sm);
+}
+
+/* Hide help panel */
+.dashboard.ultrawide-mode .help-panel {
+  display: none;
+}
+
+/* Market closed banner - compact */
+.dashboard.ultrawide-mode .market-closed-banner {
+  padding: 4px 12px;
+}
+
+.dashboard.ultrawide-mode .market-closed-text {
+  font-size: var(--font-size-sm);
+}
+
+/* ============================================
+   ULTRAWIDE V2 LAYOUT - 30% Chart | 70% Panels
+   Optimized for Corsair/Xeneon 32:9 displays
+   ============================================ */
+
+.ultrawide-layout-v2 {
+  display: grid;
+  grid-template-columns: 30% 70%;
+  gap: 8px;
+  height: calc(100vh - 20px);
+  padding: 10px;
+  overflow: hidden;
+}
+
+/* Left Column: Header + Chart */
+.ultrawide-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Compact Header for Ultrawide */
+.ultrawide-header-compact {
+  flex-shrink: 0;
+}
+
+.ultrawide-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: linear-gradient(165deg, rgba(18, 18, 28, 0.95) 0%, rgba(24, 24, 36, 0.92) 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(60, 60, 80, 0.4);
+}
+
+.uw-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uw-symbol {
+  font-size: 16px;
+  font-weight: 700;
+  color: #00d4ff;
+  letter-spacing: 0.5px;
+}
+
+.uw-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.uw-pnl {
+  font-family: 'SF Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.uw-pnl.positive { color: #00e676; }
+.uw-pnl.negative { color: #ff5252; }
+
+.uw-trades {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.uw-timeframe {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.uw-tf-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.uw-tf-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.uw-tf-btn.active {
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.15);
+}
+
+.uw-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.uw-status.live {
+  background: rgba(0, 230, 118, 0.12);
+  color: #00e676;
+}
+
+.uw-status.stale {
+  background: rgba(255, 82, 82, 0.12);
+  color: #ff5252;
+}
+
+.uw-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.uw-status.live .uw-status-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Chart Area */
+.ultrawide-chart-area {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.ultrawide-chart-area .chart-wrapper {
+  height: 100%;
+}
+
+.ultrawide-chart-area .chart-container {
+  height: 100%;
+}
+
+/* Right Area: Panels Grid */
+.ultrawide-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ultrawide-panels-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Panel cells */
+.ultrawide-panels-grid .panel-cell {
+  min-height: 0;
+}
+
+.ultrawide-panels-grid .panel-cell .data-panel {
+  height: 100%;
+  max-height: 180px;
+}
+
+/* Pearl AI gets priority styling */
+.ultrawide-panels-grid .pearl-ai-cell .data-panel {
+  border-color: rgba(171, 71, 188, 0.4);
+  box-shadow: 0 0 12px rgba(171, 71, 188, 0.15);
+}
+
+/* Compact panel styling for ultrawide */
+.ultrawide-layout-v2 .data-panel {
+  border-radius: 8px;
+}
+
+.ultrawide-layout-v2 .data-panel-header {
+  padding: 6px 10px;
+}
+
+.ultrawide-layout-v2 .data-panel-title {
+  font-size: 10px;
+}
+
+.ultrawide-layout-v2 .data-panel-icon {
+  font-size: 12px;
+}
+
+.ultrawide-layout-v2 .data-panel-icon-img {
+  width: 14px;
+  height: 14px;
+}
+
+.ultrawide-layout-v2 .data-panel-content {
+  padding: 8px;
+  font-size: 11px;
+}
+
+/* Compact stats for ultrawide panels */
+.ultrawide-layout-v2 .stats-grid {
+  gap: 4px;
+}
+
+.ultrawide-layout-v2 .stat-item-label {
+  font-size: 8px;
+}
+
+.ultrawide-layout-v2 .stat-item-value {
+  font-size: 12px;
+}
+
+/* Market closed banner for ultrawide */
+.ultrawide-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-overlay);
+  padding: 4px 16px;
+  font-size: 11px;
+}
+
+/* ============================================
+   ULTRAWIDE 3-COLUMN LAYOUT (Legacy)
+   45% Chart | 27.5% Metrics | 27.5% Status
+   Smaller chart = more room for readable data
+   ============================================ */
+
+.ultrawide-layout {
+  display: grid;
+  grid-template-columns: 45% 27.5% 27.5%;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Column 1: Chart */
+.ultrawide-chart-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ultrawide-chart-column .chart-wrapper {
+  flex: 1;
+  min-height: 0;
+}
+
+.ultrawide-chart-column .chart-container {
+  height: 100%;
+}
+
+/* Column 2: Key Metrics (Performance + Active + Challenge) */
+.ultrawide-metrics-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ultrawide-metrics-column .data-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Column 3: Status & Trades */
+.ultrawide-status-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Status badges row (Regime + AI Status) - side by side */
+.ultrawide-status-badges {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  max-height: 140px;
+}
+
+.ultrawide-status-badges .data-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Trades section fills remaining space */
+.ultrawide-trades-section {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ultrawide-trades-section .data-panel {
+  height: 100%;
+}
+
+/* ============================================
+   ULTRAWIDE PANEL STYLING
+   Compact chrome, large readable values
+   ============================================ */
+
+/* Base panel styles - minimal chrome */
+.ultrawide-layout .data-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Compact headers - inline style */
+.ultrawide-layout .data-panel-header {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.ultrawide-layout .data-panel-icon {
+  font-size: var(--font-size-md);
+}
+
+.ultrawide-layout .data-panel-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ultrawide-layout .data-panel-content {
+  padding: 8px 10px;
+  overflow-y: auto;
+  height: calc(100% - 32px);
+}
+
+/* ============================================
+   PERFORMANCE PANEL (Ultrawide)
+   ============================================ */
+
+.ultrawide-layout .perf-tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 2px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.ultrawide-layout .perf-tab {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ultrawide-layout .perf-tab.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.ultrawide-layout .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.ultrawide-layout .stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ultrawide-layout .stat-item-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ultrawide-layout .stat-item-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* Large hero P&L value */
+.ultrawide-layout .perf-pnl-hero {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+/* ============================================
+   CHALLENGE PANEL (Ultrawide)
+   ============================================ */
+
+.ultrawide-layout .challenge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+/* Large hero balance */
+.ultrawide-layout .balance-amount {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.ultrawide-layout .balance-pnl {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ultrawide-layout .challenge-outcome {
+  font-size: var(--font-size-sm);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ultrawide-layout .challenge-progress {
+  margin-bottom: 8px;
+}
+
+.ultrawide-layout .progress-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ultrawide-layout .progress-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.ultrawide-layout .challenge-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ultrawide-layout .challenge-stat {
+  text-align: center;
+  padding: 4px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.ultrawide-layout .challenge-stat-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.ultrawide-layout .challenge-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* ============================================
+   REGIME PANEL (Ultrawide - Compact Badge)
+   ============================================ */
+
+.ultrawide-status-badges .regime-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ultrawide-status-badges .regime-badge {
+  font-size: 15px;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 6px;
+}
+
+.ultrawide-status-badges .regime-confidence-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ultrawide-status-badges .regime-confidence-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.ultrawide-status-badges .regime-confidence-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ultrawide-status-badges .regime-direction-badge {
+  font-size: var(--font-size-sm);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* ============================================
+   AI STATUS PANEL (Ultrawide - Compact)
+   ============================================ */
+
+.ultrawide-status-badges .ai-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ultrawide-status-badges .ai-pill {
+  font-size: var(--font-size-sm);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ultrawide-status-badges .ai-gating {
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.ultrawide-status-badges .ai-gating-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.ultrawide-status-badges .ai-gating-enabled {
+  font-size: var(--font-size-sm);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ultrawide-status-badges .gating-count {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ultrawide-status-badges .gating-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* Hide shadow counters and lift status in compact mode */
+.ultrawide-status-badges .ai-shadow-counters,
+.ultrawide-status-badges .ai-lift-status {
+  display: none;
+}
+
+/* ============================================
+   RECENT TRADES (Ultrawide) - Horizontal Ticker
+   ============================================ */
+
+.ultrawide-trades-section .recent-trades-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.ultrawide-trades-section .recent-trade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  flex-shrink: 0;
+  min-width: fit-content;
+}
+
+.ultrawide-trades-section .trade-direction-badge {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 50px;
+  text-align: center;
+}
+
+.ultrawide-trades-section .trade-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ultrawide-trades-section .trade-time {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ultrawide-trades-section .trade-reason {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.ultrawide-trades-section .trade-pnl {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* Hide verbose details in compact mode */
+.ultrawide-trades-section .trade-expand-icon,
+.ultrawide-trades-section .trade-details,
+.ultrawide-trades-section .trade-prices {
+  display: none;
+}
+
+/* ============================================
+   CHART CONTROLS (Ultrawide)
+   ============================================ */
+
+.ultrawide-layout .timeframe-selector button {
+  min-width: 44px;
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
+}
+
+.ultrawide-layout .chart-action-btn {
+  width: 32px;
+  height: 32px;
+}
+
+/* Active Positions Panel - ultrawide */
+.ultrawide-layout .active-positions-content {
+  padding: 8px;
+}
+
+.ultrawide-layout .positions-empty {
+  font-size: var(--font-size-md);
+  padding: 12px;
+}
+
+.ultrawide-layout .position-pnl-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* ============================================
+   End of Ultrawide Styles
+   ============================================ */

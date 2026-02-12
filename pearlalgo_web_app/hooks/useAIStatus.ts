@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { AIStatus } from '@/stores'
+import type { AIStatus, PearlInsights } from '@/stores'
+import { derivePearlMode } from '@/types/pearl'
 
 export interface AIModeBadge {
   mode: 'live' | 'shadow' | 'off'
@@ -10,26 +11,16 @@ export interface AIModeBadge {
 
 /**
  * Hook to derive AI mode from agent status.
- * Consolidates the duplicate getAgentModeBadge/getAIMode logic.
+ * Uses derivePearlMode() as the single source of truth for mode detection.
  */
-export function useAIStatus(aiStatus: AIStatus | null | undefined) {
+export function useAIStatus(
+  aiStatus: AIStatus | null | undefined,
+  pearlInsights: PearlInsights | null | undefined = undefined
+) {
   const aiMode = useMemo<'live' | 'shadow' | 'off' | null>(() => {
     if (!aiStatus) return null
-
-    // Check if any AI component is in live mode
-    const hasLive = aiStatus.bandit_mode === 'live' ||
-      aiStatus.contextual_mode === 'live' ||
-      (aiStatus.ml_filter?.enabled && aiStatus.ml_filter?.mode === 'live')
-
-    // Check if any AI component is in shadow mode
-    const hasShadow = aiStatus.bandit_mode === 'shadow' ||
-      aiStatus.contextual_mode === 'shadow' ||
-      (aiStatus.ml_filter?.enabled && aiStatus.ml_filter?.mode === 'shadow')
-
-    if (hasLive) return 'live'
-    if (hasShadow) return 'shadow'
-    return 'off'
-  }, [aiStatus])
+    return derivePearlMode(aiStatus, pearlInsights || null)
+  }, [aiStatus, pearlInsights])
 
   const badge = useMemo<AIModeBadge | null>(() => {
     if (!aiMode) return null

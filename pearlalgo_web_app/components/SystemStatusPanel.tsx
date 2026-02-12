@@ -10,8 +10,9 @@ import type {
   SessionContext,
   ErrorSummary,
 } from '@/stores'
-import { apiFetch } from '@/lib/api'
+import { apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
+import { formatTimeRemaining } from '@/lib/formatters'
 
 interface SystemStatusPanelProps {
   executionState: ExecutionState | null
@@ -47,16 +48,6 @@ export default function SystemStatusPanel({
   }
 
   const readiness = getSystemReadiness()
-
-  // Format time remaining
-  const formatTimeRemaining = (seconds: number) => {
-    if (seconds < 60) return `${seconds}s`
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    if (mins < 60) return `${mins}m ${secs}s`
-    const hours = Math.floor(mins / 60)
-    return `${hours}h ${mins % 60}m`
-  }
 
   // Get session display info
   const getSessionDisplay = () => {
@@ -129,10 +120,11 @@ export default function SystemStatusPanel({
 
       setKillResult({ type: 'ok', message: body?.message || 'Kill switch requested.' })
       setConfirmKill(false)
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Kill switch request failed.'
       setKillResult({
         type: 'error',
-        message: String(e?.message || e || 'Kill switch request failed.'),
+        message,
       })
     } finally {
       setKillBusy(false)

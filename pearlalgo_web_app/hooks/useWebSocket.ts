@@ -20,6 +20,8 @@ interface UseWebSocketOptions {
   maxReconnectAttempts?: number
   /** Ping interval in ms (default: 30000) */
   pingInterval?: number
+  /** Track lastMessage in state (default: false) - set to true if you need to read lastMessage */
+  trackLastMessage?: boolean
   /** Callback for incoming messages */
   onMessage?: (message: WebSocketMessage) => void
   /** Callback for connection status changes */
@@ -50,6 +52,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     reconnectInterval = 3000,
     maxReconnectAttempts = 10,
     pingInterval = 30000,
+    trackLastMessage = false,
     onMessage,
     onStatusChange,
   } = options
@@ -120,7 +123,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         if (!mountedRef.current) return
         try {
           const message = JSON.parse(event.data) as WebSocketMessage
-          setLastMessage(message)
+          if (trackLastMessage) {
+            setLastMessage(message)
+          }
           onMessage?.(message)
         } catch (e) {
           console.error('[WebSocket] Failed to parse message:', e)

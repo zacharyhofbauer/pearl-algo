@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { WebSocketStatus } from '@/hooks/useWebSocket'
+import { formatTimeAgo } from '@/utils/formatting'
 
 interface DataFreshnessIndicatorProps {
   lastUpdate: Date | null
@@ -53,13 +54,7 @@ export default function DataFreshnessIndicator({
   const isStale = secondsAgo > staleThresholdSeconds
   const isWarning = secondsAgo > staleThresholdSeconds / 2 && secondsAgo <= staleThresholdSeconds
 
-  // Format time ago
-  const formatTimeAgo = (seconds: number): string => {
-    if (seconds < 5) return 'now'
-    if (seconds < 60) return `${seconds}s`
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-    return `${Math.floor(seconds / 3600)}h`
-  }
+  // formatTimeAgo imported from utils/formatting
 
   // Get status color class
   const getStatusClass = (): string => {

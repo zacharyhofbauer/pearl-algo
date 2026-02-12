@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsData, ATRBandsData } from '@/stores'
@@ -44,7 +44,7 @@ const getSessionColor = (hour: number): string => {
   return 'transparent'
 }
 
-export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
+function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -1105,3 +1105,5 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     </div>
   )
 }
+
+export default React.memo(CandlestickChart)

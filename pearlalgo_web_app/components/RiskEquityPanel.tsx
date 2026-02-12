@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { StatDisplay } from './ui'
 import type { EquityCurvePoint, RiskMetrics } from '@/stores'
+import { formatPnL, formatCurrency } from '@/utils/formatting'
 
 interface RiskEquityPanelProps {
   riskMetrics: RiskMetrics | null
@@ -127,15 +128,7 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
     return { lastValue, maxValue, minValue, gapFromPeak, showPeakGap }
   }, [equityCurve])
 
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
-
-  const formatCurrency = (value: number) => {
-    const sign = value >= 0 ? '+' : ''
-    return `${sign}$${value.toFixed(2)}`
-  }
+  // formatPnL and formatCurrency imported from utils/formatting
 
   const formatRatio = (value: number | null) => {
     if (value === null) return '—'
@@ -168,7 +161,7 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
           <div className="grid grid-cols-2 gap-md">
             <StatDisplay
               label="Expectancy"
-              value={formatCurrency(riskMetrics.expectancy)}
+              value={formatCurrency(riskMetrics.expectancy, { showSign: true })}
               colorMode="financial"
               positive={riskMetrics.expectancy >= 0}
               negative={riskMetrics.expectancy < 0}
@@ -182,8 +175,8 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
               negative={riskMetrics.profit_factor !== null && riskMetrics.profit_factor <= 1}
               tooltip="Gross profit / Gross loss"
             />
-            <StatDisplay label="Avg Win" value={formatCurrency(riskMetrics.avg_win)} positive />
-            <StatDisplay label="Avg Loss" value={formatCurrency(riskMetrics.avg_loss)} negative />
+            <StatDisplay label="Avg Win" value={formatCurrency(riskMetrics.avg_win, { showSign: true })} positive />
+            <StatDisplay label="Avg Loss" value={formatCurrency(riskMetrics.avg_loss, { showSign: true })} negative />
           </div>
         </div>
 
@@ -220,8 +213,8 @@ export default function RiskEquityPanel({ riskMetrics, equityCurve }: RiskEquity
         <div className="metrics-section">
           <div className="metrics-section-header">Trade Stats</div>
           <div className="grid grid-cols-2 gap-md">
-            <StatDisplay label="Best Trade" value={formatCurrency(riskMetrics.largest_win)} positive />
-            <StatDisplay label="Worst Trade" value={formatCurrency(riskMetrics.largest_loss)} negative />
+            <StatDisplay label="Best Trade" value={formatCurrency(riskMetrics.largest_win, { showSign: true })} positive />
+            <StatDisplay label="Worst Trade" value={formatCurrency(riskMetrics.largest_loss, { showSign: true })} negative />
           </div>
         </div>
 

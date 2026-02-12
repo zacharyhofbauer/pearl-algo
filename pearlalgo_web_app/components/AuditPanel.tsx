@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { apiFetch } from '@/lib/api'
 
@@ -1125,7 +1125,7 @@ const TAB_LABELS: Record<AuditTab, string> = {
   recon: 'Reconciliation',
 }
 
-export default function AuditPanel() {
+function AuditPanel() {
   const [activeTab, setActiveTab] = useState<AuditTab>('ledger')
 
   return (
@@ -1155,3 +1155,5 @@ export default function AuditPanel() {
     </DataPanel>
   )
 }
+
+export default React.memo(AuditPanel)

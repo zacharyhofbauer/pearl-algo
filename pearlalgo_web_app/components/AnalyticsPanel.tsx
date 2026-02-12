@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import type { AnalyticsData, RecentExit } from '@/stores'
 
@@ -21,7 +21,7 @@ interface DayPnL {
   isFuture: boolean
 }
 
-export default function AnalyticsPanel({ analytics, recentExits = [] }: AnalyticsPanelProps) {
+function AnalyticsPanel({ analytics, recentExits = [] }: AnalyticsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>('sessions')
   const [calMonth, setCalMonth] = useState(() => {
     const now = new Date()
@@ -398,3 +398,5 @@ export default function AnalyticsPanel({ analytics, recentExits = [] }: Analytic
     </DataPanel>
   )
 }
+
+export default React.memo(AnalyticsPanel)

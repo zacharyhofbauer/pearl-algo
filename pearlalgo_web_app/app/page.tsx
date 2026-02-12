@@ -19,9 +19,12 @@ import UltrawideLayout from '@/components/UltrawideLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
+import { useDashboardData } from '@/hooks/useDashboardData'
+import { useAIStatus } from '@/hooks/useAIStatus'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import AccountSelector, { shouldShowAccountSelector } from '@/components/AccountSelector'
-import { getApiUrl, apiFetch } from '@/lib/api'
+import { getApiUrl } from '@/lib/api'
+import { formatTimeFromDate, formatRelativeTime, formatMarketCountdown } from '@/lib/formatters'
 import type { IChartApi } from 'lightweight-charts'
 
 // Indicator panels
@@ -40,15 +43,8 @@ import {
   type DataSource,
 } from '@/stores'
 
-// API configuration imported from @/lib/api
-const REFRESH_INTERVAL = 10000 // 10 seconds (fallback when WebSocket disconnected)
-const WS_REFRESH_INTERVAL = 30000 // 30 seconds (slower when WebSocket connected)
-
 // Minimum bars to request for a full chart (500 = ~4 days on 5m, ~2 weeks on 1h)
 const MIN_BARS = 500
-
-// Fetch 72 hours (3 days) of markers - API limit
-const MARKER_HOURS = 72
 
 /**
  * Account selection gate -- shown on first visit when no account is chosen.
@@ -115,9 +111,6 @@ function PearlAlgoWebAppInner() {
   const barSpacing = useChartStore((s) => s.barSpacing)
   const chartLoading = useChartStore((s) => s.isLoading)
   const chartError = useChartStore((s) => s.error)
-  // lastDataHash is used only for comparison (never rendered) — use a ref
-  // to avoid it appearing in fetchData's dependency array.
-  const lastDataHashRef = useRef('')
   const setCandles = useChartStore((s) => s.setCandles)
   const setIndicators = useChartStore((s) => s.setIndicators)
   const setMarkers = useChartStore((s) => s.setMarkers)
@@ -127,7 +120,6 @@ function PearlAlgoWebAppInner() {
   const setBarSpacing = useChartStore((s) => s.setBarSpacing)
   const setChartLoading = useChartStore((s) => s.setLoading)
   const setChartError = useChartStore((s) => s.setError)
-  // setLastDataHash no longer needed — using lastDataHashRef instead
 
   // UI store
   const wsStatus = useUIStore((s) => s.wsStatus)
@@ -141,19 +133,37 @@ function PearlAlgoWebAppInner() {
   const setIsFetching = useUIStore((s) => s.setIsFetching)
   const recordFetch = useUIStore((s) => s.recordFetch)
 
-  // Track fetch start time for duration calculation
-  const fetchStartRef = useRef<number>(0)
-
   // Local state for chart API reference (not suitable for global store)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
 
-  // Local state for active positions (for chart price lines)
-  const [positions, setPositions] = useState<Position[]>([])
-  const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
-
   // Badge tooltip state (which badge explanation is showing)
   const [badgeTip, setBadgeTip] = useState<string | null>(null)
+
+  // Local state for active positions (for chart price lines) - updated from HTTP + WebSocket
+  const [positions, setPositions] = useState<Position[]>([])
+  const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
   const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
+
+  // Dashboard data hook - handles HTTP fetching with in-flight guard
+  const dashboardData = useDashboardData({
+    timeframe,
+    barCount,
+    wsStatus,
+    symbol: agentState?.config?.symbol,
+  })
+
+  // Merge dashboard data from hook into local state (HTTP fetch results)
+  useEffect(() => {
+    if (dashboardData.positions.length > 0 || positions.length === 0) {
+      setPositions(dashboardData.positions)
+    }
+    if (dashboardData.recentTrades.length > 0 || recentTrades.length === 0) {
+      setRecentTrades(dashboardData.recentTrades)
+    }
+    if (dashboardData.performanceSummary !== null) {
+      setPerformanceSummary(dashboardData.performanceSummary)
+    }
+  }, [dashboardData.positions, dashboardData.recentTrades, dashboardData.performanceSummary])
 
   // Convert positions to price lines for chart visualization (more visible than live price)
   const positionLines = useMemo<PositionLine[]>(() => {
@@ -269,240 +279,24 @@ function PearlAlgoWebAppInner() {
     return () => window.removeEventListener('resize', update)
   }, [getBarSpacing, calculateBarCount, setBarSpacing, setBarCount])
 
-  const fetchData = useCallback(async (tf: Timeframe, bars: number) => {
-    // Track fetch timing and state
-    fetchStartRef.current = performance.now()
-    setIsFetching(true)
-
-    try {
-      // Ensure we always request at least MIN_BARS
-      const requestBars = Math.max(MIN_BARS, bars)
-
-      // Use config symbol from agent state, fallback to MNQ
-      const sym = agentState?.config?.symbol || 'MNQ'
-
-      // Fetch all data in parallel (apiFetch includes auth headers when configured)
-      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes, tradesRes, perfSummaryRes] = await Promise.all([
-        apiFetch(`/api/candles?symbol=${sym}&timeframe=${tf}&bars=${requestBars}`),
-        apiFetch(`/api/indicators?symbol=${sym}&timeframe=${tf}&bars=${requestBars}`),
-        apiFetch(`/api/markers?hours=${MARKER_HOURS}`),
-        apiFetch(`/api/state`),
-        apiFetch(`/api/market-status`),
-        apiFetch(`/api/analytics`).catch(() => null),  // Analytics is optional
-        apiFetch(`/api/positions`).catch(() => null),  // Positions for chart lines
-        apiFetch(`/api/trades?limit=50`).catch(() => null), // Recent trades for trade dock
-        apiFetch(`/api/performance-summary`).catch(() => null), // Common performance timeframes
-      ])
-
-      // Update market status
-      if (marketStatusRes.ok) {
-        const marketData = await marketStatusRes.json()
-        setMarketStatus(marketData)
-      }
-
-      // Handle 503 (data unavailable) specifically
-      if (candlesRes.status === 503) {
-        const errorData = await candlesRes.json().catch(() => ({}))
-        throw new Error(errorData?.detail?.message || 'No Data — Agent Not Running')
-      }
-
-      if (!candlesRes.ok) throw new Error(`API Error: ${candlesRes.status}`)
-
-      const candlesData = await candlesRes.json()
-      const indicatorsData = indicatorsRes.ok ? await indicatorsRes.json() : {}
-      const markersData = markersRes.ok ? await markersRes.json() : []
-      const stateData = stateRes.ok ? await stateRes.json() : null
-
-      // Filter markers to only those within the candle time range
-      // This prevents markers from appearing at the edge when they're outside visible range
-      let filteredMarkers = markersData
-      if (candlesData.length > 0 && markersData.length > 0) {
-        const firstCandleTime = candlesData[0].time
-        const lastCandleTime = candlesData[candlesData.length - 1].time
-        filteredMarkers = markersData.filter(
-          (m: { time: number }) => m.time >= firstCandleTime && m.time <= lastCandleTime
-        )
-      }
-
-      // Only update if data changed (include timeframe in hash to force update on tf change)
-      const dataHash = `${tf}:${JSON.stringify(candlesData.slice(-3))}`
-      if (dataHash !== lastDataHashRef.current) {
-        lastDataHashRef.current = dataHash
-        setCandles(candlesData)
-        setIndicators(indicatorsData)
-        setMarkers(filteredMarkers)
-      }
-
-      if (stateData && !stateData.error) {
-        // Include analytics in state if available
-        if (analyticsRes && analyticsRes.ok) {
-          try {
-            const analyticsData = await analyticsRes.json()
-            setAgentState({ ...stateData, analytics: analyticsData })
-          } catch {
-            setAgentState(stateData)
-          }
-        } else {
-          setAgentState(stateData)
-        }
-      }
-
-      // Update positions for chart price lines
-      if (positionsRes && positionsRes.ok) {
-        try {
-          const positionsData = await positionsRes.json()
-          setPositions(positionsData)
-        } catch {
-          setPositions([])
-        }
-      } else {
-        setPositions([])
-      }
-
-      // Update recent trades for the below-chart trade dock
-      if (tradesRes && tradesRes.ok) {
-        try {
-          const tradesData = await tradesRes.json()
-          setRecentTrades(Array.isArray(tradesData) ? tradesData : [])
-        } catch {
-          setRecentTrades([])
-        }
-      } else {
-        setRecentTrades([])
-      }
-
-      // Update performance summary (TD/7D/30D/WTD/MTD/YTD)
-      if (perfSummaryRes && perfSummaryRes.ok) {
-        try {
-          const perfData = await perfSummaryRes.json()
-          setPerformanceSummary(perfData || null)
-        } catch {
-          setPerformanceSummary(null)
-        }
-      } else {
-        setPerformanceSummary(null)
-      }
-
-      // Calculate fetch duration and determine data source
-      const fetchDuration = performance.now() - fetchStartRef.current
-      // Detect cached data: if candles response has x-data-source header or is very fast (<50ms)
-      const dataSourceHeader = candlesRes.headers.get('x-data-source')
-      const detectedSource: DataSource = dataSourceHeader === 'cache' ? 'cached' : 'live'
-
-      // Record successful fetch with timing and source
-      recordFetch(fetchDuration, detectedSource)
-      setIsLive(true)
-      setChartError(null)
-
-      // Always clear loading when we have data (even if less than ideal)
-      // This fixes timeframe buttons getting stuck in loading state
-      if (candlesData.length > 0) {
-        setChartLoading(false)
-      }
-    } catch (err) {
-      console.error('Failed to fetch data:', err)
-      setChartError(err instanceof Error ? err.message : 'Failed to fetch')
-      setIsLive(false)
-      setChartLoading(false)
-      setIsFetching(false)
-    }
-  }, [
-    agentState?.config?.symbol,
-    setAgentState,
-    setCandles,
-    setIndicators,
-    setMarkers,
-    setMarketStatus,
-    setChartError,
-    setChartLoading,
-    setIsLive,
-    setIsFetching,
-    recordFetch,
-  ])
-
-  useEffect(() => {
-    fetchData(timeframe, barCount)
-    // Use slower polling when WebSocket is connected (WS handles state updates)
-    // Use faster polling when WebSocket is disconnected
-    const refreshInterval = wsStatus === 'connected' ? WS_REFRESH_INTERVAL : REFRESH_INTERVAL
-    const interval = setInterval(() => fetchData(timeframe, barCount), refreshInterval)
-    return () => clearInterval(interval)
-  }, [timeframe, barCount, wsStatus, fetchData])
-
   // Callback for TradeDockPanel to trigger an immediate refetch after close actions
   const handleTradeRefresh = useCallback(() => {
-    fetchData(timeframe, barCount)
-  }, [fetchData, timeframe, barCount])
+    dashboardData.refresh()
+  }, [dashboardData])
 
-  const formatTime = (date: Date | null) => {
-    if (!date) return '--:--'
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-  }
-
-  const formatRelativeTime = (date: Date | null) => {
+  const formatTime = formatTimeFromDate
+  const formatRelativeTimeFromDate = (date: Date | null) => {
     if (!date) return 'Never'
-    const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-    if (seconds < 5) return 'Just now'
-    if (seconds < 60) return `${seconds}s ago`
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}m ago`
-    return formatTime(date)
+    return formatRelativeTime(date)
+  }
+  const formatMarketCountdownFromStatus = () => {
+    if (!marketStatus?.next_open) return null
+    return formatMarketCountdown(marketStatus.next_open)
   }
 
-  const formatMarketCountdown = () => {
-    if (!marketStatus) return null
-
-    if (marketStatus.is_open) {
-      // Market is open - would need close time from API
-      // For now, show that it's open
-      return null
-    } else if (marketStatus.next_open) {
-      try {
-        const nextOpen = new Date(marketStatus.next_open)
-        const now = new Date()
-        const diffMs = nextOpen.getTime() - now.getTime()
-        if (diffMs <= 0) return null
-
-        const hours = Math.floor(diffMs / (1000 * 60 * 60))
-        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-
-        if (hours > 24) {
-          const days = Math.floor(hours / 24)
-          return `Opens in ${days}d ${hours % 24}h`
-        }
-        return `Opens in ${hours}h ${minutes}m`
-      } catch {
-        return null
-      }
-    }
-    return null
-  }
-
-  const getAgentModeBadge = () => {
-    if (!agentState) return null
-
-    const aiStatus = agentState.ai_status
-    if (!aiStatus) return null
-
-    // Check if any AI component is in live mode
-    const hasLive = aiStatus.bandit_mode === 'live' ||
-                    aiStatus.contextual_mode === 'live' ||
-                    (aiStatus.ml_filter.enabled && aiStatus.ml_filter.mode === 'live')
-
-    // Check if any AI component is in shadow mode
-    const hasShadow = aiStatus.bandit_mode === 'shadow' ||
-                      aiStatus.contextual_mode === 'shadow' ||
-                      (aiStatus.ml_filter.enabled && aiStatus.ml_filter.mode === 'shadow')
-
-    if (hasLive) return { mode: 'live', label: 'AI LIVE' }
-    if (hasShadow) return { mode: 'shadow', label: 'AI SHADOW' }
-    return { mode: 'off', label: 'AI OFF' }
-  }
+  // Use useAIStatus hook instead of inline logic
+  const aiStatus = useAIStatus(agentState?.ai_status)
+  const getAgentModeBadge = () => aiStatus.badge
 
   const getRegimeBadge = () => {
     if (!agentState?.market_regime) return null
@@ -533,8 +327,8 @@ function PearlAlgoWebAppInner() {
 
   // Force refresh function for manual refresh button
   const handleForceRefresh = useCallback(() => {
-    fetchData(timeframe, barCount)
-  }, [fetchData, timeframe, barCount])
+    dashboardData.refresh()
+  }, [dashboardData])
 
   // Pull-to-refresh (mobile touch) - uses window scroll position
   const pullStartY = useRef(0)
@@ -591,7 +385,7 @@ function PearlAlgoWebAppInner() {
         refreshingRef = true
         setPullRefreshing(true)
         setPullDistance(40)
-        fetchData(timeframe, barCount).finally(() => {
+        dashboardData.pullToRefresh().finally(() => {
           refreshingRef = false
           setPullRefreshing(false)
           setPullDistance(0)
@@ -624,7 +418,7 @@ function PearlAlgoWebAppInner() {
       document.removeEventListener('touchcancel', onTouchEnd)
       window.removeEventListener('scroll', onScroll)
     }
-  }, [fetchData, timeframe, barCount])
+  }, [dashboardData])
 
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
@@ -652,26 +446,15 @@ function PearlAlgoWebAppInner() {
     }
   }
 
-  // Get AI mode from status
-  const getAIMode = () => {
-    if (!agentState?.ai_status) return null
-    const ai = agentState.ai_status
-    const hasLive = ai.bandit_mode === 'live' || ai.contextual_mode === 'live' ||
-                    (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'live')
-    const hasShadow = ai.bandit_mode === 'shadow' || ai.contextual_mode === 'shadow' ||
-                      (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'shadow')
-    if (hasLive) return 'live'
-    if (hasShadow) return 'shadow'
-    return 'off'
-  }
+  // getAIMode is replaced by aiStatus.aiMode from useAIStatus hook
 
   // Combined header - all info in one modern compact section
   const renderHeader = () => {
     const agentMode = getAgentModeBadge()
     const regime = getRegimeBadge()
-    const countdown = formatMarketCountdown()
+    const countdown = formatMarketCountdownFromStatus()
     const stale = isDataStale()
-    const aiMode = getAIMode()
+    const aiMode = aiStatus.aiMode
     const dirGate = agentState?.ai_status?.direction_gating
 
     return (
@@ -726,12 +509,12 @@ function PearlAlgoWebAppInner() {
                 GW
               </span>
             )}
-            {aiMode && (
+            {aiStatus.aiMode && (
               <span
-                className={`badge ai-badge ${aiMode}`}
+                className={`badge ai-badge ${aiStatus.aiMode}`}
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
               >
-                🧠 {aiMode.toUpperCase()}
+                🧠 {aiStatus.aiMode.toUpperCase()}
                 {agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
                   <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
                 )}
@@ -823,7 +606,7 @@ function PearlAlgoWebAppInner() {
   const renderChart = () => (
     <div className="chart-wrapper">
       {/* Agent/Execution offline banner */}
-      {agentState && agentState.running === false && (
+      {agentState && (agentState.running === false || agentState.execution?.connected === false) && (
         <div style={{
           background: 'rgba(244, 67, 54, 0.15)',
           border: '1px solid rgba(244, 67, 54, 0.4)',
@@ -836,9 +619,13 @@ function PearlAlgoWebAppInner() {
           alignItems: 'center',
           gap: 8,
         }}>
-          <span style={{ fontWeight: 600 }}>AGENT OFFLINE</span>
+          <span style={{ fontWeight: 600 }}>
+            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISCONNECTED'}
+          </span>
           <span style={{ opacity: 0.7 }}>
-            The trading agent is not running. Data may be stale.
+            {agentState.running === false
+              ? 'The trading agent is not running. Data may be stale.'
+              : 'Execution adapter is disconnected. Orders will not be placed.'}
           </span>
         </div>
       )}

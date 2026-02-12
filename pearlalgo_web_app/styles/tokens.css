@@ -1,0 +1,184 @@
+/**
+ * Design Tokens - Centralized design system variables
+ * 
+ * This file contains all CSS custom properties (design tokens) used throughout the app.
+ * Import this file in globals.css to make tokens available globally.
+ */
+
+:root {
+  /* Color scheme */
+  color-scheme: dark;
+
+  /* ============================================================================
+   * Core Colors
+   * ============================================================================ */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-card: #1a1a24;
+  --bg-elevated: #22222e;  /* For elevated surfaces */
+  --text-primary: #f0eeeb;  /* Slightly brighter for better contrast */
+  --text-secondary: #b0b8c8;  /* Improved contrast: was #a0a8b8 */
+  --text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on card bg #1a1a24, ~6:1 on #0a0a0f */
+  --text-muted: #6e7380;      /* WCAG AA: ~4.5:1 on #0a0a0f; was #555a66 (~2.8:1 FAIL) */
+  --accent-cyan: #00d4ff;
+  --accent-green: #00e676;
+  --accent-red: #ff5252;
+  --accent-yellow: #ffc107;
+  --accent-purple: #ab47bc;
+  --border-color: #2a2a3a;
+  --border-subtle: #1e1e28;   /* For subtle separators */
+  --grid-color: #1e222d;
+
+  /* RGB variants for rgba() usage */
+  --accent-green-rgb: 0, 230, 118;
+  --accent-red-rgb: 255, 82, 82;
+  --accent-cyan-rgb: 0, 212, 255;
+  --accent-yellow-rgb: 255, 193, 7;
+  --accent-purple-rgb: 171, 71, 188;
+  --text-tertiary-rgb: 138, 148, 166;
+
+  /* Price highlight */
+  --price-color: #ffffff;
+  --price-glow: 0 0 10px rgba(0, 212, 255, 0.3);
+
+  /* ============================================================================
+   * Typography
+   * ============================================================================ */
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-md: 12px;
+  --font-size-lg: 14px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 24px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+
+  /* ============================================================================
+   * Spacing Scale (4px base)
+   * ============================================================================ */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+
+  /* Legacy spacing (kept for compatibility — prefer --space-* tokens) */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* ============================================================================
+   * Border Radius
+   * ============================================================================ */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ============================================================================
+   * Z-Index Scale
+   * ============================================================================ */
+  /* Base layers */
+  --z-base: 0;
+  --z-above-base: 1;
+  --z-slightly-above: 2;
+  --z-content: 20;
+  --z-overlay-low: 50;
+  --z-overlay: 100;
+  --z-overlay-medium: 200;
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+  --z-notification: 1080;
+  --z-maximum: 9999;
+  --z-absolute-maximum: 10000; /* For critical overlays that must be on top */
+
+  /* ============================================================================
+   * Motion Scale
+   * ============================================================================ */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 2000ms;
+  --ease-default: ease;
+
+  /* ============================================================================
+   * Semantic Colors - Financial
+   * ============================================================================ */
+  --color-profit: var(--accent-green);
+  --color-loss: var(--accent-red);
+
+  /* ============================================================================
+   * Semantic Colors - Status
+   * ============================================================================ */
+  --color-status-online: var(--accent-green);
+  --color-status-warning: var(--accent-yellow);
+  --color-status-offline: var(--accent-red);
+
+  /* ============================================================================
+   * Semantic Colors - Health
+   * ============================================================================ */
+  --color-health-ok: var(--accent-green);
+  --color-health-warning: var(--accent-yellow);
+  --color-health-error: var(--accent-red);
+
+  /* ============================================================================
+   * Semantic Colors - UI
+   * ============================================================================ */
+  --color-info: var(--accent-cyan);
+  --color-success: var(--accent-green);
+  --color-warning: var(--accent-yellow);
+  --color-error: var(--accent-red);
+  --color-muted: var(--text-tertiary);
+
+  /* ============================================================================
+   * Direction Colors
+   * ============================================================================ */
+  --color-long: var(--accent-cyan);
+  --color-short: #ff6ec7;
+
+  /* ============================================================================
+   * Color Variants (lighter/darker shades)
+   * ============================================================================ */
+  --accent-red-light: #ff8a80;
+  --accent-green-light: #66bb6a;
+  --accent-purple-light: #ce93d8;
+  --accent-blue: #2962ff; /* VWAP color */
+  --color-win-exit: rgba(100, 200, 180, 0.9); /* Teal for win exits */
+  --color-loss-exit: rgba(220, 140, 100, 0.9); /* Orange for loss exits */
+
+  /* ============================================================================
+   * Background Variants (RGB for rgba() usage)
+   * ============================================================================ */
+  --bg-secondary-rgb: 18, 18, 28;
+  --bg-elevated-rgb: 24, 24, 36;
+  --bg-card-rgb: 25, 25, 40;
+  --bg-neutral-rgb: 100, 100, 120;
+  --bg-border-rgb: 60, 60, 80;
+  --bg-border-light-rgb: 80, 80, 120;
+  --bg-header-rgb: 16, 16, 24;
+  --bg-header-light-rgb: 22, 22, 32;
+  --border-color-rgb: 42, 42, 58;
+
+  /* ============================================================================
+   * Scrollbar Colors
+   * ============================================================================ */
+  --scrollbar-track: var(--bg-primary);
+  --scrollbar-thumb: #2a2a3a;
+  --scrollbar-thumb-hover: #3a3a4a;
+  --scrollbar-width: 8px;
+  --scrollbar-width-thin: 6px;
+}

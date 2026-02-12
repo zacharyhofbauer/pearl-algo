@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
@@ -264,7 +264,7 @@ function QuickActionsRow({
 // Main Component
 // ============================================================================
 
-export default function PearlInsightsPanel({
+function PearlInsightsPanel({
   insights,
   suggestion,
   agentState = null,
@@ -1585,3 +1585,5 @@ function renderNarrationDetails(details: any) {
     </div>
   )
 }
+
+export default React.memo(PearlInsightsPanel)
