@@ -3800,11 +3800,19 @@ def main():
     parser.add_argument("--market", default=os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET))
     parser.add_argument("--host", default=os.getenv("API_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.getenv("API_PORT", DEFAULT_PORT)))
+    parser.add_argument("--data-dir", default=os.getenv("PEARLALGO_STATE_DIR", None),
+                        help="Explicit data directory path (overrides --market resolution)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     args = parser.parse_args()
 
     _market = str(args.market or DEFAULT_MARKET).strip().upper()
-    _state_dir = _resolve_state_dir(_market)
+    if args.data_dir:
+        _state_dir = Path(args.data_dir)
+        if not _state_dir.exists():
+            print(f"WARNING: --data-dir {_state_dir} does not exist, creating it")
+            _state_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        _state_dir = _resolve_state_dir(_market)
 
     print(f"Starting Pearl Algo Web App API Server")
     print(f"  Market: {_market}")
