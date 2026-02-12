@@ -98,7 +98,7 @@ class StateBuilder:
         version = None
         try:
             from importlib.metadata import version as get_version
-            version = get_version("pearlalgo-dev-ai-agents")
+            version = get_version("pearlalgo")
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
             version = "0.2.3"  # Fallback to known version

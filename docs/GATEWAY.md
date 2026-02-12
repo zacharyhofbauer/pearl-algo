@@ -13,7 +13,7 @@
 If you **don’t already have** IB Gateway + IBC installed under your IBKR home, you can use:
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh doctor
 ./scripts/gateway/gateway.sh install        # default: stable, IBC 3.23.0
 ./scripts/gateway/gateway.sh setup
@@ -26,7 +26,7 @@ Notes:
 ## 🚀 Start Gateway (Headless)
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh start
 ```
 
@@ -51,7 +51,7 @@ pkill -9 -f "java.*IBC.jar"
 ## ✅ Check Gateway Status
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh status
 ```
 
@@ -119,7 +119,7 @@ If you can see the VNC desktop but terminal won't open, you can run commands dir
 export DISPLAY=:1
 
 # Run Gateway start command
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh start
 ```
 
@@ -201,7 +201,7 @@ find $PEARLALGO_IBKR_HOME/Jts -name "autorestart" -type f -delete
 
 ### Start Gateway
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh start
 ./scripts/gateway/gateway.sh status
 ```
@@ -216,7 +216,7 @@ pkill -f "java.*IBC.jar"
 ```bash
 ./scripts/gateway/gateway.sh stop
 sleep 5
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/gateway/gateway.sh start
 ```
 
@@ -235,12 +235,12 @@ The repository includes systemd service files in `scripts/systemd/` for producti
 
 ### Path Customization
 
-The systemd services use hardcoded paths for the default installation at `/home/pearlalgo/pearlalgo-dev-ai-agents`. If deploying to a different location:
+The systemd services use hardcoded paths for the default installation at `/home/pearl/PearlAlgoProject`. If deploying to a different location:
 
 1. **Edit the service files** before installation:
    ```bash
    # Replace all occurrences of the default path
-   sed -i 's|/home/pearlalgo/pearlalgo-dev-ai-agents|/your/custom/path|g' scripts/systemd/*.service
+   sed -i 's|/home/pearl/PearlAlgoProject|/your/custom/path|g' scripts/systemd/*.service
    ```
 
 2. **Update `WorkingDirectory`** in each service file to match your installation.

@@ -23,7 +23,7 @@ See `docs/PEARL_WEB_APP.md` for Mini App setup (public HTTPS required) and scree
 ### Install
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd ~/PearlAlgoProject
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"

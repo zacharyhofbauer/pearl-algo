@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=pearlalgo
-Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
-Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/monitoring/monitor.py --market NQ --telegram
+User=pearl
+Group=pearl
+WorkingDirectory=/home/pearl/PearlAlgoProject
+Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearl/PearlAlgoProject/.env
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/monitoring/monitor.py --market NQ --telegram

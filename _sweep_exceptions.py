@@ -14,7 +14,7 @@ Rules:
 
 import re
 
-BASE = "/home/pearlalgo/pearlalgo-dev-ai-agents/"
+BASE = "/home/pearl/PearlAlgoProject/"
 
 # Files and their configurations
 FILES = [

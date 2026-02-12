@@ -1472,7 +1472,7 @@ class MarketAgentTelegramNotifier:
 
                 ver = None
                 try:
-                    ver = get_version("pearlalgo-dev-ai-agents")
+                    ver = get_version("pearlalgo")
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
                     ver = "0.2.2"

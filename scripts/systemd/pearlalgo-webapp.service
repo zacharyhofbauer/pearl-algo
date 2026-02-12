@@ -5,9 +5,9 @@ Wants=pearlalgo-api.service
 
 [Service]
 Type=simple
-User=pearlalgo
-Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents/pearlalgo_web_app
+User=pearl
+Group=pearl
+WorkingDirectory=/home/pearl/PearlAlgoProject/pearlalgo_web_app
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="NODE_ENV=production"
 ExecStart=/usr/bin/npm start -- -p 3001

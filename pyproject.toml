@@ -1,5 +1,5 @@
 [project]
-name = "pearlalgo-dev-ai-agents"
+name = "pearlalgo"
 version = "0.2.4"
 description = "Simple NQ futures trading agent with IBKR connection and Telegram notifications"
 authors = [{ name = "PearlAlgo", email = "dev@pearlalgo.ai" }]

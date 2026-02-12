@@ -54,8 +54,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pearlalgo
-ExecStart=/usr/local/bin/cloudflared --config /home/pearlalgo/.cloudflared/config.yml tunnel run
+User=pearl
+ExecStart=/usr/local/bin/cloudflared --config /home/pearl/.cloudflared/config.yml tunnel run
 Restart=always
 RestartSec=5
 StandardOutput=journal

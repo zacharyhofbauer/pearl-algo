@@ -249,7 +249,7 @@ tail -f logs/web_app.log           # Next.js
 ### Python Environment
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd ~/PearlAlgoProject
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .

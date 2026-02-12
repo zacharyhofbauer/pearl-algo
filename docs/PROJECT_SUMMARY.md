@@ -502,7 +502,7 @@ Signal Count Incremented
 ## Project Structure
 
 ```
-pearlalgo-dev-ai-agents/
+PearlAlgoProject/
 ├── src/pearlalgo/              # Main source code
 │   ├── market_agent/           # Market Agent Service (market-agnostic)
 │   │   ├── main.py             # Entry point
@@ -955,7 +955,7 @@ The `tests/mock_data_provider.py` provides:
 
 ```bash
 # 1. Clone repository
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 
 # 2. Install dependencies
 pip install -e .
@@ -1008,10 +1008,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/path/to/pearlalgo-dev-ai-agents
+WorkingDirectory=/path/to/PearlAlgoProject
 Environment=\"PYTHONUNBUFFERED=1\"
-EnvironmentFile=/path/to/pearlalgo-dev-ai-agents/.env
-ExecStart=/path/to/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.market_agent.main
+EnvironmentFile=/path/to/PearlAlgoProject/.env
+ExecStart=/path/to/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.main
 Restart=on-failure
 RestartSec=10
 
@@ -1032,7 +1032,7 @@ sudo systemctl status pearlalgo-mnq.service
 A minimal `Dockerfile` is provided in the project root (runtime deps only; not intended for development). To build and run:
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 docker build -t pearlalgo-mnq .
 
 # IBKR Gateway must be reachable from inside the container (host network or a separate container)
@@ -1115,7 +1115,7 @@ python3 scripts/monitoring/monitor.py --market NQ --telegram
 
 Add to cron for continuous monitoring (every 5 minutes):
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/monitor.py --market NQ --telegram
+*/5 * * * * cd /path/to/PearlAlgoProject && python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 ### Status Server (Optional)

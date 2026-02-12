@@ -5,13 +5,13 @@ Wants=pearlalgo-agent.service
 
 [Service]
 Type=simple
-User=pearlalgo
-Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
-Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
-EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market TV_PAPER_EVAL --port 8001
+User=pearl
+Group=pearl
+WorkingDirectory=/home/pearl/PearlAlgoProject
+Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearl/PearlAlgoProject/.env
+EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --market TV_PAPER_EVAL --port 8001
 Restart=always
 RestartSec=5
 

@@ -7,7 +7,7 @@ from importlib import metadata
 
 def _get_version() -> str:
     try:
-        return metadata.version("pearlalgo-dev-ai-agents")
+        return metadata.version("pearlalgo")
     except metadata.PackageNotFoundError:
         return "0.0.0"
 

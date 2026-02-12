@@ -22,7 +22,7 @@
 ## 🚀 Quick Start
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 
 # 1. Ensure IBKR Gateway is running
 ./scripts/gateway/gateway.sh status
@@ -49,7 +49,7 @@ cd /path/to/pearlalgo-dev-ai-agents
 
 ### 1. Install Dependencies
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 pip install -e .
 ```
 
@@ -314,7 +314,7 @@ The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It rea
 
 **Cron example (every 5 minutes):**
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/monitor.py --market NQ --telegram
+*/5 * * * * cd /path/to/PearlAlgoProject && python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 ### Status Server (optional)

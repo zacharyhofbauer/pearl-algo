@@ -19,7 +19,7 @@ This guide documents the **Telegram Command Handler** (menu-driven control plane
 ### Start the command handler
 
 ```bash
-cd /path/to/pearlalgo-dev-ai-agents
+cd /path/to/PearlAlgoProject
 ./scripts/telegram/start_command_handler.sh
 ```
 

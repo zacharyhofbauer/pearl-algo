@@ -67,7 +67,7 @@ export default function HelpPanel() {
           <div className="help-section">
             <h4>After Reboot</h4>
             <div className="help-commands single">
-              <code>cd ~/pearlalgo-dev-ai-agents && ./pearl.sh start</code>
+              <code>cd ~/PearlAlgoProject && ./pearl.sh start</code>
             </div>
             <p className="help-note">Tunnel auto-starts. Chart/Agent need manual start.</p>
           </div>

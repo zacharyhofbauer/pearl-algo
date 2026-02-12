@@ -3,15 +3,17 @@ Description=IBKR Gateway (IBC)
 After=network.target
 
 [Service]
-Type=forking
-User=pearlalgo
-Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+Type=simple
+User=pearl
+Group=pearl
+WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="DISPLAY=:99"
-Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1024x768x24 &
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/scripts/gateway/gateway.sh start
-ExecStop=/home/pearlalgo/pearlalgo-dev-ai-agents/scripts/gateway/gateway.sh stop
+Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+# Start Xvfb in background (shell required for &), then wait for display
+ExecStartPre=/bin/sh -c '/usr/bin/Xvfb :99 -screen 0 1024x768x24 & sleep 2'
+ExecStart=/home/pearl/PearlAlgoProject/scripts/gateway/gateway.sh start
+ExecStop=/home/pearl/PearlAlgoProject/scripts/gateway/gateway.sh stop
+TimeoutStartSec=120
 Restart=on-failure
 RestartSec=30
 
