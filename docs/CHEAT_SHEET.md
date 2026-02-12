@@ -152,25 +152,18 @@ Pearl runs two isolated accounts:
 - **IBKR Virtual** (port 8000): Virtual PnL on IBKR, no real orders
 - **Tradovate Paper** (port 8001): Real orders on Tradovate paper (demo)
 
-### Signal Forwarding (IBKR Virtual -> Tradovate Paper)
+### Architecture (Post-Restructure)
 
-IBKR Virtual generates signals. Tradovate Paper reads them from a shared file -- it does NOT run its own strategy.
+Each agent runs its own strategy independently. No signal forwarding between agents.
 
 ```
-IBKR Virtual (WRITER)                 Tradovate Paper (FOLLOWER)
-  IBKR -> strategy.analyze()            _read_shared_signals()
-       |                                      |
-  shared_signals.jsonl  ----------->  dedup (direction, bar_ts)
-       |                                      |
-  virtual PnL + [IBKR VIRTUAL] TG      eval gate -> Tradovate bracket order
-                                              |
-                                        [TRADOVATE PAPER] Telegram
+Tradovate Paper Agent
+  -> IBKR Gateway data (client ID 50/51)
+  -> strategy.analyze() (independent)
+  -> Tradovate bracket order execution
+  -> State: data/tradovate/paper/
+  -> API: port 8001
 ```
-
-**Safety guards:**
-- Shared signals file cleared on Tradovate Paper restart (no replay)
-- Market-closed check before processing any forwarded signal
-- Auto-flat disabled (Tradovate bracket orders handle exits)
 
 ### Dashboard: Tradovate Only
 
@@ -211,8 +204,8 @@ Fills persist to `tradovate_fills.json` across sessions (Tradovate clears `/fill
 ### Reset Procedure
 
 1. Adjust Tradovate balance: Settings > Accounts > Modify Balance
-2. `rm data/agent_state/TV_PAPER_EVAL/challenge_state.json`
-3. `rm -f data/agent_state/TV_PAPER_EVAL/signals.jsonl data/agent_state/TV_PAPER_EVAL/performance.json data/agent_state/TV_PAPER_EVAL/tradovate_fills.json`
+2. `rm data/tradovate/paper/challenge_state.json`
+3. `rm -f data/tradovate/paper/signals.jsonl data/tradovate/paper/performance.json data/tradovate/paper/tradovate_fills.json`
 4. `./scripts/lifecycle/tv_paper_eval.sh restart --background`
 
 ### Tradovate Credentials
@@ -278,7 +271,7 @@ First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 | Problem | Fix |
 |---------|-----|
 | Tradovate Paper dashboard wrong data | `./scripts/lifecycle/tv_paper_eval.sh restart --background` |
-| No signals forwarded | Check `logs/agent_NQ.log` -- `NoOpportunity` = normal (no crossover) |
+| No signals forwarded | Check `logs/agent_TV_PAPER.log` -- `NoOpportunity` = normal (no crossover) |
 | Chart shows CACHE not LIVE | Restart via lifecycle script (fixes client ID conflicts) |
 | pearlalgo.io unreachable | `./pearl.sh tunnel status` then `sudo ./scripts/setup-cloudflared-service.sh` |
 | No market data | `./scripts/gateway/gateway.sh status` -- gateway may be down |
@@ -293,9 +286,9 @@ First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 ### Logs
 
 ```bash
-tail -f logs/agent_NQ.log          # IBKR Virtual agent
-tail -f logs/agent_TV_PAPER_EVAL.log   # Tradovate Paper agent
-tail -f logs/api_TV_PAPER_EVAL.log     # Tradovate Paper API server
+tail -f logs/agent_TV_PAPER.log          # IBKR Virtual agent
+tail -f logs/agent_TV_PAPER.log   # Tradovate Paper agent
+tail -f logs/api_TV_PAPER.log     # Tradovate Paper API server
 tail -f logs/web_app.log           # Next.js
 ```
 
@@ -307,14 +300,14 @@ tail -f logs/web_app.log           # Next.js
 
 | What | Where |
 |------|-------|
-| IBKR Virtual config | `config/config.yaml` |
-| Tradovate Paper config | `config/markets/tv_paper_eval.yaml` |
+| Base config (shared) | `config/base.yaml` |
+| Tradovate Paper config | `config/accounts/tradovate_paper.yaml` |
+| IBKR Paper config | `config/accounts/ibkr_paper.yaml` |
+| Legacy config | `config/config.yaml` (still works) |
 | Credentials | `~/.config/pearlalgo/secrets.env` |
 | Env defaults | `.env` |
-| IBKR Virtual state | `data/agent_state/NQ/` |
-| Tradovate Paper state | `data/agent_state/TV_PAPER_EVAL/` |
-| Signal forwarding | `data/shared_signals.jsonl` |
-| Tradovate Paper fills (persistent) | `data/agent_state/TV_PAPER_EVAL/tradovate_fills.json` |
+| Tradovate Paper state | `data/tradovate/paper/` |
+| IBKR Paper state (archived) | `data/archive/ibkr_virtual/` |
 | Scripts | `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/` |
 
 ### IBKR Client ID Map
@@ -337,14 +330,14 @@ tail -f logs/web_app.log           # Next.js
 | `tradovate/adapter.py` | Execution + `get_account_summary()` + partial fills (`_pending_fills`) + order reconciliation (`_open_orders`) | Tradovate Paper |
 | `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | Tradovate Paper |
 | `trading_circuit_breaker.py` | Risk management + eval gate | Both |
-| `config_loader.py` | Config loading, signal_forwarding defaults | Both |
+| `config_loader.py` | Config loading | Both |
 | `tv_paper_eval.sh` | Tradovate Paper lifecycle (port cleanup, restart) | Tradovate Paper |
 | `state_builder.py` | State snapshot construction (assembles `state.json` payload) | Both |
 | `utils/state_io.py` | Atomic JSON I/O (`load_json_file`, `atomic_write_json`) | Both |
 | `api_server.py` | API server (auth, rate-limiting, `StateReader`, `load_json_file`). Header/performance stats use today's fills with auto-derived commission deduction. Audit router with TTL cache. | Dashboard |
 | `notification_queue.py` | Async notifications with `NotificationTier` (CRITICAL/IMPORTANT/DEBUG), `min_tier` filtering, circuit breaker dedup cooldown (5 min) | Both |
 | `tradovate/utils.py` | FIFO fill pairing for Tradovate trades | Tradovate Paper |
-| `telegram_command_handler.py` | Telegram bot commands. Uses `_detect_tv_paper_account()` to pick correct tracker | Both |
+| `telegram/main.py` | Telegram bot commands. Uses `_detect_tv_paper_account()` to pick correct tracker | Both |
 | `SystemStatusPanel.tsx` | Readiness, kill switch, operator lock, session P&L, execution state | Dashboard |
 | `ChallengePanel.tsx` | Tradovate Paper eval display | Dashboard |
 | `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
@@ -354,9 +347,9 @@ tail -f logs/web_app.log           # Next.js
 | Component | IBKR Virtual | Tradovate Paper |
 |-----------|-----------|------|
 | Config | `config/config.yaml` | `config/markets/tv_paper_eval.yaml` |
-| State dir | `data/agent_state/NQ/` | `data/agent_state/TV_PAPER_EVAL/` |
+| State dir | `data/agent_state/NQ/` | `data/tradovate/paper/` |
 | API port | 8000 | 8001 |
-| Signal gen | `strategy.analyze()` | Reads shared file |
+| Signal gen | `strategy.analyze()` (independent) | `strategy.analyze()` (independent) |
 | Dashboard data | `signals.jsonl` + `performance.json` | Tradovate API |
 | Execution | Disabled (virtual) | Tradovate paper (armed) |
 | Telegram label | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
@@ -424,7 +417,7 @@ python3 scripts/testing/test_all.py telegram
 
 - **StrategySessionOpen**: When the strategy generates signals (config session window)
 - **FuturesMarketOpen**: When CME data flows (Sun 6 PM ET - Fri 5 PM ET, with daily 5-6 PM break)
-- **Signal forwarding**: IBKR Virtual writes signals, Tradovate Paper reads them. One-way, deduped by `(direction, bar_timestamp)`
+- **Base + overlay config**: `config/base.yaml` (shared) merged with `config/accounts/*.yaml` (per-account)
 - **Tradovate bracket order**: Entry + stop loss + take profit placed as OSO (one-sends-other)
 - **FIFO fill pairing**: Tradovate fills matched oldest-first to compute per-trade P&L
 
