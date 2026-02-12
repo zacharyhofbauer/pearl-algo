@@ -88,45 +88,6 @@ def tasks(mock_deps):
     return ScheduledTasks(**mock_deps)
 
 
-@pytest.fixture
-def follower_tasks(mock_deps):
-    """Create a ScheduledTasks instance in follower mode."""
-    return ScheduledTasks(
-        **mock_deps,
-        signal_follower_mode=True,
-        follower_heartbeat_timeout_minutes=30,
-    )
-
-
-# =========================================================================
-# record_follower_signal
-# =========================================================================
-
-
-class TestRecordFollowerSignal:
-    """Tests for record_follower_signal()."""
-
-    def test_sets_timestamp_on_first_call(self, follower_tasks):
-        """Should set _follower_last_signal_at on first call."""
-        assert follower_tasks._follower_last_signal_at is None
-        follower_tasks.record_follower_signal()
-        assert follower_tasks._follower_last_signal_at is not None
-
-    def test_resets_warned_flag(self, follower_tasks):
-        """Should clear the warned flag when a new signal arrives."""
-        follower_tasks._follower_heartbeat_warned = True
-        follower_tasks.record_follower_signal()
-        assert follower_tasks._follower_heartbeat_warned is False
-
-    def test_updates_timestamp_on_subsequent_calls(self, follower_tasks):
-        """Should update the timestamp to the latest call."""
-        follower_tasks.record_follower_signal()
-        first = follower_tasks._follower_last_signal_at
-        follower_tasks.record_follower_signal()
-        second = follower_tasks._follower_last_signal_at
-        assert second >= first
-
-
 # =========================================================================
 # check_morning_briefing
 # =========================================================================
@@ -380,84 +341,6 @@ class TestCheckMarketCloseSummary:
 
         assert tasks._daily_summary_sent_date == et_time.strftime("%Y-%m-%d")
         tasks.notification_queue.enqueue_raw_message.assert_called_once()
-
-
-# =========================================================================
-# check_follower_heartbeat
-# =========================================================================
-
-
-class TestCheckFollowerHeartbeat:
-    """Tests for check_follower_heartbeat()."""
-
-    @pytest.mark.asyncio
-    async def test_noop_when_not_follower_mode(self, tasks):
-        """Should return immediately if not in follower mode."""
-        await tasks.check_follower_heartbeat()
-        tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_noop_when_market_closed(self, follower_tasks):
-        """Should skip heartbeat check when market is closed."""
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = False
-            await follower_tasks.check_follower_heartbeat()
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_initialises_timestamp_on_first_check(self, follower_tasks):
-        """Should set initial timestamp if _follower_last_signal_at is None."""
-        assert follower_tasks._follower_last_signal_at is None
-
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            await follower_tasks.check_follower_heartbeat()
-
-        assert follower_tasks._follower_last_signal_at is not None
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_within_tolerance_no_warning(self, follower_tasks):
-        """Should not warn if gap is within the timeout tolerance."""
-        follower_tasks._follower_last_signal_at = datetime.now(timezone.utc) - timedelta(minutes=10)
-
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            await follower_tasks.check_follower_heartbeat()
-
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_timeout_sends_warning(self, follower_tasks):
-        """Should send warning when gap exceeds the heartbeat timeout."""
-        follower_tasks._follower_last_signal_at = datetime.now(timezone.utc) - timedelta(minutes=35)
-
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            await follower_tasks.check_follower_heartbeat()
-
-        assert follower_tasks._follower_heartbeat_warned is True
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_already_warned_no_duplicate(self, follower_tasks):
-        """Should not send a second warning if already warned."""
-        follower_tasks._follower_last_signal_at = datetime.now(timezone.utc) - timedelta(minutes=60)
-        follower_tasks._follower_heartbeat_warned = True
-
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            await follower_tasks.check_follower_heartbeat()
-
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_market_hours_exception_returns_safely(self, follower_tasks):
-        """Should return safely if get_market_hours raises."""
-        with patch("pearlalgo.market_agent.scheduled_tasks.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.side_effect = RuntimeError("boom")
-            await follower_tasks.check_follower_heartbeat()
-        follower_tasks.notification_queue.enqueue_risk_warning.assert_not_awaited()
 
 
 # =========================================================================

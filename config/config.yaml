@@ -431,17 +431,8 @@ ai_briefings:
   morning_time: "06:30"   # ET - Morning market prep
   eod_time: "16:00"       # ET - End of day summary (uses existing 3:55-4:05 window)
 
-# ==========================================================================
-# SIGNAL FORWARDING (IBKR Virtual -> Tradovate Paper)
-# ==========================================================================
-# Write signals to a shared JSONL file so the Tradovate Paper agent can read them
-# instead of running its own strategy.analyze() against a broken IBKR data
-# connection.
-signal_forwarding:
-  enabled: true
-  mode: writer                          # writer | follower | off
-  shared_file: data/shared_signals.jsonl
-  max_lines: 500                        # Cap file at 500 lines (rotate oldest)
+# Signal forwarding removed (restructure Phase 1D).
+# Each agent now runs its own strategy with its own broker data.
 
 # ==========================================================================
 # ACCOUNT DISPLAY (Config-driven names for UI and Telegram)

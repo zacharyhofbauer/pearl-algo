@@ -105,12 +105,5 @@ auto_flat:
   weekend_enabled: false
   notify: false
 
-# ---------------------------------------------------------------------------
-# Signal Forwarding: Tradovate Paper reads signals from IBKR Virtual instead of
-# running its own strategy.analyze() (which fails due to IBKR data connection
-# issues).
-# ---------------------------------------------------------------------------
-signal_forwarding:
-  enabled: true
-  mode: follower                        # writer | follower | off
-  shared_file: data/shared_signals.jsonl
+# Signal forwarding removed (restructure Phase 1D).
+# This agent now runs its own strategy with its own broker data.

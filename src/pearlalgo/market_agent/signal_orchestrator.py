@@ -13,8 +13,6 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``compute_ml_lift_metrics()`` — shadow A/B lift calculation
 - ``build_ml_training_trades_from_signals()`` — training sample extraction
 
-**Not migrated (too coupled to service.py):**
-- Signal forwarding coordination — already lives in SignalForwarder class
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.signal_handler import SignalHandler
     from pearlalgo.market_agent.order_manager import OrderManager
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-    from pearlalgo.market_agent.signal_forwarder import SignalForwarder
     from pearlalgo.market_agent.ml_manager import MLManager
     from pearlalgo.learning.ml_signal_filter import MLSignalFilter
     from pearlalgo.learning.bandit_policy import BanditPolicy
@@ -56,7 +53,6 @@ class SignalOrchestrator:
         signal_handler: "SignalHandler",
         order_manager: "OrderManager",
         state_manager: "MarketAgentStateManager",
-        signal_forwarder: Optional["SignalForwarder"] = None,
         ml_signal_filter: Optional["MLSignalFilter"] = None,
         bandit_policy: Optional["BanditPolicy"] = None,
         ml_filter_enabled: bool = False,
@@ -66,7 +62,6 @@ class SignalOrchestrator:
         self._signal_handler = signal_handler
         self._order_manager = order_manager
         self._state_manager = state_manager
-        self._signal_forwarder = signal_forwarder
         self._ml_signal_filter = ml_signal_filter
         self._bandit_policy = bandit_policy
         self._ml_filter_enabled = ml_filter_enabled

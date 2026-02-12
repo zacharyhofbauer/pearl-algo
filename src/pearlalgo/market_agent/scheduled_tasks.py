@@ -39,9 +39,6 @@ class ScheduledTasks:
         state_manager: MarketAgentStateManager,
         performance_tracker: PerformanceTracker,
         service_config: Dict[str, Any],
-        # Follower-mode fields
-        signal_follower_mode: bool = False,
-        follower_heartbeat_timeout_minutes: int = 30,
     ):
         self.telegram_notifier = telegram_notifier
         self.notification_queue = notification_queue
@@ -51,12 +48,6 @@ class ScheduledTasks:
 
         # Audit logger (optional)
         self._audit_logger: Optional["AuditLogger"] = None
-
-        # Follower heartbeat state
-        self._signal_follower_mode = signal_follower_mode
-        self._follower_heartbeat_timeout_minutes = follower_heartbeat_timeout_minutes
-        self._follower_last_signal_at: Optional[datetime] = None
-        self._follower_heartbeat_warned: bool = False
 
         # De-duplication dates (one-shot per calendar day)
         self._morning_briefing_sent_date: Optional[str] = None
@@ -85,11 +76,6 @@ class ScheduledTasks:
     def set_audit_logger(self, audit_logger: "AuditLogger") -> None:
         """Inject the audit logger (late-binding to avoid circular deps)."""
         self._audit_logger = audit_logger
-
-    def record_follower_signal(self) -> None:
-        """Call when a forwarded signal is received to reset heartbeat."""
-        self._follower_last_signal_at = datetime.now(timezone.utc)
-        self._follower_heartbeat_warned = False
 
     # ------------------------------------------------------------------
     # Morning Briefing
@@ -422,45 +408,6 @@ class ScheduledTasks:
     # ------------------------------------------------------------------
     # Follower Heartbeat
     # ------------------------------------------------------------------
-
-    async def check_follower_heartbeat(self) -> None:
-        """Warn if no forwarded signals arrive during market hours."""
-        if not self._signal_follower_mode:
-            return
-
-        try:
-            if not get_market_hours().is_market_open():
-                return
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return
-
-        if self._follower_last_signal_at is None:
-            self._follower_last_signal_at = datetime.now(timezone.utc)
-            return
-
-        gap_minutes = (datetime.now(timezone.utc) - self._follower_last_signal_at).total_seconds() / 60
-        if gap_minutes < self._follower_heartbeat_timeout_minutes:
-            return
-
-        if self._follower_heartbeat_warned:
-            return
-
-        self._follower_heartbeat_warned = True
-        msg = (
-            f"\u26a0\ufe0f *Signal Forwarding Stale*\n\n"
-            f"No forwarded signals received in `{int(gap_minutes)}` minutes.\n"
-            f"IBKR Virtual may have stopped writing to `shared_signals.jsonl`.\n\n"
-            f"Check IBKR Virtual agent status: `./pearl.sh agent status`"
-        )
-        logger.warning(f"Follower heartbeat: no signals for {int(gap_minutes)}m (timeout={self._follower_heartbeat_timeout_minutes}m)")
-        try:
-            if self.telegram_notifier.enabled and self.telegram_notifier.telegram:
-                await self.notification_queue.enqueue_risk_warning(
-                    msg, risk_status="WARNING", priority=Priority.HIGH,
-                )
-        except Exception as e:
-            logger.debug(f"Follower heartbeat notification failed: {e}")
 
     # ------------------------------------------------------------------
     # JSON ↔ SQLite Signal Reconciliation

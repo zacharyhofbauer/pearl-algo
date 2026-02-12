@@ -61,7 +61,6 @@ from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
 from pearlalgo.market_agent.order_manager import OrderManager
 from pearlalgo.market_agent.signal_handler import SignalHandler
-from pearlalgo.market_agent.signal_forwarder import SignalForwarder
 from pearlalgo.market_agent.signal_orchestrator import SignalOrchestrator
 from pearlalgo.market_agent.execution_orchestrator import ExecutionOrchestrator
 from pearlalgo.market_agent.observability_orchestrator import ObservabilityOrchestrator
@@ -258,34 +257,10 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._risk_settings = service_config.get("risk", {}) or {}
         self._strategy_settings = service_config.get("strategy", {}) or {}
 
-        # ==========================================================================
-        # SIGNAL FORWARDING (IBKR Virtual -> Tradovate Paper)
-        # ==========================================================================
-        sf_cfg = service_config.get("signal_forwarding", {}) or {}
-        self.signal_forwarder = SignalForwarder(config=sf_cfg)
-        # Keep convenience aliases used throughout service & sub-modules
-        self._signal_follower_mode = self.signal_forwarder.follower_mode
-        self._signal_writer_mode = self.signal_forwarder.writer_mode
-
-        # Follower heartbeat: warn if no signals arrive during market hours
-        self._follower_last_signal_at: Optional[datetime] = None
-        self._follower_heartbeat_warned: bool = False
-        self._follower_heartbeat_timeout_minutes: int = int(sf_cfg.get("heartbeat_timeout_minutes", 30))
-
-        if self._signal_follower_mode:
-            logger.info(
-                f"Signal forwarding: FOLLOWER mode | "
-                f"shared_file={self.signal_forwarder.shared_signals_path} | "
-                f"heartbeat_timeout={self._follower_heartbeat_timeout_minutes}m | "
-                f"strategy.analyze() will be SKIPPED -- reading from IBKR Virtual"
-            )
-            self.signal_forwarder.clear_stale_signals()
-        elif self._signal_writer_mode:
-            logger.info(
-                f"Signal forwarding: WRITER mode | "
-                f"shared_file={self.signal_forwarder.shared_signals_path} | "
-                f"max_lines={self.signal_forwarder._max_lines}"
-            )
+        # Signal forwarding removed (restructure Phase 1D).
+        # Each agent now runs its own strategy with its own broker data.
+        self._signal_follower_mode = False
+        self._signal_writer_mode = False
 
         # Track config flags that are currently non-enforced (warn-only telemetry)
         self._config_warnings: list[dict[str, Any]] = []
@@ -631,8 +606,6 @@ class MarketAgentService(ServiceNotificationsMixin):
             state_manager=self.state_manager,
             performance_tracker=self.performance_tracker,
             service_config=service_config,
-            signal_follower_mode=self._signal_follower_mode,
-            follower_heartbeat_timeout_minutes=self._follower_heartbeat_timeout_minutes,
         )
         if self.audit_logger is not None:
             self.scheduled_tasks.set_audit_logger(self.audit_logger)
@@ -788,7 +761,6 @@ class MarketAgentService(ServiceNotificationsMixin):
             signal_handler=self._signal_handler,
             order_manager=self._order_manager,
             state_manager=self.state_manager,
-            signal_forwarder=self.signal_forwarder,
             ml_signal_filter=self._ml_manager.signal_filter,
             bandit_policy=self._ml_manager.bandit_policy,
             ml_filter_enabled=self._ml_manager.filter_enabled,
@@ -1056,9 +1028,6 @@ class MarketAgentService(ServiceNotificationsMixin):
             # Check execution adapter connection health and alert on issues
             await self.execution_orchestrator.check_execution_health()
 
-            # Check signal forwarding heartbeat (follower mode only)
-            await self.scheduled_tasks.check_follower_heartbeat()
-
             # Prune old signals from signals.jsonl (once per day)
             await self.scheduled_tasks.check_signal_pruning()
 
@@ -1188,10 +1157,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                             # breaker threshold — the CB alert already covers this info.
                             await self._handle_connection_failure()
 
-                        # Tradovate Paper follower: still read shared signals on connection error
-                        await self.signal_forwarder.process_forwarded_signals(
-                            self._signal_handler, self._sync_signal_handler_counters, market_data,
-                        )
                         await self._sleep_until_next_cycle()
                         continue
 
@@ -1262,10 +1227,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                         await self._interruptible_sleep(self.config.scan_interval * 2)
                     else:
                         await self._sleep_until_next_cycle()
-                    # Tradovate Paper follower: still read shared signals on data fetch error
-                    await self.signal_forwarder.process_forwarded_signals(
-                        self._signal_handler, self._sync_signal_handler_counters,
-                    )
                     continue
 
                 if market_data["df"].empty:
@@ -1301,10 +1262,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                     await self._check_dashboard(market_data, quiet_reason=quiet_reason)
                     self.cycle_count += 1
                     
-                    # Tradovate Paper follower: still read shared signals when data is empty
-                    await self.signal_forwarder.process_forwarded_signals(
-                        self._signal_handler, self._sync_signal_handler_counters, market_data,
-                    )
                     await self._sleep_until_next_cycle()
                     continue
 
@@ -1353,36 +1310,19 @@ class MarketAgentService(ServiceNotificationsMixin):
                     pass
                 else:
                     # Full analysis: new bar arrived
-                    if self._signal_follower_mode:
-                        # Tradovate Paper follower: read from shared file instead of strategy
-                        # Guard: never process signals when market is closed
-                        _market_open_for_signals = True
-                        try:
-                            _market_open_for_signals = bool(get_market_hours().is_market_open())
-                        except Exception as e:
-                            logger.warning(f"Critical path error: {e}", exc_info=True)
-                        signals = self.signal_forwarder.read_shared_signals() if _market_open_for_signals else []
-                        if signals:
-                            self._follower_last_signal_at = datetime.now(timezone.utc)
-                            self._follower_heartbeat_warned = False
-                            logger.info(
-                                f"Tradovate Paper: Read {len(signals)} forwarded signal(s) "
-                                f"from {self.signal_forwarder.shared_signals_path.name}"
-                            )
+                    # Run pearl_bot_auto strategy
+                    # Use run_in_executor to avoid blocking the event loop during
+                    # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
+                    df = market_data.get("df")
+                    if df is not None and not df.empty:
+                        import functools
+                        _analyze_fn = functools.partial(
+                            self.strategy.analyze, df, current_time=datetime.now(timezone.utc)
+                        )
+                        loop = asyncio.get_event_loop()
+                        signals = await loop.run_in_executor(None, _analyze_fn)
                     else:
-                        # Normal mode: run pearl_bot_auto strategy
-                        # Use run_in_executor to avoid blocking the event loop during
-                        # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
-                        df = market_data.get("df")
-                        if df is not None and not df.empty:
-                            import functools
-                            _analyze_fn = functools.partial(
-                                self.strategy.analyze, df, current_time=datetime.now(timezone.utc)
-                            )
-                            loop = asyncio.get_event_loop()
-                            signals = await loop.run_in_executor(None, _analyze_fn)
-                        else:
-                            signals = []
+                        signals = []
                     self._analysis_run_count += 1
                     # Update last analyzed bar timestamp
                     if current_bar_ts is not None:
@@ -1503,11 +1443,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                         else:
                             await self._signal_handler.process_signal(signal, buffer_data=buffer_data)
                         self._sync_signal_handler_counters()
-                        # Signal forwarding: write to shared file for Tradovate Paper (writer mode)
-                        if self._signal_writer_mode:
-                            bar_ts = signal.get("_bar_timestamp")
-                            if bar_ts and self._signal_handler.last_signal_id_prefix:
-                                self.signal_forwarder.write_shared_signal(signal, self._signal_handler.last_signal_id_prefix, bar_ts)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
@@ -3857,10 +3792,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                             self._tv_paper_tracker.update_eod_hwm()
                         except Exception as e:
                             logger.debug(f"Could not update Tradovate Paper EOD HWM: {e}")
-
-    # Signal forwarding methods now live in SignalForwarder (signal_forwarder.py).
-    # Call sites use self.signal_forwarder.write_shared_signal / read_shared_signals /
-    # process_forwarded_signals.
 
     def mark_state_dirty(self) -> None:
         """Mark the service state as needing a save on the next cycle-end."""

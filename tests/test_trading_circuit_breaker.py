@@ -842,8 +842,11 @@ class TestBlockTracking:
         assert decision.allowed is False
         assert cb._total_blocks == 1
         assert "consecutive_losses" in cb._blocks_by_reason
-- Max concurrent positions respected
-"""
+
+
+# ===========================================================================
+# Extended circuit breaker edge-case tests
+# ===========================================================================
 
 from datetime import datetime, timezone, timedelta
 
