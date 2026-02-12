@@ -38,13 +38,15 @@ def _read_json_sync(path: Path) -> Any:
     """Read and parse a JSON file (sync, for use with run_in_executor).
 
     Returns ``None`` when the file does not exist or cannot be parsed.
+
+    Delegates to :func:`~pearlalgo.utils.state_io.load_json_file` for
+    consistent encoding/error handling, translating its ``{}`` sentinel to
+    ``None`` for backward compatibility with callers.
     """
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    from pearlalgo.utils.state_io import load_json_file
+
+    data = load_json_file(path)
+    return data or None
 
 
 async def _read_json_async(path: Path) -> Any:
@@ -293,6 +295,7 @@ def _get_client_id(request: Request) -> str:
     try:
         return request.client.host if request.client else "unknown"
     except Exception:
+        logger.debug("Failed to determine client host", exc_info=True)
         return "unknown"
 
 
@@ -857,6 +860,7 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
                             pos["stop_loss"] = sig.get("stop_loss")
                             pos["take_profit"] = sig.get("take_profit")
                 except Exception:
+                    logger.debug("Failed to enrich positions with SL/TP from signals", exc_info=True)
                     pass
             return positions
 
@@ -1044,6 +1048,7 @@ class ConnectionManager:
                 await asyncio.wait_for(conn.send_json(message), timeout=5.0)
                 return None
             except Exception:
+                logger.debug("WebSocket send failed, marking connection for removal", exc_info=True)
                 return conn  # mark for removal
 
         # Copy list to avoid mutation during iteration
@@ -1052,12 +1057,12 @@ class ConnectionManager:
             return_exceptions=True,
         )
 
-        # Clean up disconnected / timed-out clients
+        # Clean up disconnected / timed-out clients (_safe_send returns conn to remove)
         for result in results:
-            if isinstance(result, WebSocket):
+            if isinstance(result, Exception):
+                pass  # gather caught it
+            elif result is not None:
                 self.disconnect(result)
-            elif isinstance(result, Exception):
-                pass  # gather caught it; connection already gone
 
     async def start_broadcast_loop(self, interval: float = 2.0):
         """Start broadcasting state updates at regular intervals."""
@@ -1157,9 +1162,11 @@ class ConnectionManager:
                                     try:
                                         last_ts = msgs[-1].timestamp.isoformat() if msgs[-1].timestamp else ""
                                     except Exception:
+                                        logger.debug("Failed to format Pearl message timestamp", exc_info=True)
                                         last_ts = str(getattr(msgs[-1], "timestamp", "")) or ""
                                 pearl_fingerprint = f"{len(msgs)}:{last_ts}"
                             except Exception:
+                                logger.debug("Failed to compute Pearl AI fingerprint", exc_info=True)
                                 pearl_fingerprint = "error"
 
                         # -- Fingerprint-first: only compute payload when state changed --
@@ -1367,6 +1374,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
             try:
                 payload = json.loads(raw)
             except Exception:
+                logger.debug("Failed to parse WebSocket auth payload", exc_info=True)
                 payload = None
 
             msg_key = ""
@@ -1655,8 +1663,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     tv_fills = state_data.get("tradovate_fills") or tv.get("fills") or []
                     if not tv_fills:
                         fills_file = state_dir / "tradovate_fills.json"
-                        if fills_file.exists():
-                            tv_fills = json.loads(fills_file.read_text()) or []
+                        _fills_data = _read_json_sync(fills_file)
+                        tv_fills = _fills_data if isinstance(_fills_data, list) else []
                     if tv_fills:
                         paired = _tradovate_fills_to_trades(tv_fills)
                         # Derive per-trade commission from equity vs fill P&L gap
@@ -1679,6 +1687,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                                     if exit_dt >= td_start:
                                         today_trades.append(t)
                                 except Exception:
+                                    logger.debug("Failed to parse trade exit_time", exc_info=True)
                                     pass
                         trades = len(today_trades)
                         wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
@@ -1714,9 +1723,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 # Use today's date from daily_pnl_by_date if available
                 tv_paper = challenge.get("tv_paper") or {}
                 # Read daily breakdown from challenge state file directly
-                ch_file = state_dir / "challenge_state.json"
-                if ch_file.exists():
-                    ch_data = json.loads(ch_file.read_text())
+                ch_data = _read_json_sync(state_dir / "challenge_state.json")
+                if ch_data:
                     daily_by_date = ch_data.get("current_attempt", {}).get("daily_pnl_by_date", {})
                     today_key = date.today().isoformat()
                     if today_key in daily_by_date:
@@ -1756,13 +1764,12 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     # --- Read performance.json once for all code paths below ---
     performance_file = state_dir / "performance.json"
     perf_data: Optional[list] = None  # None = missing or invalid
-    if performance_file.exists():
-        try:
-            _raw = json.loads(performance_file.read_text())
-            if isinstance(_raw, list):
-                perf_data = _raw
-        except Exception:
-            pass
+    try:
+        _raw = _read_json_sync(performance_file)
+        if isinstance(_raw, list):
+            perf_data = _raw
+    except Exception:
+        logger.debug("Failed to read/parse performance.json", exc_info=True)
 
     # Priority 1: Tradovate live data (Tradovate Paper accounts)
     try:
@@ -2072,12 +2079,11 @@ def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
     """Get challenge status from challenge_state.json (supports both IBKR Virtual + Tradovate Paper)."""
-    challenge_file = state_dir / "challenge_state.json"
-    if not challenge_file.exists():
+    data = _read_json_sync(state_dir / "challenge_state.json")
+    if not data:
         return None
 
     try:
-        data = json.loads(challenge_file.read_text())
         config = data.get("config", {})
         current = data.get("current_attempt", {})
 

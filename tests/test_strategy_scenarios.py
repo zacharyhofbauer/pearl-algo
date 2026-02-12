@@ -109,7 +109,7 @@ def _permissive_config(**overrides) -> dict:
     """
     return _make_config(
         min_confidence=0.01,
-        min_risk_reward=0.1,
+        min_risk_reward=0.5,
         allow_trend_breakout_entries=True,
         allow_trend_momentum_entries=True,
         **overrides,

@@ -108,7 +108,7 @@ class TestTrackSignalGenerated:
         record = json.loads(lines[0])
         assert record["status"] == "generated"
 
-    def test_test_signals_not_tracked(self, tmp_path: Path) -> None:
+    def test_track_signal_generated_skips_test_flagged_signals(self, tmp_path: Path) -> None:
         """Signals with _is_test=True return empty string and are not persisted."""
         pt = _make_performance_tracker(tmp_path)
         sig = _make_signal(_is_test=True)
@@ -444,7 +444,7 @@ class TestGetPerformanceMetrics:
         assert metrics["exited_signals"] == 1  # Only the recent one
         assert metrics["total_pnl"] == 100.0
 
-    def test_test_signals_excluded_from_metrics(self, tmp_path: Path) -> None:
+    def test_performance_metrics_excludes_test_flagged_signals(self, tmp_path: Path) -> None:
         """Test signals (_is_test=True) are excluded from P&L metrics."""
         pt = _make_performance_tracker(tmp_path)
 

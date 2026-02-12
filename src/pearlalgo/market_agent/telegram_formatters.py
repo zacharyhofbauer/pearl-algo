@@ -709,8 +709,9 @@ class TelegramFormattersMixin:
         """
         lines = []
 
-        # Signal ID and type
+        # Signal ID, symbol, type
         signal_id = signal.get("signal_id", "?")
+        symbol = signal.get("symbol", "?")
         sig_type = signal.get("type", "unknown")
         direction = signal.get("direction", "?")
         status = signal.get("status", "unknown")
@@ -718,7 +719,7 @@ class TelegramFormattersMixin:
         lines.append(f"📋 *Signal Detail*")
         lines.append("")
         lines.append(f"ID: `{safe_label(str(signal_id)[:20])}`")
-        lines.append(f"Type: {safe_label(sig_type)} | Direction: {format_signal_direction(direction)}")
+        lines.append(f"Symbol: {safe_label(symbol)} | Type: {safe_label(sig_type)} | Direction: {format_signal_direction(direction)}")
         lines.append(f"Status: {format_signal_status(status)}")
 
         # Entry/exit prices

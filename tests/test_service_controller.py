@@ -214,10 +214,10 @@ class TestStatusMethods:
         """Should return agent status."""
         controller = ServiceController(project_root=tmp_path)
         
-        lifecycle_dir = tmp_path / "scripts" / "lifecycle"
-        lifecycle_dir.mkdir(parents=True)
+        ops_dir = tmp_path / "scripts" / "ops"
+        ops_dir.mkdir(parents=True)
         
-        script = lifecycle_dir / "check_agent_status.sh"
+        script = ops_dir / "status.sh"
         script.write_text("#!/bin/bash\necho 'running'\n")
         script.chmod(0o755)
         

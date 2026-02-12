@@ -9,17 +9,17 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``process_signals()`` — batch signal processing
 - ``configure_ml_filter()`` — ML filter reconfiguration
 - ``build_context_features()`` — contextual bandit feature building
+- ``refresh_ml_lift()`` — ML lift evaluation
+- ``compute_ml_lift_metrics()`` — shadow A/B lift calculation
+- ``build_ml_training_trades_from_signals()`` — training sample extraction
 
-**To migrate next (marked with ``# TODO(1A-migrate)`` in service.py):**
-- ``_refresh_ml_lift()`` — ML lift evaluation
-- ``_compute_ml_lift_metrics()`` — shadow A/B lift calculation
-- ``_build_ml_training_trades_from_signals()`` — training sample extraction
-- Signal forwarding coordination (writer/follower modes)
+**Not migrated (too coupled to service.py):**
+- Signal forwarding coordination — already lives in SignalForwarder class
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import pandas as pd
 
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.order_manager import OrderManager
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
     from pearlalgo.market_agent.signal_forwarder import SignalForwarder
+    from pearlalgo.market_agent.ml_manager import MLManager
     from pearlalgo.learning.ml_signal_filter import MLSignalFilter
     from pearlalgo.learning.bandit_policy import BanditPolicy
 
@@ -41,15 +42,12 @@ class SignalOrchestrator:
     Dependencies are injected via the constructor so the class is independently
     testable and avoids circular imports with service.py.
 
-    Current scope (delegation layer):
+    Scope:
     - ``process_signals()``: delegates to SignalHandler.process_signal()
     - ``configure_ml_filter()``: reconfigures ML components at runtime
-    - ``refresh_ml_lift()``: triggers ML lift evaluation
-
-    Future scope (method migration):
-    - Strategy analysis dispatch (currently inline in _run_loop)
-    - Signal forwarding coordination (writer/follower)
-    - Contextual bandit feature building
+    - ``refresh_ml_lift()`` / ``compute_ml_lift_metrics()``: ML lift evaluation
+    - ``build_ml_training_trades_from_signals()``: training sample extraction
+    - ``build_context_features()``: contextual bandit feature building
     """
 
     def __init__(
@@ -63,6 +61,7 @@ class SignalOrchestrator:
         bandit_policy: Optional["BanditPolicy"] = None,
         ml_filter_enabled: bool = False,
         ml_filter_mode: str = "shadow",
+        ml_manager: Optional["MLManager"] = None,
     ):
         self._signal_handler = signal_handler
         self._order_manager = order_manager
@@ -72,6 +71,7 @@ class SignalOrchestrator:
         self._bandit_policy = bandit_policy
         self._ml_filter_enabled = ml_filter_enabled
         self._ml_filter_mode = ml_filter_mode
+        self._ml_manager = ml_manager
 
         logger.debug("SignalOrchestrator initialized")
 
@@ -149,6 +149,33 @@ class SignalOrchestrator:
             "SignalOrchestrator: ML filter reconfigured",
             extra={"enabled": enabled, "mode": mode},
         )
+
+    # ------------------------------------------------------------------
+    # ML lift / training (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    def refresh_ml_lift(self, *, force: bool = False) -> None:
+        """Refresh ML lift metrics + blocking allowance (delegates to MLManager)."""
+        if self._ml_manager is not None:
+            self._ml_manager.refresh_lift(force=force)
+
+    def compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
+        """Compute shadow A/B lift for ML gating (delegates to MLManager)."""
+        if self._ml_manager is None:
+            return {}
+        return self._ml_manager.compute_lift_metrics(trades)
+
+    def build_ml_training_trades_from_signals(self, *, limit: int = 2000) -> List[dict]:
+        """Build supervised training samples (delegates to MLManager)."""
+        if self._ml_manager is None:
+            return []
+        return self._ml_manager.build_training_trades_from_signals(limit=limit)
+
+    async def build_ml_training_trades_from_signals_async(self, *, limit: int = 2000) -> List[dict]:
+        """Async wrapper (delegates to MLManager)."""
+        if self._ml_manager is None:
+            return []
+        return await self._ml_manager.build_training_trades_from_signals_async(limit=limit)
 
     # ------------------------------------------------------------------
     # Contextual features (migrated from service.py)

@@ -391,7 +391,7 @@ class TestSaveState:
         service.running = True
         service.start_time = datetime.now(timezone.utc)
 
-        service._save_state()
+        service._save_state(force=True)
 
         state_file = tmp_path / "state.json"
         assert state_file.exists(), "state.json was not created"
@@ -409,7 +409,7 @@ class TestSaveState:
         service.error_count = 2
         service.connection_failures = 1
 
-        service._save_state()
+        service._save_state(force=True)
 
         state_file = tmp_path / "state.json"
         state = json.loads(state_file.read_text())
@@ -433,7 +433,7 @@ class TestSaveState:
         service.cycle_count = 100
         service.signal_count = 15
 
-        service._save_state()
+        service._save_state(force=True)
 
         loaded = service.state_manager.load_state()
         assert isinstance(loaded, dict)

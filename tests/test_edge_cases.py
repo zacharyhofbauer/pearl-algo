@@ -335,7 +335,9 @@ async def test_close_all_requested_closes_virtual_trades(tmp_path) -> None:
     await service._handle_close_all_requests(market_data)
 
     recent = service.state_manager.get_recent_signals(limit=50)
-    assert not any(rec.get("status") == "entered" for rec in recent)
+    # Latest status per signal_id (JSONL can have multiple rows per id)
+    by_id = {rec.get("signal_id"): rec for rec in recent if rec.get("signal_id")}
+    assert not any(r.get("status") == "entered" for r in by_id.values()), "No signal should still be entered after close-all"
 
     state = json.loads(state_file.read_text(encoding="utf-8"))
     assert not state.get("close_all_requested", False)

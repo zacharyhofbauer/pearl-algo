@@ -242,6 +242,7 @@ class TvPaperEvalTracker:
                     with open(self.history_file) as f:
                         history = json.load(f)
                 except Exception:
+                    logger.debug("Failed to parse challenge history file", exc_info=True)
                     history = []
             history.append(attempt.to_dict())
             with open(self.history_file, "w") as f:

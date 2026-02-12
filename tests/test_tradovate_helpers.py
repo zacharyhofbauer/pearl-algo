@@ -146,7 +146,7 @@ class TestTradovatePerformanceForPeriod:
         assert result["pnl"] == 0.0
         assert result["trades"] == 0
 
-    def test_basic_period_filter(self):
+    def test_performance_for_period_filters_by_time_and_computes_stats(self):
         """Test that the function filters by time and computes basic stats."""
         from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades
 

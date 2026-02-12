@@ -12,17 +12,21 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``get_daily_summary()`` — dashboard-ready summary
 - ``notify_error()`` — error notification via queue
 - ``compute_quiet_period_minutes()`` — time since last signal
+- ``generate_dashboard_chart()`` — chart capture + export
 
-**To migrate next (marked with ``# TODO(1A-migrate)`` in service.py):**
-- ``_check_dashboard()`` — periodic dashboard scheduling
-- ``_generate_dashboard_chart()`` — chart capture + export
-- ``_send_dashboard()`` — dashboard delivery
-- ``get_status()`` — full status snapshot
+**Not migrated (too coupled to service.py):**
+- ``_check_dashboard()`` — controls timing state (last_dashboard_chart_sent, etc.)
+  and calls _send_dashboard which depends on get_status() with 40+ service attributes
+- ``_send_dashboard()`` — builds status dict from get_status() and accesses
+  data_fetcher, config, and many service-level attributes for enrichment
+- ``get_status()`` — references nearly every subsystem in the service;
+  moving it would require passing the entire service as a dependency
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
@@ -41,15 +45,13 @@ class ObservabilityOrchestrator:
     Dependencies are injected via the constructor so the class is independently
     testable and avoids circular imports with service.py.
 
-    Current scope (delegation layer):
+    Scope:
     - ``track_performance()``: delegates to PerformanceTracker
     - ``send_notification()``: delegates to NotificationQueue
     - ``get_daily_summary()``: aggregates metrics for dashboard / Telegram
-
-    Future scope (method migration):
-    - Dashboard chart generation & scheduling
-    - ML lift metrics refresh
-    - Cycle diagnostics persistence
+    - ``generate_dashboard_chart()``: chart capture + export for Telegram
+    - ``notify_error()``: error notification via queue
+    - ``compute_quiet_period_minutes()``: time since last signal
     """
 
     def __init__(
@@ -184,3 +186,37 @@ class ObservabilityOrchestrator:
             return delta.total_seconds() / 60.0
         except Exception:
             return None
+
+    # ------------------------------------------------------------------
+    # Dashboard chart generation (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    async def generate_dashboard_chart(self) -> Optional[Path]:
+        """
+        Capture the Live Main Chart and export it for Telegram/UI use.
+
+        This produces (atomically) a PNG at:
+          ``data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png``
+        """
+        import os
+
+        from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
+
+        exports_dir = self._state_manager.state_dir / "exports"
+        try:
+            exports_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
+
+        export_path = exports_dir / "dashboard_telegram_latest.png"
+        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
+
+        try:
+            captured = await capture_live_chart_screenshot(output_path=export_path, url=str(chart_url))
+            if captured and captured.exists():
+                return captured
+        except Exception as e:
+            logger.debug(f"Could not capture live chart screenshot: {e}")
+
+        # Fallback: return whatever exists on disk (may be stale) for resiliency.
+        return export_path if export_path.exists() else None

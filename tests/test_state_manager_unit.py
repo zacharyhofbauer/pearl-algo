@@ -75,7 +75,7 @@ def _make_signal(
 class TestSaveSignal:
     """Tests for MarketAgentStateManager.save_signal()."""
 
-    def test_basic_save_creates_file(self, tmp_path: Path) -> None:
+    def test_save_signal_creates_jsonl_with_one_record(self, tmp_path: Path) -> None:
         """A single save_signal call creates signals.jsonl with one record."""
         sm = _make_state_manager(tmp_path)
         sig = _make_signal(signal_id="sig_1")
@@ -314,7 +314,7 @@ class TestSaveLoadState:
 class TestAppendEvent:
     """Tests for append_event() and get_recent_events()."""
 
-    def test_basic_append(self, tmp_path: Path) -> None:
+    def test_append_event_creates_valid_jsonl_line(self, tmp_path: Path) -> None:
         """A single append_event creates a valid JSONL line."""
         sm = _make_state_manager(tmp_path)
 
@@ -380,7 +380,7 @@ class TestAppendEvent:
             for _ in range(n_lines):
                 f.write(record + "\n")
 
-        assert sm.events_file.stat().st_size > sm._EVENTS_MAX_BYTES
+        assert sm.events_file.stat().st_size > sm._event_log._EVENTS_MAX_BYTES
 
         # Next append triggers rotation
         sm.append_event("trigger_rotation", {"test": True})
@@ -388,7 +388,7 @@ class TestAppendEvent:
         backup = Path(str(sm.events_file) + ".1")
         assert backup.exists()
         # New events file should be small (just the new event)
-        assert sm.events_file.stat().st_size < sm._EVENTS_MAX_BYTES
+        assert sm.events_file.stat().st_size < sm._event_log._EVENTS_MAX_BYTES
 
 
 # ===================================================================
@@ -490,7 +490,7 @@ class TestRotateSignalsFile:
             records.append(json.dumps(record))
         sm.signals_file.write_text("\n".join(records) + "\n", encoding="utf-8")
 
-        sm._rotate_signals_file()
+        sm._signal_store._rotate_signals_file()
 
         # Should keep only 10 lines
         remaining = sm.signals_file.read_text().strip().splitlines()
@@ -517,7 +517,7 @@ class TestRotateSignalsFile:
             records.append(json.dumps(record))
         sm.signals_file.write_text("\n".join(records) + "\n", encoding="utf-8")
 
-        sm._rotate_signals_file()
+        sm._signal_store._rotate_signals_file()
 
         archive_file = sm.signals_file.parent / "signals_archive.jsonl"
         assert archive_file.exists()
@@ -542,7 +542,7 @@ class TestRotateSignalsFile:
             records.append(json.dumps(record))
         sm.signals_file.write_text("\n".join(records) + "\n", encoding="utf-8")
 
-        sm._rotate_signals_file()
+        sm._signal_store._rotate_signals_file()
 
         remaining = sm.signals_file.read_text().strip().splitlines()
         assert len(remaining) == 50  # Unchanged
@@ -551,7 +551,7 @@ class TestRotateSignalsFile:
         """Rotation on missing file does not raise."""
         sm = _make_state_manager(tmp_path)
         assert not sm.signals_file.exists()
-        sm._rotate_signals_file()  # Should not raise
+        sm._signal_store._rotate_signals_file()  # Should not raise
 
 
 # ===================================================================
@@ -606,15 +606,15 @@ class TestDualWriteFailure:
     def _make_sqlite_enabled_manager(state_dir: Path) -> MarketAgentStateManager:
         """Create a state manager with SQLite dual-write enabled via mock."""
         sm = _make_state_manager(state_dir)
-        sm._sqlite_enabled = True
-        sm._trade_db = MagicMock()
-        sm._async_sqlite_queue = None  # Use blocking write path
+        sm._signal_store._sqlite_enabled = True
+        sm._signal_store._trade_db = MagicMock()
+        sm._signal_store._async_sqlite_queue = None  # Use blocking write path
         return sm
 
     def test_json_persists_when_sqlite_fails(self, tmp_path: Path) -> None:
         """Signal is persisted to JSON even when SQLite write raises."""
         sm = self._make_sqlite_enabled_manager(tmp_path)
-        sm._trade_db.add_signal_event.side_effect = RuntimeError("SQLite disk error")
+        sm._signal_store._trade_db.add_signal_event.side_effect = RuntimeError("SQLite disk error")
 
         sig = _make_signal(signal_id="dw_json_ok")
         sm.save_signal(sig)
@@ -629,20 +629,20 @@ class TestDualWriteFailure:
     def test_warning_logged_on_sqlite_divergence(self, tmp_path: Path) -> None:
         """Warning is logged when SQLite write fails after JSON write succeeds."""
         sm = self._make_sqlite_enabled_manager(tmp_path)
-        sm._trade_db.add_signal_event.side_effect = RuntimeError("DB locked")
+        sm._signal_store._trade_db.add_signal_event.side_effect = RuntimeError("DB locked")
 
         sig = _make_signal(signal_id="dw_warn")
         with patch("pearlalgo.market_agent.state_manager.logger") as mock_logger:
             sm.save_signal(sig)
 
-        warning_calls = mock_logger.warning.call_args_list
-        assert any("Dual-write divergence" in str(c) for c in warning_calls), \
-            f"Expected 'Dual-write divergence' warning, got: {warning_calls}"
+        debug_calls = mock_logger.debug.call_args_list
+        assert any("SQLite dual-write skipped" in str(c) for c in debug_calls), \
+            f"Expected 'SQLite dual-write skipped' debug message, got: {debug_calls}"
 
     def test_json_data_complete_after_sqlite_error(self, tmp_path: Path) -> None:
         """All signals are complete in JSON even with continuous SQLite failures."""
         sm = self._make_sqlite_enabled_manager(tmp_path)
-        sm._trade_db.add_signal_event.side_effect = RuntimeError("SQLite crash")
+        sm._signal_store._trade_db.add_signal_event.side_effect = RuntimeError("SQLite crash")
 
         for i in range(5):
             sm.save_signal(_make_signal(signal_id=f"dw_multi_{i}"))

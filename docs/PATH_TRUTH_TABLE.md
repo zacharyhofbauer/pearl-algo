@@ -22,7 +22,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.market_agent.trading_circuit_breaker` – Circuit breaker logic
 - **Lifecycle scripts**:
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
-  - `scripts/lifecycle/check_agent_status.sh` (state summary; `--market NQ|ES|GC`)
+  - `scripts/ops/status.sh` (manual CLI health check; `--market NQ|ES|GC`)
 - **Docs**:
   - `docs/MARKET_AGENT_GUIDE.md`
   - `docs/PROJECT_SUMMARY.md`
@@ -142,13 +142,12 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: External watchdog / state freshness validator + optional localhost status server
 - **Scripts**:
-  - `scripts/monitoring/watchdog_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
+  - `scripts/monitoring/monitor.py` – automated health monitor with Telegram alerts and exit codes (replaces `health_check.py` + `watchdog_agent.py`)
   - `scripts/monitoring/serve_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
   - `scripts/monitoring/incident_report.py` – incident report generation
-  - `scripts/monitoring/health_check.py` – automated health check with Telegram alerts (for cron/systemd)
 - **Ops scripts** (`scripts/ops/`):
-  - `quick_status.sh` – fast local health snapshot for manual use (requires `jq`)
+  - `status.sh` – manual CLI health check (replaces `quick_status.sh` + `check_agent_status.sh`)
 - **Docs**:
   - `docs/MARKET_AGENT_GUIDE.md` (monitoring section)
   - `docs/PROJECT_SUMMARY.md` (status server section)
@@ -185,23 +184,23 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 There are two separate AI-related modules in this repository, serving different purposes:
 
-### `pearl_ai/` (Top-level Module)
+### `src/pearlalgo/pearl_ai/` (Pearl AI Module)
 
 - **Logical component**: Pearl AI 3.0 - Data-grounded trading analyst with RAG
 - **Purpose**: Comprehensive AI system for CLI/terminal and web app usage
 - **Python modules**:
-  - `pearl_ai.brain` – Core AI orchestrator (routes between local/Claude)
-  - `pearl_ai.narrator` – Narrative generation for briefings
-  - `pearl_ai.memory` – Conversation persistence
-  - `pearl_ai.data_access` – Trade database RAG integration
-  - `pearl_ai.cache` – Response caching with semantic hashing
-  - `pearl_ai.tools` – Tool execution for structured queries
-  - `pearl_ai.metrics` – Observability and cost tracking
-  - `pearl_ai.llm_claude` – Claude API integration
-  - `pearl_ai.llm_local` – Local LLM (Ollama) integration
-  - `pearl_ai.llm_mock` – Mock LLM for testing
-  - `pearl_ai.config` – Configuration management
-  - `pearl_ai.api_router` – FastAPI router for AI endpoints
+  - `pearlalgo.pearl_ai.brain` – Core AI orchestrator (routes between local/Claude)
+  - `pearlalgo.pearl_ai.narrator` – Narrative generation for briefings
+  - `pearlalgo.pearl_ai.memory` – Conversation persistence
+  - `pearlalgo.pearl_ai.data_access` – Trade database RAG integration
+  - `pearlalgo.pearl_ai.cache` – Response caching with semantic hashing
+  - `pearlalgo.pearl_ai.tools` – Tool execution for structured queries
+  - `pearlalgo.pearl_ai.metrics` – Observability and cost tracking
+  - `pearlalgo.pearl_ai.llm_claude` – Claude API integration
+  - `pearlalgo.pearl_ai.llm_local` – Local LLM (Ollama) integration
+  - `pearlalgo.pearl_ai.llm_mock` – Mock LLM for testing
+  - `pearlalgo.pearl_ai.config` – Configuration management
+  - `pearlalgo.pearl_ai.api_router` – FastAPI router for AI endpoints
 - **Features**: RAG, tool use, streaming, caching, cost tracking
 - **Tests**: `tests/test_pearl_brain.py`, `tests/test_pearl_cache.py`, `tests/test_pearl_tools.py`
 
@@ -217,10 +216,9 @@ There are two separate AI-related modules in this repository, serving different 
 
 ### Relationship
 
-- `pearl_ai/` is the newer, more comprehensive AI system (v3.0) for CLI and web app
-- `src/pearlalgo/ai/` provides lightweight wrappers for Telegram integration and outcome tracking
-- Both modules can coexist; they serve different integration points
-- `pearl_ai/` has its own versioning (`__version__ = "3.0.0"`) and is kept separate intentionally
+- `pearlalgo.pearl_ai` is the comprehensive AI system (v3.0) for CLI and web app
+- `pearlalgo.ai` provides lightweight wrappers for Telegram integration and outcome tracking
+- Both modules coexist; they serve different integration points
 
 ## Utilities / Cross‑cutting Concerns
 

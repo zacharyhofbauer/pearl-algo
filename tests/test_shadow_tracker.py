@@ -56,7 +56,7 @@ class TestSuggestionOutcome:
 class TestTrackedSuggestion:
     """Tests for TrackedSuggestion dataclass."""
 
-    def test_default_values(self):
+    def test_tracked_suggestion_initializes_with_pending_outcome(self):
         """Should have sensible defaults."""
         suggestion = TrackedSuggestion(
             id="test_1",
@@ -97,7 +97,7 @@ class TestTrackedSuggestion:
 class TestShadowMetrics:
     """Tests for ShadowMetrics dataclass."""
 
-    def test_default_values(self):
+    def test_shadow_metrics_initializes_with_zero_counters(self):
         """Should have zero defaults."""
         metrics = ShadowMetrics()
         

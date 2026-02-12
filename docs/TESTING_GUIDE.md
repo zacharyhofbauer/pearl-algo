@@ -63,13 +63,13 @@ pytest tests/
 ### Option 4: Pearl AI prompt regression eval (fast, no API calls)
 ```bash
 # Core golden suite (mock mode)
-python3 -m pearl_ai.eval.ci --mock
+python3 -m pearlalgo.pearl_ai.eval.ci --mock
 
 # Expanded suite
-python3 -m pearl_ai.eval.ci --dataset golden_expanded.json --mock
+python3 -m pearlalgo.pearl_ai.eval.ci --dataset golden_expanded.json --mock
 
 # Only run if prompt files changed (handy before committing)
-python3 -m pearl_ai.eval.ci --changed-only --mock
+python3 -m pearlalgo.pearl_ai.eval.ci --changed-only --mock
 ```
 
 **Optional pre-commit hook (runs eval when prompt files are staged):**
@@ -316,7 +316,7 @@ python3 scripts/testing/test_all.py service
 ./scripts/gateway/gateway.sh status
 
 # Check agent status
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 **Expected:**
@@ -851,7 +851,7 @@ python3 scripts/testing/test_all.py arch
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 
 # Check status
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 
 # Multi-market smoke check
 python3 scripts/testing/smoke_multi_market.py

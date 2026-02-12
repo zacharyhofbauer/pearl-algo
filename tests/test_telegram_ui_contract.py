@@ -259,7 +259,8 @@ class TestSignalDetailFormatting:
         assert len(formatted) < 4096
         assert "MNQ" in formatted
         assert "LONG" in formatted
-        assert "17500.00" in formatted
+        # Entry price may be formatted as 17,500.00 or $17,500.00
+        assert "17500" in formatted.replace(",", "").replace("$", "")
 
     def test_signal_detail_with_underscore_id(self, temp_state_dir):
         """Signal IDs with underscores are displayed safely."""

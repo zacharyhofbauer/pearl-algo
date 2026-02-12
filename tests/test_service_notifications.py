@@ -56,6 +56,15 @@ def mock_service(temp_state_dir):
             self.config = MockConfig()
             self.data_fetcher = MockDataFetcher()
             self.notification_queue = MockNotificationQueue()
+            # Use the real ObservabilityOrchestrator so generate_dashboard_chart
+            # actually calls capture_live_chart_screenshot (patched in tests).
+            from pearlalgo.market_agent.observability_orchestrator import ObservabilityOrchestrator
+            self.observability_orchestrator = ObservabilityOrchestrator(
+                performance_tracker=MagicMock(),
+                notification_queue=MagicMock(),
+                telegram_notifier=MagicMock(),
+                state_manager=self.state_manager,
+            )
             self.last_dashboard_chart_sent = None
             self.last_status_update = None
             self.dashboard_chart_enabled = True
@@ -77,12 +86,12 @@ class TestCheckDashboard:
     async def test_sends_chart_when_due(self, mock_service):
         """Should send chart when interval has passed."""
         mock_service.last_dashboard_chart_sent = None
-        mock_service._generate_dashboard_chart = AsyncMock(return_value=None)
+        mock_service.observability_orchestrator.generate_dashboard_chart = AsyncMock(return_value=None)
         mock_service._send_dashboard = AsyncMock()
 
         await mock_service._check_dashboard()
 
-        mock_service._generate_dashboard_chart.assert_called_once()
+        mock_service.observability_orchestrator.generate_dashboard_chart.assert_called_once()
         mock_service._send_dashboard.assert_called_once()
 
     @pytest.mark.asyncio
@@ -90,12 +99,12 @@ class TestCheckDashboard:
         """Should send text-only dashboard when chart not due."""
         mock_service.last_dashboard_chart_sent = datetime.now(timezone.utc)
         mock_service.last_status_update = None
-        mock_service._generate_dashboard_chart = AsyncMock(return_value=None)
+        mock_service.observability_orchestrator.generate_dashboard_chart = AsyncMock(return_value=None)
         mock_service._send_dashboard = AsyncMock()
 
         await mock_service._check_dashboard()
 
-        mock_service._generate_dashboard_chart.assert_not_called()
+        mock_service.observability_orchestrator.generate_dashboard_chart.assert_not_called()
         mock_service._send_dashboard.assert_called_once()
 
     @pytest.mark.asyncio
@@ -126,17 +135,23 @@ class TestCheckDashboard:
 
 
 class TestGenerateDashboardChart:
-    """Tests for _generate_dashboard_chart method."""
+    """Tests for _generate_dashboard_chart method.
+
+    Since _generate_dashboard_chart now delegates to
+    ObservabilityOrchestrator.generate_dashboard_chart(), these tests
+    call the orchestrator method directly and patch capture_live_chart_screenshot
+    at its new import location inside the orchestrator.
+    """
 
     @pytest.mark.asyncio
     async def test_captures_live_chart(self, mock_service, temp_state_dir):
         """Should capture live chart screenshot."""
-        with patch('pearlalgo.market_agent.service_notifications.capture_live_chart_screenshot') as mock_capture:
+        with patch('pearlalgo.market_agent.live_chart_screenshot.capture_live_chart_screenshot') as mock_capture:
             mock_path = temp_state_dir / "exports" / "dashboard_telegram_latest.png"
             mock_path.write_bytes(b"fake image")
             mock_capture.return_value = mock_path
 
-            result = await mock_service._generate_dashboard_chart()
+            result = await mock_service.observability_orchestrator.generate_dashboard_chart()
 
             mock_capture.assert_called_once()
             assert result == mock_path
@@ -149,20 +164,20 @@ class TestGenerateDashboardChart:
         existing_chart = exports_dir / "dashboard_telegram_latest.png"
         existing_chart.write_bytes(b"existing chart")
 
-        with patch('pearlalgo.market_agent.service_notifications.capture_live_chart_screenshot') as mock_capture:
+        with patch('pearlalgo.market_agent.live_chart_screenshot.capture_live_chart_screenshot') as mock_capture:
             mock_capture.side_effect = Exception("Capture failed")
 
-            result = await mock_service._generate_dashboard_chart()
+            result = await mock_service.observability_orchestrator.generate_dashboard_chart()
 
             assert result == existing_chart
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_chart(self, mock_service, temp_state_dir):
         """Should return None when no chart exists."""
-        with patch('pearlalgo.market_agent.service_notifications.capture_live_chart_screenshot') as mock_capture:
+        with patch('pearlalgo.market_agent.live_chart_screenshot.capture_live_chart_screenshot') as mock_capture:
             mock_capture.return_value = None
 
-            result = await mock_service._generate_dashboard_chart()
+            result = await mock_service.observability_orchestrator.generate_dashboard_chart()
 
             # May return None or existing path depending on implementation
 

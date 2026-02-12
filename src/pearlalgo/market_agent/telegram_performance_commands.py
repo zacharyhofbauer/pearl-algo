@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Optional
 from pearlalgo.utils.logger import logger
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
 from pearlalgo.utils.paths import parse_utc_timestamp
+from pearlalgo.api.data_layer import get_cached_performance_data
 
 try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -58,204 +59,198 @@ class TelegramPerformanceCommandsMixin:
             
             lines = ["🔬 *Performance Analytics*", ""]
             
-            # Load all trades from performance.json
-            perf_file = self.state_dir / "performance.json"
-            if not perf_file.exists():
+            # Load all trades from performance.json (TTL-cached)
+            all_trades = get_cached_performance_data(self.state_dir).get("trades", [])
+            if not isinstance(all_trades, list):
+                all_trades = []
+
+            if not all_trades:
                 lines.append("No performance data available yet.")
                 lines.append("Start trading to see analytics.")
             else:
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
+
+                def _parse_dt(val) -> datetime | None:
+                    if not val:
+                        return None
+                    try:
+                        s = str(val).strip().replace("Z", "+00:00")
+                        # Strip fractional seconds when offset is present (fromisoformat can be finicky)
+                        if "." in s and "+" in s:
+                            parts = s.split("+", 1)
+                            base = parts[0].split(".", 1)[0]
+                            s = base + "+" + parts[1]
+                        dt = datetime.fromisoformat(s)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        return dt
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
+                        return None
+
+                # De-dupe by signal_id to prevent any double-counting in analytics
+                # if the performance log ever accumulates duplicate exits.
+                by_id: dict[str, dict] = {}
+                no_id: list[dict] = []
+                for t in all_trades:
+                    if not isinstance(t, dict):
+                        continue
+                    sid = str(t.get("signal_id") or "").strip()
+                    if not sid:
+                        no_id.append(t)
+                        continue
+                    prev = by_id.get(sid)
+                    if prev is None:
+                        by_id[sid] = t
+                        continue
+                    dt_new = _parse_dt(t.get("exit_time") or t.get("entry_time"))
+                    dt_old = _parse_dt(prev.get("exit_time") or prev.get("entry_time"))
+                    if dt_old is None and dt_new is not None:
+                        by_id[sid] = t
+                    elif dt_old is not None and dt_new is not None and dt_new > dt_old:
+                        by_id[sid] = t
+                all_trades = list(by_id.values()) + no_id
+
+                total_trades = len(all_trades)
+                total_wins = sum(1 for t in all_trades if isinstance(t, dict) and t.get("is_win"))
+                total_pnl = sum(float((t or {}).get("pnl", 0) or 0) for t in all_trades if isinstance(t, dict))
+                overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
                 
-                if not all_trades:
-                    lines.append("No trades recorded yet.")
-                else:
-                    # Defensive: perf file should be a list; tolerate bad shapes.
-                    if not isinstance(all_trades, list):
-                        all_trades = []
-
-                    def _parse_dt(val) -> datetime | None:
-                        if not val:
-                            return None
-                        try:
-                            s = str(val).strip().replace("Z", "+00:00")
-                            # Strip fractional seconds when offset is present (fromisoformat can be finicky)
-                            if "." in s and "+" in s:
-                                parts = s.split("+", 1)
-                                base = parts[0].split(".", 1)[0]
-                                s = base + "+" + parts[1]
-                            dt = datetime.fromisoformat(s)
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=timezone.utc)
-                            return dt
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}", exc_info=True)
-                            return None
-
-                    # De-dupe by signal_id to prevent any double-counting in analytics
-                    # if the performance log ever accumulates duplicate exits.
-                    by_id: dict[str, dict] = {}
-                    no_id: list[dict] = []
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        sid = str(t.get("signal_id") or "").strip()
-                        if not sid:
-                            no_id.append(t)
-                            continue
-                        prev = by_id.get(sid)
-                        if prev is None:
-                            by_id[sid] = t
-                            continue
-                        dt_new = _parse_dt(t.get("exit_time") or t.get("entry_time"))
-                        dt_old = _parse_dt(prev.get("exit_time") or prev.get("entry_time"))
-                        if dt_old is None and dt_new is not None:
-                            by_id[sid] = t
-                        elif dt_old is not None and dt_new is not None and dt_new > dt_old:
-                            by_id[sid] = t
-                    all_trades = list(by_id.values()) + no_id
-
-                    total_trades = len(all_trades)
-                    total_wins = sum(1 for t in all_trades if isinstance(t, dict) and t.get("is_win"))
-                    total_pnl = sum(float((t or {}).get("pnl", 0) or 0) for t in all_trades if isinstance(t, dict))
-                    overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
-                    
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji} ${total_pnl:,.2f}")
-                    lines.append("")
-                    
-                    # Session breakdown
-                    sessions = {
-                        'overnight': (18, 4),      # 6PM - 4AM ET
-                        'premarket': (4, 6),       # 4AM - 6AM ET
-                        'morning': (6, 10),        # 6AM - 10AM ET
-                        'midday': (10, 14),        # 10AM - 2PM ET
-                        'afternoon': (14, 17),     # 2PM - 5PM ET
-                        'close': (17, 18),         # 5PM - 6PM ET
-                    }
-                    
-                    session_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        time_str = t.get("exit_time") or t.get("entry_time")
-                        dt = _parse_dt(time_str)
-                        if dt is None:
-                            continue
-                        try:
-                            et_hour = int(dt.astimezone(et_tz).hour)
-                            
-                            session_name = 'other'
-                            for sname, (start, end) in sessions.items():
-                                if start > end:  # overnight wraps
-                                    if et_hour >= start or et_hour < end:
-                                        session_name = sname
-                                        break
-                                elif start <= et_hour < end:
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji} ${total_pnl:,.2f}")
+                lines.append("")
+                
+                # Session breakdown
+                sessions = {
+                    'overnight': (18, 4),      # 6PM - 4AM ET
+                    'premarket': (4, 6),       # 4AM - 6AM ET
+                    'morning': (6, 10),        # 6AM - 10AM ET
+                    'midday': (10, 14),        # 10AM - 2PM ET
+                    'afternoon': (14, 17),     # 2PM - 5PM ET
+                    'close': (17, 18),         # 5PM - 6PM ET
+                }
+                
+                session_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                
+                for t in all_trades:
+                    if not isinstance(t, dict):
+                        continue
+                    time_str = t.get("exit_time") or t.get("entry_time")
+                    dt = _parse_dt(time_str)
+                    if dt is None:
+                        continue
+                    try:
+                        et_hour = int(dt.astimezone(et_tz).hour)
+                        
+                        session_name = 'other'
+                        for sname, (start, end) in sessions.items():
+                            if start > end:  # overnight wraps
+                                if et_hour >= start or et_hour < end:
                                     session_name = sname
                                     break
-                            
-                            if t.get("is_win"):
-                                session_stats[session_name]['wins'] += 1
-                            else:
-                                session_stats[session_name]['losses'] += 1
-                            session_stats[session_name]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}", exc_info=True)
-                    
-                    lines.append("*📅 Session Performance:*")
-                    session_order = ['overnight', 'premarket', 'morning', 'midday', 'afternoon', 'close']
-                    for sname in session_order:
-                        data = session_stats[sname]
-                        count = data['wins'] + data['losses']
-                        if count > 0:
-                            wr = (data['wins'] / count * 100)
-                            pnl = data['pnl']
-                            emoji = "🟢" if pnl >= 0 else "🔴"
-                            # Highlight best/worst sessions
-                            if wr >= 55:
-                                indicator = "✅"
-                            elif wr <= 30:
-                                indicator = "⚠️"
-                            else:
-                                indicator = "•"
-                            lines.append(f"{indicator} {sname.title()}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
-                    
-                    lines.append("")
-                    
-                    # Top hours
-                    hour_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        time_str = t.get("exit_time") or t.get("entry_time")
-                        dt = _parse_dt(time_str)
-                        if dt is None:
-                            continue
-                        try:
-                            et_hour = int(dt.astimezone(et_tz).hour)
-                            
-                            if t.get("is_win"):
-                                hour_stats[et_hour]['wins'] += 1
-                            else:
-                                hour_stats[et_hour]['losses'] += 1
-                            hour_stats[et_hour]['pnl'] += float(t.get("pnl", 0) or 0)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}", exc_info=True)
-                    
-                    # Find best and worst hours
-                    hours_with_data = [(h, d) for h, d in hour_stats.items() if d['wins'] + d['losses'] >= 5]
-                    if hours_with_data:
-                        # Sort by P&L
-                        sorted_hours = sorted(hours_with_data, key=lambda x: x[1]['pnl'], reverse=True)
-                        
-                        lines.append("*⏰ Best Hours (ET):*")
-                        for h, data in sorted_hours[:3]:
-                            count = data['wins'] + data['losses']
-                            wr = (data['wins'] / count * 100) if count > 0 else 0
-                            pnl = data['pnl']
-                            if pnl > 0:
-                                lines.append(f"🔥 {h:02d}:00: {wr:.0f}% WR | +${pnl:,.0f}")
-                        
-                        lines.append("")
-                        lines.append("*⏰ Worst Hours (ET):*")
-                        for h, data in sorted_hours[-3:]:
-                            count = data['wins'] + data['losses']
-                            wr = (data['wins'] / count * 100) if count > 0 else 0
-                            pnl = data['pnl']
-                            if pnl < 0:
-                                lines.append(f"❄️ {h:02d}:00: {wr:.0f}% WR | -${abs(pnl):,.0f}")
-                    
-                    # Hold duration insight
-                    lines.append("")
-                    duration_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
-                    for t in all_trades:
-                        if not isinstance(t, dict):
-                            continue
-                        hold_mins = t.get("hold_duration_minutes", 0) or 0
-                        if hold_mins < 30:
-                            bucket = 'Quick (<30m)'
-                        elif hold_mins < 60:
-                            bucket = 'Medium (30-60m)'
-                        else:
-                            bucket = 'Long (60m+)'
+                            elif start <= et_hour < end:
+                                session_name = sname
+                                break
                         
                         if t.get("is_win"):
-                            duration_stats[bucket]['wins'] += 1
+                            session_stats[session_name]['wins'] += 1
                         else:
-                            duration_stats[bucket]['losses'] += 1
-                        duration_stats[bucket]['pnl'] += float(t.get("pnl", 0) or 0)
+                            session_stats[session_name]['losses'] += 1
+                        session_stats[session_name]['pnl'] += float(t.get("pnl", 0) or 0)
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
+                
+                lines.append("*📅 Session Performance:*")
+                session_order = ['overnight', 'premarket', 'morning', 'midday', 'afternoon', 'close']
+                for sname in session_order:
+                    data = session_stats[sname]
+                    count = data['wins'] + data['losses']
+                    if count > 0:
+                        wr = (data['wins'] / count * 100)
+                        pnl = data['pnl']
+                        emoji = "🟢" if pnl >= 0 else "🔴"
+                        # Highlight best/worst sessions
+                        if wr >= 55:
+                            indicator = "✅"
+                        elif wr <= 30:
+                            indicator = "⚠️"
+                        else:
+                            indicator = "•"
+                        lines.append(f"{indicator} {sname.title()}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
+                
+                lines.append("")
+                
+                # Top hours
+                hour_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                for t in all_trades:
+                    if not isinstance(t, dict):
+                        continue
+                    time_str = t.get("exit_time") or t.get("entry_time")
+                    dt = _parse_dt(time_str)
+                    if dt is None:
+                        continue
+                    try:
+                        et_hour = int(dt.astimezone(et_tz).hour)
+                        
+                        if t.get("is_win"):
+                            hour_stats[et_hour]['wins'] += 1
+                        else:
+                            hour_stats[et_hour]['losses'] += 1
+                        hour_stats[et_hour]['pnl'] += float(t.get("pnl", 0) or 0)
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
+                
+                # Find best and worst hours
+                hours_with_data = [(h, d) for h, d in hour_stats.items() if d['wins'] + d['losses'] >= 5]
+                if hours_with_data:
+                    # Sort by P&L
+                    sorted_hours = sorted(hours_with_data, key=lambda x: x[1]['pnl'], reverse=True)
                     
-                    lines.append("*⏱️ Hold Duration:*")
-                    for bucket in ['Quick (<30m)', 'Medium (30-60m)', 'Long (60m+)']:
-                        data = duration_stats[bucket]
+                    lines.append("*⏰ Best Hours (ET):*")
+                    for h, data in sorted_hours[:3]:
                         count = data['wins'] + data['losses']
-                        if count > 0:
-                            wr = (data['wins'] / count * 100)
-                            pnl = data['pnl']
-                            emoji = "🟢" if pnl >= 0 else "🔴"
-                            lines.append(f"• {bucket}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
+                        wr = (data['wins'] / count * 100) if count > 0 else 0
+                        pnl = data['pnl']
+                        if pnl > 0:
+                            lines.append(f"🔥 {h:02d}:00: {wr:.0f}% WR | +${pnl:,.0f}")
+                    
+                    lines.append("")
+                    lines.append("*⏰ Worst Hours (ET):*")
+                    for h, data in sorted_hours[-3:]:
+                        count = data['wins'] + data['losses']
+                        wr = (data['wins'] / count * 100) if count > 0 else 0
+                        pnl = data['pnl']
+                        if pnl < 0:
+                            lines.append(f"❄️ {h:02d}:00: {wr:.0f}% WR | -${abs(pnl):,.0f}")
+                
+                # Hold duration insight
+                lines.append("")
+                duration_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                for t in all_trades:
+                    if not isinstance(t, dict):
+                        continue
+                    hold_mins = t.get("hold_duration_minutes", 0) or 0
+                    if hold_mins < 30:
+                        bucket = 'Quick (<30m)'
+                    elif hold_mins < 60:
+                        bucket = 'Medium (30-60m)'
+                    else:
+                        bucket = 'Long (60m+)'
+                    
+                    if t.get("is_win"):
+                        duration_stats[bucket]['wins'] += 1
+                    else:
+                        duration_stats[bucket]['losses'] += 1
+                    duration_stats[bucket]['pnl'] += float(t.get("pnl", 0) or 0)
+                
+                lines.append("*⏱️ Hold Duration:*")
+                for bucket in ['Quick (<30m)', 'Medium (30-60m)', 'Long (60m+)']:
+                    data = duration_stats[bucket]
+                    count = data['wins'] + data['losses']
+                    if count > 0:
+                        wr = (data['wins'] / count * 100)
+                        pnl = data['pnl']
+                        emoji = "🟢" if pnl >= 0 else "🔴"
+                        lines.append(f"• {bucket}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
             
             text = "\n".join(lines)
             
@@ -417,90 +412,84 @@ class TelegramPerformanceCommandsMixin:
         """Display performance metrics from performance.json."""
         text = "📈 *Performance Metrics*\n\n"
         
-        # Load performance.json for comprehensive metrics
+        # Load performance.json for comprehensive metrics (TTL-cached)
         try:
-            perf_file = self.state_dir / "performance.json"
-            if perf_file.exists():
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
-                
-                if all_trades:
-                    now = datetime.now(timezone.utc)
-                    
-                    # 7-day metrics
-                    cutoff_7d = now - timedelta(days=7)
-                    trades_7d = []
-                    for t in all_trades:
-                        try:
-                            ts = t.get("exit_time") or t.get("entry_time")
-                            if ts:
-                                ts_str = str(ts).replace('Z', '+00:00')
-                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
-                                if dt.tzinfo is None:
-                                    dt = dt.replace(tzinfo=timezone.utc)
-                                if dt >= cutoff_7d:
-                                    trades_7d.append(t)
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}", exc_info=True)
-                    
-                    if trades_7d:
-                        total_trades = len(trades_7d)
-                        wins = sum(1 for t in trades_7d if t.get('is_win'))
-                        losses = total_trades - wins
-                        total_pnl = sum(float(t.get('pnl', 0) or 0) for t in trades_7d)
-                        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-                        
-                        # Calculate profit factor correctly
-                        winning_trades = [t for t in trades_7d if t.get('is_win')]
-                        losing_trades = [t for t in trades_7d if not t.get('is_win')]
-                        gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
-                        gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
-                        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
-                        
-                        avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
-                        avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
-                        avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
-                        
-                        # Calculate avg hold time
-                        hold_times = []
-                        for t in trades_7d:
-                            hold_mins = t.get('hold_duration_minutes', 0) or 0
-                            if hold_mins > 0:
-                                hold_times.append(hold_mins)
-                        avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
-                        
-                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                        wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                        pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
-                        
-                        text += "*7-Day Summary:*\n"
-                        text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
-                        text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
-                        text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
-                        text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
-                        if profit_factor > 0:
-                            text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
-                        text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
-                        text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
-                        if avg_hold > 0:
-                            text += f"  Avg Hold: {avg_hold:.1f} min\n"
-                    else:
-                        text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
-                    
-                    # All-time summary
-                    text += "\n*All-Time Summary:*\n"
-                    total_all = len(all_trades)
-                    wins_all = sum(1 for t in all_trades if t.get('is_win'))
-                    losses_all = total_all - wins_all
-                    pnl_all = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
-                    wr_all = (wins_all / total_all * 100) if total_all > 0 else 0
-                    
-                    pnl_emoji_all = "🟢" if pnl_all >= 0 else "🔴"
-                    text += f"  Trades: {total_all} ({wins_all}W / {losses_all}L)\n"
-                    text += f"  Win Rate: {wr_all:.1f}%\n"
-                    text += f"  Total P&L: {pnl_emoji_all} ${pnl_all:,.2f}\n"
+            all_trades = get_cached_performance_data(self.state_dir).get("trades", [])
+            if all_trades:
+                now = datetime.now(timezone.utc)
+
+                # 7-day metrics
+                cutoff_7d = now - timedelta(days=7)
+                trades_7d = []
+                for t in all_trades:
+                    try:
+                        ts = t.get("exit_time") or t.get("entry_time")
+                        if ts:
+                            ts_str = str(ts).replace('Z', '+00:00')
+                            dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            if dt >= cutoff_7d:
+                                trades_7d.append(t)
+                    except Exception as e:
+                        logger.debug(f"Non-critical: {e}", exc_info=True)
+
+                if trades_7d:
+                    total_trades = len(trades_7d)
+                    wins = sum(1 for t in trades_7d if t.get('is_win'))
+                    losses = total_trades - wins
+                    total_pnl = sum(float(t.get('pnl', 0) or 0) for t in trades_7d)
+                    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+                    # Calculate profit factor correctly
+                    winning_trades = [t for t in trades_7d if t.get('is_win')]
+                    losing_trades = [t for t in trades_7d if not t.get('is_win')]
+                    gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
+                    gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
+                    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+
+                    avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
+                    avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
+                    avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+
+                    # Calculate avg hold time
+                    hold_times = []
+                    for t in trades_7d:
+                        hold_mins = t.get('hold_duration_minutes', 0) or 0
+                        if hold_mins > 0:
+                            hold_times.append(hold_mins)
+                    avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
+
+                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                    pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
+
+                    text += "*7-Day Summary:*\n"
+                    text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
+                    text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
+                    text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                    text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
+                    if profit_factor > 0:
+                        text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
+                    text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+                    text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
+                    if avg_hold > 0:
+                        text += f"  Avg Hold: {avg_hold:.1f} min\n"
                 else:
-                    text += "No performance data available yet.\n"
+                    text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
+
+                # All-time summary
+                text += "\n*All-Time Summary:*\n"
+                total_all = len(all_trades)
+                wins_all = sum(1 for t in all_trades if t.get('is_win'))
+                losses_all = total_all - wins_all
+                pnl_all = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
+                wr_all = (wins_all / total_all * 100) if total_all > 0 else 0
+
+                pnl_emoji_all = "🟢" if pnl_all >= 0 else "🔴"
+                text += f"  Trades: {total_all} ({wins_all}W / {losses_all}L)\n"
+                text += f"  Win Rate: {wr_all:.1f}%\n"
+                text += f"  Total P&L: {pnl_emoji_all} ${pnl_all:,.2f}\n"
             else:
                 text += "No performance data available yet.\n"
         except Exception as e:
@@ -626,12 +615,7 @@ class TelegramPerformanceCommandsMixin:
         
         # Load from performance.json for accurate data
         try:
-            perf_file = self.state_dir / "performance.json"
-            all_trades = []
-            if perf_file.exists():
-                with open(perf_file, 'r') as f:
-                    all_trades = json.load(f)
-            
+            all_trades = get_cached_performance_data(self.state_dir).get("trades", [])
             if all_trades:
                 total_pnl = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
                 winning_trades = [t for t in all_trades if t.get('is_win')]

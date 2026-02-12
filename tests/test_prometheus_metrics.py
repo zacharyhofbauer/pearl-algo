@@ -13,7 +13,8 @@ from pathlib import Path
 # Add scripts to path for importing
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "monitoring"))
 
-from serve_agent_status import generate_metrics, evaluate_health, _load_state, _parse_ts
+from serve_agent_status import generate_metrics, evaluate_health
+from pearlalgo.utils.health_evaluator import HealthEvaluator
 
 
 class TestGenerateMetrics:
@@ -323,11 +324,11 @@ class TestEvaluateHealth:
 
 
 class TestParseTimestamp:
-    """Test timestamp parsing."""
+    """Test timestamp parsing via HealthEvaluator."""
 
     def test_parse_iso_format(self):
         """Should parse ISO format timestamps."""
-        ts = _parse_ts("2025-01-27T12:00:00+00:00")
+        ts = HealthEvaluator.parse_timestamp("2025-01-27T12:00:00+00:00")
         assert ts is not None
         assert ts.year == 2025
         assert ts.month == 1
@@ -335,26 +336,26 @@ class TestParseTimestamp:
 
     def test_parse_z_suffix(self):
         """Should parse timestamps with Z suffix."""
-        ts = _parse_ts("2025-01-27T12:00:00Z")
+        ts = HealthEvaluator.parse_timestamp("2025-01-27T12:00:00Z")
         assert ts is not None
         assert ts.year == 2025
 
     def test_parse_none_returns_none(self):
         """None input should return None."""
-        assert _parse_ts(None) is None
+        assert HealthEvaluator.parse_timestamp(None) is None
 
     def test_parse_invalid_returns_none(self):
         """Invalid timestamp should return None."""
-        assert _parse_ts("not-a-timestamp") is None
+        assert HealthEvaluator.parse_timestamp("not-a-timestamp") is None
 
 
 class TestLoadState:
-    """Test state file loading."""
+    """Test state file loading via HealthEvaluator."""
 
     def test_missing_file_returns_error(self, tmp_path):
         """Missing state file should return error dict."""
         missing_file = tmp_path / "nonexistent" / "state.json"
-        state = _load_state(missing_file)
+        state = HealthEvaluator.load_state(missing_file)
         
         assert "_error" in state
         assert state["_error"] == "state_file_missing"
@@ -363,7 +364,7 @@ class TestLoadState:
         """Corrupt JSON should return error dict."""
         corrupt_file = tmp_path / "state.json"
         corrupt_file.write_text("not valid json {{{")
-        state = _load_state(corrupt_file)
+        state = HealthEvaluator.load_state(corrupt_file)
         
         assert "_error" in state
         assert state["_error"] == "state_file_corrupt"
@@ -375,6 +376,6 @@ class TestLoadState:
         expected_state = {"running": True, "cycle_count": 42}
         state_file.write_text(json.dumps(expected_state))
         
-        state = _load_state(state_file)
+        state = HealthEvaluator.load_state(state_file)
         
         assert state == expected_state

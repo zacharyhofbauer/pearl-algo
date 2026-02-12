@@ -11,12 +11,12 @@
 #         name: Pearl AI Eval
 #         entry: scripts/pre-commit-eval.sh
 #         language: script
-#         files: ^pearl_ai/(brain|narrator|tools|config)\.py$
+#         files: ^src/pearlalgo/pearl_ai/(brain|narrator|tools|config)\.py$
 
 set -e
 
 # Check if any prompt files are staged
-PROMPT_FILES=$(git diff --cached --name-only | grep -E "^pearl_ai/(brain|narrator|tools|config)\.py$" || true)
+PROMPT_FILES=$(git diff --cached --name-only | grep -E "^src/pearlalgo/pearl_ai/(brain|narrator|tools|config)\.py$" || true)
 
 if [ -z "$PROMPT_FILES" ]; then
     echo "No prompt files changed, skipping eval"

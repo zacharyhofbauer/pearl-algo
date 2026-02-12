@@ -55,13 +55,13 @@ docs:
 	$(PYTHON) scripts/testing/check_doc_references.py
 
 eval:
-	$(PYTHON) -m pearl_ai.eval.ci --mock
+	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --mock
 
 eval-expanded:
-	$(PYTHON) -m pearl_ai.eval.ci --dataset golden_expanded.json --mock
+	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --dataset golden_expanded.json --mock
 
 eval-changed:
-	$(PYTHON) -m pearl_ai.eval.ci --changed-only --mock
+	$(PYTHON) -m pearlalgo.pearl_ai.eval.ci --changed-only --mock
 
 ci: ruff-bugs arch secrets docs smoke audit test
 

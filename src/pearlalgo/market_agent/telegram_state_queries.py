@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Optional, Any
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_state_file, get_signals_file, parse_utc_timestamp
+from pearlalgo.utils.state_io import load_json_file, load_jsonl_file
 from pearlalgo.market_agent.stats_computation import (
     compute_daily_stats,
     get_trading_day_start,
@@ -55,50 +56,42 @@ class TelegramStateQueriesMixin:
     def _read_state(self) -> Optional[dict]:
         """Read current state from state.json."""
         state_file = get_state_file(self.state_dir)
-        if not state_file.exists():
-            return None
-        try:
-            return json.loads(state_file.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"Failed to read state file: {e}")
-            return None
+        data = load_json_file(state_file)
+        return data or None
 
     def _read_recent_signals(self, limit: int = 10) -> list:
-        """Read recent signals from signals.jsonl."""
+        """Read recent signals from signals.jsonl (efficient tail-read)."""
         signals_file = get_signals_file(self.state_dir)
         if not signals_file.exists():
             return []
         try:
+            # Use tail-read helper: fetch at most 100 trailing lines instead of
+            # scanning the entire file.  The caller then slices to *limit*.
+            raw = load_jsonl_file(signals_file, max_lines=100)
+
             signals = []
-            with open(signals_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            rec = json.loads(line)
-                            # Normalize for UI: many handlers expect direction/type/etc at top-level,
-                            # but the JSONL stores these under rec["signal"].
-                            if isinstance(rec, dict):
-                                sig = rec.get("signal", {})
-                                if isinstance(sig, dict):
-                                    for k in (
-                                        "direction",
-                                        "type",
-                                        "symbol",
-                                        "timeframe",
-                                        "entry_price",
-                                        "stop_loss",
-                                        "take_profit",
-                                        "confidence",
-                                        "risk_reward",
-                                        "reason",
-                                    ):
-                                        if rec.get(k) is None and sig.get(k) is not None:
-                                            rec[k] = sig.get(k)
-                            signals.append(rec)
-                        except json.JSONDecodeError:
-                            continue
-            # Return most recent signals first
+            for rec in raw:
+                # Normalize for UI: many handlers expect direction/type/etc at top-level,
+                # but the JSONL stores these under rec["signal"].
+                if isinstance(rec, dict):
+                    sig = rec.get("signal", {})
+                    if isinstance(sig, dict):
+                        for k in (
+                            "direction",
+                            "type",
+                            "symbol",
+                            "timeframe",
+                            "entry_price",
+                            "stop_loss",
+                            "take_profit",
+                            "confidence",
+                            "risk_reward",
+                            "reason",
+                        ):
+                            if rec.get(k) is None and sig.get(k) is not None:
+                                rec[k] = sig.get(k)
+                signals.append(rec)
+            # Return most recent signals
             return signals[-limit:] if len(signals) > limit else signals
         except Exception as e:
             logger.warning(f"Failed to read signals file: {e}")
@@ -115,10 +108,7 @@ class TelegramStateQueriesMixin:
         )
         if not metrics_files:
             return None
-        try:
-            return json.loads(metrics_files[0].read_text(encoding="utf-8"))
-        except Exception:
-            return None
+        return load_json_file(metrics_files[0]) or None
 
     def _read_strategy_selection(self) -> Optional[dict]:
         """Read latest strategy selection from exports directory."""
@@ -131,10 +121,7 @@ class TelegramStateQueriesMixin:
         if not candidates:
             return None
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        try:
-            return json.loads(candidates[0].read_text(encoding="utf-8"))
-        except Exception:
-            return None
+        return load_json_file(candidates[0]) or None
 
     def _load_latest_incident_report(self) -> Optional[dict]:
         """Load the latest incident report from exports directory."""
@@ -148,7 +135,7 @@ class TelegramStateQueriesMixin:
             )
             if not files:
                 return None
-            return json.loads(files[-1].read_text(encoding="utf-8"))
+            return load_json_file(files[-1]) or None
         except Exception:
             return None
 
@@ -395,12 +382,8 @@ class TelegramStateQueriesMixin:
         """
         try:
             perf_file = self.state_dir / "performance.json"
-            if not perf_file.exists():
-                return []
-
-            with open(perf_file, 'r', encoding='utf-8') as f:
-                all_trades = json.load(f)
-
+            # performance.json contains a JSON array
+            all_trades = load_json_file(perf_file)
             if not isinstance(all_trades, list):
                 return []
 

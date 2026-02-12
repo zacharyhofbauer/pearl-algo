@@ -139,7 +139,7 @@ class TestKnownAnswers:
 
 class TestStreaks:
 
-    def test_simple_streaks(self):
+    def test_compute_streaks_identifies_wins_losses_and_current(self):
         max_w, max_l, cur = _compute_streaks([10, 20, -5, -10, -15, 30])
         assert max_w == 2
         assert max_l == 3

@@ -189,7 +189,7 @@ class TestBuildServiceDependencies:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_returns_service_dependencies_instance(
+    def test_build_service_dependencies_returns_fully_populated_instance(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,
@@ -330,3 +330,60 @@ class TestAccountLabel:
         assert call_kwargs.kwargs.get("account_label") == "IBKR-VIR" or (
             call_kwargs.args and "IBKR-VIR" in call_kwargs.args
         )
+
+
+# ---------------------------------------------------------------------------
+# Real-wiring test — only external I/O mocked
+# ---------------------------------------------------------------------------
+
+
+class TestRealWiringBuildDependencies:
+    """build_service_dependencies() with real constructors — only external I/O mocked."""
+
+    def test_service_factory_builds_real_dependencies_with_mock_io(
+        self,
+        tmp_path: Path,
+        mock_data_provider,
+    ) -> None:
+        """Use the real factory with only IBKR connection and Telegram mocked.
+
+        Verifies that every dependency is a genuine production instance and
+        that the state manager can round-trip data through the filesystem.
+        """
+        from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+        from pearlalgo.market_agent.health_monitor import HealthMonitor
+        from pearlalgo.market_agent.notification_queue import NotificationQueue
+        from pearlalgo.market_agent.performance_tracker import PerformanceTracker
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+        config = _minimal_config(symbol="MNQ", timeframe="5m")
+        service_cfg = _stub_service_config()
+
+        deps = build_service_dependencies(
+            data_provider=mock_data_provider,
+            config=config,
+            state_dir=tmp_path,
+            telegram_bot_token=None,   # disabled — no network
+            telegram_chat_id=None,
+            service_config=service_cfg,
+        )
+
+        assert isinstance(deps, ServiceDependencies)
+
+        # StateManager is a real instance that can save/load from disk
+        assert isinstance(deps.state_manager, MarketAgentStateManager)
+        deps.state_manager.save_state({"integration_test": True, "counter": 1})
+        loaded = deps.state_manager.load_state()
+        assert loaded["integration_test"] is True
+        assert loaded["counter"] == 1
+
+        # PerformanceTracker is a real instance
+        assert isinstance(deps.performance_tracker, PerformanceTracker)
+
+        # DataFetcher wraps the real mock data provider (not a MagicMock)
+        assert isinstance(deps.data_fetcher, MarketAgentDataFetcher)
+        assert deps.data_fetcher.data_provider is mock_data_provider
+
+        # HealthMonitor and NotificationQueue are non-None real instances
+        assert isinstance(deps.health_monitor, HealthMonitor)
+        assert isinstance(deps.notification_queue, NotificationQueue)

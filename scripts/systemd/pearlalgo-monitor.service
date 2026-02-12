@@ -9,4 +9,4 @@ Group=pearlalgo
 WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
 Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/monitoring/health_check.py
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/monitoring/monitor.py --market NQ --telegram

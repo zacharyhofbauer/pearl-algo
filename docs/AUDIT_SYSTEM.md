@@ -24,7 +24,7 @@ The audit system captures every meaningful event in PearlAlgo's lifecycle — fr
 
 ### Database
 
-All audit events live in the `audit_events` table inside `data/trades.db` (SQLite).
+All audit events live in the `audit_events` table inside `data/agent_state/<MARKET>/trades.db` (SQLite).
 
 ### Schema
 
@@ -56,15 +56,15 @@ The composite index on `(timestamp, account, event_type)` enables efficient quer
 | Event Category | Retention | Config Key |
 |---------------|-----------|------------|
 | General events (signals, trades, system) | 90 days | `audit.retention_days` |
-| Equity snapshots | 365 days | `audit.equity_retention_days` |
+| Equity snapshots | 365 days | `audit.snapshot_retention_days` |
 
 Retention is configurable in `config.yaml`:
 
 ```yaml
 audit:
   retention_days: 90
-  equity_retention_days: 365
-  db_path: "data/trades.db"
+  snapshot_retention_days: 365
+  # db_path is per-market: data/agent_state/<MARKET>/trades.db
 ```
 
 A nightly cleanup job prunes events older than the configured retention period.
@@ -191,7 +191,7 @@ For ad-hoc analysis, query the database directly:
 
 ```bash
 # Open the database
-sqlite3 data/trades.db
+sqlite3 data/agent_state/NQ/trades.db
 
 # Recent trade entries (last 24h)
 SELECT timestamp, account, json_extract(data_json, '$.direction') as direction,
@@ -238,7 +238,7 @@ The `AuditLogger` class provides typed methods for recording audit events. All m
 ```python
 from pearlalgo.audit import AuditLogger
 
-audit = AuditLogger(db_path="data/trades.db")
+audit = AuditLogger(db_path="data/agent_state/NQ/trades.db")
 
 # Signals
 audit.log_signal_generated(account="ibkr_virtual", direction="LONG", confidence=0.82,

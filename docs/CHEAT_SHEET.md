@@ -204,12 +204,12 @@ tail -f logs/web_app.log           # Next.js
 
 | Service | Client ID | Port |
 |---------|-----------|------|
-| IBKR Virtual agent (trading) | 10 | 4001 |
-| IBKR Virtual agent (data) | 11 | 4001 |
-| IBKR Virtual chart API | 96 | 4001 |
-| Tradovate Paper agent (trading) | 50 | 4001 |
-| Tradovate Paper agent (data) | 51 | 4001 |
-| Tradovate Paper chart API | 97 | 4001 |
+| IBKR Virtual agent (trading) | 10 | 4002 |
+| IBKR Virtual agent (data) | 11 | 4002 |
+| IBKR Virtual chart API | 96 | 4002 |
+| Tradovate Paper agent (trading) | 50 | 4002 |
+| Tradovate Paper agent (data) | 51 | 4002 |
+| Tradovate Paper chart API | 97 | 4002 |
 
 ### Key Code Files
 

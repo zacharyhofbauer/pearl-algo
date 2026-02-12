@@ -24,8 +24,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Any
 
+from pearlalgo.config.config_file import toggle_strategy_in_config
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_state_file
+from pearlalgo.utils.state_io import load_json_file
 
 if TYPE_CHECKING:
     from telegram import CallbackQuery, InlineKeyboardMarkup
@@ -126,7 +128,7 @@ class TelegramHandlersMixin:
         try:
             state_file = get_state_file(self.state_dir)
             if state_file.exists():
-                state = json.loads(state_file.read_text(encoding="utf-8"))
+                state = load_json_file(state_file)
                 virtual_count = state.get("active_trades_count", 0) or 0
                 state["close_all_requested"] = True
                 state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
@@ -175,9 +177,9 @@ class TelegramHandlersMixin:
 
             # First, try to write emergency stop signal to state file
             state_file = get_state_file(self.state_dir)
-            if state_file.exists():
+            state = load_json_file(state_file)
+            if state is not None:
                 try:
-                    state = json.loads(state_file.read_text(encoding="utf-8"))
                     state["emergency_stop"] = True
                     state["emergency_stop_time"] = datetime.now(timezone.utc).isoformat()
                     state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -273,8 +275,7 @@ class TelegramHandlersMixin:
         try:
             state_file = get_state_file(self.state_dir)
             if state_file.exists():
-                state = json.loads(state_file.read_text(encoding="utf-8"))
-                # Reset performance-related fields
+                state = load_json_file(state_file)
                 state["daily_pnl"] = 0.0
                 state["daily_trades"] = 0
                 state["daily_wins"] = 0
@@ -447,61 +448,8 @@ class TelegramHandlersMixin:
             strategy_name: Name of the strategy to toggle
             reply_markup: Fallback keyboard markup
         """
-        config_path = Path(os.getenv("PEARLALGO_CONFIG_PATH", "config/config.yaml"))
-        if not config_path.is_absolute():
-            repo_root = Path(__file__).resolve().parents[3]
-            config_path = (repo_root / config_path).resolve()
-        if not config_path.exists():
-            await self._safe_edit_or_send(
-                query,
-                f"❌ Config file not found: {config_path}\n\nCannot modify strategies.",
-                reply_markup=reply_markup,
-            )
-            return
-
         try:
-            import yaml
-
-            # Read current config
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f) or {}
-
-            # Ensure strategy section exists
-            if "strategy" not in config:
-                config["strategy"] = {}
-
-            strategy_config = config["strategy"]
-            enabled_signals = list(strategy_config.get("enabled_signals", []))
-            disabled_signals = list(strategy_config.get("disabled_signals", []))
-
-            # Toggle the strategy
-            if strategy_name in enabled_signals:
-                enabled_signals.remove(strategy_name)
-                if strategy_name not in disabled_signals:
-                    disabled_signals.append(strategy_name)
-                action = "disabled"
-            elif strategy_name in disabled_signals:
-                disabled_signals.remove(strategy_name)
-                if strategy_name not in enabled_signals:
-                    enabled_signals.append(strategy_name)
-                action = "enabled"
-            else:
-                if strategy_name not in enabled_signals:
-                    enabled_signals.append(strategy_name)
-                action = "enabled"
-
-            # Update config
-            strategy_config["enabled_signals"] = enabled_signals
-            strategy_config["disabled_signals"] = disabled_signals
-            config["strategy"] = strategy_config
-
-            # Backup original config
-            backup_path = config_path.with_suffix('.yaml.backup')
-            shutil.copy2(config_path, backup_path)
-
-            # Write updated config
-            with open(config_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            action = toggle_strategy_in_config(strategy_name)
 
             # Show success message
             status_emoji = "🟢" if action == "enabled" else "🔴"
@@ -532,6 +480,12 @@ class TelegramHandlersMixin:
 
             logger.info(f"Strategy {strategy_name} {action} via Telegram")
 
+        except FileNotFoundError as e:
+            await self._safe_edit_or_send(
+                query,
+                f"❌ {e}\n\nCannot modify strategies.",
+                reply_markup=reply_markup,
+            )
         except Exception as e:
             logger.error(f"Error toggling strategy: {e}", exc_info=True)
             await self._safe_edit_or_send(

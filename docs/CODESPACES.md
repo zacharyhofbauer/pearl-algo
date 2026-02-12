@@ -56,7 +56,7 @@ EOF
 
 ```bash
 ./scripts/lifecycle/agent.sh start --market NQ --background
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 ## Health Checks
@@ -64,7 +64,7 @@ EOF
 ### Quick health check (all services)
 
 ```bash
-./scripts/ops/quick_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 ### Run CI checks locally

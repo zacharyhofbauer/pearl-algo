@@ -14,7 +14,7 @@ from pearlalgo.config.config_schema import (
 class TestAccountDisplayConfig:
     """Test AccountDisplayConfig Pydantic model."""
 
-    def test_default_values(self):
+    def test_account_display_config_defaults_to_unknown_badge(self):
         cfg = AccountDisplayConfig()
         assert cfg.display_name == "Unknown"
         assert cfg.badge == "UNKNOWN"
@@ -53,7 +53,7 @@ class TestAccountsConfig:
 class TestAuditConfig:
     """Test AuditConfig Pydantic model."""
 
-    def test_defaults(self):
+    def test_audit_config_defaults_to_90_day_retention(self):
         cfg = AuditConfig()
         assert cfg.retention_days == 90
         assert cfg.snapshot_retention_days == 365

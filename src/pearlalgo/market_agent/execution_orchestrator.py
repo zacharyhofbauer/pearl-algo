@@ -12,20 +12,24 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``auto_flat_due()`` — daily/friday/weekend auto-flat logic
 - ``get_close_signals_requested()`` / ``clear_close_signals_requested()``
 - ``clear_close_all_flag()``
+- ``check_daily_reset()`` — daily counter reset
+- ``check_execution_health()`` — execution adapter monitoring
 
-**To migrate next (marked with ``# TODO(1A-migrate)`` in service.py):**
-- ``_close_all_virtual_trades()`` — force-close all positions
-- ``_close_specific_virtual_trades()`` — close by signal_id
-- ``_handle_close_all_requests()`` — close-all coordination
-- ``_check_execution_health()`` — execution adapter monitoring
-- ``_check_execution_control_flags()`` — arm/disarm/kill file checks
-- ``_check_daily_reset()`` — daily counter reset
+**Not migrated (too coupled to service.py):**
+- ``_close_all_virtual_trades()`` — needs performance_tracker, config,
+  notification system, internal price helpers, and sets tracking state
+  used by get_status()
+- ``_close_specific_virtual_trades()`` — same coupling as above
+- ``_handle_close_all_requests()`` — master coordinator calling 6+ tightly
+  coupled internal methods plus broker flatten operations
+- ``_check_execution_control_flags()`` — 278 lines, deeply intertwined
+  with operator_handler, data_fetcher, and execution adapter state
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -35,7 +39,8 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.virtual_trade_manager import VirtualTradeManager
     from pearlalgo.market_agent.order_manager import OrderManager
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-    from pearlalgo.execution.base import ExecutionAdapter
+    from pearlalgo.market_agent.notification_queue import NotificationQueue, Priority
+    from pearlalgo.execution.base import ExecutionAdapter, ExecutionConfig
 
 
 class ExecutionOrchestrator:
@@ -49,11 +54,8 @@ class ExecutionOrchestrator:
     - ``execute_signal()``: computes size via OrderManager, delegates placement
     - ``process_virtual_exits()``: delegates to VirtualTradeManager
     - ``get_active_positions()``: reads from state manager
-
-    Future scope (method migration):
-    - Auto-flat logic (daily/friday/weekend)
-    - Close-all-virtual-trades coordination
-    - Execution health checks
+    - ``check_daily_reset()``: resets execution counters at trading-day boundary
+    - ``check_execution_health()``: monitors adapter connection + alerts
     """
 
     def __init__(
@@ -63,11 +65,24 @@ class ExecutionOrchestrator:
         order_manager: "OrderManager",
         state_manager: "MarketAgentStateManager",
         execution_adapter: Optional["ExecutionAdapter"] = None,
+        execution_config: Optional["ExecutionConfig"] = None,
+        notification_queue: Optional["NotificationQueue"] = None,
+        connection_alert_cooldown_seconds: int = 300,
     ):
         self._virtual_trade_manager = virtual_trade_manager
         self._order_manager = order_manager
         self._state_manager = state_manager
         self._execution_adapter = execution_adapter
+        self._execution_config = execution_config
+        self._notification_queue = notification_queue
+
+        # State for check_daily_reset
+        self._last_trading_day: Optional[date] = None
+
+        # State for check_execution_health
+        self._execution_was_connected: Optional[bool] = None
+        self._last_connection_alert_time: Optional[datetime] = None
+        self._connection_alert_cooldown_seconds: int = connection_alert_cooldown_seconds
 
         logger.debug("ExecutionOrchestrator initialized")
 
@@ -241,3 +256,114 @@ class ExecutionOrchestrator:
             })
         except Exception as exc:
             logger.debug("Error clearing close_all_flag: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Daily reset (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    def check_daily_reset(self) -> None:
+        """
+        Reset execution daily counters at start of new trading day.
+
+        This ensures:
+        - _orders_today counter resets to 0 each day
+        - _daily_pnl resets to 0.0 each day (for kill switch threshold)
+        - Per-signal-type cooldowns clear
+
+        Called at start of each scan cycle in the main loop.
+        """
+        if self._execution_adapter is None:
+            return
+
+        from pearlalgo.market_agent.stats_computation import get_trading_day_start
+
+        # Use 6pm ET as the trading day boundary
+        today = get_trading_day_start().date()
+
+        if self._last_trading_day is None:
+            # First cycle - initialize but don't reset (may be mid-day startup)
+            self._last_trading_day = today
+            return
+
+        if self._last_trading_day != today:
+            # New trading day (6pm ET boundary crossed) - reset counters
+            self._execution_adapter.reset_daily_counters()
+            logger.info(
+                f"Execution daily counters reset for {today} "
+                f"(previous day: {self._last_trading_day}) - 6pm ET boundary"
+            )
+            self._last_trading_day = today
+
+    # ------------------------------------------------------------------
+    # Execution health monitoring (migrated from service.py)
+    # ------------------------------------------------------------------
+
+    async def check_execution_health(self) -> None:
+        """
+        Check execution adapter connection health and send alerts on state changes.
+
+        Sends Telegram alert when:
+        - Connection is lost (was connected, now disconnected)
+        - Connection is restored (was disconnected, now connected)
+
+        Deduplicates alerts using cooldown to prevent spam.
+        """
+        if self._execution_adapter is None:
+            return
+
+        # Only check if execution is enabled
+        if self._execution_config is None or not self._execution_config.enabled:
+            return
+
+        is_connected = self._execution_adapter.is_connected()
+        now = datetime.now(timezone.utc)
+
+        # Initialize state on first check
+        if self._execution_was_connected is None:
+            self._execution_was_connected = is_connected
+            return
+
+        # Check for state change
+        if is_connected != self._execution_was_connected:
+            # Check cooldown to avoid alert spam
+            should_alert = True
+            if self._last_connection_alert_time is not None:
+                elapsed = (now - self._last_connection_alert_time).total_seconds()
+                if elapsed < self._connection_alert_cooldown_seconds:
+                    should_alert = False
+
+            if should_alert and self._notification_queue is not None:
+                self._last_connection_alert_time = now
+
+                if is_connected:
+                    # Connection restored
+                    message = (
+                        "✅ *IBKR Execution Connected*\n\n"
+                        "Connection to IBKR Gateway has been restored.\n"
+                        f"Execution adapter is now {'armed' if self._execution_adapter.armed else 'disarmed'}."
+                    )
+                    logger.info("IBKR execution connection restored")
+                else:
+                    # Connection lost
+                    message = (
+                        "🔴 *IBKR Execution Disconnected*\n\n"
+                        "⚠️ Connection to IBKR Gateway has been lost.\n\n"
+                        "• Orders cannot be placed\n"
+                        "• Auto-reconnection will be attempted\n"
+                        "• Use `/positions` to check status"
+                    )
+                    logger.warning("IBKR execution connection lost")
+
+                # Send Telegram alert (through notification queue)
+                try:
+                    from pearlalgo.market_agent.notification_queue import Priority
+                    await self._notification_queue.enqueue_raw_message(
+                        message,
+                        parse_mode="Markdown",
+                        priority=Priority.NORMAL,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to queue connection alert: {e}")
+
+            # Update state
+            self._execution_was_connected = is_connected

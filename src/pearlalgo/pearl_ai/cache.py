@@ -152,6 +152,11 @@ class ResponseCache:
     - Skip cache for personalized content
     """
 
+    # Default TTL constants (match pearl_ai/config.py); config overrides at runtime
+    TTL_SHORT: int = 300   # 5 minutes - state-dependent queries
+    TTL_MEDIUM: int = 1800  # 30 minutes - general questions
+    TTL_LONG: int = 3600   # 1 hour - static content
+
     def __init__(self, max_size: Optional[int] = None):
         """
         Initialize response cache.

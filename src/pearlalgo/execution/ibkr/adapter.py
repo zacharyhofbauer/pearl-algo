@@ -215,6 +215,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
         try:
             loop.close()
         except Exception:
+            logger.debug("Failed to close event loop during IBKR shutdown", exc_info=True)
             pass
         
         logger.info("IBKR Execution thread stopped")
@@ -292,6 +293,7 @@ class IBKRExecutionAdapter(ExecutionAdapter):
                 try:
                     self._ib.disconnect()
                 except Exception:
+                    logger.debug("Failed to disconnect IBKR before reconnect", exc_info=True)
                     pass
             
             # Create new connection

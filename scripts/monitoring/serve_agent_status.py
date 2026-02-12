@@ -24,14 +24,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
+from pearlalgo.utils.health_evaluator import HealthEvaluator, HealthStatus
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 DEFAULT_PORT = 9100
 DEFAULT_HOST = "127.0.0.1"
-
-# Thresholds (seconds)
-STATE_STALE_THRESHOLD = 120
-CYCLE_STALE_THRESHOLD = 300
 
 
 def _resolve_state_file(market: str, state_dir_override: str | None = None) -> Path:
@@ -46,30 +44,6 @@ def _resolve_state_file(market: str, state_dir_override: str | None = None) -> P
     return PROJECT_ROOT / "data" / "agent_state" / market_upper / "state.json"
 
 
-def _load_state(state_file: Path) -> dict[str, Any]:
-    if not state_file.exists():
-        return {"_error": "state_file_missing", "_path": str(state_file)}
-    try:
-        return json.loads(state_file.read_text())
-    except json.JSONDecodeError as e:
-        return {"_error": "state_file_corrupt", "_detail": str(e)}
-    except Exception as e:
-        return {"_error": "state_file_read_error", "_detail": str(e)}
-
-
-def _parse_ts(ts_str: str | None) -> datetime | None:
-    if not ts_str:
-        return None
-    try:
-        ts_str = str(ts_str)
-        if ts_str.endswith("Z"):
-            ts_str = ts_str[:-1] + "+00:00"
-        dt = datetime.fromisoformat(ts_str)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
-
-
 def evaluate_health(state: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     """
     Evaluate agent health based on state.
@@ -80,92 +54,34 @@ def evaluate_health(state: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     - stale state/cycle/data while market open is unhealthy
     - details always includes "status" and may include "issues"
     """
-    now = datetime.now(timezone.utc)
-    details: dict[str, Any] = {"timestamp": now.isoformat()}
+    evaluator = HealthEvaluator(state_file=Path("/unused"))
+    result = evaluator.evaluate_state(state)
+    details = dict(result.details)
 
-    # State file errors
-    if "_error" in state:
-        error_type = str(state.get("_error", "unknown"))
-        status = f"state_error:{error_type}"
-        details.update(
-            {
-                "status": status,
-                "error": error_type,
-                "detail": state.get("_detail", ""),
-                "path": state.get("_path", ""),
-            }
-        )
+    # Additional serve_agent_status-specific field
+    connection_failures = int(state.get("connection_failures", 0) or 0)
+    details["connection_failures"] = connection_failures
+
+    if result.status == HealthStatus.ERROR:
+        status = details.get("status", f"state_error:{details.get('error', 'unknown')}")
         return (False, status, details)
 
-    running = bool(state.get("running", False))
-    paused = bool(state.get("paused", False))
-    pause_reason = state.get("pause_reason")
-    futures_market_open = state.get("futures_market_open")
-    strategy_session_open = state.get("strategy_session_open")
-    data_fresh = state.get("data_fresh")
-    consecutive_errors = int(state.get("consecutive_errors", 0) or 0)
-    connection_failures = int(state.get("connection_failures", 0) or 0)
-
-    last_updated = _parse_ts(state.get("last_updated"))
-    last_successful_cycle = _parse_ts(state.get("last_successful_cycle"))
-
-    details.update(
-        {
-            "running": running,
-            "paused": paused,
-            "pause_reason": pause_reason,
-            "futures_market_open": futures_market_open,
-            "strategy_session_open": strategy_session_open,
-            "data_fresh": data_fresh,
-            "consecutive_errors": consecutive_errors,
-            "connection_failures": connection_failures,
-        }
-    )
-
-    # Intentional stop is healthy
-    if not running:
-        details["status"] = "agent_stopped"
+    if not details.get("running", True):
         return (True, "agent_stopped", details)
 
-    issues: list[str] = []
+    issues = list(details.get("issues", []))
 
-    if paused:
-        issues.append("agent_paused")
-
-    if last_updated is None:
-        issues.append("missing_last_updated")
-    else:
-        age = (now - last_updated).total_seconds()
-        details["state_age_seconds"] = age
-        if age > STATE_STALE_THRESHOLD:
-            issues.append("state_stale")
-
-    if last_successful_cycle is None:
-        issues.append("missing_last_successful_cycle")
-    else:
-        age = (now - last_successful_cycle).total_seconds()
-        details["cycle_age_seconds"] = age
-        if age > CYCLE_STALE_THRESHOLD:
-            issues.append("cycle_stale")
-
-    # Suppress cycle staleness while market is closed or session is closed
-    if futures_market_open is False or strategy_session_open is False:
-        issues = [i for i in issues if i != "cycle_stale"]
-
-    if futures_market_open is True and data_fresh is False:
-        issues.append("data_stale")
-
-    # Operator threshold (kept simple; test expects 10 to trigger)
-    if consecutive_errors >= 10:
-        issues.append("consecutive_errors")
-
-    if connection_failures >= 5:
+    # Additional serve_agent_status-specific check
+    if connection_failures >= 5 and "connection_failures" not in issues:
         issues.append("connection_failures")
+        details["issues"] = issues
+        issue_msgs = list(details.get("issue_messages", []))
+        issue_msgs.append(f"Connection failures: {connection_failures}")
+        details["issue_messages"] = issue_msgs
 
     if issues:
         status = "unhealthy:" + ",".join(issues)
         details["status"] = status
-        details["issues"] = issues
         return (False, status, details)
 
     details["status"] = "healthy"
@@ -569,7 +485,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        state = _load_state(self.state_file)
+        state = HealthEvaluator.load_state(self.state_file)
         healthy, status, details = evaluate_health(state)
 
         if self.path == "/healthz":

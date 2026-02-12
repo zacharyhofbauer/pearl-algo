@@ -140,6 +140,21 @@ class PerformanceTracker:
         self._metrics_cache_time: float = 0.0
         self._metrics_cache_days: Optional[int] = None
 
+        # Running aggregates for all-time metrics — updated incrementally
+        # on each trade exit to avoid O(n) file scans.  Initialized from a
+        # one-time full scan on first get_performance_metrics() call.
+        self._running_aggregates: Dict = {
+            "total_pnl": 0.0,
+            "total_trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "total_win_pnl": 0.0,
+            "total_loss_pnl": 0.0,
+            "max_win": 0.0,
+            "max_loss": 0.0,
+            "is_initialized": False,
+        }
+
         logger.info(f"PerformanceTracker initialized: state_dir={self.state_dir}")
 
     def set_sqlite_queue(self, queue) -> None:
@@ -402,8 +417,54 @@ class PerformanceTracker:
             "exit_time": exit_time.isoformat(),
         }
 
-        # Invalidate the metrics cache so next read picks up the new exit
-        self._metrics_cache = None
+        # Update running aggregates incrementally (O(1) — no file scan).
+        self._update_running_aggregates(pnl, is_win)
+
+        # Incrementally patch the cached metrics dict (if present) instead of
+        # invalidating it — avoids the O(n) full-file scan that was previously
+        # triggered on every exit.  The exit just happened so it falls within
+        # any active time-window.  avg_hold_minutes and total_signals refresh
+        # on the next TTL-driven full scan.
+        if self._metrics_cache is not None:
+            c = self._metrics_cache
+            c["exited_signals"] = c.get("exited_signals", 0) + 1
+            c["total_pnl"] = c.get("total_pnl", 0.0) + pnl
+            if is_win:
+                c["wins"] = c.get("wins", 0) + 1
+            else:
+                c["losses"] = c.get("losses", 0) + 1
+            n_exited = c.get("exited_signals", 1)
+            c["win_rate"] = c["wins"] / n_exited if n_exited > 0 else 0.0
+            c["avg_pnl"] = c["total_pnl"] / n_exited if n_exited > 0 else 0.0
+            # Update by_signal_type breakdown
+            if "by_signal_type" in c:
+                sig_type = signal.get("type", "unknown")
+                if sig_type not in c["by_signal_type"]:
+                    c["by_signal_type"][sig_type] = {
+                        "count": 0, "wins": 0, "losses": 0,
+                        "total_pnl": 0.0, "win_rate": 0.0, "avg_pnl": 0.0,
+                    }
+                bt = c["by_signal_type"][sig_type]
+                bt["count"] += 1
+                bt["total_pnl"] += pnl
+                if is_win:
+                    bt["wins"] += 1
+                else:
+                    bt["losses"] += 1
+                bt["win_rate"] = bt["wins"] / bt["count"] if bt["count"] > 0 else 0.0
+                bt["avg_pnl"] = bt["total_pnl"] / bt["count"] if bt["count"] > 0 else 0.0
+            # Prepend to recent_exits so callers see the latest trade
+            if "recent_exits" in c:
+                c["recent_exits"].insert(0, {
+                    "signal_id": signal_id,
+                    "type": signal.get("type", "unknown"),
+                    "direction": direction,
+                    "pnl": pnl,
+                    "is_win": is_win,
+                    "exit_reason": exit_reason,
+                    "exit_time": exit_time.isoformat(),
+                })
+                c["recent_exits"] = c["recent_exits"][:10]
 
         # Determine outcome string for consistent schema
         outcome = "win" if is_win else "loss"
@@ -591,6 +652,11 @@ class PerformanceTracker:
 
         if days is None:
             days = self._default_lookback_days
+
+        # Ensure running aggregates are initialized (one-time full scan on
+        # startup).  Subsequent exits update them incrementally in track_exit().
+        if not self._running_aggregates["is_initialized"]:
+            self._initialize_running_aggregates()
 
         # Check TTL cache — return cached result when within TTL and same lookback
         now = _time.monotonic()
@@ -919,6 +985,98 @@ class PerformanceTracker:
                 atomic_write_json(self.performance_file, performances)
         except Exception as e:
             logger.error(f"Error saving performance record: {e}")
+
+    # ------------------------------------------------------------------
+    # Running aggregates – incremental O(1) updates per trade exit
+    # ------------------------------------------------------------------
+
+    def _initialize_running_aggregates(self) -> None:
+        """One-time full scan of signals.jsonl to seed running aggregates.
+
+        Called lazily on the first ``get_performance_metrics()`` invocation.
+        After this, ``_update_running_aggregates()`` keeps them current in
+        O(1) on every ``track_exit()``.
+        """
+        agg = self._running_aggregates
+        agg.update({
+            "total_pnl": 0.0,
+            "total_trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "total_win_pnl": 0.0,
+            "total_loss_pnl": 0.0,
+            "max_win": 0.0,
+            "max_loss": 0.0,
+        })
+
+        if not self.signals_file.exists():
+            agg["is_initialized"] = True
+            return
+
+        try:
+            with open(self.signals_file, "r") as f:
+                for line in f:
+                    try:
+                        record = json.loads(line.strip())
+                        if record.get("status") != "exited":
+                            continue
+                        # Skip test signals
+                        if record.get("_is_test", False):
+                            continue
+                        sig = record.get("signal", {})
+                        if isinstance(sig, dict) and sig.get("_is_test", False):
+                            continue
+
+                        pnl = float(record.get("pnl", 0))
+                        is_win = bool(record.get("is_win", False))
+
+                        agg["total_pnl"] += pnl
+                        agg["total_trades"] += 1
+                        if is_win:
+                            agg["wins"] += 1
+                            agg["total_win_pnl"] += pnl
+                            agg["max_win"] = max(agg["max_win"], pnl)
+                        else:
+                            agg["losses"] += 1
+                            agg["total_loss_pnl"] += pnl
+                            agg["max_loss"] = min(agg["max_loss"], pnl)
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        continue
+        except Exception as e:
+            logger.error(f"Error initializing running aggregates: {e}")
+
+        agg["is_initialized"] = True
+        if agg["total_trades"] > 0:
+            wr = agg["wins"] / agg["total_trades"] * 100
+            logger.info(
+                f"Running aggregates initialized: {agg['total_trades']} trades, "
+                f"PnL={agg['total_pnl']:.2f}, win_rate={wr:.1f}%"
+            )
+        else:
+            logger.info("Running aggregates initialized: 0 trades")
+
+    def _update_running_aggregates(self, pnl: float, is_win: bool) -> None:
+        """Incrementally update running aggregates with a new trade exit.
+
+        O(1) — no file I/O required.  If aggregates are not yet
+        initialized (first ``get_performance_metrics()`` hasn't run),
+        this is a no-op; the full initialization scan will pick up
+        the trade from the file.
+        """
+        agg = self._running_aggregates
+        if not agg["is_initialized"]:
+            return
+
+        agg["total_pnl"] += pnl
+        agg["total_trades"] += 1
+        if is_win:
+            agg["wins"] += 1
+            agg["total_win_pnl"] += pnl
+            agg["max_win"] = max(agg["max_win"], pnl)
+        else:
+            agg["losses"] += 1
+            agg["total_loss_pnl"] += pnl
+            agg["max_loss"] = min(agg["max_loss"], pnl)
 
     # ------------------------------------------------------------------
     # Async wrappers – run blocking file I/O in a thread to avoid

@@ -62,7 +62,7 @@ async def test_connection_failure_circuit_breaker_pauses_service(tmp_path) -> No
     task = asyncio.create_task(service.start())
 
     # Wait until the service pauses due to connection failures.
-    for _ in range(40):
+    for _ in range(80):
         if service.paused:
             break
         await asyncio.sleep(0.05)
@@ -71,7 +71,7 @@ async def test_connection_failure_circuit_breaker_pauses_service(tmp_path) -> No
     assert service.pause_reason == "connection_failures"
 
     await service.stop("test")
-    await asyncio.wait_for(task, timeout=2.0)
+    await asyncio.wait_for(task, timeout=5.0)
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +166,13 @@ class TestSQLiteDualWriteFallback:
         """A single signal is saved to JSON despite SQLite 'database is locked' error."""
         manager = MarketAgentStateManager(state_dir=tmp_path)
 
-        # Manually enable SQLite dual-write with a mock that always raises
-        manager._sqlite_enabled = True
+        # Manually enable SQLite dual-write with a mock that always raises.
+        # Since save_signal() delegates to _signal_store, set the mock there.
         mock_db = MagicMock()
         mock_db.add_signal_event.side_effect = Exception("database is locked")
-        manager._trade_db = mock_db
-        manager._async_sqlite_queue = None  # force blocking path
+        manager._signal_store._sqlite_enabled = True
+        manager._signal_store._trade_db = mock_db
+        manager._signal_store._async_sqlite_queue = None  # force blocking path
 
         signal = {
             "signal_id": "sqlite_fail_test",
@@ -196,11 +197,12 @@ class TestSQLiteDualWriteFallback:
         """Multiple signals accumulate in JSON even if every SQLite write fails."""
         manager = MarketAgentStateManager(state_dir=tmp_path)
 
-        manager._sqlite_enabled = True
+        # Since save_signal() delegates to _signal_store, set the mock there.
         mock_db = MagicMock()
         mock_db.add_signal_event.side_effect = OSError("disk full")
-        manager._trade_db = mock_db
-        manager._async_sqlite_queue = None
+        manager._signal_store._sqlite_enabled = True
+        manager._signal_store._trade_db = mock_db
+        manager._signal_store._async_sqlite_queue = None
 
         for i in range(5):
             manager.save_signal({

@@ -43,7 +43,7 @@ def _make_tracker(tmp_path: Path, **config_overrides) -> TvPaperEvaluationTracke
 class TestTvPaperEvalConfig:
     """Tests for TvPaperEvalConfig dataclass defaults."""
 
-    def test_default_values(self):
+    def test_eval_config_initializes_with_standard_50k_defaults(self):
         cfg = TvPaperEvalConfig()
         assert cfg.enabled is True
         assert cfg.stage == "evaluation"

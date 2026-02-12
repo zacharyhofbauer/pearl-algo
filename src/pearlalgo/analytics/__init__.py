@@ -16,6 +16,11 @@ from pearlalgo.analytics.doctor_report import (
 from pearlalgo.analytics.session_analytics import (
     compute_session_analytics,
 )
+from pearlalgo.analytics.incident_analysis import (
+    build_incident_report,
+    compute_exposure,
+    group_stats,
+)
 
 __all__ = [
     "TradeRecord",
@@ -24,4 +29,7 @@ __all__ = [
     "build_doctor_rollup",
     "format_doctor_rollup_text",
     "compute_session_analytics",
+    "build_incident_report",
+    "compute_exposure",
+    "group_stats",
 ]

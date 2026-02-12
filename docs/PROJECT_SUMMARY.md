@@ -570,7 +570,7 @@ pearlalgo-dev-ai-agents/
 ├── scripts/                     # Utility scripts (organized by category)
 │   ├── lifecycle/                  # Service lifecycle scripts
 │   │   ├── agent.sh                     # Start/stop/restart/status (market-aware)
-│   │   └── check_agent_status.sh        # Check status (market-aware)
+│   │   └── (status checks moved to ops/status.sh)
 │   ├── gateway/                    # IBKR Gateway scripts
 │   │   └── gateway.sh                  # Gateway CLI (start/stop/status/2FA/VNC/setup)
 │   ├── telegram/                   # Telegram command-handler scripts
@@ -578,7 +578,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── check_command_handler.sh     # Check handler status
 │   │   └── set_bot_commands.py          # Push BotFather commands via API
 │   ├── monitoring/                 # Monitoring scripts (external safety nets)
-│   │   ├── watchdog_agent.py            # State freshness watchdog (cron/systemd timer)
+│   │   ├── monitor.py                   # Automated health monitor + Telegram alerts (replaces health_check.py + watchdog_agent.py)
 │   │   └── serve_agent_status.py        # Localhost /healthz + /metrics sidecar (optional)
 │   ├── maintenance/                # Maintenance/hygiene scripts
 │   │   ├── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
@@ -901,7 +901,7 @@ In practice:
    - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
    - `smoke_multi_market.py`: Multi-market config + state isolation smoke
    - `check_no_secrets.py`: Secret detection guardrail
-   - `python -m pearl_ai.eval.ci --mock`: Pearl AI prompt regression eval (golden suite; see `.github/workflows/eval.yml`)
+   - `python -m pearlalgo.pearl_ai.eval.ci --mock`: Pearl AI prompt regression eval (golden suite; see `.github/workflows/eval.yml`)
 
 ### Running Tests
 
@@ -989,7 +989,7 @@ pip install -e .
 
 **Check Status**:
 ```bash
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 **View Logs**:
@@ -1052,7 +1052,7 @@ docker run --rm -it \\
 
 **Morning Checklist**:
 1. Verify IBKR Gateway is running: `./scripts/gateway/gateway.sh status`
-2. Check service status: `./scripts/lifecycle/check_agent_status.sh --market NQ`
+2. Check service status: `./scripts/ops/status.sh --market NQ`
 3. Review overnight errors/status (Telegram and/or `journalctl -u pearlalgo-mnq.service --since yesterday`)
 
 **During Trading**:
@@ -1080,7 +1080,7 @@ docker run --rm -it \\
 
 **Check Service Status**:
 ```bash
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ps aux | grep "pearlalgo.market_agent.main"
 ```
 
@@ -1107,15 +1107,15 @@ The watchdog script validates state freshness from outside the agent process:
 
 ```bash
 # Check health (exit codes: 0=OK, 1=Warning, 2=Critical, 3=Error)
-python3 scripts/monitoring/watchdog_agent.py --market NQ --verbose
+python3 scripts/monitoring/monitor.py --market NQ --verbose
 
 # Send alerts to Telegram on issues
-python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
+python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 Add to cron for continuous monitoring (every 5 minutes):
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 ### Status Server (Optional)
@@ -1359,7 +1359,7 @@ Use this document as the canonical reference for improvement iterations.
 ./scripts/lifecycle/agent.sh stop --market NQ
 
 # Check Service Status
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 
 # Run Tests
 python3 scripts/testing/test_all.py

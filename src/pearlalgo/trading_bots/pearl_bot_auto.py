@@ -1261,6 +1261,7 @@ class IndicatorResult:
     key_levels: Dict[str, Optional[float]]
     key_level_signal: Optional[str]
     key_level_confidence: float
+    key_level_info: Dict
     vwap_band_signal: Optional[str]
     regime: "MarketRegime"
     # Aggressive triggers (only populated when config enables them)
@@ -1308,38 +1309,51 @@ def _calculate_indicators(
                            atr=atr, atr_series=atr_series, ema_fast=ema_fast, ema_slow=ema_slow,
                            vwap_series=vwap_series, vwap_val=vwap_val)
 
-    vol_signal, vol_conf = safe_check(check_volume_confirmation, ctx.df, ctx.config)
-    volume_confirmed = vol_signal is not None
+    try:
+        volume_confirmed = check_volume_confirmation(ctx.df, ctx.config)
+    except Exception as e:
+        logger.warning("check_volume_confirmation failed: %s", e, exc_info=True)
+        volume_confirmed = False
 
     sr_signal, sr_conf = safe_check(check_sr_signals, ctx.df, ctx.config)
     tbt_signal, tbt_conf = safe_check(check_tbt_signals, ctx.df, ctx.config)
     sd_signal, sd_conf = safe_check(check_supply_demand_signals, ctx.df, ctx.config)
 
     key_levels = get_key_levels(df) if len(df) >= 5 else {}
-    kl_signal, kl_conf = (None, 0.0)
+    kl_signal, kl_conf, kl_info = (None, 0.0, {})
     if key_levels:
         try:
             result = check_key_level_signals(df, key_levels, config)
-            if result and len(result) >= 2:
+            if result and len(result) >= 3:
+                kl_signal, kl_conf, kl_info = result[0], result[1], result[2]
+            elif result and len(result) >= 2:
                 kl_signal, kl_conf = result[0], result[1]
         except Exception:
-            kl_signal, kl_conf = (None, 0.0)
+            kl_signal, kl_conf, kl_info = (None, 0.0, {})
 
     vwap_band_signal: Optional[str] = None
     try:
         if vwap_val is not None:
-            bands = calculate_vwap_bands(df, std_dev=params.vwap_std_dev, num_bands=params.vwap_bands)
-            if bands:
-                upper1 = bands.get("upper_1")
-                lower1 = bands.get("lower_1")
-                if upper1 is not None and close > upper1:
+            _vwap, upper_bands, lower_bands = calculate_vwap_bands(
+                df,
+                std_dev=params.vwap_std_dev,
+                bands=params.vwap_bands,
+                vwap_series=vwap_series,
+            )
+            if upper_bands and lower_bands:
+                outer_upper = upper_bands[-1].iloc[-1] if len(upper_bands) > 0 else None
+                outer_lower = lower_bands[-1].iloc[-1] if len(lower_bands) > 0 else None
+                if outer_upper is not None and close > outer_upper:
                     vwap_band_signal = "extended_above"
-                elif lower1 is not None and close < lower1:
+                elif outer_lower is not None and close < outer_lower:
                     vwap_band_signal = "extended_below"
-                elif lower1 is not None and close <= lower1 * 1.002:
-                    vwap_band_signal = "bounce_lower"
-                elif upper1 is not None and close >= upper1 * 0.998:
-                    vwap_band_signal = "bounce_upper"
+                elif len(upper_bands) > 0 and len(lower_bands) > 0:
+                    inner_upper = upper_bands[0].iloc[-1]
+                    inner_lower = lower_bands[0].iloc[-1]
+                    if close > vwap_val and close <= inner_upper:
+                        vwap_band_signal = "near_vwap_above"
+                    elif close < vwap_val and close >= inner_lower:
+                        vwap_band_signal = "near_vwap_below"
     except Exception:
         pass
 
@@ -1366,7 +1380,7 @@ def _calculate_indicators(
         tbt_signal=tbt_signal, tbt_confidence=tbt_conf,
         sd_signal=sd_signal, sd_confidence=sd_conf,
         key_levels=key_levels, key_level_signal=kl_signal, key_level_confidence=kl_conf,
-        vwap_band_signal=vwap_band_signal, regime=regime,
+        key_level_info=kl_info, vwap_band_signal=vwap_band_signal, regime=regime,
         vwap_cross_signal=vwap_cross_sig, vwap_retest_signal=vwap_retest_sig,
         trend_breakout_signal=trend_brk_sig, trend_momentum_signal=trend_mom_sig,
     )
@@ -1557,78 +1571,31 @@ def generate_signals(
             logger.debug(f"Trend momentum check failed: {e}")
             trend_momentum_long, trend_momentum_short = False, False
     
-    # 3. Volume confirmation (core - required)
-    volume_confirmed = check_volume_confirmation(df, config)
-    
-    # 4. S&R Power Channel (extended - conditional on data availability)
-    sr_signal, sr_confidence = None, 0.0
-    sr_length = config.get("sr_length", 130)
-    if len(df) >= sr_length:
-        try:
-            sr_signal, sr_confidence = check_sr_signals(df, config)
-        except Exception as e:
-            logger.debug(f"S&R signals check failed (optional): {e}")
+    # ------------------------------------------------------------------
+    # Use pre-computed indicator signals from _calculate_indicators()
+    # to avoid redundant computation of volume, S&R, TBT, S&D,
+    # key level, and VWAP band signals.
+    # ------------------------------------------------------------------
 
-    # 5. TBT Trendlines (extended - conditional on data availability)
-    tbt_signal, tbt_confidence = None, 0.0
-    tbt_period = config.get("tbt_period", 10)
-    if len(df) >= tbt_period * 2:
-        try:
-            tbt_signal, tbt_confidence = check_tbt_signals(df, config)
-        except Exception as e:
-            logger.debug(f"TBT signals check failed (optional): {e}")
+    # 3. Volume confirmation (core - pre-computed)
+    volume_confirmed = ind.volume_confirmed
 
-    # 6. Supply & Demand (extended - conditional, needs ~100 bars ideally)
-    sd_signal, sd_confidence = None, 0.0
-    if len(df) >= 20:
-        try:
-            sd_signal, sd_confidence = check_supply_demand_signals(df, config)
-        except Exception as e:
-            logger.debug(f"Supply/Demand signals check failed (optional): {e}")
-    
-    # 7. SpacemanBTC Key Levels (extended - conditional)
-    # These are CRITICAL for reversal/breakout detection
-    # key_levels dict already extracted from ind above
-    key_level_signal = None
-    key_level_conf_adj = 0.0
-    key_level_info = {}
-    if key_levels and len(df) >= 5:
-        try:
-            # Check for bounce/breakout signals at key levels
-            key_level_signal, key_level_conf_adj, key_level_info = check_key_level_signals(
-                df, key_levels, config
-            )
-        except Exception:
-            pass  # Key levels are optional enhancement
-    
-    # 8. VWAP bands (for extension/reversion detection)
-    vwap_band_signal = None
-    try:
-        vwap, upper_bands, lower_bands = calculate_vwap_bands(
-            df, 
-            std_dev=config.get("vwap_std_dev", 1.0),
-            bands=config.get("vwap_bands", 2),
-            vwap_series=vwap_series,
-        )
-        vwap_val = vwap.iloc[-1]
-        # Check if price is extended beyond outer band
-        if upper_bands and lower_bands:
-            outer_upper = upper_bands[-1].iloc[-1] if len(upper_bands) > 0 else None
-            outer_lower = lower_bands[-1].iloc[-1] if len(lower_bands) > 0 else None
-            if outer_upper is not None and close > outer_upper:
-                vwap_band_signal = "extended_above"
-            elif outer_lower is not None and close < outer_lower:
-                vwap_band_signal = "extended_below"
-            # Check for mean reversion opportunity (near inner band)
-            elif len(upper_bands) > 0 and len(lower_bands) > 0:
-                inner_upper = upper_bands[0].iloc[-1]
-                inner_lower = lower_bands[0].iloc[-1]
-                if close > vwap_val and close <= inner_upper:
-                    vwap_band_signal = "near_vwap_above"
-                elif close < vwap_val and close >= inner_lower:
-                    vwap_band_signal = "near_vwap_below"
-    except Exception:
-        pass  # VWAP bands optional - continue without
+    # 4. S&R Power Channel (extended - pre-computed)
+    sr_signal, sr_confidence = ind.sr_signal, ind.sr_confidence
+
+    # 5. TBT Trendlines (extended - pre-computed)
+    tbt_signal, tbt_confidence = ind.tbt_signal, ind.tbt_confidence
+
+    # 6. Supply & Demand (extended - pre-computed)
+    sd_signal, sd_confidence = ind.sd_signal, ind.sd_confidence
+
+    # 7. SpacemanBTC Key Levels (extended - pre-computed)
+    key_level_signal = ind.key_level_signal
+    key_level_conf_adj = ind.key_level_confidence
+    key_level_info = ind.key_level_info
+
+    # 8. VWAP bands (for extension/reversion detection - pre-computed)
+    vwap_band_signal = ind.vwap_band_signal
     
     # ==========================================================================
     # MARKET REGIME DETECTION

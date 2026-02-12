@@ -25,19 +25,23 @@ import pytest
 fastapi = pytest.importorskip("fastapi", reason="FastAPI not installed")
 
 # ---------------------------------------------------------------------------
-# Path setup: api_server.py lives under scripts/, not src/
+# Path setup: api_server.py lives under scripts/; app implementation under src/
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+SRC_DIR = PROJECT_ROOT / "src"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import the module under test after path setup.
-# We import the *module* so we can patch its globals.
+# Wrapper (scripts) re-exports app/ConnectionManager/ws_manager from real server
 import pearlalgo_web_app.api_server as api_mod  # noqa: E402
+# Real server module: patch this so request handlers see patched globals
+import pearlalgo.api.server as _server_impl  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -158,15 +162,16 @@ def _patch_globals(state_dir):
     Sets _state_dir, _market, disables auth by default, clears Pearl AI.
     """
     patches = [
-        patch.object(api_mod, "_state_dir", state_dir),
-        patch.object(api_mod, "_market", "NQ"),
-        patch.object(api_mod, "_auth_enabled", False),
-        patch.object(api_mod, "_api_keys", set()),
-        patch.object(api_mod, "_operator_enabled", False),
-        patch.object(api_mod, "_pearl_ai_mounted", False),
-        patch.object(api_mod, "_pearl_brain", None),
-        patch.object(api_mod, "_data_provider", None),
-        patch.object(api_mod, "_data_provider_error", "mocked-away"),
+        patch.object(_server_impl, "_state_dir", state_dir),
+        patch.object(_server_impl, "_state_reader", None),  # force fresh reader for this dir
+        patch.object(_server_impl, "_market", "NQ"),
+        patch.object(_server_impl, "_auth_enabled", False),
+        patch.object(_server_impl, "_api_keys", set()),
+        patch.object(_server_impl, "_operator_enabled", False),
+        patch.object(_server_impl, "_pearl_ai_mounted", False),
+        patch.object(_server_impl, "_pearl_brain", None),
+        patch.object(_server_impl, "_data_provider", None),
+        patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
     for p in patches:
         p.start()
@@ -179,15 +184,16 @@ def _patch_globals(state_dir):
 def _patch_globals_empty(empty_state_dir):
     """Patch globals pointing at an empty state directory."""
     patches = [
-        patch.object(api_mod, "_state_dir", empty_state_dir),
-        patch.object(api_mod, "_market", "NQ"),
-        patch.object(api_mod, "_auth_enabled", False),
-        patch.object(api_mod, "_api_keys", set()),
-        patch.object(api_mod, "_operator_enabled", False),
-        patch.object(api_mod, "_pearl_ai_mounted", False),
-        patch.object(api_mod, "_pearl_brain", None),
-        patch.object(api_mod, "_data_provider", None),
-        patch.object(api_mod, "_data_provider_error", "mocked-away"),
+        patch.object(_server_impl, "_state_dir", empty_state_dir),
+        patch.object(_server_impl, "_state_reader", None),  # force fresh reader for empty dir
+        patch.object(_server_impl, "_market", "NQ"),
+        patch.object(_server_impl, "_auth_enabled", False),
+        patch.object(_server_impl, "_api_keys", set()),
+        patch.object(_server_impl, "_operator_enabled", False),
+        patch.object(_server_impl, "_pearl_ai_mounted", False),
+        patch.object(_server_impl, "_pearl_brain", None),
+        patch.object(_server_impl, "_data_provider", None),
+        patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
     for p in patches:
         p.start()
@@ -200,15 +206,16 @@ def _patch_globals_empty(empty_state_dir):
 def _patch_globals_auth(state_dir):
     """Patch globals with authentication ENABLED and a known valid key."""
     patches = [
-        patch.object(api_mod, "_state_dir", state_dir),
-        patch.object(api_mod, "_market", "NQ"),
-        patch.object(api_mod, "_auth_enabled", True),
-        patch.object(api_mod, "_api_keys", {VALID_API_KEY}),
-        patch.object(api_mod, "_operator_enabled", False),
-        patch.object(api_mod, "_pearl_ai_mounted", False),
-        patch.object(api_mod, "_pearl_brain", None),
-        patch.object(api_mod, "_data_provider", None),
-        patch.object(api_mod, "_data_provider_error", "mocked-away"),
+        patch.object(_server_impl, "_state_dir", state_dir),
+        patch.object(_server_impl, "_state_reader", None),
+        patch.object(_server_impl, "_market", "NQ"),
+        patch.object(_server_impl, "_auth_enabled", True),
+        patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
+        patch.object(_server_impl, "_operator_enabled", False),
+        patch.object(_server_impl, "_pearl_ai_mounted", False),
+        patch.object(_server_impl, "_pearl_brain", None),
+        patch.object(_server_impl, "_data_provider", None),
+        patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
     for p in patches:
         p.start()
@@ -346,8 +353,8 @@ class TestStateEndpoint:
     def test_state_returns_500_when_state_dir_not_configured(self, client):
         """If _state_dir is None, return 500."""
         with (
-            patch.object(api_mod, "_state_dir", None),
-            patch.object(api_mod, "_auth_enabled", False),
+            patch.object(_server_impl, "_state_dir", None),
+            patch.object(_server_impl, "_auth_enabled", False),
         ):
             resp = client.get("/api/state")
             assert resp.status_code == 500
@@ -365,7 +372,7 @@ class TestCandlesEndpoint:
             {"time": 1700000000, "open": 20000, "high": 20010, "low": 19990, "close": 20005, "volume": 1234},
             {"time": 1700000300, "open": 20005, "high": 20015, "low": 19998, "close": 20010, "volume": 987},
         ]
-        with patch.dict(api_mod._candle_cache, {cache_key: sample_candles}):
+        with patch.dict(_server_impl._candle_cache, {cache_key: sample_candles}):
             resp = client.get("/api/candles?symbol=MNQ&timeframe=5m&bars=72")
 
         assert resp.status_code == 200
@@ -378,7 +385,7 @@ class TestCandlesEndpoint:
 
     def test_candles_returns_503_when_no_data(self, client, _patch_globals):
         """When no provider and no cache exist, return 503."""
-        with patch.dict(api_mod._candle_cache, {}, clear=True):
+        with patch.dict(_server_impl._candle_cache, {}, clear=True):
             resp = client.get("/api/candles?symbol=MNQ&timeframe=5m&bars=72")
         assert resp.status_code == 503
         body = resp.json()
@@ -513,10 +520,10 @@ class TestErrorHandling:
         assert resp.status_code == 422
 
     def test_candles_internal_error_returns_500(self, client, _patch_globals):
-        """If _fetch_candles_with_source raises unexpected error, return 500."""
+        """If _fetch_candles raises unexpected error, return 500."""
         with patch.object(
-            api_mod,
-            "_fetch_candles_with_source",
+            _server_impl,
+            "_fetch_candles",
             side_effect=RuntimeError("Unexpected boom"),
         ):
             resp = client.get("/api/candles?symbol=MNQ&timeframe=5m&bars=72")
@@ -841,10 +848,10 @@ class TestKillSwitch:
     def test_kill_switch_returns_500_when_state_dir_none(self, client):
         """Returns 500 when state directory is not configured."""
         with (
-            patch.object(api_mod, "_state_dir", None),
-            patch.object(api_mod, "_auth_enabled", True),
-            patch.object(api_mod, "_api_keys", {VALID_API_KEY}),
-            patch.object(api_mod, "_operator_enabled", False),
+            patch.object(_server_impl, "_state_dir", None),
+            patch.object(_server_impl, "_auth_enabled", True),
+            patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
+            patch.object(_server_impl, "_operator_enabled", False),
         ):
             resp = client.post(
                 "/api/kill-switch",

@@ -749,3 +749,64 @@ class TestConfigToServiceStartup:
         assert service.notification_queue is not None
         assert service.running is False
         assert service.signal_count >= 0
+
+
+# ---------------------------------------------------------------------------
+# Real-wiring pipeline: fetch → generate → persist
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestRealWiringPipeline:
+    """Full mini-pipeline with real constructors — only external I/O mocked."""
+
+    def test_fetch_generate_save_pipeline_writes_signal_to_disk(
+        self,
+        tmp_state_dir: Path,
+        mock_data_provider,
+    ):
+        """Fetch data via real provider → generate signals → persist to state file.
+
+        Uses the real MockDataProvider (not a MagicMock), real
+        generate_signals(), and real MarketAgentStateManager to verify the
+        entire pipeline writes data to disk without mocking internals.
+        """
+        from datetime import timedelta
+
+        from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+        from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
+
+        # 1. Fetch data via the real (mock) data provider
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=4)
+        df = mock_data_provider.fetch_historical("MNQ", start, end, timeframe="5m")
+        assert not df.empty, "Mock data provider should return data"
+
+        # 2. Generate signals from the real strategy code
+        signals = generate_signals(df, current_time=end)
+        assert isinstance(signals, list)
+
+        # 3. If the strategy produced no signal on this data, use a known-good
+        #    fallback so we always exercise the persist path.
+        signal_to_save = (
+            signals[0]
+            if signals
+            else _make_signal(entry=17600.0, direction="long")
+        )
+
+        # 4. Persist through a real state manager
+        sm = MarketAgentStateManager(state_dir=tmp_state_dir, service_config={})
+        sm.save_signal(signal_to_save)
+
+        # 5. Verify the signal was written to the physical file on disk
+        signals_file = tmp_state_dir / "signals.jsonl"
+        assert signals_file.exists(), "signals.jsonl should exist on disk"
+        raw_content = signals_file.read_text()
+        assert len(raw_content.strip()) > 0, "signals.jsonl should not be empty"
+
+        # 6. Verify round-trip through the state manager
+        recent = sm.get_recent_signals(limit=10)
+        assert len(recent) >= 1
+        inner = recent[-1].get("signal", recent[-1])
+        assert inner.get("entry_price") is not None
+        assert inner.get("direction") in ("long", "short")

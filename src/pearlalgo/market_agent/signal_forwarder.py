@@ -54,6 +54,7 @@ class SignalForwarder:
         # when the dedup set grows too large.  Values are unused (always True).
         self._processed_keys: OrderedDict[tuple[str, str], bool] = OrderedDict()
         self._last_read_offset: int = 0
+        self._last_file_inode: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Startup helpers
@@ -167,6 +168,14 @@ class SignalForwarder:
 
         new_signals: list[Dict] = []
         try:
+            # Detect file rotation (inode change or file shrunk) and reset offset.
+            st = os.stat(self.shared_signals_path)
+            if self._last_file_inode is not None and st.st_ino != self._last_file_inode:
+                self._last_read_offset = 0
+            elif self._last_read_offset > st.st_size:
+                self._last_read_offset = 0
+            self._last_file_inode = st.st_ino
+
             lock_path = Path(str(self.shared_signals_path) + ".lock")
             with open(lock_path, "w") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_SH)  # shared (read) lock

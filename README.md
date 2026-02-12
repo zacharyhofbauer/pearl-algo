@@ -51,7 +51,7 @@ Service behavior is configured in `config/config.yaml`.
 ./scripts/telegram/start_command_handler.sh --background
 
 # Check status
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 ## Validation
@@ -64,7 +64,7 @@ Service behavior is configured in `config/config.yaml`.
 python3 scripts/testing/test_all.py
 
 # Pearl AI prompt regression eval (fast, no API calls)
-python3 -m pearl_ai.eval.ci --mock
+python3 -m pearlalgo.pearl_ai.eval.ci --mock
 
 # Type checking (mypy)
 mypy src/pearlalgo

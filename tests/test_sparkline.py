@@ -175,7 +175,7 @@ class TestTrendArrow:
 class TestFormatMtfSnapshot:
     """Test multi-timeframe snapshot formatting."""
 
-    def test_basic_snapshot(self):
+    def test_format_mtf_snapshot_includes_all_timeframe_labels(self):
         """Should format basic snapshot."""
         trends = {"5m": 0.5, "15m": -0.3, "1h": 0.0}
         result = format_mtf_snapshot(trends)
@@ -201,7 +201,7 @@ class TestFormatMtfSnapshot:
 class TestFormatSessionSummary:
     """Test session summary formatting."""
 
-    def test_basic_summary(self):
+    def test_format_session_summary_includes_cycles_signals_and_buffer(self):
         """Should format session summary."""
         result = format_session_summary(
             cycles=100,

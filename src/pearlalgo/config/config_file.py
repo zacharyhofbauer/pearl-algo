@@ -152,8 +152,95 @@ def load_config_yaml(
         return {}
 
 
+def toggle_strategy_in_config(
+    strategy_name: str,
+    config_path: Optional[Union[str, Path]] = None,
+) -> str:
+    """Toggle a strategy on/off in config.yaml.
+
+    Reads config.yaml (without env substitution, preserving raw ``${VAR}``
+    tokens), flips the strategy between ``enabled_signals`` and
+    ``disabled_signals``, creates a ``.yaml.backup``, and writes back.
+
+    Args:
+        strategy_name: Name of the strategy to toggle.
+        config_path: Explicit path to config.yaml.  When ``None``, uses
+            ``PEARLALGO_CONFIG_PATH`` env var or ``config/config.yaml``
+            relative to the project root.
+
+    Returns:
+        ``"enabled"`` or ``"disabled"`` — the new state of the strategy.
+
+    Raises:
+        FileNotFoundError: If the config file does not exist.
+    """
+    import shutil
+
+    import yaml
+
+    # Resolve path (mirrors load_config_yaml resolution)
+    if config_path is None:
+        env_path = os.getenv("PEARLALGO_CONFIG_PATH")
+        if env_path:
+            resolved = Path(env_path)
+        else:
+            project_root = Path(__file__).parent.parent.parent.parent
+            resolved = project_root / "config" / "config.yaml"
+    else:
+        resolved = Path(config_path)
+
+    if not resolved.is_absolute():
+        project_root = Path(__file__).parent.parent.parent.parent
+        resolved = (project_root / resolved).resolve()
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"Config file not found: {resolved}")
+
+    # Read without env substitution — we write back as-is
+    with open(resolved, "r") as f:
+        config = yaml.safe_load(f) or {}
+
+    if "strategy" not in config:
+        config["strategy"] = {}
+
+    strategy_config = config["strategy"]
+    enabled_signals = list(strategy_config.get("enabled_signals", []))
+    disabled_signals = list(strategy_config.get("disabled_signals", []))
+
+    # Toggle the strategy
+    if strategy_name in enabled_signals:
+        enabled_signals.remove(strategy_name)
+        if strategy_name not in disabled_signals:
+            disabled_signals.append(strategy_name)
+        action = "disabled"
+    elif strategy_name in disabled_signals:
+        disabled_signals.remove(strategy_name)
+        if strategy_name not in enabled_signals:
+            enabled_signals.append(strategy_name)
+        action = "enabled"
+    else:
+        if strategy_name not in enabled_signals:
+            enabled_signals.append(strategy_name)
+        action = "enabled"
+
+    strategy_config["enabled_signals"] = enabled_signals
+    strategy_config["disabled_signals"] = disabled_signals
+    config["strategy"] = strategy_config
+
+    # Backup original config then write
+    backup_path = resolved.with_suffix(".yaml.backup")
+    shutil.copy2(resolved, backup_path)
+
+    with open(resolved, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    return action
+
+
 # Known top-level config sections (for unknown key detection)
 _KNOWN_CONFIG_SECTIONS = frozenset({
+    "accounts",
+    "audit",
     "symbol",
     "timeframe",
     "scan_interval",

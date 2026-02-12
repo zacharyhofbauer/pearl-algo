@@ -31,7 +31,7 @@ cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/lifecycle/agent.sh start --market NQ
 
 # 3. Check status (in another terminal)
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 **Note:** The service runs in foreground mode by default, showing all logs directly in your terminal. Press `Ctrl+C` to stop. To run in background (no terminal output), use `--background` flag.
@@ -113,7 +113,7 @@ kill $(cat logs/agent_NQ.pid) 2>/dev/null || true
 
 ### Check Service Status
 ```bash
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 
 # Or manually:
 ps aux | grep "pearlalgo.market_agent.main"
@@ -233,7 +233,7 @@ R:R: 1.47:1
 
 2. **Check Service Status:**
    ```bash
-   ./scripts/lifecycle/check_agent_status.sh --market NQ
+   ./scripts/ops/status.sh --market NQ
    ```
 
 3. **Review Overnight Activity:**
@@ -269,7 +269,7 @@ R:R: 1.47:1
 
 **Check Service Status:**
 ```bash
-./scripts/lifecycle/check_agent_status.sh --market NQ
+./scripts/ops/status.sh --market NQ
 ```
 
 **View Service State:**
@@ -304,17 +304,17 @@ If you want an **independent safety net** outside the running agent process (det
 
 ```bash
 # Local check (prints summary + exit code)
-python3 scripts/monitoring/watchdog_agent.py --market NQ --verbose
+python3 scripts/monitoring/monitor.py --market NQ --verbose
 
 # Alert to Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
-python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
+python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It reads `data/agent_state/NQ/state.json` and returns non‑zero exit codes for warning/critical conditions.
 
 **Cron example (every 5 minutes):**
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/monitor.py --market NQ --telegram
 ```
 
 ### Status Server (optional)
@@ -473,7 +473,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 ### Multiple Service Processes Running
 
-**Symptom:** `check_agent_status.sh --market NQ` shows multiple PIDs running
+**Symptom:** `scripts/ops/status.sh --market NQ` shows multiple PIDs running
 
 **Cause:** Service didn't stop cleanly, leaving orphaned processes
 
@@ -485,7 +485,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 2. **Verify all processes are stopped:**
    ```bash
-   ./scripts/lifecycle/check_agent_status.sh --market NQ
+   ./scripts/ops/status.sh --market NQ
    ```
 
 3. **If processes persist, manually kill them:**

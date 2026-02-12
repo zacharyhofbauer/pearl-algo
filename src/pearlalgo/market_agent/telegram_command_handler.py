@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import re
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -74,6 +75,8 @@ from pearlalgo.utils.pearl_suggestions import (
     PearlSuggestion,
     get_suggestion_engine,
 )
+from pearlalgo.utils.state_io import load_json_file
+from pearlalgo.config.config_file import load_config_yaml, toggle_strategy_in_config
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
@@ -112,6 +115,10 @@ except ImportError:
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
 from pearlalgo.market_agent.telegram_audit_commands import TelegramAuditCommandsMixin
+
+# TTL cache for _count_open_challenge_positions (avoids re-reading signals.jsonl on every menu build)
+_challenge_pos_cache: dict = {"count": 0, "ts": 0.0}
+_CHALLENGE_POS_TTL = 5.0  # seconds
 
 
 class TelegramCommandHandler(
@@ -244,10 +251,16 @@ class TelegramCommandHandler(
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
 
     def _count_open_challenge_positions(self) -> int:
-        """Count open challenge positions from signals.jsonl file."""
+        """Count open challenge positions from signals.jsonl file (5s TTL cached)."""
+        global _challenge_pos_cache
+        now = time.monotonic()
+        if now - _challenge_pos_cache["ts"] < _CHALLENGE_POS_TTL:
+            return _challenge_pos_cache["count"]
+
         try:
             signals_file = self.state_dir / "signals.jsonl"
             if not signals_file.exists():
+                _challenge_pos_cache = {"count": 0, "ts": now}
                 return 0
 
             open_count = 0
@@ -263,6 +276,7 @@ class TelegramCommandHandler(
                                 open_count += 1
                         except json.JSONDecodeError:
                             continue
+            _challenge_pos_cache = {"count": open_count, "ts": now}
             return open_count
         except Exception as e:
             logger.warning(f"Error counting open challenge positions: {e}")
@@ -1215,8 +1229,7 @@ class TelegramCommandHandler(
             state = None
             try:
                 state_file = self._state_dir_path_for_market(market) / "state.json"
-                if state_file.exists():
-                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                state = load_json_file(state_file) or None
             except Exception as e:
                 logger.debug(f"Non-critical: {e}", exc_info=True)
                 state = None
@@ -3712,62 +3725,9 @@ class TelegramCommandHandler(
 
     async def _toggle_strategy(self, query: CallbackQuery, strategy_name: str) -> None:
         """Toggle a strategy on/off by updating config.yaml."""
-        config_path = Path("config/config.yaml")
-        if not config_path.exists():
-            keyboard = [self._nav_back_row()]
-            await query.edit_message_text(
-                f"❌ Config file not found: {config_path}\n\nCannot modify strategies.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return
-        
         try:
-            import yaml
-            
-            # Read current config
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f) or {}
-            
-            # Ensure strategy section exists
-            if "strategy" not in config:
-                config["strategy"] = {}
-            
-            strategy_config = config["strategy"]
-            enabled_signals = list(strategy_config.get("enabled_signals", []))
-            disabled_signals = list(strategy_config.get("disabled_signals", []))
-            
-            # Toggle the strategy
-            if strategy_name in enabled_signals:
-                # Disable it
-                enabled_signals.remove(strategy_name)
-                if strategy_name not in disabled_signals:
-                    disabled_signals.append(strategy_name)
-                action = "disabled"
-            elif strategy_name in disabled_signals:
-                # Enable it
-                disabled_signals.remove(strategy_name)
-                if strategy_name not in enabled_signals:
-                    enabled_signals.append(strategy_name)
-                action = "enabled"
-            else:
-                # Not in either list, enable it
-                if strategy_name not in enabled_signals:
-                    enabled_signals.append(strategy_name)
-                action = "enabled"
-            
-            # Update config
-            strategy_config["enabled_signals"] = enabled_signals
-            strategy_config["disabled_signals"] = disabled_signals
-            config["strategy"] = strategy_config
-            
-            # Backup original config
-            backup_path = config_path.with_suffix('.yaml.backup')
-            shutil.copy2(config_path, backup_path)
-            
-            # Write updated config
-            with open(config_path, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            
+            action = toggle_strategy_in_config(strategy_name)
+
             # Show success message
             status_emoji = "🟢" if action == "enabled" else "🔴"
             keyboard = [
@@ -3782,7 +3742,13 @@ class TelegramCommandHandler(
             )
             await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             logger.info(f"Strategy {strategy_name} {action} via Telegram")
-            
+
+        except FileNotFoundError as e:
+            keyboard = [self._nav_back_row()]
+            await query.edit_message_text(
+                f"❌ {e}\n\nCannot modify strategies.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         except Exception as e:
             logger.error(f"Error toggling strategy: {e}", exc_info=True)
             keyboard = [self._nav_back_row()]
@@ -3977,13 +3943,10 @@ class TelegramCommandHandler(
             # Data age (read threshold from config)
             data_stale_threshold_minutes = 10.0  # Default
             try:
-                import yaml
-                config_path = Path("config/config.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
-                        data_config = config.get("data", {})
-                        data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
+                _cfg = load_config_yaml()
+                data_stale_threshold_minutes = float(
+                    _cfg.get("data", {}).get("stale_data_threshold_minutes", 10.0)
+                )
             except Exception as e:
                 logger.debug(f"Non-critical: {e}", exc_info=True)
             
@@ -4082,9 +4045,8 @@ class TelegramCommandHandler(
             _skip_ibkr_virtual_challenge = True
             try:
                 challenge_state_file = self.state_dir / "challenge_state.json"
-                if challenge_state_file.exists():
-                    import json as _cjson
-                    _cdata = _cjson.loads(challenge_state_file.read_text())
+                _cdata = load_json_file(challenge_state_file)
+                if _cdata:
                     _cenabled = (_cdata.get("config") or {}).get("enabled", False)
                     # Only show if explicitly enabled AND not an Tradovate Paper tracker
                     _cstage = (_cdata.get("config") or {}).get("stage") or (_cdata.get("tv_paper") or {}).get("stage")
@@ -4980,12 +4942,8 @@ class TelegramCommandHandler(
         
         # Try to load config
         try:
-            import yaml
-            config_path = Path("config/config.yaml")
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f) or {}
-                
+            config = load_config_yaml()
+            if config:
                 # Display key settings
                 strategy = config.get("strategy", {})
                 data = config.get("data", {})
@@ -5061,9 +5019,8 @@ class TelegramCommandHandler(
     def _detect_tv_paper_account(self) -> bool:
         """Detect if current account is Tradovate Paper (Tradovate-based challenge)."""
         try:
-            ch_file = self.state_dir / "challenge_state.json"
-            if ch_file.exists():
-                ch = json.loads(ch_file.read_text())
+            ch = load_json_file(self.state_dir / "challenge_state.json")
+            if ch:
                 _stage = (ch.get("tv_paper", {}) or {}).get("stage") or (ch.get("config", {}) or {}).get("stage")
                 if _stage and str(_stage).lower() in ("evaluation", "sim_funded", "live", "tv_paper_eval"):
                     return True
@@ -5099,6 +5056,7 @@ class TelegramCommandHandler(
                             history = json.load(f)
                     history = [h for h in history if h.get("outcome") in ("pass", "fail")]
                 except Exception:
+                    logger.debug("Failed to load Tradovate Paper challenge history", exc_info=True)
                     history = []
                 total_passes = sum(1 for h in history if h.get("outcome") == "pass")
                 total_fails = sum(1 for h in history if h.get("outcome") == "fail")
@@ -5182,6 +5140,7 @@ class TelegramCommandHandler(
                         with open(tv_paper_tracker.history_file) as f:
                             history = json.load(f)
                 except Exception:
+                    logger.debug("Failed to load Tradovate Paper challenge history for /history", exc_info=True)
                     history = []
                 history = [h for h in history if h.get("outcome") in ("pass", "fail")]
             else:

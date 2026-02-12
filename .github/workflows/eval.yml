@@ -8,22 +8,22 @@ name: Pearl AI Eval
 on:
   pull_request:
     paths:
-      - 'pearl_ai/brain.py'
-      - 'pearl_ai/narrator.py'
-      - 'pearl_ai/tools.py'
-      - 'pearl_ai/config.py'
-      - 'pearl_ai/prompts/**'
-      - 'pearl_ai/eval/**'
+      - 'src/pearlalgo/pearl_ai/brain.py'
+      - 'src/pearlalgo/pearl_ai/narrator.py'
+      - 'src/pearlalgo/pearl_ai/tools.py'
+      - 'src/pearlalgo/pearl_ai/config.py'
+      - 'src/pearlalgo/pearl_ai/prompts/**'
+      - 'src/pearlalgo/pearl_ai/eval/**'
   push:
     branches:
       - main
       - master
     paths:
-      - 'pearl_ai/brain.py'
-      - 'pearl_ai/narrator.py'
-      - 'pearl_ai/tools.py'
-      - 'pearl_ai/config.py'
-      - 'pearl_ai/prompts/**'
+      - 'src/pearlalgo/pearl_ai/brain.py'
+      - 'src/pearlalgo/pearl_ai/narrator.py'
+      - 'src/pearlalgo/pearl_ai/tools.py'
+      - 'src/pearlalgo/pearl_ai/config.py'
+      - 'src/pearlalgo/pearl_ai/prompts/**'
   workflow_dispatch:
     inputs:
       dataset:

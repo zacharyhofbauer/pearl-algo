@@ -203,6 +203,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         if isinstance(p, dict)
                     ]
                 except Exception:
+                    logger.warning("Failed to fetch broker positions, defaulting to empty", exc_info=True)
                     broker_positions = []
 
             active_broker_positions = [

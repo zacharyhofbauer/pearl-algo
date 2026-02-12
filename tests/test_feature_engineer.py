@@ -96,7 +96,7 @@ def feature_engineer():
 class TestFeatureConfig:
     """Tests for FeatureConfig dataclass."""
 
-    def test_default_values(self):
+    def test_feature_config_initializes_with_standard_window_sizes(self):
         """Test default configuration values."""
         config = FeatureConfig()
 
@@ -156,7 +156,7 @@ class TestFeatureConfig:
 class TestFeatureVector:
     """Tests for FeatureVector dataclass."""
 
-    def test_default_initialization(self):
+    def test_feature_vector_initializes_with_empty_features(self):
         """Test default FeatureVector initialization."""
         fv = FeatureVector()
 
@@ -229,7 +229,7 @@ class TestFeatureVector:
 class TestFeatureEngineerInit:
     """Tests for FeatureEngineer initialization."""
 
-    def test_default_initialization(self):
+    def test_feature_engineer_initializes_with_default_config(self):
         """Test default initialization."""
         fe = FeatureEngineer()
 

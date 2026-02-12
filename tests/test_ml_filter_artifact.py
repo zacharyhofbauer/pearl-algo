@@ -320,7 +320,7 @@ def test_ml_filter_save_model_untrained():
 # ==========================================================================
 
 
-def test_simple_gradient_boosting_fit_predict():
+def test_simple_gbm_fit_and_predict_returns_valid_probabilities():
     """SimpleGradientBoosting fits and predicts without external ML libs."""
     rng = np.random.RandomState(42)
     X = rng.randn(100, 5)
@@ -338,14 +338,14 @@ def test_simple_gradient_boosting_fit_predict():
     assert set(preds).issubset({0, 1})
 
 
-def test_simple_gradient_boosting_not_fitted_raises():
+def test_simple_gbm_predict_raises_value_error_before_fit():
     """predict_proba raises ValueError before fit."""
     model = SimpleGradientBoosting()
     with pytest.raises(ValueError, match="not fitted"):
         model.predict_proba(np.array([[1.0, 2.0, 3.0]]))
 
 
-def test_simple_gradient_boosting_feature_importances():
+def test_simple_gbm_feature_importances_sum_to_one_after_fit():
     """After fitting, feature_importances_ sums to approximately 1."""
     rng = np.random.RandomState(0)
     X = rng.randn(80, 4)

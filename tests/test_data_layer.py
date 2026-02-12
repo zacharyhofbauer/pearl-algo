@@ -164,9 +164,9 @@ class TestLoadPerformanceData:
         assert result is not None
         assert len(result) == 2
 
-    def test_missing_file_returns_none(self, tmp_path):
+    def test_missing_file_returns_empty_list(self, tmp_path):
         result = load_performance_data(tmp_path)
-        assert result is None
+        assert result == []
 
 
 # ---------------------------------------------------------------------------

@@ -65,14 +65,14 @@ class OperatorHandler:
 
             logger.info(f"Processing grade request: {signal_id} -> {'win' if is_win else 'loss'} (force={force})")
 
-            # Check if signal already has an exit recorded (via locked read)
+            # Check if signal already has an exit recorded (latest status per signal_id wins)
             already_exited = False
             try:
                 recent_signals = self.state_manager.get_recent_signals(limit=500)
                 for record in recent_signals:
                     if isinstance(record, dict) and record.get("signal_id") == signal_id:
                         already_exited = record.get("status") == "exited"
-                        break
+                        # Do not break: keep updating so last occurrence (latest status) wins
             except Exception as e:
                 logger.warning(f"Failed to check signal exit status: {e}")
 

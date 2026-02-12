@@ -823,7 +823,7 @@ function PearlAlgoWebAppInner() {
   const renderChart = () => (
     <div className="chart-wrapper">
       {/* Agent/Execution offline banner */}
-      {agentState && (agentState.running === false || agentState.execution?.connected === false) && (
+      {agentState && agentState.running === false && (
         <div style={{
           background: 'rgba(244, 67, 54, 0.15)',
           border: '1px solid rgba(244, 67, 54, 0.4)',
@@ -836,13 +836,9 @@ function PearlAlgoWebAppInner() {
           alignItems: 'center',
           gap: 8,
         }}>
-          <span style={{ fontWeight: 600 }}>
-            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISCONNECTED'}
-          </span>
+          <span style={{ fontWeight: 600 }}>AGENT OFFLINE</span>
           <span style={{ opacity: 0.7 }}>
-            {agentState.running === false
-              ? 'The trading agent is not running. Data may be stale.'
-              : 'Execution adapter is disconnected. Orders will not be placed.'}
+            The trading agent is not running. Data may be stale.
           </span>
         </div>
       )}

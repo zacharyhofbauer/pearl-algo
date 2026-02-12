@@ -7,8 +7,6 @@ This document standardizes the roles of all scripts under `scripts/` and identif
 - `agent.sh`
   - **Role**: Canonical market-aware agent lifecycle CLI (start/stop/restart/status).
   - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
-- `check_agent_status.sh`
-  - **Role**: Check process and basic state summary for a market (`--market NQ|ES|GC`).
 
 ## Gateway (`scripts/gateway/`)
 
@@ -63,8 +61,8 @@ Backtesting scripts for strategy validation on historical data.
 
 - `pre-commit-eval.sh`
   - **Role**: Optional pre-commit hook that runs Pearl AI prompt regression eval when prompt files are staged.
-  - **Triggers on**: staged changes to `pearl_ai/(brain|narrator|tools|config).py`.
-  - **Runs**: `python -m pearl_ai.eval.ci --mock` (fast, no API calls).
+  - **Triggers on**: staged changes to `src/pearlalgo/pearl_ai/(brain|narrator|tools|config).py`.
+  - **Runs**: `python -m pearlalgo.pearl_ai.eval.ci --mock` (fast, no API calls).
   - **Install**: `ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit`
 
 ## Maintenance (`scripts/maintenance/`)
@@ -87,10 +85,11 @@ Scripts for repository hygiene and cleanup operations.
 External safety nets intended for cron/systemd timers. These scripts validate runtime health/state;
 they do **not** contain trading or strategy logic.
 
-- `watchdog_agent.py`
-  - **Role**: External watchdog for state freshness + silent failure detection.
-  - **Behavior**: Reads `data/agent_state/<MARKET>/state.json`, checks staleness against scan interval and dashboard cadence, and can optionally send Telegram alerts.
-  - **Usage**: `python3 scripts/monitoring/watchdog_agent.py --market NQ [--telegram] [--verbose]`
+- `monitor.py`
+  - **Role**: Automated health monitor with Telegram alerts and structured exit codes. Replaces the former `health_check.py` and `watchdog_agent.py`.
+  - **Behavior**: Uses `HealthEvaluator` to check agent state freshness; also probes IBKR Gateway, API server, and web app. Supports alert deduplication via `alert_state.json` and sends Telegram notifications on new failures / recoveries.
+  - **Usage**: `python3 scripts/monitoring/monitor.py --market NQ [--telegram] [--verbose] [--json]`
+  - **Exit codes**: 0=OK, 1=WARNING, 2=CRITICAL, 3=ERROR
 
 - `serve_agent_status.py`
   - **Role**: Localhost status server for standard tooling integration (curl, Prometheus, systemd health checks).
@@ -139,10 +138,11 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
 
 Quick operational utilities for manual/interactive use.
 
-- `quick_status.sh`
-  - **Role**: Fast local health snapshot (processes, gateway, state.json, recent signals/log errors). Requires `jq`.
-  - **Usage**: `./scripts/ops/quick_status.sh --market NQ`
-  - **Note**: For automated monitoring with Telegram alerts, use `scripts/monitoring/health_check.py` instead.
+- `status.sh`
+  - **Role**: Manual CLI health check — shows process, gateway, state, signal, and log status. Replaces the former `quick_status.sh` and `lifecycle/check_agent_status.sh`.
+  - **Usage**: `./scripts/ops/status.sh [--market NQ]`
+  - **Requires**: `jq` (optional but recommended for pretty state output).
+  - **Note**: For automated monitoring with Telegram alerts, use `scripts/monitoring/monitor.py` instead.
 
 ## General Guidelines
 

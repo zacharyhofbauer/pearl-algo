@@ -534,6 +534,7 @@ class TradovateClient:
             if name:
                 return name
         except Exception:
+            logger.debug("Direct find_contract failed for %s", product, exc_info=True)
             pass
 
         raise TradovateAPIError(f"Could not resolve front-month contract for {product}")
@@ -633,6 +634,7 @@ class TradovateClient:
             except asyncio.CancelledError:
                 break
             except Exception:
+                logger.error("WebSocket heartbeat loop failed unexpectedly", exc_info=True)
                 break
 
     async def _ws_listener_loop(self) -> None:
@@ -698,6 +700,7 @@ class TradovateClient:
                 try:
                     await self._ws.close()
                 except Exception:
+                    logger.debug("Failed to close lingering WebSocket", exc_info=True)
                     pass
             self._ws = None
 
@@ -733,6 +736,7 @@ class TradovateClient:
                         try:
                             handler({"e": "ws_reconnected"})
                         except Exception:
+                            logger.debug("WebSocket reconnect event handler failed", exc_info=True)
                             pass
                     break  # Back to outer loop -> inner message loop
 

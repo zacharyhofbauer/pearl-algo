@@ -226,10 +226,10 @@ def get_cached_challenge_state(state_dir: Path) -> Optional[TvPaperChallengeStat
     """
     def _read() -> Optional[TvPaperChallengeState]:
         ch_file = state_dir / "challenge_state.json"
-        if not ch_file.exists():
-            return None
         try:
-            data = json.loads(ch_file.read_text(encoding="utf-8"))
+            data = _load_json_file(ch_file)
+            if not data:
+                return None
             return TvPaperChallengeState.from_challenge_data(data)
         except Exception as exc:
             logger.debug(f"Could not parse challenge_state.json: {exc}")
@@ -248,9 +248,8 @@ _DEFAULT_START_BALANCE = 50_000.0
 def get_start_balance(state_dir: Path) -> float:
     """Read Tradovate Paper start balance from challenge_state.json, or return default."""
     try:
-        ch_file = state_dir / "challenge_state.json"
-        if ch_file.exists():
-            ch_data = json.loads(ch_file.read_text())
+        ch_data = _load_json_file(state_dir / "challenge_state.json")
+        if ch_data:
             return float(
                 ch_data.get("config", {}).get("start_balance", _DEFAULT_START_BALANCE)
             )
@@ -271,10 +270,9 @@ def get_cached_performance_data(state_dir: Path) -> dict:
     """
     def _read_perf() -> dict:
         pf = state_dir / "performance.json"
-        if not pf.exists():
-            return {}
         try:
-            data = json.loads(pf.read_text())
+            data = _load_json_file(pf)
+            # performance.json contains a JSON array, not a dict
             if isinstance(data, list):
                 return {"trades": data}
             return {}
@@ -290,7 +288,8 @@ def load_performance_data(state_dir: Path) -> Optional[list]:
     Delegates to :func:`get_cached_performance_data` so the underlying
     disk read is shared across all callers within the 5-second TTL window.
     """
-    return get_cached_performance_data(state_dir).get("trades")
+    perf_data = get_cached_performance_data(state_dir)
+    return (perf_data or {}).get("trades", [])
 
 
 # ---------------------------------------------------------------------------

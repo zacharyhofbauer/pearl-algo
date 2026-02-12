@@ -24,7 +24,7 @@ Pearl runs two isolated accounts simultaneously:
 | Account | Purpose | Execution | State Dir | API Port |
 |---------|---------|-----------|-----------|----------|
 | **IBKR Virtual** | Live market data, virtual P&L tracking | IBKR (dry_run) | `data/agent_state/NQ/` | 8000 |
-| **Tradovate Paper** | MyFundedFutures 50K prop firm | Tradovate (paper) | `data/agent_state/TV_PAPER_EVAL/` | 8001 |
+| **Tradovate Paper** | Tradovate Paper 50K Rapid Evaluation | Tradovate (paper) | `data/agent_state/TV_PAPER_EVAL/` | 8001 |
 
 **Signal flow**: IBKR Virtual generates all signals via `strategy.analyze()`. Tradovate Paper reads signals from `data/shared_signals.jsonl` (written by IBKR Virtual) instead of running its own strategy. This guarantees both accounts trade the same signals. Tradovate Paper's circuit breaker eval gate still enforces prop firm rules (max contracts, trading hours, hedging, news blackout).
 

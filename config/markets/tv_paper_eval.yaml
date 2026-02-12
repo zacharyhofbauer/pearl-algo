@@ -5,7 +5,7 @@
 # It extends the base config.yaml with prop-firm-specific settings.
 #
 # Launch: ./scripts/lifecycle/tv_paper_eval.sh start --background
-# Web:    http://localhost:3000?api_port=8001
+# Web:    http://localhost:3001?api_port=8001
 # ============================================================================
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ execution:
   # IBKR data connection (separate client IDs to avoid clash with IBKR Virtual NQ agent)
   ibkr_trading_client_id: 50
   ibkr_host: "127.0.0.1"
-  ibkr_port: 4001
+  ibkr_port: 4002
 
 # IBKR data provider override (avoid client ID clash with IBKR Virtual agent)
 data:

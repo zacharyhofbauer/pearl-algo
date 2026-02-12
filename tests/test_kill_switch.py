@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+# Ensure src is on path so pearlalgo.api.server can be imported
+_TEST_ROOT = Path(__file__).parent.parent
+_SRC_DIR = _TEST_ROOT / "src"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 
 @pytest.fixture
@@ -12,13 +20,12 @@ def api_server_module(monkeypatch, tmp_path):
 
     The API server starts a background WS broadcast loop on startup. In tests we
     patch that loop (and other startup init) to avoid hanging tasks.
+    Uses the real implementation (pearlalgo.api.server) so patched globals are seen.
     """
-    # Avoid importing the API server module unless FastAPI/uvicorn exist.
-    # The module calls sys.exit(1) on missing deps.
     pytest.importorskip("fastapi")
     pytest.importorskip("uvicorn")
 
-    import scripts.pearlalgo_web_app.api_server as api_server
+    import pearlalgo.api.server as api_server
 
     async def _noop_broadcast_loop(*args, **kwargs):
         return None
@@ -26,12 +33,9 @@ def api_server_module(monkeypatch, tmp_path):
     monkeypatch.setattr(api_server.ws_manager, "start_broadcast_loop", _noop_broadcast_loop)
     monkeypatch.setattr(api_server, "_init_auth", lambda: None)
     monkeypatch.setattr(api_server, "_init_pearl_ai", lambda: None)
-    # Ensure operator lock does not interfere with API-key auth tests, even if
-    # the local environment has PEARL_OPERATOR_PASSPHRASE set.
     monkeypatch.setattr(api_server, "_operator_passphrase", "")
     monkeypatch.setattr(api_server, "_operator_enabled", False)
 
-    # Ensure the state dir is isolated per-test
     api_server._state_dir = tmp_path
     api_server._market = "NQ"
 

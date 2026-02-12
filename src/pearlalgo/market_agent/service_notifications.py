@@ -82,7 +82,7 @@ class ServiceNotificationsMixin:
             chart_path = None
             try:
                 # Bound chart generation time so the service loop cannot stall indefinitely.
-                chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+                chart_path = await asyncio.wait_for(self.observability_orchestrator.generate_dashboard_chart(), timeout=30.0)
             except Exception as e:
                 logger.debug(f"Could not generate dashboard chart: {e}", exc_info=True)
                 chart_path = None
@@ -115,32 +115,11 @@ class ServiceNotificationsMixin:
             self.last_status_update = now
 
     async def _generate_dashboard_chart(self: "MarketAgentService") -> Optional[Path]:
+        """Capture the Live Main Chart and export it for Telegram/UI use.
+
+        Delegated to ObservabilityOrchestrator.generate_dashboard_chart().
         """
-        Capture the Live Main Chart and export it for Telegram/UI use.
-
-        This produces (atomically) a PNG at:
-          `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
-        """
-        import os
-
-        exports_dir = self.state_manager.state_dir / "exports"
-        try:
-            exports_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}", exc_info=True)
-
-        export_path = exports_dir / "dashboard_telegram_latest.png"
-        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
-
-        try:
-            captured = await capture_live_chart_screenshot(output_path=export_path, url=str(chart_url))
-            if captured and captured.exists():
-                return captured
-        except Exception as e:
-            logger.debug(f"Could not capture live chart screenshot: {e}", exc_info=True)
-
-        # Fallback: return whatever exists on disk (may be stale) for resiliency.
-        return export_path if export_path.exists() else None
+        return await self.observability_orchestrator.generate_dashboard_chart()
 
     async def _send_dashboard(
         self: "MarketAgentService",

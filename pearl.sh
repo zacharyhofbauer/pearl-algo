@@ -586,7 +586,7 @@ handle_agent() {
             stop_agent
             ;;
         status)
-            ./scripts/lifecycle/check_agent_status.sh --market "$MARKET"
+            ./scripts/ops/status.sh --market "$MARKET"
             ;;
         *)
             echo "Unknown agent command: $subcmd"

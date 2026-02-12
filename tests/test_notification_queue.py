@@ -416,7 +416,7 @@ class TestNotificationQueueConvenienceMethods:
     @pytest.mark.asyncio
     async def test_enqueue_data_quality_alert(self, mock_notifier):
         """Should enqueue data quality alert."""
-        queue = NotificationQueue(mock_notifier)
+        queue = NotificationQueue(mock_notifier, min_tier="debug")
         
         result = await queue.enqueue_data_quality_alert(
             alert_type="stale_data",
@@ -429,7 +429,7 @@ class TestNotificationQueueConvenienceMethods:
     @pytest.mark.asyncio
     async def test_enqueue_heartbeat(self, mock_notifier):
         """Should enqueue heartbeat notification."""
-        queue = NotificationQueue(mock_notifier)
+        queue = NotificationQueue(mock_notifier, min_tier="debug")
         
         result = await queue.enqueue_heartbeat({"cycle": 100})
         
@@ -459,7 +459,7 @@ class TestNotificationQueueConvenienceMethods:
     @pytest.mark.asyncio
     async def test_enqueue_recovery(self, mock_notifier):
         """Should enqueue recovery notification."""
-        queue = NotificationQueue(mock_notifier)
+        queue = NotificationQueue(mock_notifier, min_tier="debug")
         
         result = await queue.enqueue_recovery({"recovered_from": "error"})
         

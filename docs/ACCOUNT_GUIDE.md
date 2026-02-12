@@ -38,7 +38,7 @@ PearlAlgo runs two isolated account types side by side:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    IBKR Gateway (port 4001)               │
+│                    IBKR Gateway (port 4002)               │
 │         Real-time streaming data for ALL accounts         │
 └────────────┬─────────────────────────┬───────────────────┘
              │                         │
@@ -187,11 +187,11 @@ Each account uses dedicated IBKR client IDs to avoid conflicts:
 
 | Service | Client ID | Gateway Port |
 |---------|-----------|--------------|
-| IBKR Virtual agent (trading) | 10 | 4001 |
-| IBKR Virtual agent (data) | 11 | 4001 |
-| IBKR Virtual chart API | 96 | 4001 |
-| Tradovate Paper agent (trading) | 50 | 4001 |
-| Tradovate Paper agent (data) | 51 | 4001 |
-| Tradovate Paper chart API | 97 | 4001 |
+| IBKR Virtual agent (trading) | 10 | 4002 |
+| IBKR Virtual agent (data) | 11 | 4002 |
+| IBKR Virtual chart API | 96 | 4002 |
+| Tradovate Paper agent (trading) | 50 | 4002 |
+| Tradovate Paper agent (data) | 51 | 4002 |
+| Tradovate Paper chart API | 97 | 4002 |
 
 **Rule:** If you see `"client id already in use"`, another process holds that ID. Restart the conflicting service.

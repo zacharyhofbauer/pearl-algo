@@ -807,12 +807,16 @@ class MarketAgentService(ServiceNotificationsMixin):
             bandit_policy=self._ml_manager.bandit_policy,
             ml_filter_enabled=self._ml_manager.filter_enabled,
             ml_filter_mode=self._ml_manager.filter_mode,
+            ml_manager=self._ml_manager,
         )
         self.execution_orchestrator = ExecutionOrchestrator(
             virtual_trade_manager=self.virtual_trade_manager,
             order_manager=self._order_manager,
             state_manager=self.state_manager,
             execution_adapter=self.execution_adapter,
+            execution_config=self._execution_config,
+            notification_queue=self.notification_queue,
+            connection_alert_cooldown_seconds=self._connection_alert_cooldown_seconds,
         )
         self.observability_orchestrator = ObservabilityOrchestrator(
             performance_tracker=self.performance_tracker,
@@ -1055,7 +1059,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             await self._check_execution_control_flags()
             
             # Reset execution daily counters if new trading day
-            self._check_daily_reset()
+            self.execution_orchestrator.check_daily_reset()
 
             # Check for morning briefing (6:30 AM ET)
             await self.scheduled_tasks.check_morning_briefing()
@@ -1064,7 +1068,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             await self.scheduled_tasks.check_market_close_summary()
 
             # Check execution adapter connection health and alert on issues
-            await self._check_execution_health()
+            await self.execution_orchestrator.check_execution_health()
 
             # Check signal forwarding heartbeat (follower mode only)
             await self.scheduled_tasks.check_follower_heartbeat()
@@ -1474,6 +1478,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                             try:
                                 self.audit_logger.log_signal_generated(signal)
                             except Exception:
+                                logger.debug("Tradovate operation failed", exc_info=True)
                                 pass  # non-fatal
 
                         try:
@@ -1524,7 +1529,7 @@ class MarketAgentService(ServiceNotificationsMixin):
 
                 # Refresh ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
                 try:
-                    self._refresh_ml_lift()
+                    self.signal_orchestrator.refresh_ml_lift()
                 except Exception as e:
                     logger.debug(f"ML lift refresh failed (non-fatal): {e}")
 
@@ -1587,6 +1592,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                                     priority=Priority.NORMAL,
                                 )
                             except Exception:
+                                logger.debug("Tradovate operation failed", exc_info=True)
                                 pass
                         else:
                             logger.warning("Tradovate Paper execution disconnected")
@@ -1596,6 +1602,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                                     priority=Priority.HIGH,
                                 )
                             except Exception:
+                                logger.debug("Tradovate operation failed", exc_info=True)
                                 pass
                     self._tv_paper_was_connected = _now_connected
 
@@ -2211,7 +2218,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             chart_path = None
             try:
                 # Bound chart generation time so the service loop cannot stall indefinitely.
-                chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+                chart_path = await asyncio.wait_for(self.observability_orchestrator.generate_dashboard_chart(), timeout=30.0)
             except Exception as e:
                 logger.debug(f"Could not generate dashboard chart: {e}")
                 chart_path = None
@@ -2244,32 +2251,11 @@ class MarketAgentService(ServiceNotificationsMixin):
             self.last_status_update = now
 
     async def _generate_dashboard_chart(self) -> Optional[Path]:
+        """Capture the Live Main Chart and export it for Telegram/UI use.
+
+        Delegated to ObservabilityOrchestrator.generate_dashboard_chart().
         """
-        Capture the Live Main Chart and export it for Telegram/UI use.
-
-        This produces (atomically) a PNG at:
-          `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
-        """
-        import os
-
-        exports_dir = self.state_manager.state_dir / "exports"
-        try:
-            exports_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-        export_path = exports_dir / "dashboard_telegram_latest.png"
-        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
-
-        try:
-            captured = await capture_live_chart_screenshot(output_path=export_path, url=str(chart_url))
-            if captured and captured.exists():
-                return captured
-        except Exception as e:
-            logger.debug(f"Could not capture live chart screenshot: {e}")
-
-        # Fallback: return whatever exists on disk (may be stale) for resiliency.
-        return export_path if export_path.exists() else None
+        return await self.observability_orchestrator.generate_dashboard_chart()
 
     async def _send_dashboard(
         self,
@@ -2834,104 +2820,18 @@ class MarketAgentService(ServiceNotificationsMixin):
             logger.error(f"Error queuing error notification: {e}")
 
     def _check_daily_reset(self) -> None:
+        """Reset execution daily counters at start of new trading day.
+
+        Delegated to ExecutionOrchestrator.check_daily_reset().
         """
-        Reset execution daily counters at start of new trading day.
-        
-        This ensures:
-        - _orders_today counter resets to 0 each day
-        - _daily_pnl resets to 0.0 each day (for kill switch threshold)
-        - Per-signal-type cooldowns clear
-        
-        Called at start of each scan cycle in the main loop.
-        """
-        if self.execution_adapter is None:
-            return
-
-        # Use 6pm ET as the trading day boundary
-        today = get_trading_day_date()
-
-        if self._last_trading_day is None:
-            # First cycle - initialize but don't reset (may be mid-day startup)
-            self._last_trading_day = today
-            return
-
-        if self._last_trading_day != today:
-            # New trading day (6pm ET boundary crossed) - reset counters
-            self.execution_adapter.reset_daily_counters()
-            logger.info(
-                f"Execution daily counters reset for {today} "
-                f"(previous day: {self._last_trading_day}) - 6pm ET boundary"
-            )
-            self._last_trading_day = today
+        self.execution_orchestrator.check_daily_reset()
 
     async def _check_execution_health(self) -> None:
-        """
-        Check execution adapter connection health and send alerts on state changes.
+        """Check execution adapter connection health and send alerts on state changes.
 
-        Sends Telegram alert when:
-        - Connection is lost (was connected, now disconnected)
-        - Connection is restored (was disconnected, now connected)
-
-        Deduplicates alerts using cooldown to prevent spam.
+        Delegated to ExecutionOrchestrator.check_execution_health().
         """
-        if self.execution_adapter is None:
-            return
-        
-        # Only check if execution is enabled
-        if self._execution_config is None or not self._execution_config.enabled:
-            return
-        
-        is_connected = self.execution_adapter.is_connected()
-        now = datetime.now(timezone.utc)
-        
-        # Initialize state on first check
-        if self._execution_was_connected is None:
-            self._execution_was_connected = is_connected
-            return
-        
-        # Check for state change
-        if is_connected != self._execution_was_connected:
-            # Check cooldown to avoid alert spam
-            should_alert = True
-            if self._last_connection_alert_time is not None:
-                elapsed = (now - self._last_connection_alert_time).total_seconds()
-                if elapsed < self._connection_alert_cooldown_seconds:
-                    should_alert = False
-            
-            if should_alert:
-                self._last_connection_alert_time = now
-                
-                if is_connected:
-                    # Connection restored
-                    message = (
-                        "✅ *IBKR Execution Connected*\n\n"
-                        "Connection to IBKR Gateway has been restored.\n"
-                        f"Execution adapter is now {'armed' if self.execution_adapter.armed else 'disarmed'}."
-                    )
-                    logger.info("IBKR execution connection restored")
-                else:
-                    # Connection lost
-                    message = (
-                        "🔴 *IBKR Execution Disconnected*\n\n"
-                        "⚠️ Connection to IBKR Gateway has been lost.\n\n"
-                        "• Orders cannot be placed\n"
-                        "• Auto-reconnection will be attempted\n"
-                        "• Use `/positions` to check status"
-                    )
-                    logger.warning("IBKR execution connection lost")
-                
-                # Send Telegram alert (through notification queue)
-                try:
-                    await self.notification_queue.enqueue_raw_message(
-                        message,
-                        parse_mode="Markdown",
-                        priority=Priority.NORMAL,
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to queue connection alert: {e}")
-            
-            # Update state
-            self._execution_was_connected = is_connected
+        await self.execution_orchestrator.check_execution_health()
 
     async def _check_execution_control_flags(self) -> None:
         """
@@ -3413,20 +3313,32 @@ class MarketAgentService(ServiceNotificationsMixin):
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
 
     def _build_ml_training_trades_from_signals(self, *, limit: int = 2000) -> list[dict]:
-        """Build supervised training samples (delegates to MLManager)."""
-        return self._ml_manager.build_training_trades_from_signals(limit=limit)
+        """Build supervised training samples.
+
+        Delegated to SignalOrchestrator.build_ml_training_trades_from_signals().
+        """
+        return self.signal_orchestrator.build_ml_training_trades_from_signals(limit=limit)
 
     async def _build_ml_training_trades_from_signals_async(self, *, limit: int = 2000) -> list[dict]:
-        """Async wrapper (delegates to MLManager)."""
-        return await self._ml_manager.build_training_trades_from_signals_async(limit=limit)
+        """Async wrapper.
+
+        Delegated to SignalOrchestrator.build_ml_training_trades_from_signals_async().
+        """
+        return await self.signal_orchestrator.build_ml_training_trades_from_signals_async(limit=limit)
 
     def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
-        """Compute shadow A/B lift for ML gating (delegates to MLManager)."""
-        return self._ml_manager.compute_lift_metrics(trades)
+        """Compute shadow A/B lift for ML gating.
+
+        Delegated to SignalOrchestrator.compute_ml_lift_metrics().
+        """
+        return self.signal_orchestrator.compute_ml_lift_metrics(trades)
 
     def _refresh_ml_lift(self, *, force: bool = False) -> None:
-        """Refresh ML lift metrics + blocking allowance (delegates to MLManager)."""
-        self._ml_manager.refresh_lift(force=force)
+        """Refresh ML lift metrics + blocking allowance.
+
+        Delegated to SignalOrchestrator.refresh_ml_lift().
+        """
+        self.signal_orchestrator.refresh_ml_lift(force=force)
 
     @staticmethod
     def _parse_hhmm(value: Any, *, default: tuple[int, int]) -> tuple[int, int]:

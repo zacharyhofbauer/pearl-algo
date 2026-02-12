@@ -417,23 +417,26 @@ class TestCheckExecutionHealth:
         mock_adapter = MagicMock()
         mock_adapter.is_connected.return_value = True
         mock_adapter.armed = False
-        service.execution_adapter = mock_adapter
 
         # Enable execution config
         mock_exec_config = MagicMock()
         mock_exec_config.enabled = True
-        service._execution_config = mock_exec_config
 
-        # Ensure state is uninitialised
-        service._execution_was_connected = None
+        # Set up the orchestrator (check_execution_health is now delegated there)
+        orch = service.execution_orchestrator
+        orch._execution_adapter = mock_adapter
+        orch._execution_config = mock_exec_config
+        orch._execution_was_connected = None
 
-        service.notification_queue.enqueue_raw_message = AsyncMock(return_value=True)
+        mock_nq = MagicMock()
+        mock_nq.enqueue_raw_message = AsyncMock(return_value=True)
+        orch._notification_queue = mock_nq
 
         await service._check_execution_health()
 
         # State should now be initialised, but no alert sent
-        assert service._execution_was_connected is True
-        service.notification_queue.enqueue_raw_message.assert_not_awaited()
+        assert orch._execution_was_connected is True
+        mock_nq.enqueue_raw_message.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_connection_lost_sends_alert(self, service):
@@ -441,24 +444,27 @@ class TestCheckExecutionHealth:
         mock_adapter = MagicMock()
         mock_adapter.is_connected.return_value = False
         mock_adapter.armed = False
-        service.execution_adapter = mock_adapter
 
         mock_exec_config = MagicMock()
         mock_exec_config.enabled = True
-        service._execution_config = mock_exec_config
 
-        # Simulate that we were previously connected
-        service._execution_was_connected = True
-        service._last_connection_alert_time = None
+        # Set up the orchestrator (check_execution_health is now delegated there)
+        orch = service.execution_orchestrator
+        orch._execution_adapter = mock_adapter
+        orch._execution_config = mock_exec_config
+        orch._execution_was_connected = True
+        orch._last_connection_alert_time = None
 
-        service.notification_queue.enqueue_raw_message = AsyncMock(return_value=True)
+        mock_nq = MagicMock()
+        mock_nq.enqueue_raw_message = AsyncMock(return_value=True)
+        orch._notification_queue = mock_nq
 
         await service._check_execution_health()
 
-        service.notification_queue.enqueue_raw_message.assert_awaited_once()
-        msg = service.notification_queue.enqueue_raw_message.call_args[0][0]
+        mock_nq.enqueue_raw_message.assert_awaited_once()
+        msg = mock_nq.enqueue_raw_message.call_args[0][0]
         assert "Disconnected" in msg
-        assert service._execution_was_connected is False
+        assert orch._execution_was_connected is False
 
     @pytest.mark.asyncio
     async def test_connection_restored_sends_alert(self, service):
@@ -466,68 +472,78 @@ class TestCheckExecutionHealth:
         mock_adapter = MagicMock()
         mock_adapter.is_connected.return_value = True
         mock_adapter.armed = True
-        service.execution_adapter = mock_adapter
 
         mock_exec_config = MagicMock()
         mock_exec_config.enabled = True
-        service._execution_config = mock_exec_config
 
-        # Previously disconnected
-        service._execution_was_connected = False
-        service._last_connection_alert_time = None
+        # Set up the orchestrator (check_execution_health is now delegated there)
+        orch = service.execution_orchestrator
+        orch._execution_adapter = mock_adapter
+        orch._execution_config = mock_exec_config
+        orch._execution_was_connected = False
+        orch._last_connection_alert_time = None
 
-        service.notification_queue.enqueue_raw_message = AsyncMock(return_value=True)
+        mock_nq = MagicMock()
+        mock_nq.enqueue_raw_message = AsyncMock(return_value=True)
+        orch._notification_queue = mock_nq
 
         await service._check_execution_health()
 
-        service.notification_queue.enqueue_raw_message.assert_awaited_once()
-        msg = service.notification_queue.enqueue_raw_message.call_args[0][0]
+        mock_nq.enqueue_raw_message.assert_awaited_once()
+        msg = mock_nq.enqueue_raw_message.call_args[0][0]
         assert "Connected" in msg
-        assert service._execution_was_connected is True
+        assert orch._execution_was_connected is True
 
     @pytest.mark.asyncio
     async def test_no_state_change_no_alert(self, service):
         """Same connection state should not produce an alert."""
         mock_adapter = MagicMock()
         mock_adapter.is_connected.return_value = True
-        service.execution_adapter = mock_adapter
 
         mock_exec_config = MagicMock()
         mock_exec_config.enabled = True
-        service._execution_config = mock_exec_config
 
-        service._execution_was_connected = True  # same as is_connected()
+        # Set up the orchestrator (check_execution_health is now delegated there)
+        orch = service.execution_orchestrator
+        orch._execution_adapter = mock_adapter
+        orch._execution_config = mock_exec_config
+        orch._execution_was_connected = True  # same as is_connected()
 
-        service.notification_queue.enqueue_raw_message = AsyncMock(return_value=True)
+        mock_nq = MagicMock()
+        mock_nq.enqueue_raw_message = AsyncMock(return_value=True)
+        orch._notification_queue = mock_nq
 
         await service._check_execution_health()
 
-        service.notification_queue.enqueue_raw_message.assert_not_awaited()
+        mock_nq.enqueue_raw_message.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_cooldown_suppresses_duplicate_alerts(self, service):
         """Alert within cooldown period should be suppressed."""
         mock_adapter = MagicMock()
         mock_adapter.is_connected.return_value = False
-        service.execution_adapter = mock_adapter
 
         mock_exec_config = MagicMock()
         mock_exec_config.enabled = True
-        service._execution_config = mock_exec_config
 
-        # Simulate a state change but within the cooldown window
-        service._execution_was_connected = True
-        service._last_connection_alert_time = datetime.now(timezone.utc) - timedelta(seconds=10)
-        service._connection_alert_cooldown_seconds = 300
+        # Set up the orchestrator (check_execution_health is now delegated there)
+        orch = service.execution_orchestrator
+        orch._execution_adapter = mock_adapter
+        orch._execution_config = mock_exec_config
+        orch._execution_was_connected = True
+        orch._last_connection_alert_time = datetime.now(timezone.utc) - timedelta(seconds=10)
+        orch._connection_alert_cooldown_seconds = 300
 
-        service.notification_queue.enqueue_raw_message = AsyncMock(return_value=True)
+        mock_nq = MagicMock()
+        mock_nq.enqueue_raw_message = AsyncMock(return_value=True)
+        orch._notification_queue = mock_nq
 
         await service._check_execution_health()
 
         # Alert suppressed by cooldown
-        service.notification_queue.enqueue_raw_message.assert_not_awaited()
+        mock_nq.enqueue_raw_message.assert_not_awaited()
         # State still updates even when alert is suppressed
-        assert service._execution_was_connected is False
+        assert orch._execution_was_connected is False
 
 
 # ===========================================================================

@@ -438,3 +438,56 @@ class TestConfigToServiceInit:
         """Health monitor should be initialized."""
         svc = service_instance
         assert svc.health_monitor is not None
+
+
+# =========================================================================
+# 4. Real-Wiring: get_status() without internal mocks
+# =========================================================================
+
+
+class TestRealWiringServiceStatus:
+    """MarketAgentService with real internals — only data provider mocked."""
+
+    def test_get_status_returns_valid_dict_with_real_components(
+        self,
+        tmp_state_dir,
+        mock_data_provider,
+    ):
+        """Construct a real service and call get_status() end-to-end.
+
+        No internal components are mocked — the only fake is the data
+        provider (MockDataProvider), which replaces a live IBKR connection.
+        Verifies that get_status() returns a well-formed status dict with
+        all expected top-level keys populated.
+        """
+        from pearlalgo.market_agent.service import MarketAgentService
+
+        svc = MarketAgentService(
+            data_provider=mock_data_provider,
+            state_dir=tmp_state_dir,
+        )
+
+        status = svc.get_status()
+
+        # Basic structure
+        assert isinstance(status, dict)
+
+        # Core status fields must be present
+        assert "running" in status
+        assert "signal_count" in status
+        assert "cycle_count" in status
+        assert "error_count" in status
+        assert "config" in status
+
+        # Service should be stopped (never started)
+        assert status["running"] is False
+        assert status["signal_count"] >= 0
+        assert status["cycle_count"] >= 0
+
+        # Performance and health sections should be populated (not None)
+        assert "performance" in status
+        assert isinstance(status["performance"], dict)
+
+        # Config section should reflect the real defaults
+        assert isinstance(status["config"], dict)
+        assert status["config"]["symbol"] == "MNQ"

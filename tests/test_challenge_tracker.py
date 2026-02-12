@@ -29,7 +29,7 @@ from pearlalgo.market_agent.challenge_tracker import (
 class TestChallengeConfig:
     """Tests for ChallengeConfig dataclass."""
 
-    def test_default_values(self):
+    def test_challenge_config_defaults_to_50k_balance_settings(self):
         """Should have standard 50k challenge defaults."""
         config = ChallengeConfig()
         
@@ -58,7 +58,7 @@ class TestChallengeConfig:
 class TestChallengeAttempt:
     """Tests for ChallengeAttempt dataclass."""
 
-    def test_default_values(self):
+    def test_challenge_attempt_initializes_as_active_with_zero_pnl(self):
         """Should have sensible defaults."""
         attempt = ChallengeAttempt(
             attempt_id=1,
