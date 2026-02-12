@@ -666,55 +666,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   }, [aggregatedMarkers, markers, activeSignalId])
 
   // Draw connection line between entry and exit when hovering
-  useEffect(() => {
-    if (!connectionLineRef.current || !markers) return
-
-    if (activeSignalId) {
-      // Find entry and exit for this trade
-      const entry = markers.find(m => m.signal_id === activeSignalId && m.kind === 'entry')
-      const exit = markers.find(m => m.signal_id === activeSignalId && m.kind === 'exit')
-      
-      if (entry && exit) {
-        const entryPrice = entry.entry_price || 0
-        const exitPrice = exit.exit_price || 0
-        const isWin = (exit.pnl || 0) >= 0
-        
-        // Set line color based on win/loss - bright colors to stand out
-        connectionLineRef.current.applyOptions({
-          color: isWin ? '#00ff88' : '#ff3333',
-          lineWidth: 2,
-          lineStyle: 2, // dotted
-        })
-        
-        // Draw RIGHT ANGLE step line (doesn't cover candles)
-        // Pattern: entry → horizontal → vertical step → horizontal → exit
-        // Use entry time + small offset for vertical step to maintain ascending order
-        const stepTime = entry.time + 300 // 5 minutes after entry (one bar on 5m)
-        
-        // Only draw step line if there's enough time gap
-        if (exit.time > stepTime) {
-          connectionLineRef.current.setData([
-            { time: entry.time as Time, value: entryPrice },      // Start at entry
-            { time: stepTime as Time, value: entryPrice },        // Horizontal short distance
-            { time: (stepTime + 1) as Time, value: exitPrice },   // Vertical step (+1 sec for ascending)
-            { time: exit.time as Time, value: exitPrice },        // Horizontal to exit
-          ])
-        } else {
-          // If entry and exit are too close, just draw simple diagonal
-          connectionLineRef.current.setData([
-            { time: entry.time as Time, value: entryPrice },
-            { time: exit.time as Time, value: exitPrice },
-          ])
-        }
-      } else {
-        connectionLineRef.current.setData([])
-      }
-    } else {
-      // Clear connection line when not hovering
-      connectionLineRef.current.setData([])
-    }
-  }, [activeSignalId, markers])
-
   // Update position lines (Entry, SL, TP)
   useEffect(() => {
     if (!candleSeriesRef.current) return
@@ -1021,82 +972,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
             </div>
           )}
 
-          {/* PEARL Logo - small */}
-          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={14} height={14} />
-        </div>
-      )}
-
-      {/* Marker Tooltip - Grouped Trades */}
-      {tooltip.visible && tooltip.groupedMarkers && tooltip.groupedMarkers.length > 1 && (
-        <div
-          className="marker-tooltip grouped"
-          style={{
-            position: 'absolute',
-            left: tooltip.x,
-            top: tooltip.y,
-            pointerEvents: 'none',
-          }}
-        >
-          {/* Header */}
-          <div className="tooltip-header grouped-header">
-            <span className="grouped-count">{tooltip.groupedMarkers.length} TRADES</span>
-            <span className="grouped-time">
-              {new Date(tooltip.marker!.time * 1000).toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: false 
-              })}
-            </span>
-          </div>
-          
-          {/* Summary */}
-          <div className="tooltip-summary">
-            {(() => {
-              const exits = tooltip.groupedMarkers.filter(m => m.kind === 'exit')
-              const entries = tooltip.groupedMarkers.filter(m => m.kind === 'entry')
-              const totalPnl = exits.reduce((sum, m) => sum + (m.pnl || 0), 0)
-              const wins = exits.filter(m => (m.pnl || 0) >= 0).length
-              const losses = exits.length - wins
-              
-              return (
-                <>
-                  <div className={`tooltip-total-pnl ${totalPnl >= 0 ? 'positive' : 'negative'}`}>
-                    {formatPnL(totalPnl)}
-                  </div>
-                  <div className="tooltip-stats">
-                    {entries.length > 0 && <span className="stat-entries">{entries.length} entries</span>}
-                    {exits.length > 0 && (
-                      <span className="stat-exits">
-                        {wins}W / {losses}L
-                      </span>
-                    )}
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-          
-          {/* Trade List */}
-          <div className="tooltip-trade-list">
-            {tooltip.groupedMarkers.slice(0, 6).map((m, i) => (
-              <div key={i} className={`trade-item ${m.kind} ${(m.pnl || 0) >= 0 ? 'win' : 'loss'}`}>
-                <span className="trade-direction">{m.direction?.toUpperCase()}</span>
-                <span className="trade-kind">{m.kind === 'entry' ? 'IN' : 'OUT'}</span>
-                {m.kind === 'exit' && m.pnl !== undefined && (
-                  <span className={`trade-pnl ${m.pnl >= 0 ? 'positive' : 'negative'}`}>
-                    {formatPnL(m.pnl)}
-                  </span>
-                )}
-                {m.exit_reason && (
-                  <span className="trade-reason">{m.exit_reason.replace(/_/g, ' ').slice(0, 8)}</span>
-                )}
-              </div>
-            ))}
-            {tooltip.groupedMarkers.length > 6 && (
-              <div className="trade-item more">+{tooltip.groupedMarkers.length - 6} more...</div>
-            )}
-          </div>
-          
           {/* PEARL Logo - small */}
           <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={14} height={14} />
         </div>

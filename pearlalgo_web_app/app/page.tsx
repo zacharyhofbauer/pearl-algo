@@ -591,9 +591,6 @@ function PearlAlgoWebAppInner() {
     )
   }
 
-  // Status panel no longer needed - integrated into header
-  const renderStatusPanel = () => null
-
   // Chart section component
   const renderChart = () => (
     <div className="chart-wrapper">
@@ -709,43 +706,7 @@ function PearlAlgoWebAppInner() {
     )
   )
 
-  // Compact header for ultrawide view
-  const renderUltrawideHeader = () => {
-    const stale = isDataStale()
-    return (
-      <div className="ultrawide-header">
-        <div className="uw-brand">
-          <Image src="/logo.png" alt="PEARL" width={20} height={20} priority />
-          <span className="uw-symbol">MNQ</span>
-        </div>
-        <div className="uw-stats">
-          <span className={`uw-pnl ${(agentState?.daily_pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
-            {(agentState?.daily_pnl || 0) >= 0 ? '+' : ''}${(agentState?.daily_pnl || 0).toFixed(0)}
-          </span>
-          <span className="uw-trades">
-            {agentState?.performance?.['24h']?.wins || 0}W/{agentState?.performance?.['24h']?.losses || 0}L
-          </span>
-        </div>
-        <div className="uw-timeframe">
-          {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
-            <button
-              key={tf}
-              className={`uw-tf-btn ${timeframe === tf ? 'active' : ''}`}
-              onClick={() => setTimeframe(tf)}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-        <div className={`uw-status ${stale ? 'stale' : 'live'}`}>
-          <span className="uw-status-dot"></span>
-          {stale ? 'STALE' : 'LIVE'}
-        </div>
-      </div>
-    )
-  }
-
-  // Standard layout (all viewports -- ultrawide layout removed in restructure)
+  // Standard layout (all viewports)
   return (
     <>
       {/* Skip navigation link for accessibility */}
@@ -774,7 +735,7 @@ function PearlAlgoWebAppInner() {
         </div>
         <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
           {renderHeader()}
-          {renderStatusPanel()}
+          {/* Status integrated into PearlHeaderBar */}
           {renderChart()}
 
           {/* Trades Dock (Open / Recent) - TradingView-style section */}
