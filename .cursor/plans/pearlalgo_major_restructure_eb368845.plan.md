@@ -4,64 +4,64 @@ overview: Complete architectural overhaul informed by 15 reviewed decisions -- t
 todos:
   - id: phase-0a-safety
     content: "Phase 0A: Tag pre-restructure, create branch, preflight builds"
-    status: pending
+    status: completed
   - id: phase-0b-pnl-test
     content: "Phase 0B: Write test_pnl_accuracy.py with hand-calculated trade scenarios -- acceptance test for the restructure"
-    status: pending
+    status: completed
   - id: phase-1a-data-comparison
     content: "Phase 1A: Run IBKR vs Tradovate data quality comparison (same symbol, same period, compare candle accuracy/latency)"
-    status: pending
+    status: completed
   - id: phase-1b-decide-architecture
     content: "Phase 1B: Based on data comparison, decide: one Tradovate agent, one IBKR-data+TV-exec agent, or two agents"
-    status: pending
+    status: completed
   - id: phase-1c-data-dirs
     content: "Phase 1C: Create broker-separated data directories, migrate existing data, archive IBKR Virtual data if consolidating"
-    status: pending
+    status: completed
   - id: phase-1d-kill-signal-forwarding
     content: "Phase 1D: Delete signal_forwarder.py, remove all shared JSONL signal forwarding code and files"
-    status: pending
+    status: completed
   - id: phase-1e-agent-config
     content: "Phase 1E: Create base.yaml + thin per-account override configs. Parameterized main.py (--config, --data-dir)."
-    status: pending
+    status: completed
   - id: phase-1f-tradovate-data-provider
     content: "Phase 1F: If Tradovate data wins or consolidating to one agent: build Tradovate data provider. Otherwise defer."
-    status: pending
+    status: completed
   - id: phase-1g-verify
     content: "Phase 1G: Verify P&L accuracy with test_pnl_accuracy.py, confirm agent(s) run independently"
-    status: pending
+    status: completed
   - id: phase-2a-telegram-tests
     content: "Phase 2A: Write behavioral test contract (~15-20 tests) defining required Telegram handler behavior"
-    status: pending
+    status: completed
   - id: phase-2b-telegram-rewrite
     content: "Phase 2B: Ground-up Telegram rewrite -- handlers/status.py, handlers/trading.py, handlers/analytics.py, handlers/config.py, formatters/, main.py router. ~1,150 lines total. Routes to agent via API."
-    status: pending
+    status: completed
   - id: phase-2c-service-extract
     content: "Phase 2C: Incremental service.py extraction -- service_lifecycle.py, service_loop.py one at a time, test after each move"
-    status: pending
+    status: completed
   - id: phase-2d-kill-ai
     content: "Phase 2D: git tag pre-ai-deletion, then delete pearl_ai/, knowledge/, ai/ directories. Keep learning/ in shadow mode. Delete orphaned tests in same commit."
-    status: pending
+    status: completed
   - id: phase-2e-config-cleanup
     content: "Phase 2E: Replace 6-file config system with lightweight Pydantic model (~100 lines) + simple loader"
-    status: pending
+    status: completed
   - id: phase-3a-strip-panels
     content: "Phase 3A: Kill web app panels -- AnalyticsPanel, PearlInsightsPanel, SystemHealthPanel, SignalDecisionsPanel, AuditPanel, PostTradesPanels, etc."
-    status: pending
+    status: completed
   - id: phase-3b-simplify-chart
     content: "Phase 3B: Keep lightweight-charts, simplify CandlestickChart.tsx from 1,109 to ~500 lines"
-    status: pending
+    status: completed
   - id: phase-3c-simplified-dashboard
     content: "Phase 3C: Simplified dashboard -- Header, Chart, Positions, Trades, Controls. Rewrite page.tsx to ~200 lines."
-    status: pending
+    status: completed
   - id: phase-4a-api-simplify
     content: "Phase 4A: One api_server.py parameterized by --data-dir and --port. Simplified endpoints: /status, /chart/{tf}, /trades, /control"
-    status: pending
+    status: completed
   - id: phase-4b-sqlite-wal
     content: "Phase 4B: Verify SQLite WAL mode is enabled for concurrent agent writes / API reads"
-    status: pending
+    status: completed
   - id: phase-4c-test-polish
     content: "Phase 4C: End-to-end testing, verify P&L numbers, ratchet coverage threshold back to 70%"
-    status: pending
+    status: completed
 isProject: false
 ---
 
