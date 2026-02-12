@@ -13,7 +13,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-from pearlalgo.utils.formatting import fmt_currency, fmt_pct_direct
+from pearlalgo.utils.formatting import fmt_currency, fmt_pct_direct, fmt_time_et, pnl_emoji
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.telegram_markdown import escape_markdown_v2 as _canonical_escape_markdown_v2
 
@@ -893,22 +893,13 @@ class MarketAgentTelegramNotifier:
             time_str = ""
             if current_time:
                 try:
-                    from datetime import timezone as tz
-                    import pytz
                     if isinstance(current_time, str):
                         current_time = parse_utc_timestamp(current_time)
                     if current_time.tzinfo is None:
-                        current_time = current_time.replace(tzinfo=tz.utc)
-                    et_tz = pytz.timezone('US/Eastern')
-                    et_time = current_time.astimezone(et_tz)
-                    time_str = et_time.strftime("%I:%M %p ET")
+                        current_time = current_time.replace(tzinfo=timezone.utc)
+                    time_str = fmt_time_et(current_time, fallback=current_time.strftime("%H:%M UTC"))
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
-                    try:
-                        if hasattr(current_time, 'strftime'):
-                            time_str = current_time.strftime("%H:%M UTC")
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
             
             # Build compact message
             futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
@@ -1082,19 +1073,16 @@ class MarketAgentTelegramNotifier:
             current_time = status.get("current_time") or datetime.now(timezone.utc)
             
             # Format ET time
-            time_str = ""
             try:
-                import pytz
                 if isinstance(current_time, str):
                     current_time = parse_utc_timestamp(current_time)
                 if current_time.tzinfo is None:
                     current_time = current_time.replace(tzinfo=timezone.utc)
-                et_tz = pytz.timezone('US/Eastern')
-                et_time = current_time.astimezone(et_tz)
-                time_str = et_time.strftime("%I:%M %p ET").lstrip("0")
+                fallback = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
+                time_str = fmt_time_et(current_time, fallback=fallback)
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
-                time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
+                time_str = ""
             
             latest_price = status.get("latest_price")
             paused = bool(status.get("paused", False))
@@ -1338,13 +1326,13 @@ class MarketAgentTelegramNotifier:
                 daily_losses = int(daily_losses or 0)
 
                 if daily_trades > 0 or daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_emoji_str = pnl_emoji(daily_pnl)
                     win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
                     streak_str = ""
                     if current_streak >= 3 and streak_type:
                         streak_str = f" • {'🔥' if streak_type == 'win' else '❄️'}{current_streak}{'W' if streak_type == 'win' else 'L'}"
                     message += "\n\n*24h:*"
-                    message += f"\n{pnl_emoji} {fmt_currency(daily_pnl, show_sign=True)} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                    message += f"\n{pnl_emoji_str} {fmt_currency(daily_pnl, show_sign=True)} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
 
                 # Rolling 72h
                 if perf_trades:
@@ -1383,7 +1371,7 @@ class MarketAgentTelegramNotifier:
                         wins_72h = sum(1 for t in trades_72h if t.get("is_win"))
                         losses_72h = int(len(trades_72h) - int(wins_72h or 0))
                         wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
-                        pnl_emoji_72h = "🟢" if pnl_72h >= 0 else "🔴"
+                        pnl_emoji_72h = pnl_emoji(pnl_72h)
                         message += "\n\n*72h:*"
                         message += f"\n{pnl_emoji_72h} {fmt_currency(pnl_72h, show_sign=True)} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
             except Exception as e:
@@ -1916,13 +1904,7 @@ class MarketAgentTelegramNotifier:
 
             # Current time in ET
             current_time = datetime.now(timezone.utc)
-            try:
-                import pytz
-                et_time = current_time.astimezone(pytz.timezone("US/Eastern"))
-                time_str = et_time.strftime("%I:%M %p ET")
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                time_str = current_time.strftime("%H:%M UTC")
+            time_str = fmt_time_et(current_time, fallback=current_time.strftime("%H:%M UTC"))
 
             futures_market_open = config.get("futures_market_open")
             strategy_session_open = config.get("strategy_session_open")

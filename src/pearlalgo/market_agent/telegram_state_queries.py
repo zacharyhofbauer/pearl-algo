@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Any
 
+from pearlalgo.utils.formatting import fmt_time_et
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_state_file, get_signals_file, parse_utc_timestamp
 from pearlalgo.utils.state_io import load_json_file, load_jsonl_file
@@ -224,13 +225,7 @@ class TelegramStateQueriesMixin:
     def _get_current_time_str(self) -> str:
         """Get current time as formatted string."""
         now = datetime.now(timezone.utc)
-        try:
-            import pytz
-            et_tz = pytz.timezone('US/Eastern')
-            et_time = now.astimezone(et_tz)
-            return et_time.strftime("%I:%M %p ET").lstrip('0')
-        except Exception:
-            return now.strftime("%H:%M UTC")
+        return fmt_time_et(now, fallback=now.strftime("%H:%M UTC"))
 
     def _count_open_positions(self, state: Optional[dict] = None) -> int:
         """

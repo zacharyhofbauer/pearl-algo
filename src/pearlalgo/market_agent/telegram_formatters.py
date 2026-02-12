@@ -20,7 +20,16 @@ import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional, Any, Tuple
 
-from pearlalgo.utils.formatting import fmt_currency, fmt_pct_direct
+from pearlalgo.utils.formatting import (
+    fmt_currency,
+    fmt_pct_direct,
+    fmt_time_et,
+    format_duration,
+    format_duration_short,
+    format_hold_duration,
+    format_pnl,
+    pnl_emoji,
+)
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.telegram_alerts import (
     sanitize_telegram_markdown,
@@ -40,18 +49,6 @@ if TYPE_CHECKING:
 # =============================================================================
 # Pure Formatting Functions (no side effects, no API calls)
 # =============================================================================
-
-
-def pnl_emoji(value: float) -> str:
-    """Return a colored emoji for a PnL value.
-
-    Args:
-        value: Profit/loss amount.
-
-    Returns:
-        '🟢' for non-negative, '🔴' for negative.
-    """
-    return "🟢" if value >= 0 else "🔴"
 
 
 def format_pnl_line(pnl: float, *, show_sign: bool = True) -> str:
@@ -198,34 +195,8 @@ def data_level_short(level: str | None) -> str:
     return DATA_LEVEL_SHORT.get(str(level or "").strip().lower(), "?")
 
 
-# ---------------------------------------------------------------------------
-# Duration / Time Formatting
-# ---------------------------------------------------------------------------
-
-def format_duration_short(seconds: float | None) -> str:
-    """Format a duration in seconds to a compact human-readable form.
-
-    Args:
-        seconds: Duration in seconds (or None).
-
-    Returns:
-        e.g. '45s', '12m', '3h15m', or '?' if None.
-    """
-    from pearlalgo.utils.telegram_alerts import format_duration
-    return format_duration(seconds, compact=True)
-
-
-def format_hold_duration(minutes: float) -> str:
-    """Format a hold-duration in minutes to human-readable form.
-
-    Args:
-        minutes: Hold time in minutes.
-
-    Returns:
-        e.g. '45m' or '2h 15m'.
-    """
-    from pearlalgo.utils.telegram_alerts import format_duration
-    return format_duration(minutes * 60, compact=False)
+# NOTE: format_duration_short, format_hold_duration are now imported from
+# pearlalgo.utils.formatting at the top of this module.
 
 
 # ---------------------------------------------------------------------------
@@ -532,23 +503,7 @@ class TelegramFormattersMixin:
 
     def _format_support_duration(self, seconds: float | None) -> str:
         """Format a duration in seconds to human-readable form."""
-        if seconds is None or seconds < 0:
-            return "?"
-        if seconds < 60:
-            return f"{int(seconds)}s"
-        if seconds < 3600:
-            return f"{int(seconds / 60)}m"
-        if seconds < 86400:
-            hours = int(seconds / 3600)
-            minutes = int((seconds % 3600) / 60)
-            if minutes > 0:
-                return f"{hours}h {minutes}m"
-            return f"{hours}h"
-        days = int(seconds / 86400)
-        hours = int((seconds % 86400) / 3600)
-        if hours > 0:
-            return f"{days}d {hours}h"
-        return f"{days}d"
+        return format_duration(seconds, compact=False)
 
     def _get_chart_url(self) -> str | None:
         """Get the Live Chart URL from environment or None if not configured."""
@@ -571,13 +526,7 @@ class TelegramFormattersMixin:
 
         # Time
         now = datetime.now(timezone.utc)
-        try:
-            import pytz
-            et_tz = pytz.timezone('US/Eastern')
-            et_time = now.astimezone(et_tz)
-            time_str = et_time.strftime("%I:%M %p ET").lstrip('0')
-        except Exception:
-            time_str = now.strftime("%H:%M UTC")
+        time_str = fmt_time_et(now, fallback=now.strftime("%H:%M UTC"))
 
         # Market
         market = getattr(self, "active_market", "?")
@@ -801,10 +750,10 @@ class TelegramFormattersMixin:
         total_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
         win_rate = (wins / total * 100) if total > 0 else 0
 
-        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+        pnl_emoji_str = pnl_emoji(total_pnl)
 
         lines.append(f"Total: {total} | {wins}W/{losses}L | {win_rate:.0f}% WR")
-        lines.append(f"P&L: {pnl_emoji} {fmt_currency(total_pnl, show_sign=True)}")
+        lines.append(f"P&L: {pnl_emoji_str} {fmt_currency(total_pnl, show_sign=True)}")
         lines.append("")
 
         # Recent trades (last 5)
@@ -846,8 +795,8 @@ class TelegramFormattersMixin:
         lines = ["📊 *Activity Summary*", ""]
 
         # Daily P&L
-        pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-        lines.append(f"*Today:* {pnl_emoji} {fmt_currency(daily_pnl, show_sign=True)}")
+        pnl_emoji_str = pnl_emoji(daily_pnl)
+        lines.append(f"*Today:* {pnl_emoji_str} {fmt_currency(daily_pnl, show_sign=True)}")
 
         # Trades
         if daily_trades > 0:
@@ -962,10 +911,10 @@ class TelegramFormattersMixin:
 
         # Balance and progress
         pnl = balance - starting_balance
-        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+        pnl_emoji_str = pnl_emoji(pnl)
 
         lines.append(f"Balance: {fmt_currency(balance)}")
-        lines.append(f"P&L: {pnl_emoji} {fmt_currency(pnl, show_sign=True)}")
+        lines.append(f"P&L: {pnl_emoji_str} {fmt_currency(pnl, show_sign=True)}")
         lines.append("")
 
         # Targets

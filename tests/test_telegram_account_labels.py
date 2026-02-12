@@ -57,6 +57,7 @@ class TestTelegramAccountLabels:
         tmp_path: Path,
     ) -> None:
         """IBKR Virtual account should produce the IBKR-VIR label."""
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": "ibkr_virtual"})
 
         build_service_dependencies(
@@ -89,6 +90,7 @@ class TestTelegramAccountLabels:
         tmp_path: Path,
     ) -> None:
         """Tradovate Paper account should produce the TV-PAPER label."""
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": "tv_paper_eval"})
 
         build_service_dependencies(
@@ -121,6 +123,7 @@ class TestTelegramAccountLabels:
         tmp_path: Path,
     ) -> None:
         """Without accounts config, the label should fall back to IBKR-VIR."""
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": ""})
 
         build_service_dependencies(

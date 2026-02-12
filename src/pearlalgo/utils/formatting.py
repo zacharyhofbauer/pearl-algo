@@ -253,8 +253,143 @@ def fmt_pct_direct(
 
 
 # =============================================================================
+# PnL formatting
+# =============================================================================
+
+
+def pnl_emoji(value: float) -> str:
+    """Return a colored emoji for a PnL value.
+
+    Args:
+        value: Profit/loss amount.
+
+    Returns:
+        '🟢' for non-negative, '🔴' for negative.
+    """
+    return "🟢" if value >= 0 else "🔴"
+
+
+def format_pnl(pnl: float) -> tuple[str, str]:
+    """Return (emoji, formatted_string) for a P&L value.
+
+    Args:
+        pnl: Profit/loss amount.
+
+    Returns:
+        Tuple of (emoji, formatted_string), e.g. ('🟢', '+$125.50')
+    """
+    if pnl >= 0:
+        return "🟢", f"+${pnl:,.2f}"
+    else:
+        return "🔴", f"-${abs(pnl):,.2f}"
+
+
+# =============================================================================
 # Time formatting
 # =============================================================================
+
+
+def format_duration(seconds: float | None, suffix: str = "", compact: bool = False) -> str:
+    """Format a duration in seconds to a human-readable form.
+
+    Args:
+        seconds: Duration in seconds (or None).
+        suffix: Optional suffix to append (e.g., " ago").
+        compact: If True, use compact format like "3h15m"; if False, use "3h 15m".
+
+    Returns:
+        e.g. '45s', '12m', '3h15m' (compact) or '3h 15m' (spaced), or '?' if None.
+    """
+    if seconds is None:
+        return "?" + suffix
+    try:
+        s = float(seconds)
+    except (ValueError, TypeError):
+        return "?" + suffix
+    if s < 0:
+        return "?" + suffix
+    if s < 60:
+        return f"{int(s)}s{suffix}"
+    if s < 3600:
+        return f"{int(s // 60)}m{suffix}"
+    if s < 86400:
+        hours = int(s // 3600)
+        mins = int((s % 3600) // 60)
+        sep = "" if compact else " "
+        if mins > 0:
+            return f"{hours}h{sep}{mins}m{suffix}"
+        return f"{hours}h{suffix}"
+    days = int(s // 86400)
+    hours = int((s % 86400) // 3600)
+    sep = "" if compact else " "
+    if hours > 0:
+        return f"{days}d{sep}{hours}h{suffix}"
+    return f"{days}d{suffix}"
+
+
+def format_duration_short(seconds: float | None) -> str:
+    """Format a duration in seconds to a compact human-readable form.
+
+    Args:
+        seconds: Duration in seconds (or None).
+
+    Returns:
+        e.g. '45s', '12m', '3h15m', or '?' if None.
+    """
+    return format_duration(seconds, compact=True)
+
+
+def format_hold_duration(minutes: float) -> str:
+    """Format a hold-duration in minutes to human-readable form.
+
+    Args:
+        minutes: Hold time in minutes.
+
+    Returns:
+        e.g. '45m' or '2h 15m'.
+    """
+    return format_duration(minutes * 60, compact=False)
+
+
+def format_time_ago(timestamp_str: str | None) -> str:
+    """Format a timestamp as a human-readable 'time ago' string.
+
+    Returns e.g. '5m ago', '2h ago', '1d ago', or '' if parsing fails.
+    """
+    if not timestamp_str:
+        return ""
+    try:
+        from datetime import timezone as _tz
+        from pearlalgo.utils.paths import parse_utc_timestamp
+
+        ts = parse_utc_timestamp(str(timestamp_str))
+        if ts is None:
+            return ""
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+        now = datetime.now(_tz.utc)
+        delta = now - ts
+        seconds = delta.total_seconds()
+        if seconds < 0:
+            return ""
+        return format_duration(seconds, suffix=" ago", compact=True)
+    except Exception:
+        return ""
+
+
+def format_uptime(uptime: dict) -> str:
+    """Format an uptime dict (with 'hours' and 'minutes' keys) compactly.
+
+    Args:
+        uptime: Dict with 'hours' and/or 'minutes' keys.
+
+    Returns:
+        e.g. '3h15m' or '45m'.
+    """
+    hours = uptime.get("hours", 0)
+    minutes = uptime.get("minutes", 0)
+    total_seconds = hours * 3600 + minutes * 60
+    return format_duration(total_seconds, compact=True)
 
 
 def fmt_time_et(dt: Optional[datetime], fallback: str = "N/A") -> str:

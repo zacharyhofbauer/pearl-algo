@@ -278,7 +278,7 @@ class ScheduledTasks:
                 losses = len(today_trades) - wins
                 win_rate = (wins / len(today_trades) * 100) if today_trades else 0
 
-                pnl_emoji = "\U0001f7e2" if total_pnl >= 0 else "\U0001f534"
+                pnl_icon = "\U0001f7e2" if total_pnl >= 0 else "\U0001f534"
                 pnl_sign = "+" if total_pnl >= 0 else ""
 
                 long_trades = [t for t in today_trades if t.get("direction", "").lower() == "long"]
@@ -288,7 +288,7 @@ class ScheduledTasks:
 
                 msg_parts = [
                     f"{acct_prefix}\U0001f4ca *Daily Summary* \u2022 {now_et.strftime('%b %d')}\n",
-                    f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}",
+                    f"{pnl_icon} *P&L:* {pnl_sign}${total_pnl:,.2f}",
                     f"\U0001f4c8 *Trades:* {len(today_trades)} ({wins}W/{losses}L)",
                     f"\U0001f3af *Win Rate:* {win_rate:.0f}%",
                 ]

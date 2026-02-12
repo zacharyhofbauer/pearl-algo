@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pearlalgo.utils.formatting import pnl_emoji
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_utc_timestamp
 
@@ -436,7 +437,7 @@ class ChallengeTracker:
         """
         p = self.get_attempt_performance(unrealized_pnl=unrealized_pnl)
         pnl = p["total_pnl"]
-        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+        pnl_emoji_str = pnl_emoji(pnl)
         pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
 
         # Progress bar (simple)
@@ -460,7 +461,7 @@ class ChallengeTracker:
 
         return (
             f"{header}\n"
-            f"Balance: `${p['current_balance']:,.2f}` | {pnl_emoji} {pnl_str}\n"
+            f"Balance: `${p['current_balance']:,.2f}` | {pnl_emoji_str} {pnl_str}\n"
             f"{target_str}\n"
             f"Trades: {p['exited_signals']} | WR: {p['win_rate'] * 100:.0f}%\n"
             f"{totals_line}"

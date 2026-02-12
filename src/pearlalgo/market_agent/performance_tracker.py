@@ -359,7 +359,11 @@ class PerformanceTracker:
             return None
 
         signal = signal_record.get("signal", {}) or {}
-        entry_price = float(signal.get("entry_price", 0) or 0.0)
+        entry_price = float(
+            signal_record.get("entry_price")
+            or signal.get("entry_price")
+            or 0.0
+        )
         direction = str(signal.get("direction", "long") or "long").lower()
 
         # Validate prices before computing P&L to prevent corrupt metrics.

@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from pearlalgo.utils.formatting import pnl_emoji
+
 if TYPE_CHECKING:
     from telegram import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -69,9 +71,9 @@ class TelegramTradeCommandsMixin:
         if active_trades_unrealized_pnl is not None:
             try:
                 upnl = float(active_trades_unrealized_pnl)
-                pnl_emoji = "💰" if upnl >= 0 else "📉"
+                upnl_emoji = "💰" if upnl >= 0 else "📉"
                 pnl_sign = "+" if upnl >= 0 else ""
-                lines.append(f"{pnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
+                lines.append(f"{upnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
             except Exception:
                 pass
 
@@ -206,8 +208,8 @@ class TelegramTradeCommandsMixin:
 
             text += f"*Total Trades:* {stats['total']}\n"
             if stats['exited_count'] > 0:
-                pnl_emoji = "🟢" if stats['total_pnl'] >= 0 else "🔴"
-                text += f"*Total P&L:* {pnl_emoji} ${stats['total_pnl']:,.2f}\n"
+                pnl_emoji_str = pnl_emoji(stats['total_pnl'])
+                text += f"*Total P&L:* {pnl_emoji_str} ${stats['total_pnl']:,.2f}\n"
             text += "\n"
 
             text += "*By Status:*\n"

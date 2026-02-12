@@ -95,6 +95,7 @@ class TestResolveDefaults:
         tmp_path: Path,
     ) -> None:
         mock_load_cfg.return_value = _stub_service_config()
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
 
         deps = ServiceDependencies(
             data_provider=_mock_data_provider(),
@@ -133,6 +134,7 @@ class TestResolveDefaults:
         tmp_path: Path,
     ) -> None:
         mock_load_cfg.return_value = _stub_service_config()
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         custom_fetcher = MagicMock(name="custom_fetcher")
 
         deps = ServiceDependencies(
@@ -162,8 +164,10 @@ class TestResolveDefaults:
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
+        tmp_path: Path,
     ) -> None:
         mock_load_cfg.return_value = _stub_service_config()
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
 
         deps = ServiceDependencies(
             config=_minimal_config(),
@@ -201,6 +205,7 @@ class TestBuildServiceDependencies:
         tmp_path: Path,
     ) -> None:
         mock_load_cfg.return_value = _stub_service_config()
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
 
         deps = build_service_dependencies(
             data_provider=_mock_data_provider(),
@@ -239,6 +244,7 @@ class TestBuildServiceDependencies:
     ) -> None:
         expected_cfg = _stub_service_config()
         mock_load_cfg.return_value = expected_cfg
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
 
         deps = build_service_dependencies(
             data_provider=_mock_data_provider(),
@@ -279,6 +285,7 @@ class TestAccountLabel:
         stage: str,
         tmp_path: Path,
     ) -> None:
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": stage})
 
         build_service_dependencies(
@@ -316,6 +323,7 @@ class TestAccountLabel:
         stage: str,
         tmp_path: Path,
     ) -> None:
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": stage})
 
         build_service_dependencies(

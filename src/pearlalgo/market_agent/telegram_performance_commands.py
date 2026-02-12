@@ -15,6 +15,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
+from pearlalgo.utils.formatting import pnl_emoji
 from pearlalgo.utils.logger import logger
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
 from pearlalgo.utils.paths import parse_utc_timestamp
@@ -115,8 +116,8 @@ class TelegramPerformanceCommandsMixin:
                 total_pnl = sum(float((t or {}).get("pnl", 0) or 0) for t in all_trades if isinstance(t, dict))
                 overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
                 
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji} ${total_pnl:,.2f}")
+                pnl_emoji_str = pnl_emoji(total_pnl)
+                lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji_str} ${total_pnl:,.2f}")
                 lines.append("")
                 
                 # Session breakdown
@@ -299,11 +300,11 @@ class TelegramPerformanceCommandsMixin:
                 
                 lines.append("*Today:*")
                 if daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_emoji_str = pnl_emoji(daily_pnl)
                     pnl_sign = "+" if daily_pnl >= 0 else ""
                     # Add trend indicator
                     trend = "↗️" if daily_pnl > 0 else "↘️" if daily_pnl < 0 else "→"
-                    lines.append(f"{pnl_emoji} P&L: {trend} {pnl_sign}${abs(daily_pnl):.2f}")
+                    lines.append(f"{pnl_emoji_str} P&L: {trend} {pnl_sign}${abs(daily_pnl):.2f}")
                 else:
                     lines.append("• P&L: $0.00")
                 
@@ -323,9 +324,9 @@ class TelegramPerformanceCommandsMixin:
                 lines.append("*Overall:*")
                 lines.append(f"• Total Trades: {total_trades}")
                 if total_pnl != 0:
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    pnl_emoji_str = pnl_emoji(total_pnl)
                     pnl_sign = "+" if total_pnl >= 0 else ""
-                    lines.append(f"• Total P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
+                    lines.append(f"• Total P&L: {pnl_emoji_str} {pnl_sign}${abs(total_pnl):.2f}")
                 if total_trades > 0:
                     wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                     lines.append(f"• Win Rate: {wr_emoji} {win_rate:.1f}%")
@@ -361,10 +362,10 @@ class TelegramPerformanceCommandsMixin:
             if state:
                 daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
                 if daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_emoji_str = pnl_emoji(daily_pnl)
                     pnl_sign = "+" if daily_pnl >= 0 else ""
-                    daily_pnl_label = f"📊 Daily {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
-                    pnl_overview_label = f"💰 P&L {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
+                    daily_pnl_label = f"📊 Daily {pnl_emoji_str}{pnl_sign}${abs(daily_pnl):.0f}"
+                    pnl_overview_label = f"💰 P&L {pnl_emoji_str}{pnl_sign}${abs(daily_pnl):.0f}"
             
             if metrics:
                 total_trades = metrics.get("exited_signals", 0)
@@ -460,14 +461,14 @@ class TelegramPerformanceCommandsMixin:
                             hold_times.append(hold_mins)
                     avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
 
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    pnl_emoji_str = pnl_emoji(total_pnl)
                     wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                     pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
 
                     text += "*7-Day Summary:*\n"
                     text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
                     text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
-                    text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                    text += f"  Total P&L: {pnl_emoji_str} ${total_pnl:,.2f}\n"
                     text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
                     if profit_factor > 0:
                         text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
@@ -540,7 +541,7 @@ class TelegramPerformanceCommandsMixin:
             wins = len([s for s in today_signals if s.get("status") == "exited" and (s.get("pnl") or 0) > 0])
             losses = exited - wins
             
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            pnl_emoji_str = pnl_emoji(total_pnl)
             
             text += "*Today's Activity:*\n"
             text += f"  Alerts: {len(today_signals)} total\n"
@@ -550,7 +551,7 @@ class TelegramPerformanceCommandsMixin:
             
             if exited > 0:
                 text += "\n*Today's P&L:*\n"
-                text += f"  {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  {pnl_emoji_str} ${total_pnl:,.2f}\n"
                 text += f"  Trades: {wins}W / {losses}L\n"
         else:
             text += "No alerts generated today.\n"
@@ -583,7 +584,7 @@ class TelegramPerformanceCommandsMixin:
             avg_pnl = performance.get("avg_pnl", 0)
             avg_hold = performance.get("avg_hold_minutes", 0)
             
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            pnl_emoji_str = pnl_emoji(total_pnl)
             
             text += "*Alert Statistics:*\n"
             text += f"  Total Generated: {total_signals}\n"
@@ -595,7 +596,7 @@ class TelegramPerformanceCommandsMixin:
                 text += f"  Losses: {losses}\n"
                 text += f"  Win Rate: {win_rate:.1f}%\n"
                 text += "\n*P&L:*\n"
-                text += f"  Total: {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  Total: {pnl_emoji_str} ${total_pnl:,.2f}\n"
                 text += f"  Average: ${avg_pnl:,.2f}\n"
                 if avg_hold > 0:
                     text += "\n*Timing:*\n"
@@ -634,11 +635,11 @@ class TelegramPerformanceCommandsMixin:
                 
                 win_rate = (len(winning_trades) / len(all_trades) * 100) if all_trades else 0
                 
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                pnl_emoji_str = pnl_emoji(total_pnl)
                 wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                 pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
                 
-                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"*Total P&L:* {pnl_emoji_str} ${total_pnl:,.2f}\n"
                 text += f"*Trades:* {len(all_trades)} ({len(winning_trades)}W / {len(losing_trades)}L)\n"
                 text += f"*Win Rate:* {wr_emoji} {win_rate:.1f}%\n\n"
                 

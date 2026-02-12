@@ -42,6 +42,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_state_file, get_signals_file, parse_utc_timestamp
 from pearlalgo.utils.service_controller import ServiceController
+from pearlalgo.utils.formatting import fmt_time_et, pnl_emoji
 from pearlalgo.utils.telegram_alerts import (
     TelegramPrefs,
     sanitize_telegram_markdown,
@@ -2348,9 +2349,9 @@ class TelegramCommandHandler(
             lines = ["📊 *Activity*", ""]
             
             # Performance card
-            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+            pnl_emoji_str = pnl_emoji(daily_pnl)
             pnl_sign = "+" if daily_pnl >= 0 else ""
-            lines.append(f"*Today:* {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+            lines.append(f"*Today:* {pnl_emoji_str} {pnl_sign}${abs(daily_pnl):.2f}")
             
             if daily_trades > 0:
                 wr = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
@@ -3199,9 +3200,9 @@ class TelegramCommandHandler(
                         impact_lines.append("📊 *Impact Preview:*")
                         impact_lines.append(f"• Will close {positions} open position(s)")
                         if daily_pnl != 0:
-                            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                            pnl_emoji_str = pnl_emoji(daily_pnl)
                             pnl_sign = "+" if daily_pnl >= 0 else ""
-                            impact_lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                            impact_lines.append(f"• Current P&L: {pnl_emoji_str} {pnl_sign}${abs(daily_pnl):.2f}")
                         impact_lines.append("")
                 
                 lines = [
@@ -3250,9 +3251,9 @@ class TelegramCommandHandler(
                         impact_lines.append("📊 *Impact Preview:*")
                         impact_lines.append(f"• Will close/flatten {positions_count} position(s)/trade(s)")
                         if daily_pnl != 0:
-                            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                            pnl_emoji_str = pnl_emoji(daily_pnl)
                             pnl_sign = "+" if daily_pnl >= 0 else ""
-                            impact_lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                            impact_lines.append(f"• Current P&L: {pnl_emoji_str} {pnl_sign}${abs(daily_pnl):.2f}")
                         impact_lines.append("")
 
                 lines = [
@@ -3324,9 +3325,9 @@ class TelegramCommandHandler(
                         lines.append(f"• Unrealized P&L: {unreal_emoji} {unreal_sign}${abs(unrealized_pnl):.2f}")
                     
                     if daily_pnl != 0:
-                        pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                        pnl_emoji_str = pnl_emoji(daily_pnl)
                         pnl_sign = "+" if daily_pnl >= 0 else ""
-                        lines.append(f"• Realized P&L Today: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                        lines.append(f"• Realized P&L Today: {pnl_emoji_str} {pnl_sign}${abs(daily_pnl):.2f}")
                     
                     lines.extend([
                         "",
@@ -3803,8 +3804,6 @@ class TelegramCommandHandler(
             trading_bot_label = tb_selected if tb_enabled else "Scanner"
             
             # Format time
-            from datetime import datetime, timezone
-            import pytz
             current_time = state.get("current_time")
             if not current_time:
                 current_time = datetime.now(timezone.utc)
@@ -3812,14 +3811,9 @@ class TelegramCommandHandler(
                 current_time = parse_utc_timestamp(current_time)
             if hasattr(current_time, 'tzinfo') and current_time.tzinfo is None:
                 current_time = current_time.replace(tzinfo=timezone.utc)
-            
-            try:
-                et_tz = pytz.timezone('US/Eastern')
-                et_time = current_time.astimezone(et_tz)
-                time_str = et_time.strftime("%I:%M %p ET").lstrip('0')
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}", exc_info=True)
-                time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
+
+            fallback = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
+            time_str = fmt_time_et(current_time, fallback=fallback)
             
             # Service status - use live process check, not stale state file
             agent_running = bool(self._is_agent_process_running())
@@ -4257,7 +4251,7 @@ class TelegramCommandHandler(
                 daily_losses = int(daily_losses or 0)
                 
                 # Always show 24h section - even with no trades (shows session is active)
-                pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                pnl_emoji_str = pnl_emoji(daily_pnl)
                 pnl_sign = "+" if daily_pnl >= 0 else "-"
                 win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
 
@@ -4272,7 +4266,7 @@ class TelegramCommandHandler(
                 message += "\n\n*24h:*"
                 if daily_trades > 0:
                     # Condensed format: "24h: 🟢 +$2,375.00 (73W/74L • 50% WR) • ❄️3L"
-                    message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                    message += f"\n{pnl_emoji_str} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
                 else:
                     message += f"\n⚪ $0.00 (new session)"
 
@@ -4318,7 +4312,7 @@ class TelegramCommandHandler(
                             wins_72h = sum(1 for t in trades_72h if t.get("is_win"))
                             losses_72h = int(len(trades_72h) - wins_72h)
                             wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
-                            pnl_emoji_72h = "🟢" if pnl_72h >= 0 else "🔴"
+                            pnl_emoji_72h = pnl_emoji(pnl_72h)
                             pnl_sign_72h = "+" if pnl_72h >= 0 else "-"
 
                             message += "\n\n*72h:*"
@@ -4392,7 +4386,7 @@ class TelegramCommandHandler(
                     dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
                     sig_type = safe_label(str(t.get("type") or "unknown"))
                     reason = safe_label(str(t.get("exit_reason") or "")).strip()
-                    line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
+                    line = f"\n{pnl_emoji_str} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
                     if reason:
                         line += f" • {reason}"
                     message += line
@@ -4430,7 +4424,8 @@ class TelegramCommandHandler(
                 for _attempt in range(2):
                     try:
                         async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=8)) as _sess:
-                            async with _sess.get("http://localhost:8001/api/state", headers=_tv_paper_headers) as _resp:
+                            _tv_paper_api_url = os.getenv("TV_PAPER_API_URL", "http://localhost:8001")
+                            async with _sess.get(f"{_tv_paper_api_url}/api/state", headers=_tv_paper_headers) as _resp:
                                 if _resp.status == 200:
                                     _tv_paper_data = await _resp.json()
                                     break
@@ -4454,7 +4449,7 @@ class TelegramCommandHandler(
                         _losses = _trades - _wins
                         _wr = _tv_paper_ch.get("win_rate", 0)
                         _outcome = _tv_paper_ch.get("outcome", "active")
-                        _pnl_emoji = "🟢" if _pnl >= 0 else "🔴"
+                        _pnl_emoji = pnl_emoji(_pnl)
                         _pnl_sign = "+" if _pnl >= 0 else ""
                         _progress = min(100, max(0, (_pnl / _target * 100))) if _target > 0 else 0
 
@@ -4537,9 +4532,9 @@ class TelegramCommandHandler(
         if active_trades_unrealized_pnl is not None:
             try:
                 upnl = float(active_trades_unrealized_pnl)
-                pnl_emoji = "💰" if upnl >= 0 else "📉"
+                upnl_emoji = "💰" if upnl >= 0 else "📉"
                 pnl_sign = "+" if upnl >= 0 else ""
-                lines.append(f"{pnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
+                lines.append(f"{upnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
             except Exception as e:
                 logger.debug(f"Non-critical: {e}", exc_info=True)
 
@@ -4676,11 +4671,11 @@ class TelegramCommandHandler(
                     total_pnl += float(signal.get("pnl", 0) or 0)
             
             exited_count = status_counts.get("exited", 0)
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-            
+            pnl_emoji_str = pnl_emoji(total_pnl)
+
             text += f"*Total Trades:* {len(signals)}\n"
             if exited_count > 0:
-                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"*Total P&L:* {pnl_emoji_str} ${total_pnl:,.2f}\n"
             text += "\n"
             
             text += "*By Status:*\n"
@@ -5104,7 +5099,7 @@ class TelegramCommandHandler(
                 total_passes = sum(1 for h in history if h.get("outcome") == "pass")
                 total_fails = sum(1 for h in history if h.get("outcome") == "fail")
             
-            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+            pnl_emoji_str = pnl_emoji(pnl)
             pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
             
             # Progress bar
@@ -5120,7 +5115,7 @@ class TelegramCommandHandler(
             text = (
                 f"🏆 *50k Challenge*\n\n"
                 f"*Current Attempt:* #{attempt_id}\n"
-                f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
+                f"Balance: `${balance:,.2f}` | {pnl_emoji_str} {pnl_str}\n"
                 f"{target_line}\n"
                 f"Trades: {trades} ({wins}W / {losses}L) | WR: {wr:.0f}%\n\n"
                 f"*Rules:*\n"
@@ -6314,6 +6309,4 @@ def main() -> None:
     handler.run()
 
 if __name__ == "__main__":
-    main()
- "__main__":
     main()

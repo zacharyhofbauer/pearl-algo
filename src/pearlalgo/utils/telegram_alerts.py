@@ -11,6 +11,14 @@ from pearlalgo.utils.formatting import (
     fmt_currency,
     fmt_number_commas,
     fmt_pct_direct,
+    fmt_time_et,
+    format_duration,
+    format_duration_short,
+    format_hold_duration,
+    format_pnl,
+    format_time_ago,
+    format_uptime as _format_uptime_impl,
+    pnl_emoji,
 )
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.sparkline import generate_progress_bar
@@ -129,14 +137,7 @@ def format_transparency_footer(
     else:
         # Unknown. If we still have an uptime value, show it; otherwise be explicit.
         if agent_uptime_seconds is not None:
-            if agent_uptime_seconds < 60:
-                uptime_str = f"{int(agent_uptime_seconds)}s"
-            elif agent_uptime_seconds < 3600:
-                uptime_str = f"{int(agent_uptime_seconds // 60)}m"
-            else:
-                hours = int(agent_uptime_seconds // 3600)
-                mins = int((agent_uptime_seconds % 3600) // 60)
-                uptime_str = f"{hours}h{mins}m"
+            uptime_str = format_duration(agent_uptime_seconds, compact=True)
             parts.append(f"Agent: {uptime_str}")
         else:
             parts.append("Agent: ?")
@@ -151,12 +152,7 @@ def format_transparency_footer(
     
     # Data freshness
     if data_age_seconds is not None:
-        if data_age_seconds < 60:
-            age_str = f"{int(data_age_seconds)}s"
-        elif data_age_seconds < 3600:
-            age_str = f"{int(data_age_seconds // 60)}m"
-        else:
-            age_str = f"{int(data_age_seconds // 3600)}h"
+        age_str = format_duration(data_age_seconds, compact=True)
         if data_stale is True:
             parts.append(f"Data: {EMOJI_ERROR} {age_str}")
         else:
@@ -288,11 +284,8 @@ def _format_separator(length: int = 25) -> str:
 
 
 def _format_uptime(uptime: dict) -> str:
-    """Format uptime compactly."""
-    hours = uptime.get('hours', 0)
-    minutes = uptime.get('minutes', 0)
-    total_seconds = hours * 3600 + minutes * 60
-    return format_duration(total_seconds, compact=True)
+    """Format uptime compactly. Delegates to formatting.format_uptime."""
+    return _format_uptime_impl(uptime)
 
 
 def _format_number(value: float, decimals: int = 2, show_sign: bool = False) -> str:
@@ -362,75 +355,11 @@ def format_signal_confidence_tier(confidence: float) -> tuple[str, str]:
         return "🔴", "Low"
 
 
-def format_pnl(pnl: float) -> tuple[str, str]:
-    """Return (emoji, formatted_string) for a P&L value."""
-    if pnl >= 0:
-        return "🟢", f"+${pnl:,.2f}"
-    else:
-        return "🔴", f"-${abs(pnl):,.2f}"
 
-
-def format_duration(seconds: float | None, suffix: str = "", compact: bool = False) -> str:
-    """
-    Format a duration in seconds to a human-readable form.
-
-    Args:
-        seconds: Duration in seconds (or None).
-        suffix: Optional suffix to append (e.g., " ago").
-        compact: If True, use compact format like "3h15m"; if False, use "3h 15m".
-
-    Returns:
-        e.g. '45s', '12m', '3h15m' (compact) or '3h 15m' (spaced), or '?' if None.
-    """
-    if seconds is None:
-        return "?" + suffix
-    try:
-        s = float(seconds)
-    except (ValueError, TypeError):
-        return "?" + suffix
-    if s < 0:
-        return "?" + suffix
-    if s < 60:
-        return f"{int(s)}s{suffix}"
-    if s < 3600:
-        return f"{int(s // 60)}m{suffix}"
-    hours = int(s // 3600)
-    mins = int((s % 3600) // 60)
-    if compact:
-        if mins > 0:
-            return f"{hours}h{mins}m{suffix}"
-        return f"{hours}h{suffix}"
-    else:
-        if mins > 0:
-            return f"{hours}h {mins}m{suffix}"
-        return f"{hours}h{suffix}"
-
-
-def format_time_ago(timestamp_str: str | None) -> str:
-    """
-    Format a timestamp as a human-readable 'time ago' string.
-
-    Returns e.g. '5m ago', '2h ago', '1d ago', or '' if parsing fails.
-    """
-    if not timestamp_str:
-        return ""
-    try:
-        from datetime import datetime, timezone
-        from pearlalgo.utils.paths import parse_utc_timestamp
-
-        ts = parse_utc_timestamp(str(timestamp_str))
-        if ts is None:
-            return ""
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        delta = now - ts
-        seconds = delta.total_seconds()
-        if seconds < 0:
-            return ""
-        return format_duration(seconds, suffix=" ago", compact=True)
-    except Exception:
-        return ""
+# NOTE: format_pnl, pnl_emoji, format_duration, format_time_ago,
+# format_duration_short, format_hold_duration are now imported from
+# pearlalgo.utils.formatting and re-exported at the top of this module
+# for backward compatibility.
 
 
 # ---------------------------------------------------------------------------
@@ -766,26 +695,24 @@ def format_signal_timing(
     
     try:
         from datetime import timezone
-        import pytz
         from pearlalgo.utils.paths import parse_utc_timestamp
-        
+
         ts = parse_utc_timestamp(str(timestamp_str))
         if ts is None:
             return ""
-        
+
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        
-        # Convert to ET
-        et_tz = pytz.timezone('US/Eastern')
-        et_time = ts.astimezone(et_tz)
-        time_str = et_time.strftime("%I:%M %p ET")
-        
+
+        time_str = fmt_time_et(ts, fallback="")
+        if not time_str:
+            return ""
+
         if include_relative:
             age = format_time_ago(timestamp_str)
             if age:
                 return f"{time_str} ({age})"
-        
+
         return time_str
     except Exception:
         return ""
@@ -1276,7 +1203,7 @@ def format_performance_line(
 
     Returns compact line like: 📈 5W/2L • 71% WR • 🟢 +$350.00
     """
-    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+    pnl_emoji_str = pnl_emoji(total_pnl)
 
     # Win-rate progress bar (keep compact for mobile)
     try:
@@ -1291,7 +1218,7 @@ def format_performance_line(
     else:
         wr_part = f"{wr:.0f}% WR"
 
-    return f"📈 {int(wins)}W/{int(losses)}L • {wr_part} • {pnl_emoji} {fmt_currency(total_pnl)}"
+    return f"📈 {int(wins)}W/{int(losses)}L • {wr_part} • {pnl_emoji_str} {fmt_currency(total_pnl)}"
 
 
 def format_home_card(
@@ -1834,9 +1761,9 @@ def format_glanceable_card(
     if active_trades_count > 0:
         pnl_part = ""
         if daily_pnl is not None:
-            pnl_emoji = EMOJI_PROFIT if daily_pnl >= 0 else EMOJI_LOSS
+            pnl_icon = EMOJI_PROFIT if daily_pnl >= 0 else EMOJI_LOSS
             pnl_sign = "+" if daily_pnl >= 0 else ""
-            pnl_part = f" | {pnl_emoji}{pnl_sign}${abs(daily_pnl):.2f}"
+            pnl_part = f" | {pnl_icon}{pnl_sign}${abs(daily_pnl):.2f}"
         lines.append(f"{EMOJI_TARGET} *{active_trades_count} Active*{pnl_part}")
     
     # Footer: system state
@@ -2329,11 +2256,11 @@ class TelegramAlerts:
         win_rate: Optional[float] = None,
     ) -> None:
         """Send daily trading summary (mobile-friendly)."""
-        pnl_emoji = "📈" if daily_pnl >= 0 else "📉"
+        pnl_icon = "📈" if daily_pnl >= 0 else "📉"
         trend_emoji = "↗️" if daily_pnl >= 0 else "↘️"
         trend_text = "Profitable" if daily_pnl >= 0 else "Loss"
 
-        message = f"{pnl_emoji} *Daily Summary*\n\n"
+        message = f"{pnl_icon} *Daily Summary*\n\n"
         message += f"💰 *P&L:* {fmt_currency(daily_pnl)}\n"
 
         if win_rate is not None:
@@ -2508,7 +2435,7 @@ class TelegramAlerts:
             risk_amount: Risk amount in dollars
         """
         side_emoji = "📈" if side.lower() == "long" else "📉"
-        pnl_emoji = "💰" if unrealized_pnl and unrealized_pnl >= 0 else "💸"
+        pnl_icon = "💰" if unrealized_pnl and unrealized_pnl >= 0 else "💸"
 
         message = f"{side_emoji} *Signal Logged*\n\n"
         message += f"*Symbol:* {symbol}\n"
@@ -2522,7 +2449,7 @@ class TelegramAlerts:
             message += f"*Take Profit:* ${take_profit:,.2f}\n"
 
         if unrealized_pnl is not None:
-            message += f"\n{pnl_emoji} *Unrealized P&L:* ${unrealized_pnl:,.2f}\n"
+            message += f"\n{pnl_icon} *Unrealized P&L:* ${unrealized_pnl:,.2f}\n"
 
         if risk_amount:
             message += f"*Risk:* ${risk_amount:,.2f}\n"
@@ -2553,10 +2480,10 @@ class TelegramAlerts:
             hold_duration: How long position was held (optional)
             exit_reason: Reason for exit (optional)
         """
-        pnl_emoji = "💰" if realized_pnl >= 0 else "💸"
+        pnl_icon = "💰" if realized_pnl >= 0 else "💸"
         direction_emoji = "📈" if direction.lower() == "long" else "📉"
 
-        message = f"{pnl_emoji} *Position Exited*\n\n"
+        message = f"{pnl_icon} *Position Exited*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()} {direction_emoji}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"
@@ -2657,10 +2584,10 @@ class TelegramAlerts:
             size: Position size
             unrealized_pnl: Unrealized profit/loss
         """
-        pnl_emoji = "📈" if unrealized_pnl >= 0 else "📉"
+        pnl_icon = "📈" if unrealized_pnl >= 0 else "📉"
         pnl_pct = abs((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
 
-        message = f"{pnl_emoji} *Position Update*\n\n"
+        message = f"{pnl_icon} *Position Update*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"
