@@ -1,5 +1,5 @@
 [Unit]
-Description=PearlAlgo Market Agent - IBKR Paper
+Description=PearlAlgo Market Agent - Tradovate Paper
 After=network.target ibkr-gateway.service
 Wants=ibkr-gateway.service
 
@@ -11,7 +11,7 @@ WorkingDirectory=/home/pearl/PearlAlgoProject
 Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/pearl/PearlAlgoProject/.env
 EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.main --config config/accounts/ibkr_paper.yaml --data-dir data/ibkr/paper
+ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.main --config config/accounts/tradovate_paper.yaml --data-dir data/tradovate/paper
 Restart=always
 RestartSec=10
 
