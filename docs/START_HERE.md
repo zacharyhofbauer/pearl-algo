@@ -37,6 +37,8 @@ Pearl runs two isolated accounts simultaneously:
 ./pearl.sh stop           # Stop everything
 ./pearl.sh restart        # Restart everything
 ./pearl.sh quick          # One-liner status
+./pearl.sh start --no-chart   # Start without web app
+./pearl.sh chart deploy   # Build + restart web app (after frontend changes)
 ./pearl.sh tv_paper restart   # Restart Tradovate Paper independently
 ./pearl.sh tv_paper logs      # Tail Tradovate Paper agent log
 ```
@@ -46,6 +48,9 @@ Pearl runs two isolated accounts simultaneously:
 - Hard refresh shows account selector (IBKR Virtual vs Tradovate Paper)
 - Header dropdown to switch accounts anytime
 - `pearlalgo.io` = IBKR Virtual, `pearlalgo.io?account=tv_paper` = Tradovate Paper
+- **Status badges** in header: Agent, GW, AI, Market, Data, ML, Shadow savings (with tooltips)
+- **SystemStatusPanel**: Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch, session P&L
+- **Pull-to-refresh** on mobile
 
 ### Telegram
 

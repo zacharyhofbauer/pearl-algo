@@ -132,13 +132,14 @@ class _StatePersistence:
             logger.error(f"Error saving state: {e}", exc_info=True)
 
     def load_state(self) -> Dict:
+        """Load state.json using canonical helper."""
+        from pearlalgo.utils.state_io import load_json_file
         if not self._state_file.exists():
             return {}
         lock_path = self._state_dir / ".state.lock"
         try:
             with file_lock(lock_path, shared=True):
-                with open(self._state_file, "r") as f:
-                    return json.load(f)
+                return load_json_file(self._state_file)
         except Exception as e:
             logger.error(f"Error loading state: {e}", exc_info=True)
             return {}
@@ -197,54 +198,22 @@ class _EventLog:
                 logger.warning(f"Critical path error: {e}", exc_info=True)
 
     def get_recent_events(self, limit: int = 200) -> List[Dict[str, Any]]:
-        events: List[Dict[str, Any]] = []
+        """Get recent events from events.jsonl using canonical helper."""
+        from pearlalgo.utils.state_io import load_jsonl_file
         if not self._events_file.exists():
-            return events
-
-        safe_limit = max(1, int(limit))
-        chunk_size = 8192
-
+            return []
         try:
-            with open(self._events_file, "rb") as f:
-                f.seek(0, 2)
-                file_size = f.tell()
-                if file_size == 0:
-                    return events
-
-                remaining = file_size
-                tail_bytes = b""
-                lines_found = 0
-
-                while remaining > 0 and lines_found <= safe_limit:
-                    read_size = min(chunk_size, remaining)
-                    remaining -= read_size
-                    f.seek(remaining)
-                    chunk = f.read(read_size)
-                    tail_bytes = chunk + tail_bytes
-                    lines_found = tail_bytes.count(b"\n")
-
-                text = tail_bytes.decode("utf-8", errors="replace")
-                all_lines = text.splitlines()
-                tail_lines = all_lines[-safe_limit:] if len(all_lines) > safe_limit else all_lines
-
-                for line in tail_lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
-                    try:
-                        events.append(json.loads(stripped))
-                    except json.JSONDecodeError:
-                        continue
+            return load_jsonl_file(self._events_file, max_lines=limit)
         except Exception as e:
             logger.debug(f"Error reading events: {e}")
-        return events
+            return []
 
 
 class _SignalStore:
     """Manages ``signals.jsonl`` persistence, caching, rotation, and dedup."""
 
     # Cache recent signals for this many seconds before re-reading from disk.
-    _SIGNALS_CACHE_TTL: float = 5.0
+    _SIGNALS_CACHE_TTL: float = 15.0
 
     def __init__(
         self,
@@ -539,50 +508,15 @@ class _SignalStore:
         return signals
 
     def get_recent_signals_tail(self, max_lines: int = 1000) -> List[Dict]:
+        """Get recent signals from signals.jsonl using canonical helper."""
+        from pearlalgo.utils.state_io import load_jsonl_file
         if not self._signals_file.exists():
             return []
-
-        signals: List[Dict] = []
-        chunk_size = 8192
-
         try:
-            with open(self._signals_file, "rb") as f:
-                f.seek(0, 2)
-                file_size = f.tell()
-
-                if file_size == 0:
-                    return []
-
-                remaining = file_size
-                tail_bytes = b""
-                lines_found = 0
-
-                while remaining > 0 and lines_found <= max_lines:
-                    read_size = min(chunk_size, remaining)
-                    remaining -= read_size
-                    f.seek(remaining)
-                    chunk = f.read(read_size)
-                    tail_bytes = chunk + tail_bytes
-                    lines_found = tail_bytes.count(b"\n")
-
-                text = tail_bytes.decode("utf-8", errors="replace")
-                all_lines = text.splitlines()
-                tail_lines = all_lines[-max_lines:] if len(all_lines) > max_lines else all_lines
-
-                for line in tail_lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
-                    try:
-                        record = json.loads(stripped)
-                        signals.append(record)
-                    except json.JSONDecodeError:
-                        continue
-
+            return load_jsonl_file(self._signals_file, max_lines=max_lines)
         except Exception as e:
             logger.error(f"Error tail-reading signals: {e}")
-
-        return signals
+            return []
 
     async def async_get_recent_signals(self, limit: int = 100) -> List[Dict]:
         import asyncio

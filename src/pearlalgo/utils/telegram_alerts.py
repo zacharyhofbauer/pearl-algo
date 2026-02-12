@@ -120,14 +120,7 @@ def format_transparency_footer(
     # Agent uptime / state
     if agent_running is True:
         if agent_uptime_seconds is not None:
-            if agent_uptime_seconds < 60:
-                uptime_str = f"{int(agent_uptime_seconds)}s"
-            elif agent_uptime_seconds < 3600:
-                uptime_str = f"{int(agent_uptime_seconds // 60)}m"
-            else:
-                hours = int(agent_uptime_seconds // 3600)
-                mins = int((agent_uptime_seconds % 3600) // 60)
-                uptime_str = f"{hours}h{mins}m"
+            uptime_str = format_duration(agent_uptime_seconds, compact=True)
             parts.append(f"Agent: {uptime_str}")
         else:
             parts.append("Agent: ON")
@@ -298,9 +291,8 @@ def _format_uptime(uptime: dict) -> str:
     """Format uptime compactly."""
     hours = uptime.get('hours', 0)
     minutes = uptime.get('minutes', 0)
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
+    total_seconds = hours * 3600 + minutes * 60
+    return format_duration(total_seconds, compact=True)
 
 
 def _format_number(value: float, decimals: int = 2, show_sign: bool = False) -> str:
@@ -378,6 +370,42 @@ def format_pnl(pnl: float) -> tuple[str, str]:
         return "🔴", f"-${abs(pnl):,.2f}"
 
 
+def format_duration(seconds: float | None, suffix: str = "", compact: bool = False) -> str:
+    """
+    Format a duration in seconds to a human-readable form.
+
+    Args:
+        seconds: Duration in seconds (or None).
+        suffix: Optional suffix to append (e.g., " ago").
+        compact: If True, use compact format like "3h15m"; if False, use "3h 15m".
+
+    Returns:
+        e.g. '45s', '12m', '3h15m' (compact) or '3h 15m' (spaced), or '?' if None.
+    """
+    if seconds is None:
+        return "?" + suffix
+    try:
+        s = float(seconds)
+    except (ValueError, TypeError):
+        return "?" + suffix
+    if s < 0:
+        return "?" + suffix
+    if s < 60:
+        return f"{int(s)}s{suffix}"
+    if s < 3600:
+        return f"{int(s // 60)}m{suffix}"
+    hours = int(s // 3600)
+    mins = int((s % 3600) // 60)
+    if compact:
+        if mins > 0:
+            return f"{hours}h{mins}m{suffix}"
+        return f"{hours}h{suffix}"
+    else:
+        if mins > 0:
+            return f"{hours}h {mins}m{suffix}"
+        return f"{hours}h{suffix}"
+
+
 def format_time_ago(timestamp_str: str | None) -> str:
     """
     Format a timestamp as a human-readable 'time ago' string.
@@ -400,14 +428,7 @@ def format_time_ago(timestamp_str: str | None) -> str:
         seconds = delta.total_seconds()
         if seconds < 0:
             return ""
-        if seconds < 60:
-            return f"{int(seconds)}s ago"
-        elif seconds < 3600:
-            return f"{int(seconds // 60)}m ago"
-        elif seconds < 86400:
-            return f"{int(seconds // 3600)}h ago"
-        else:
-            return f"{int(seconds // 86400)}d ago"
+        return format_duration(seconds, suffix=" ago", compact=True)
     except Exception:
         return ""
 

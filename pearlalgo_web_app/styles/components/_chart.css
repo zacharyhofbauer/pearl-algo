@@ -118,6 +118,13 @@
    CHART CONTAINER
    ===================================================== */
 
+/* Chart wrapper - needs position relative for absolute children */
+.chart-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Chart container */
 .chart-container {
   flex: 1;
@@ -125,6 +132,7 @@
   border-radius: 8px;
   border: 1px solid var(--border-color);
   overflow: hidden;
+  position: relative; /* Needed for absolute positioning of chart-actions */
 }
 
 /* =====================================================

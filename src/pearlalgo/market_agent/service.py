@@ -20,6 +20,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from pearlalgo.market_agent.service_factory import ServiceDependencies
 
+from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_int
 from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.state_io import atomic_write_json
@@ -131,22 +132,6 @@ except ImportError:
     MLSignalFilter = None  # type: ignore
 
 
-def _safe_get_bool(config: dict, key: str, default: bool) -> bool:
-    """Safely read a boolean from *config*, returning *default* on any error."""
-    try:
-        return bool(config.get(key, default))
-    except Exception as exc:
-        logger.debug(f"Non-critical config read ({key}): {exc}")
-        return default
-
-
-def _safe_get_int(config: dict, key: str, default: int, lo: int = 0, hi: int = 100) -> int:
-    """Safely read a clamped int from *config*."""
-    try:
-        return max(lo, min(hi, int(config.get(key, default) or default)))
-    except Exception as exc:
-        logger.debug(f"Non-critical config read ({key}): {exc}")
-        return default
 
 
 def get_trading_day_date() -> date:
@@ -515,10 +500,10 @@ class MarketAgentService(ServiceNotificationsMixin):
         self._last_close_all_price_source: Optional[str] = None
 
         # Telegram UI formatting (Home Card / dashboards)
-        self._telegram_ui_compact_metrics_enabled = _safe_get_bool(telegram_ui_settings, "compact_metrics_enabled", True)
-        self._telegram_ui_show_progress_bars = _safe_get_bool(telegram_ui_settings, "show_progress_bars", False)
-        self._telegram_ui_show_volume_metrics = _safe_get_bool(telegram_ui_settings, "show_volume_metrics", True)
-        self._telegram_ui_compact_metric_width = _safe_get_int(telegram_ui_settings, "compact_metric_width", 10, lo=5, hi=20)
+        self._telegram_ui_compact_metrics_enabled = safe_get_bool(telegram_ui_settings, "compact_metrics_enabled", True)
+        self._telegram_ui_show_progress_bars = safe_get_bool(telegram_ui_settings, "show_progress_bars", False)
+        self._telegram_ui_show_volume_metrics = safe_get_bool(telegram_ui_settings, "show_volume_metrics", True)
+        self._telegram_ui_compact_metric_width = safe_get_int(telegram_ui_settings, "compact_metric_width", 10, lo=5, hi=20)
 
         # Configure optional market-hours overrides (disabled by default).
         # Keeps the declared boundary intact: config drives utils, never the reverse.
@@ -587,6 +572,7 @@ class MarketAgentService(ServiceNotificationsMixin):
         self.max_data_fetch_errors = circuit_breaker_settings.get("max_data_fetch_errors", 5)
         self.connection_failures = 0
         self.max_connection_failures = circuit_breaker_settings.get("max_connection_failures", 10)
+        self._cb_connection_notified = False  # Guard: only send circuit breaker notification once per event
         
         # Virtual trade exit manager (extracted from this class)
         self.virtual_trade_manager = VirtualTradeManager(
@@ -1162,9 +1148,6 @@ class MarketAgentService(ServiceNotificationsMixin):
                         self.data_fetch_errors += 1
                         self.error_count += 1
 
-                        # Alert on connection failures
-                        await self._handle_connection_failure()
-
                         # Circuit breaker: pause service if too many connection failures
                         if self.connection_failures >= self.max_connection_failures:
                             logger.error(
@@ -1185,17 +1168,25 @@ class MarketAgentService(ServiceNotificationsMixin):
                                         "cycle": self.cycle_count,
                                     },
                                 )
-                            await self.notification_queue.enqueue_circuit_breaker(
-                                "IB Gateway connection lost",
-                                {
-                                    "connection_failures": self.connection_failures,
-                                    "error_type": "connection",
-                                    "action_taken": "Service paused - IB Gateway appears to be down",
-                                },
-                                priority=Priority.CRITICAL,
-                            )
+                            # Guard: only send the circuit breaker notification once per event
+                            # (prevents duplicates if the service re-enters this path)
+                            if not self._cb_connection_notified:
+                                self._cb_connection_notified = True
+                                await self.notification_queue.enqueue_circuit_breaker(
+                                    "IB Gateway connection lost",
+                                    {
+                                        "connection_failures": self.connection_failures,
+                                        "error_type": "connection",
+                                        "action_taken": "Service paused - IB Gateway appears to be down",
+                                    },
+                                    priority=Priority.CRITICAL,
+                                )
                             self.paused = True
                             self.pause_reason = "connection_failures"
+                        else:
+                            # Only send fetch_failure alert when NOT hitting the circuit
+                            # breaker threshold — the CB alert already covers this info.
+                            await self._handle_connection_failure()
 
                         # Tradovate Paper follower: still read shared signals on connection error
                         await self.signal_forwarder.process_forwarded_signals(
@@ -1207,6 +1198,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                     # Success - reset error counters
                     self.data_fetch_errors = 0
                     self.connection_failures = 0
+                    self._cb_connection_notified = False
                     self.last_successful_cycle = datetime.now(timezone.utc)
 
                     # Check data quality
@@ -1478,8 +1470,7 @@ class MarketAgentService(ServiceNotificationsMixin):
                             try:
                                 self.audit_logger.log_signal_generated(signal)
                             except Exception:
-                                logger.debug("Tradovate operation failed", exc_info=True)
-                                pass  # non-fatal
+                                ErrorHandler.log_and_continue("tradovate_execution", exc, level="warning")
 
                         try:
                             self.state_manager.append_event(
@@ -1591,9 +1582,8 @@ class MarketAgentService(ServiceNotificationsMixin):
                                     "✅ Tradovate Paper execution reconnected.",
                                     priority=Priority.NORMAL,
                                 )
-                            except Exception:
-                                logger.debug("Tradovate operation failed", exc_info=True)
-                                pass
+                            except Exception as exc:
+                                ErrorHandler.log_and_continue("tradovate_reconnect_notification", exc, level="warning")
                         else:
                             logger.warning("Tradovate Paper execution disconnected")
                             try:
@@ -1601,9 +1591,8 @@ class MarketAgentService(ServiceNotificationsMixin):
                                     "🚨 Tradovate Paper execution DISCONNECTED. Auto-reconnect will attempt.",
                                     priority=Priority.HIGH,
                                 )
-                            except Exception:
-                                logger.debug("Tradovate operation failed", exc_info=True)
-                                pass
+                            except Exception as exc:
+                                ErrorHandler.log_and_continue("tradovate_disconnect_notification", exc, level="warning")
                     self._tv_paper_was_connected = _now_connected
 
                 # Save state periodically, OR immediately when a signal was
@@ -1665,15 +1654,17 @@ class MarketAgentService(ServiceNotificationsMixin):
                         )
                     except Exception as e:
                         logger.debug(f"Non-critical: {e}")
-                    await self.notification_queue.enqueue_circuit_breaker(
-                        "Too many consecutive errors",
-                        {
-                            "consecutive_errors": self.consecutive_errors,
-                            "error_type": "general",
-                            "action_taken": "Service paused",
-                        },
-                        priority=Priority.CRITICAL,
-                    )
+                    if not self._cb_connection_notified:
+                        # Only notify if the connection CB hasn't already sent an alert
+                        await self.notification_queue.enqueue_circuit_breaker(
+                            "Too many consecutive errors",
+                            {
+                                "consecutive_errors": self.consecutive_errors,
+                                "error_type": "general",
+                                "action_taken": "Service paused",
+                            },
+                            priority=Priority.CRITICAL,
+                        )
                     self.paused = True
                     self.pause_reason = "consecutive_errors"
 
@@ -2749,6 +2740,9 @@ class MarketAgentService(ServiceNotificationsMixin):
         """Resume the service."""
         self.paused = False
         self.pause_reason = None
+        # Reset circuit breaker notification guard so a fresh CB event can notify again
+        self.connection_failures = 0
+        self._cb_connection_notified = False
         # Reset cadence scheduler to avoid catch-up storm
         if self.cadence_scheduler:
             self.cadence_scheduler.reset()
@@ -2918,9 +2912,10 @@ class MarketAgentService(ServiceNotificationsMixin):
                     closed_virtual = 0
                     close_err: Optional[str] = None
                     try:
-                        closed_virtual = await self._close_all_virtual_trades(
+                        closed_virtual, _ = await self._close_all_virtual_trades(
                             market_data=last_market_data,
                             reason="kill_switch",
+                            notify=False,
                         )
                     except Exception as e:
                         close_err = str(e)
@@ -3013,9 +3008,10 @@ class MarketAgentService(ServiceNotificationsMixin):
 
                 # Close all virtual trades (best-effort; uses last known market data)
                 try:
-                    closed_virtual = await self._close_all_virtual_trades(
+                    closed_virtual, _ = await self._close_all_virtual_trades(
                         market_data=last_market_data,
                         reason="kill_switch",
+                        notify=False,
                     )
                 except Exception as e:
                     close_virtual_err = str(e)
@@ -3445,21 +3441,31 @@ class MarketAgentService(ServiceNotificationsMixin):
 
         return None
 
-    async def _close_all_virtual_trades(self, *, market_data: Dict, reason: str) -> int:
-        """Force-close all virtual trades (status=entered) using latest price."""
+    async def _close_all_virtual_trades(
+        self, *, market_data: Dict, reason: str, notify: bool = True,
+    ) -> tuple[int, float]:
+        """Force-close all virtual trades (status=entered) using latest price.
+
+        Returns (closed_count, total_pnl).
+
+        Args:
+            notify: If False, suppress the internal Telegram notification.
+                    Callers that send their own consolidated notification should
+                    pass ``notify=False`` to avoid duplicates.
+        """
         if not getattr(self.config, "virtual_pnl_enabled", True):
             logger.warning("Auto/close-all requested but virtual PnL is disabled")
-            return 0
+            return 0, 0.0
 
         active = self._get_active_virtual_trades(limit=500)
         if not active:
-            return 0
+            return 0, 0.0
 
         prices = self._resolve_latest_prices(market_data)
         close_px = prices.get("close")
         if close_px is None:
             logger.warning("Close-all requested but no valid latest price available")
-            return 0
+            return 0, 0.0
 
         bid_px = prices.get("bid")
         ask_px = prices.get("ask")
@@ -3526,10 +3532,12 @@ class MarketAgentService(ServiceNotificationsMixin):
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
 
-        if self._auto_flat_notify and self.telegram_notifier.enabled:
+        if notify and self._auto_flat_notify and self.telegram_notifier.enabled:
             try:
+                acct_label = getattr(self.telegram_notifier, "account_label", None)
+                acct_tag = f"[{acct_label}] " if acct_label else ""
                 msg = (
-                    f"🚫 *Close All Trades Executed*\n\n"
+                    f"{acct_tag}🚫 *Close All Trades Executed*\n\n"
                     f"Reason: `{reason}`\n"
                     f"Closed: `{closed_count}`\n"
                     f"Total P&L: `{fmt_currency(total_pnl)}`"
@@ -3541,7 +3549,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
-        return closed_count
+        return closed_count, total_pnl
 
     async def _close_specific_virtual_trades(
         self, *, signal_ids: list, market_data: Dict, reason: str
@@ -3624,56 +3632,68 @@ class MarketAgentService(ServiceNotificationsMixin):
 
     def _clear_close_all_flag(self) -> None:
         """Clear close_all_requested flags in state.json (best-effort)."""
-        try:
-            state = self.state_manager.load_state()
-        except Exception as e:
-            logger.warning(f"Failed to load state for close-all flag: {e}")
-            state = {}
-        if not isinstance(state, dict):
-            return
-        if "close_all_requested" in state or "close_all_requested_time" in state:
-            state.pop("close_all_requested", None)
-            state.pop("close_all_requested_time", None)
+        if self.execution_orchestrator:
+            self.execution_orchestrator.clear_close_all_flag()
+        else:
+            # Fallback if orchestrator not initialized
+            try:
+                state = self.state_manager.load_state()
+            except Exception as e:
+                logger.warning(f"Failed to load state for close-all flag: {e}")
+                return
+            if not isinstance(state, dict):
+                return
+            if "close_all_requested" in state or "close_all_requested_time" in state:
+                state.pop("close_all_requested", None)
+                state.pop("close_all_requested_time", None)
+                try:
+                    self.state_manager.save_state(state)
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
+
+    def _get_close_signals_requested(self) -> list:
+        """Get list of signal_ids requested for close from state.json."""
+        if self.execution_orchestrator:
+            return self.execution_orchestrator.get_close_signals_requested()
+        else:
+            # Fallback if orchestrator not initialized
+            try:
+                state = self.state_manager.load_state()
+                return list(state.get("close_signals_requested", []))
+            except Exception as e:
+                logger.warning(f"Failed to retrieve close signals requested: {e}")
+                return []
+
+    def _clear_close_signals_requested(self, signal_ids: list = None) -> None:
+        """Clear specific signal close requests or all of them from state.json."""
+        if self.execution_orchestrator:
+            self.execution_orchestrator.clear_close_signals_requested(signal_ids)
+        else:
+            # Fallback if orchestrator not initialized
+            try:
+                state = self.state_manager.load_state()
+            except Exception as e:
+                logger.warning(f"Failed to load state for close signals: {e}")
+                return
+            if not isinstance(state, dict):
+                return
+
+            current_requests = state.get("close_signals_requested", [])
+            if signal_ids is None:
+                # Clear all
+                state.pop("close_signals_requested", None)
+                state.pop("close_signals_requested_time", None)
+            else:
+                # Remove specific signal_ids
+                state["close_signals_requested"] = [s for s in current_requests if s not in signal_ids]
+                if not state["close_signals_requested"]:
+                    state.pop("close_signals_requested", None)
+                    state.pop("close_signals_requested_time", None)
+
             try:
                 self.state_manager.save_state(state)
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
-
-    def _get_close_signals_requested(self) -> list:
-        """Get list of signal_ids requested for close from state.json."""
-        try:
-            state = self.state_manager.load_state()
-            return list(state.get("close_signals_requested", []))
-        except Exception as e:
-            logger.warning(f"Failed to retrieve close signals requested: {e}")
-            return []
-
-    def _clear_close_signals_requested(self, signal_ids: list = None) -> None:
-        """Clear specific signal close requests or all of them from state.json."""
-        try:
-            state = self.state_manager.load_state()
-        except Exception as e:
-            logger.warning(f"Failed to load state for close signals: {e}")
-            state = {}
-        if not isinstance(state, dict):
-            return
-
-        current_requests = state.get("close_signals_requested", [])
-        if signal_ids is None:
-            # Clear all
-            state.pop("close_signals_requested", None)
-            state.pop("close_signals_requested_time", None)
-        else:
-            # Remove specific signal_ids
-            state["close_signals_requested"] = [s for s in current_requests if s not in signal_ids]
-            if not state["close_signals_requested"]:
-                state.pop("close_signals_requested", None)
-                state.pop("close_signals_requested_time", None)
-
-        try:
-            self.state_manager.save_state(state)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
 
     async def _handle_close_all_requests(self, market_data: Dict) -> None:
         """Handle manual close-all flag, individual close requests, and auto-flat rules."""
@@ -3687,7 +3707,9 @@ class MarketAgentService(ServiceNotificationsMixin):
 
         if manual_requested:
             logger.warning("Close-all flag detected - flattening virtual trades")
-            closed_virtual = await self._close_all_virtual_trades(market_data=market_data, reason="close_all_requested")
+            closed_virtual, virtual_pnl = await self._close_all_virtual_trades(
+                market_data=market_data, reason="close_all_requested", notify=False,
+            )
             self._clear_close_all_flag()
 
             # Also flatten real broker positions (Tradovate/IBKR) if execution adapter is present
@@ -3715,12 +3737,13 @@ class MarketAgentService(ServiceNotificationsMixin):
                     logger.error(f"Close-all: broker flatten failed: {e}", exc_info=True)
                     broker_errors.append(str(e)[:80])
 
-            # Send Telegram summary
+            # Send single consolidated Telegram notification
             try:
                 acct_label = getattr(self.telegram_notifier, "account_label", None)
                 acct_tag = f"[{acct_label}] " if acct_label else ""
                 parts = [f"{acct_tag}🛑 *Close All Executed*\n"]
-                parts.append(f"Virtual trades closed: `{closed_virtual}`")
+                parts.append(f"Closed: `{closed_virtual}`")
+                parts.append(f"Total P&L: `{fmt_currency(virtual_pnl)}`")
                 if self.execution_adapter is not None:
                     parts.append(f"Orders cancelled: `{cancelled_count}`")
                     parts.append(f"Positions flattened: `{flattened_count}`")
@@ -3819,7 +3842,7 @@ class MarketAgentService(ServiceNotificationsMixin):
             active = self._get_active_virtual_trades(limit=200)
             if active:
                 logger.warning(f"Auto-flat triggered: {reason}")
-                closed = await self._close_all_virtual_trades(market_data=market_data, reason=reason)
+                closed, _ = await self._close_all_virtual_trades(market_data=market_data, reason=reason)
                 if closed > 0:
                     try:
                         local_now = now.astimezone(ZoneInfo(self._auto_flat_timezone))

@@ -57,6 +57,10 @@ node --version  # v20.x.x
 | **Error Boundaries** | Graceful component failure handling with `role="alert"` |
 | **API Authentication** | API key authentication for protected endpoints (enabled by default) |
 | **Passcode Gate** | Optional passcode login screen for shared/public dashboards |
+| **Status Badges** | Header badges for Agent, GW, AI, Market, Data, ML, Shadow savings (with hover tooltips) |
+| **SystemStatusPanel** | Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch with operator lock, session P&L, circuit breaker state |
+| **Agent Banner** | Agent offline / execution disabled banner with clear visual indicator |
+| **Pull-to-Refresh** | Mobile gesture support for dashboard refresh |
 | **Pearl AI Chat (LLM)** | Optional LLM chat box (local/Ollama + Claude) backed by `/api/pearl/*` |
 | **Accessibility** | WCAG AA contrast, focus indicators, ARIA roles/labels, keyboard navigation, skip-link, reduced-motion support |
 | **Commission Handling** | Tradovate Paper fill P&L auto-adjusted against Tradovate equity to account for broker fees |

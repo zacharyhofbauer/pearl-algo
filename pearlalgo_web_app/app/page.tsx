@@ -149,7 +149,6 @@ function PearlAlgoWebAppInner() {
     timeframe,
     barCount,
     wsStatus,
-    symbol: agentState?.config?.symbol,
   })
 
   // Merge dashboard data from hook into local state (HTTP fetch results)
@@ -281,7 +280,7 @@ function PearlAlgoWebAppInner() {
 
   // Callback for TradeDockPanel to trigger an immediate refetch after close actions
   const handleTradeRefresh = useCallback(() => {
-    dashboardData.refresh()
+    dashboardData.handleTradeRefresh()
   }, [dashboardData])
 
   const formatTime = formatTimeFromDate
@@ -327,7 +326,7 @@ function PearlAlgoWebAppInner() {
 
   // Force refresh function for manual refresh button
   const handleForceRefresh = useCallback(() => {
-    dashboardData.refresh()
+    dashboardData.handleTradeRefresh()
   }, [dashboardData])
 
   // Pull-to-refresh (mobile touch) - uses window scroll position
@@ -385,11 +384,13 @@ function PearlAlgoWebAppInner() {
         refreshingRef = true
         setPullRefreshing(true)
         setPullDistance(40)
-        dashboardData.pullToRefresh().finally(() => {
+        dashboardData.handleTradeRefresh()
+        // Brief visual feedback before clearing pull state
+        setTimeout(() => {
           refreshingRef = false
           setPullRefreshing(false)
           setPullDistance(0)
-        })
+        }, 800)
       } else {
         setPullDistance(0)
       }
@@ -606,7 +607,7 @@ function PearlAlgoWebAppInner() {
   const renderChart = () => (
     <div className="chart-wrapper">
       {/* Agent/Execution offline banner */}
-      {agentState && (agentState.running === false || agentState.execution?.connected === false) && (
+      {agentState && (agentState.running === false || agentState.execution_state?.enabled === false) && (
         <div style={{
           background: 'rgba(244, 67, 54, 0.15)',
           border: '1px solid rgba(244, 67, 54, 0.4)',
@@ -620,43 +621,43 @@ function PearlAlgoWebAppInner() {
           gap: 8,
         }}>
           <span style={{ fontWeight: 600 }}>
-            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISCONNECTED'}
+            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISABLED'}
           </span>
           <span style={{ opacity: 0.7 }}>
             {agentState.running === false
               ? 'The trading agent is not running. Data may be stale.'
-              : 'Execution adapter is disconnected. Orders will not be placed.'}
+              : 'Execution is disabled. Orders will not be placed.'}
           </span>
         </div>
       )}
-      <div className="chart-actions">
-        {/* Data Freshness Indicator with chart action buttons */}
-        <DataFreshnessIndicator
-          lastUpdate={lastUpdate}
-          wsStatus={wsStatus}
-          dataSource={dataSource}
-          isLoading={isFetching}
-          staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
-          onRefresh={handleForceRefresh}
-          onFitAll={() => {
-            if (mainChartApi && candles.length > 0) {
-              // Zoom to show last ~100 bars for a readable view
-              const visibleBars = Math.min(100, candles.length)
-              if (candles.length > visibleBars) {
-                const fromTime = candles[candles.length - visibleBars].time as unknown as import('lightweight-charts').Time
-                const toTime = candles[candles.length - 1].time as unknown as import('lightweight-charts').Time
-                mainChartApi.timeScale().setVisibleRange({ from: fromTime, to: toTime })
-              } else {
-                mainChartApi.timeScale().fitContent()
-              }
-              mainChartApi.timeScale().scrollToRealTime()
-            }
-          }}
-          onGoLive={() => mainChartApi?.timeScale().scrollToRealTime()}
-          variant="floating"
-        />
-      </div>
       <div className="chart-container" role="img" aria-label="MNQ candlestick price chart with indicators">
+        <div className="chart-actions">
+          {/* Data Freshness Indicator with chart action buttons */}
+          <DataFreshnessIndicator
+            lastUpdate={lastUpdate}
+            wsStatus={wsStatus}
+            dataSource={dataSource}
+            isLoading={isFetching}
+            staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
+            onRefresh={handleForceRefresh}
+            onFitAll={() => {
+              if (mainChartApi && candles.length > 0) {
+                // Zoom to show last ~100 bars for a readable view
+                const visibleBars = Math.min(100, candles.length)
+                if (candles.length > visibleBars) {
+                  const fromTime = candles[candles.length - visibleBars].time as unknown as import('lightweight-charts').Time
+                  const toTime = candles[candles.length - 1].time as unknown as import('lightweight-charts').Time
+                  mainChartApi.timeScale().setVisibleRange({ from: fromTime, to: toTime })
+                } else {
+                  mainChartApi.timeScale().fitContent()
+                }
+                mainChartApi.timeScale().scrollToRealTime()
+              }
+            }}
+            onGoLive={() => mainChartApi?.timeScale().scrollToRealTime()}
+            variant="floating"
+          />
+        </div>
         {chartLoading && (
           <div className="loading-screen">
             <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />

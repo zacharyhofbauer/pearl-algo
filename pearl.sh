@@ -66,6 +66,53 @@ parse_options() {
     done
 }
 
+# Sync web app env vars into .env.local (merge, don't overwrite)
+sync_env_local() {
+    local env_local="$SCRIPT_DIR/pearlalgo_web_app/.env.local"
+    local changed=false
+    local temp_file="${env_local}.tmp"
+
+    # Vars to sync: target_key=source_value
+    declare -A sync_vars
+    [ -n "${PEARL_API_KEY:-}" ] && sync_vars[NEXT_PUBLIC_API_KEY]="$PEARL_API_KEY"
+    [ -n "${PEARL_WEBAPP_AUTH_ENABLED:-}" ] && sync_vars[PEARL_WEBAPP_AUTH_ENABLED]="$PEARL_WEBAPP_AUTH_ENABLED"
+    [ -n "${PEARL_WEBAPP_PASSCODE:-}" ] && sync_vars[PEARL_WEBAPP_PASSCODE]="$PEARL_WEBAPP_PASSCODE"
+
+    # If no vars to sync, skip
+    [ ${#sync_vars[@]} -eq 0 ] && return
+
+    # Read existing file into associative array (preserve non-synced vars)
+    declare -A existing
+    if [ -f "$env_local" ]; then
+        while IFS='=' read -r key val; do
+            # Skip comments and empty lines
+            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+            # Remove quotes if present
+            val="${val#\"}"
+            val="${val%\"}"
+            existing["$key"]="$val"
+        done < <(grep -v '^#' "$env_local" | grep -v '^$' || true)
+    fi
+
+    # Merge synced vars (update if changed)
+    for key in "${!sync_vars[@]}"; do
+        if [ "${existing[$key]:-}" != "${sync_vars[$key]}" ]; then
+            existing["$key"]="${sync_vars[$key]}"
+            changed=true
+        fi
+    done
+
+    # Write back if changed or file doesn't exist
+    if [ "$changed" = true ] || [ ! -f "$env_local" ]; then
+        echo "# API + Auth Configuration (auto-synced by pearl.sh)" > "$temp_file"
+        # Write vars in sorted order for consistency
+        for key in $(printf '%s\n' "${!existing[@]}" | sort); do
+            echo "$key=${existing[$key]}" >> "$temp_file"
+        done
+        mv "$temp_file" "$env_local"
+    fi
+}
+
 # Load env files (non-sensitive + secrets)
 load_env_files() {
     set -a
@@ -78,18 +125,8 @@ load_env_files() {
         export NEXT_PUBLIC_API_KEY="$PEARL_API_KEY"
     fi
 
-    # Keep .env.local in sync with secrets (prevents stale API key issues)
-    local env_local="$SCRIPT_DIR/pearlalgo_web_app/.env.local"
-    if [ -n "${PEARL_API_KEY:-}" ]; then
-        local current_key=""
-        if [ -f "$env_local" ]; then
-            current_key=$(grep "NEXT_PUBLIC_API_KEY=" "$env_local" 2>/dev/null | cut -d= -f2)
-        fi
-        if [ "$current_key" != "$PEARL_API_KEY" ]; then
-            echo "# API Configuration (auto-synced from secrets.env)" > "$env_local"
-            echo "NEXT_PUBLIC_API_KEY=$PEARL_API_KEY" >> "$env_local"
-        fi
-    fi
+    # Sync web app env vars into .env.local (merge, don't overwrite)
+    sync_env_local
 }
 
 # Activate virtual environment

@@ -20,7 +20,7 @@ from pearlalgo.utils.logger import logger
 
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.data_providers.ibkr_executor import (
+from pearlalgo.data_providers.ibkr_data_executor import (
     GetHistoricalDataTask,
     GetLatestBarTask,
     IBKRExecutor,
@@ -234,7 +234,7 @@ class IBKRProvider(DataProvider):
         """
         # The executor manages its own connection
         # Submit a connect task to ensure connection
-        from pearlalgo.data_providers.ibkr_executor import ConnectTask
+        from pearlalgo.data_providers.ibkr_data_executor import ConnectTask
 
         connect_task = ConnectTask(
             task_id="validate_connection",

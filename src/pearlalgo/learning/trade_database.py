@@ -366,6 +366,86 @@ class TradeDatabase:
             )
             conn.commit()
 
+    def add_signal_events_batch(self, events: list[Dict[str, Any]]) -> None:
+        """Append multiple signal events in a single transaction.
+
+        Args:
+            events: List of event dicts, each with signal_id, status, timestamp, and optional payload.
+        """
+        if not events:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            rows = []
+            for event in events:
+                signal_id = str(event.get("signal_id", ""))
+                status = str(event.get("status", ""))
+                timestamp = str(event.get("timestamp", ""))
+                payload = event.get("payload") or event.get("payload_json") or {}
+                try:
+                    payload_json = json.dumps(payload, ensure_ascii=False)
+                except Exception as e:
+                    ErrorHandler.log_and_continue(
+                        "add_signal_events_batch payload serialization", e,
+                        level="warning", category="serialization",
+                    )
+                    payload_json = "{}"
+                rows.append((signal_id, status, timestamp, payload_json))
+            
+            cursor.executemany(
+                """
+                INSERT INTO signal_events (signal_id, status, timestamp, payload_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+
+    def get_signal_events_by_ids(self, signal_ids: list[str]) -> list[Dict[str, Any]]:
+        """Get the most recent signal event for each signal_id in a batch.
+
+        Args:
+            signal_ids: List of signal identifiers
+
+        Returns:
+            List of record dicts with all accumulated fields (one per signal_id).
+        """
+        if not signal_ids:
+            return []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(signal_ids))
+            params = [str(sid) for sid in signal_ids]
+            cursor.execute(
+                f"""
+                SELECT signal_id, status, timestamp, payload_json
+                FROM signal_events
+                WHERE id IN (
+                    SELECT MAX(id)
+                    FROM signal_events
+                    WHERE signal_id IN ({placeholders})
+                    GROUP BY signal_id
+                )
+                ORDER BY id DESC
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+        
+        results = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.setdefault("signal_id", row["signal_id"])
+            payload.setdefault("status", row["status"])
+            payload.setdefault("timestamp", row["timestamp"])
+            results.append(payload)
+        return results
+
     def get_signal_event_by_id(self, signal_id: str) -> Optional[Dict[str, Any]]:
         """Get the most recent signal event for a given signal_id.
 

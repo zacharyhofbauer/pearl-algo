@@ -4,37 +4,145 @@
 
 ---
 
-## 1. Daily Commands
+## 0. Restart Everything (Full System)
+
+**Single command to restart all services:**
 
 ```bash
-# Start/stop everything
-./pearl.sh start                # Gateway -> Agent -> Telegram -> Chart
-./pearl.sh stop                 # Stop all services
-./pearl.sh restart              # Restart all
-./pearl.sh status               # Full status dashboard
-./pearl.sh quick                # One-liner: Gateway OK | Agent OK | ...
-
-# Tradovate Paper (prop firm eval -- most used)
-./scripts/lifecycle/tv_paper_eval.sh restart --background   # Clean restart (kills stale processes)
-./scripts/lifecycle/tv_paper_eval.sh start --background     # Start agent + API
-./scripts/lifecycle/tv_paper_eval.sh stop                   # Stop everything
-./scripts/lifecycle/tv_paper_eval.sh status                 # Check status
-
-# Individual services
-./pearl.sh gateway start|stop|status
-./pearl.sh agent start|stop|status         # IBKR Virtual (NQ)
-./pearl.sh tv_paper start|stop|restart|status  # Tradovate Paper
-./pearl.sh telegram start|stop|status
-./pearl.sh chart start|stop|status         # Web app (pearlalgo.io)
-./pearl.sh chart deploy                    # Build + restart (after code changes)
-./pearl.sh chart build                     # Build only (no restart)
-./pearl.sh tunnel start|stop|status        # Cloudflare tunnel
+./pearl.sh restart
 ```
 
-**After any code change:**
-- Web app (frontend): `./pearl.sh chart deploy` (builds + restarts in production mode)
-- Tradovate Paper (backend): `./scripts/lifecycle/tv_paper_eval.sh restart --background`
-- IBKR Virtual: `./pearl.sh restart`
+### What This Does (in order):
+
+1. **Stops** (reverse dependency order):
+   - Cloudflare tunnel (pearlalgo.io)
+   - Web app frontend (Next.js on port 3001)
+   - Tradovate Paper API (port 8001)
+   - Telegram handler
+   - IBKR Virtual agent (NQ)
+   - IBKR Gateway
+
+2. **Waits 3 seconds** (cleanup time)
+
+3. **Starts** (dependency order):
+   - IBKR Gateway
+   - IBKR Virtual agent (NQ)
+   - Tradovate Paper agent + API (port 8001)
+   - Telegram handler
+   - Web app frontend (auto-builds if no production build exists)
+   - IBKR Virtual API server (port 8000)
+   - Cloudflare tunnel
+
+4. **Auto-syncs** environment variables:
+   - `NEXT_PUBLIC_API_KEY` → `pearlalgo_web_app/.env.local`
+   - `PEARL_WEBAPP_AUTH_ENABLED` → `pearlalgo_web_app/.env.local`
+   - `PEARL_WEBAPP_PASSCODE` → `pearlalgo_web_app/.env.local` (if set)
+
+5. **Accessible at:** `https://pearlalgo.io`
+
+### Verification Checklist
+
+After restart, verify everything is running:
+
+```bash
+./pearl.sh status          # Full status dashboard (all services)
+./pearl.sh quick           # One-line summary: Gateway OK | Agent OK | ...
+```
+
+**Expected output:** All services should show ✅ RUNNING
+
+---
+
+## 1. Daily Commands
+
+### Master Control
+
+```bash
+./pearl.sh start           # Start all services
+./pearl.sh start --no-chart  # Start without web app
+./pearl.sh stop            # Stop all services
+./pearl.sh restart         # Restart all (see Section 0)
+./pearl.sh status          # Full status dashboard
+./pearl.sh quick           # One-line summary
+```
+
+### Individual Services
+
+| Service | Commands |
+|---------|----------|
+| **Gateway** | `./pearl.sh gateway start\|stop\|status` |
+| **Agent (IBKR Virtual)** | `./pearl.sh agent start\|stop\|status` |
+| **Tradovate Paper** | `./pearl.sh tv_paper start\|stop\|restart\|status` |
+| **Telegram** | `./pearl.sh telegram start\|stop\|status` |
+| **Web App** | `./pearl.sh chart start\|stop\|status` |
+| **Tunnel** | `./pearl.sh tunnel start\|stop\|status` |
+
+### Tradovate Paper (Prop Firm Eval)
+
+```bash
+./scripts/lifecycle/tv_paper_eval.sh restart --background   # Clean restart (kills stale processes)
+./scripts/lifecycle/tv_paper_eval.sh start --background      # Start agent + API
+./scripts/lifecycle/tv_paper_eval.sh stop                    # Stop everything
+./scripts/lifecycle/tv_paper_eval.sh status                  # Check status
+```
+
+### After Code Changes
+
+| Change Type | Command |
+|-------------|---------|
+| **Frontend only** (React/Next.js) | `./pearl.sh chart deploy` (builds + restarts) |
+| **Backend only** (Python) | `./pearl.sh restart` (full restart) |
+| **Tradovate Paper backend** | `./scripts/lifecycle/tv_paper_eval.sh restart --background` |
+| **Both frontend + backend** | `./pearl.sh chart deploy && ./pearl.sh restart` |
+
+---
+
+## 1.5. Individual Component Restarts
+
+**When to restart individual components** (instead of `./pearl.sh restart`):
+
+| Component | Command | When to Use |
+|-----------|---------|-------------|
+| **Gateway** | `./pearl.sh gateway restart` | IBKR Gateway crashes, connection issues, "client ID already in use" errors |
+| **Agent (IBKR Virtual)** | `./pearl.sh agent stop --market NQ`<br>`./pearl.sh agent start --market NQ --background`<br>Or: `./scripts/lifecycle/agent.sh stop --market NQ`<br>`./scripts/lifecycle/agent.sh start --market NQ --background` | Agent stuck, not generating signals, config changes, Python code changes |
+| **Tradovate Paper** | `./pearl.sh tv_paper restart` | TV Paper agent issues, signal forwarding problems, Tradovate API errors |
+| **Telegram** | `./pearl.sh telegram restart` | Bot not responding, command handler crashes, Telegram API issues |
+| **Web App (Frontend)** | `./pearl.sh chart restart` | UI not updating, chart not loading, frontend code changes (no build needed) |
+| **Web App (Build + Restart)** | `./pearl.sh chart deploy` | After React/Next.js code changes (builds production bundle + restarts) |
+| **API Server** | `./pearl.sh chart restart` | API endpoints not responding, port conflicts, backend API code changes |
+| **Tunnel** | `./pearl.sh tunnel restart` | pearlalgo.io unreachable, Cloudflare tunnel disconnects |
+
+### Component Dependencies
+
+**Restart order matters** if multiple components need restart:
+
+1. **Gateway** → Must be running before Agent
+2. **Agent** → Can restart independently (if Gateway is up)
+3. **Telegram** → Independent (can restart anytime)
+4. **Web App** → Independent (can restart anytime)
+5. **Tunnel** → Independent (can restart anytime)
+
+**Example scenarios:**
+
+```bash
+# Gateway crashed → Agent can't connect
+./pearl.sh gateway restart
+sleep 5
+./pearl.sh agent restart --market NQ
+
+# Frontend code change → Just rebuild web app
+./pearl.sh chart deploy
+
+# Agent stuck but Gateway OK → Just restart agent
+./pearl.sh agent stop --market NQ
+./pearl.sh agent start --market NQ --background
+
+# Telegram not responding → Just restart Telegram
+./pearl.sh telegram restart
+
+# Everything broken → Full restart
+./pearl.sh restart
+```
 
 ---
 
@@ -133,6 +241,15 @@ https://pearlalgo.io/?account=tv_paper           # Tradovate Paper
 
 Account switcher dropdown in the header bar toggles between accounts.
 
+### Dashboard Features
+
+- **Status badges**: Header badges for Agent, GW, AI, Market, Data, ML, Shadow savings (with hover tooltips)
+- **SystemStatusPanel**: Readiness (Offline/Paused/Cooldown/Disarmed/Armed), execution state, circuit breaker, direction, session, errors
+- **Kill switch**: With optional operator lock (requires `PEARL_OPERATOR_PASSPHRASE`)
+- **Session P&L**: Real-time P&L in status panel
+- **Agent offline banner**: Clear visual indicator when agent is not trading or execution is disabled
+- **Pull-to-refresh**: Mobile gesture support
+
 ### Key Environment Variables
 
 | Variable | Default | Purpose |
@@ -217,14 +334,18 @@ tail -f logs/web_app.log           # Next.js
 |------|---------|---------|
 | `service.py` | Agent orchestrator (inherits `ServiceNotificationsMixin`), signal forwarding, Tradovate polling. Virtual trade exits delegated to `virtual_trade_manager.py` | Both |
 | `tv_paper_eval_tracker.py` | Challenge state tracking (eval: fixed floor $48K, no lock; sim_funded: intraday trailing, locks at $100) | Tradovate Paper |
-| `tradovate/adapter.py` | Execution + `get_account_summary()` | Tradovate Paper |
+| `tradovate/adapter.py` | Execution + `get_account_summary()` + partial fills (`_pending_fills`) + order reconciliation (`_open_orders`) | Tradovate Paper |
 | `tradovate/client.py` | REST/WS client (`get_fills`, `get_positions`) | Tradovate Paper |
 | `trading_circuit_breaker.py` | Risk management + eval gate | Both |
 | `config_loader.py` | Config loading, signal_forwarding defaults | Both |
 | `tv_paper_eval.sh` | Tradovate Paper lifecycle (port cleanup, restart) | Tradovate Paper |
-| `api_server.py` | API server (auth, rate-limiting, `StateReader`). Header/performance stats use today's fills with auto-derived commission deduction | Dashboard |
+| `state_builder.py` | State snapshot construction (assembles `state.json` payload) | Both |
+| `utils/state_io.py` | Atomic JSON I/O (`load_json_file`, `atomic_write_json`) | Both |
+| `api_server.py` | API server (auth, rate-limiting, `StateReader`, `load_json_file`). Header/performance stats use today's fills with auto-derived commission deduction. Audit router with TTL cache. | Dashboard |
+| `notification_queue.py` | Async notifications with `NotificationTier` (CRITICAL/IMPORTANT/DEBUG), `min_tier` filtering, circuit breaker dedup cooldown (5 min) | Both |
 | `tradovate/utils.py` | FIFO fill pairing for Tradovate trades | Tradovate Paper |
 | `telegram_command_handler.py` | Telegram bot commands. Uses `_detect_tv_paper_account()` to pick correct tracker | Both |
+| `SystemStatusPanel.tsx` | Readiness, kill switch, operator lock, session P&L, execution state | Dashboard |
 | `ChallengePanel.tsx` | Tradovate Paper eval display | Dashboard |
 | `AnalyticsPanel.tsx` | Sessions, hours, duration, calendar | Dashboard |
 

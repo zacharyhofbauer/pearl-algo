@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.4  
-**Last Updated:** 2026-02-04 (Pearl AI prompt eval framework + CI workflow)  
+**Version:** 0.2.5  
+**Last Updated:** 2026-02-12 (State module refactor, notification tiers, web dashboard SystemStatusPanel, Tradovate partial fills)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -59,7 +59,7 @@ The MNQ Trading Agent is designed to:
 
 - **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
 - **Timeframe**: 1-minute decision stream (configurable), with 5m/15m for MTF context
-- **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 16:10 ET (NY time). Positions must be flat by 16:10.
+- **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 15:45 ET (NY time). Positions must be flat by 15:45.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
 - **Trading Style**: Prop-firm intraday swings and scalps; sizing/risk thresholds are configured in `config/config.yaml`
@@ -110,7 +110,7 @@ The MNQ Trading Agent is designed to:
 
 2. **Data Flow**:
    - IBKR Gateway → IBKR Provider → Data Fetcher → Strategy
-   - Historical data cached in buffer (last 100 bars)
+   - Historical data cached in buffer (last 300 bars)
 
 3. **Signal Flow**:
    - Strategy → Signal Generator → State Manager → Performance Tracker → Telegram
@@ -141,7 +141,7 @@ The MNQ Trading Agent is designed to:
 
 **Data Fetcher** (`data_fetcher.py`):
 - Fetches historical and latest bar data
-- Maintains data buffer (last 100 bars)
+- Maintains data buffer (last 300 bars)
 - Handles data provider abstraction
 - Error handling and retry logic
 
@@ -152,6 +152,11 @@ The MNQ Trading Agent is designed to:
 - Loads state on startup
 - State directory: `data/agent_state/<MARKET>/`
 - Provides `async_get_recent_signals()` wrapper for async callers
+
+**State Builder** (`state_builder.py`):
+- Constructs structured state snapshots from service components
+- Assembles cadence metrics, data quality, circuit breaker status, and session info
+- Used by `service.py` to build the `state.json` payload each save cycle
 
 **State Reader** (`state_reader.py`):
 - Thread-safe reads of agent state files using fcntl shared locks
@@ -248,10 +253,17 @@ The MNQ Trading Agent is designed to:
 
 ### 4. Utilities (`src/pearlalgo/utils/`)
 
+**State I/O** (`state_io.py`):
+- Atomic JSON file writes using temp file + rename pattern
+- `atomic_write_json()` for crash-safe state persistence
+- `load_json_file()` for consistent JSON reads with encoding handling
+- Shared by `market_agent`, `api_server`, and `telegram_command_handler`
+
 **Telegram Alerts** (`telegram_alerts.py`):
 - Core Telegram messaging functionality
 - Rich formatting helpers (currency, percentage, numbers)
-- Mobile-friendly message formatting
+- Mobile-friendly message formatting with character limits (`CHAR_LIMIT_HEADER`, `CHAR_LIMIT_BUTTON`)
+- `truncate_for_mobile()` and `format_button_label()` for Telegram-safe output
 
 **Market Hours** (`market_hours.py`):
 - Market hours detection
@@ -353,10 +365,13 @@ trading_circuit_breaker:
 
 ### 9. Notification Queue (`src/pearlalgo/market_agent/notification_queue.py`)
 
-**Purpose**: Async notification delivery with priority and retry logic.
+**Purpose**: Async notification delivery with priority, tier filtering, and retry logic.
 
 **Features**:
 - Priority queue (high/medium/low)
+- **Notification tiers**: `NotificationTier.CRITICAL`, `IMPORTANT`, `DEBUG` for severity-based filtering
+- **`min_tier` filtering**: Suppress low-priority notifications when desired (e.g., only deliver CRITICAL during quiet hours)
+- **Circuit breaker dedup cooldown**: Suppresses duplicate circuit breaker alerts for 5 minutes
 - Automatic retry with exponential backoff
 - Rate limiting for Telegram API compliance
 - Decoupled delivery (non-blocking main loop)
@@ -409,8 +424,8 @@ Service Loop
   ↓
 Data Fetcher.fetch_latest_data()
   ↓
-  ├─→ Fetch historical data (last 2 hours)
-  ├─→ Update buffer (last 100 bars)
+  ├─→ Fetch historical data (last 5 hours)
+  ├─→ Update buffer (last 300 bars)
   └─→ Get latest bar
   ↓
 pearl_bot_auto.generate_signals(df, config)
@@ -440,7 +455,7 @@ IBKR Provider
   └─→ get_latest_bar() → Dict
   ↓
 Data Fetcher
-  └─→ Maintains buffer (100 bars)
+  └─→ Maintains buffer (300 bars)
 ```
 
 ### 4. Signal Processing Flow
@@ -507,6 +522,7 @@ PearlAlgoProject/
 │   │   ├── service_notifications.py  # Dashboard/chart mixin for MarketAgentService
 │   │   ├── data_fetcher.py     # Data fetching logic
 │   │   ├── state_manager.py    # State persistence (with signal cache + incremental count)
+│   │   ├── state_builder.py    # State snapshot construction (assembles state.json payload)
 │   │   ├── state_reader.py     # Thread-safe locked reads (used by api_server)
 │   │   ├── performance_tracker.py  # Performance metrics
 │   │   ├── telegram_notifier.py    # Telegram notifications
@@ -542,7 +558,8 @@ PearlAlgoProject/
 │   │   │   └── ibkr_provider.py
 │   │   └── ibkr_executor.py    # Thread-safe executor
 │   ├── utils/                  # Utilities (cross-cutting)
-│   │   ├── telegram_alerts.py  # Telegram core
+│   │   ├── state_io.py         # Atomic JSON I/O (load_json_file, atomic_write_json)
+│   │   ├── telegram_alerts.py  # Telegram core (mobile-friendly formatting)
 │   │   ├── cadence.py          # Cadence scheduler + metrics
 │   │   ├── market_hours.py     # Market hours logic
 │   │   ├── retry.py            # Retry logic
@@ -555,7 +572,7 @@ PearlAlgoProject/
 │   │   ├── volume_pressure.py  # Signed-volume pressure computations
 │   │   ├── paths.py            # Timestamp/path helpers
 │   │   └── vwap.py             # VWAP computation
-│   └── config/                 # Configuration (3 files)
+│   └── config/                 # Configuration (7 files: settings, config_loader, config_file, config_schema, config_view, adapters, defaults)
 │       ├── settings.py          # Settings management
 │       ├── config_loader.py     # Service config loader
 │       └── config_file.py       # YAML loader + env substitution + validation warnings
@@ -600,6 +617,7 @@ PearlAlgoProject/
 │   ├── test_mtf_cache.py       # Multi-timeframe cache behavior
 │   ├── test_edge_cases.py      # Data fetcher + short-run service lifecycle
 │   ├── test_error_recovery.py  # Circuit breaker / pause behavior
+│   ├── test_service_pause.py   # Service pause: circuit breaker, connection failures, manual pause/resume
 │   ├── test_telegram_authorization.py  # Telegram auth guards
 │   └── test_telegram_message_limits.py # Telegram message sizing
 │
@@ -1169,7 +1187,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 
 ### Ranked Opportunity Clusters
 
-The following opportunity clusters are ranked by leverage and risk, updated as of 2025-12-30.
+The following opportunity clusters are ranked by leverage and risk, updated as of 2026-02-12.
 Use this document as the canonical reference for improvement iterations.
 
 #### 1. Operational Risk (Highest Leverage)
@@ -1188,13 +1206,13 @@ Use this document as the canonical reference for improvement iterations.
 
 #### 3. Observability & Ops Maturity
 
-- Operator-focused dashboards: data-level, freshness buckets, cache hit rates.
-- "Quiet reasons" in dashboard (why no signals: session closed, no opportunity, stale data).
+- ~~Operator-focused dashboards~~ **Done (v0.2.5)**: `SystemStatusPanel` with readiness, kill switch, session P&L, status badges with tooltips.
+- ~~"Quiet reasons" in dashboard~~ **Done (v0.2.5)**: Agent offline/execution disabled banner, status badges show data level and market state.
 - Restart cause tracking and correlation with `run_id`.
 
 #### 4. Risk Management & Circuit Breakers
 
-- More explicit pause/resume semantics ("degradation mode" vs "hard stop").
+- ~~More explicit pause/resume semantics~~ **Improved (v0.2.5)**: `NotificationTier` filtering, circuit breaker dedup cooldown, manual pause/resume tested in `test_service_pause.py`.
 - Stronger containment for partial failures (data vs execution vs notifications).
 - Clearer recovery criteria before auto-resume.
 
@@ -1298,7 +1316,7 @@ Use this document as the canonical reference for improvement iterations.
    - **Metadata**: Data source is tracked via `_data_level` field in latest_bar (`level1` vs `historical`)
 
 2. **Signal Generation**:
-   - Only generates signals during the configured strategy session window (default 18:00–16:10 ET, NY time)
+   - Only generates signals during the configured strategy session window (default 18:00–15:45 ET, NY time)
    - **Status**: Working as designed
    - Signals require specific market conditions
 
@@ -1319,17 +1337,18 @@ Use this document as the canonical reference for improvement iterations.
 1. **Market Calendar Coverage**: Holiday/early-close coverage is intentionally incomplete by default; optional overrides exist (disabled by default).
 2. **Error Recovery**: Basic recovery (could be more sophisticated)
 3. **Data Validation**: Good baseline validation, but edge-case hardening is ongoing (see testing notes)
-4. **Volume Profile Robustness**: Fixed — `inf` values in volume profile calculations are now sanitized (see `test_signal_generation_edge_cases.py`)
+4. **Volume Profile Robustness**: Fixed — `inf` values in volume profile calculations are now sanitized
 5. **Testing Coverage**: Good coverage, but could be expanded
 
 ---
 
-## Trust Assessment (2026-01-28)
+## Trust Assessment (2026-02-12)
 
-- **Status**: High trust after cleanup and verification.
+- **Status**: High trust after cleanup, state refactor, and verification.
 - **Evidence**:
   - CI guardrails enforced (doc reference audit, boundary checks, secrets scan, smoke tests, unit tests).
   - IBKR Gateway install externalized with CI guard against re-vendoring.
+  - State module refactored: `pearlalgo.state` package eliminated; I/O moved to `utils/state_io.py`, state management consolidated under `market_agent/`.
   - All unit tests pass (`make ci`), with coverage above the 40% gate.
 
 ---
@@ -1445,12 +1464,74 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2026-01-29  
+**Last Updated:** 2026-02-12  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 ---
 
-## Recent Updates (v0.2.4)
+## Recent Updates (v0.2.5)
+
+### State Module Refactor + Dashboard Overhaul (2026-02-12)
+
+**State management consolidation:**
+- Eliminated `src/pearlalgo/state/` package entirely
+- `state_io.py` (atomic JSON read/write) moved to `src/pearlalgo/utils/state_io.py`
+- `state_builder.py` (state snapshot assembly) moved to `src/pearlalgo/market_agent/state_builder.py`
+- `state_manager.py` and `state_reader.py` remain in `src/pearlalgo/market_agent/`
+- `state_helpers.py` removed (functionality inlined or no longer needed)
+
+**Web dashboard enhancements:**
+- **SystemStatusPanel**: New comprehensive status panel showing readiness (Offline/Paused/Cooldown/Disarmed/Armed), execution state, circuit breaker, direction, session, errors
+- **Kill switch with operator lock**: Requires `PEARL_OPERATOR_PASSPHRASE` for critical operations
+- **Session P&L summary**: Real-time P&L in status panel
+- **Status badges**: Header badges for Agent, GW, AI, Market, Data, ML, Shadow savings with hover tooltips
+- **Agent offline / execution disabled banner**: Clear visual indicator when agent is not trading
+- **Pull-to-refresh**: Mobile gesture support for dashboard refresh
+- **Ultrawide layout**: `SystemStatusPanel` positioned in sidebar for wide screens
+
+**Notification system improvements:**
+- `NotificationTier` enum: `CRITICAL`, `IMPORTANT`, `DEBUG` for severity-based filtering
+- `min_tier` filtering: Suppress low-priority notifications
+- Circuit breaker dedup cooldown: 5-minute suppression of duplicate alerts
+
+**Tradovate adapter improvements:**
+- `_pending_fills` tracking for partial fill reconciliation
+- `_contract_id` caching for efficient contract resolution
+- `_open_orders` / `_orders_lock` for order reconciliation
+
+**Execution orchestrator:**
+- Uses `MarketAgentStateManager` for state management (was using raw state dict)
+- Docstring notes on migrated vs non-migrated logic
+
+**Telegram improvements:**
+- Mobile-friendly character limits (`CHAR_LIMIT_HEADER`, `CHAR_LIMIT_BUTTON`)
+- `truncate_for_mobile()` and `format_button_label()` helpers
+- Uses `load_json_file()` from `pearlalgo.utils.state_io` for consistent file reads
+
+**API server improvements:**
+- Uses `pearlalgo.utils.state_io` (`load_json_file`) for consistent JSON reads
+- Uses `pearlalgo.market_agent.state_reader.StateReader` for locked reads
+- Audit router: TTL cache for historical queries with `_is_recent_query()` skip for recent data
+
+**pearl.sh improvements:**
+- `sync_env_local()`: Merges `PEARL_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE` into `.env.local`
+- `--no-chart` flag: Skip web app startup
+- Chart auto-build: Builds production bundle if none exists
+- `chart deploy`: Build + restart recommended after frontend code changes
+
+**Testing:**
+- `test_circuit_breaker.py` replaced by `test_service_pause.py` with expanded coverage:
+  - Connection failure pause
+  - Consecutive errors pause
+  - Data fetch errors (backoff only, not pause)
+  - Counter reset on success
+  - Manual pause/resume
+  - Status reflects circuit breaker state
+  - Edge cases for thresholds
+
+---
+
+### Previous Updates (v0.2.4)
 
 ### Pearl Algo Web App Enhancements (2026-01-29)
 - **Web-based TradingView-style chart** using lightweight-charts library

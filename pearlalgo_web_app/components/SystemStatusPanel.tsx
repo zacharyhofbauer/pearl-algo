@@ -10,7 +10,7 @@ import type {
   SessionContext,
   ErrorSummary,
 } from '@/stores'
-import { apiFetchJson } from '@/lib/api'
+import { apiFetch, apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
 import { formatTimeRemaining } from '@/lib/formatters'
 

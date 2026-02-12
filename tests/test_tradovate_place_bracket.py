@@ -231,7 +231,7 @@ class TestBrokerPositionGuardMax:
         """When max_net_positions > 1 and room exists, order goes through."""
         adapter = _make_adapter()
         # Override max_net_positions to 3
-        adapter.config.max_net_positions = 3
+        adapter.config.max_positions = 3
 
         # One existing long position — room for 2 more
         adapter._live_positions["999"] = {

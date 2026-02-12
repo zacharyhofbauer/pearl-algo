@@ -173,7 +173,7 @@ Service statistics:
   Cycles: 24
   Signals: 0-2 (depends on conditions)
   Errors: 0
-  Buffer: 100 bars
+  Buffer: 300 bars
 ```
 
 ---
@@ -333,7 +333,7 @@ Monitor logs for:
 **What to Check:**
 - ✅ No connection errors
 - ✅ Data is fresh (not stale)
-- ✅ Buffer size is stable (50-100 bars)
+- ✅ Buffer size is stable (300 bars)
 - ✅ No data quality alerts
 
 **Red Flags:**
@@ -480,7 +480,7 @@ Verify session filters work:
 - Momentum signals should be disabled
 - Mean reversion may be favored
 
-**Closing (15:30-16:10 ET):**
+**Closing (15:30-15:45 ET):**
 - Reversal signals may be favored
 - Tight stops recommended
 
@@ -654,7 +654,7 @@ config.get("foo", default_value)
 4. Market is closed
 
 **Solutions:**
-1. Check strategy session window (default 18:00–16:10 ET, NY time)
+1. Check strategy session window (default 18:00–15:45 ET, NY time)
 2. Review confidence thresholds in `config.yaml`
 3. Check data quality logs
 4. Adjust filter parameters if needed
@@ -866,6 +866,7 @@ python3 scripts/testing/smoke_multi_market.py
 - `scripts/testing/check_doc_references.py` - Doc path/reference audit
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
+- `tests/test_service_pause.py` - Service pause: connection failures, consecutive errors, data fetch backoff, manual pause/resume, counter reset, edge cases
 - `tests/mock_data_provider.py` - Mock data provider
 - Service logs are emitted to stdout/stderr (terminal output, systemd journal, or Docker logs)
 - `data/agent_state/<MARKET>/state.json` - Service state
@@ -912,6 +913,7 @@ This section summarizes the current test coverage and highlights areas for futur
 - `test_config_wiring.py` – config propagation from `config.yaml` to `MarketAgentService` and `MarketAgentDataFetcher`
 - `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
 - `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
+- `test_service_pause.py` – comprehensive service pause/resume tests: connection failure pause, consecutive errors pause, data fetch errors (backoff only, not pause), counter reset on success, manual pause/resume, status reflects circuit breaker state, edge cases for thresholds
 - `test_signal_generation_edge_cases.py` – edge cases for signal generation (NaN, inf, extreme prices, malformed data)
 - `test_service_core.py` – 20 targeted tests for the 5 highest-risk service.py methods (VirtualTradeManager, save_state, init, connection failure, stop)
 - `test_tradovate_client.py` – 22 tests for Tradovate REST/WebSocket client with mocked HTTP responses (auth, token refresh, error handling, rate limiting)
@@ -931,8 +933,8 @@ These gaps are **observational only** and do not change behavior.
 1. **Market hours edge cases** (`test_edge_cases.py`)
    - DST transitions are covered (see `test_dst_transitions.py`), but full CME holiday/early-close calendar behavior is not yet comprehensively tested.
 
-2. **Circuit breaker thresholds** (`test_error_recovery.py`)
-   - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
+2. **Circuit breaker thresholds** (`test_error_recovery.py`, `test_service_pause.py`)
+   - Connection-failure pause, consecutive errors pause, data-fetch backoff, manual pause/resume, and counter reset are now tested via `test_service_pause.py`. Edge cases for threshold boundaries are also covered.
 
 3. **IBKR connectivity and fallback behavior**
    - `smoke_test_ibkr.py` tests basic connectivity. `test_ibkr_adapter_unit.py` now covers adapter-level order placement, position management, and error handling with mocked ib_insync. Detailed reconnection/staleness recovery paths could use further expansion.
@@ -964,6 +966,9 @@ The following gaps have been addressed with explicit test coverage:
 
 7. **Web app auth and real-time** (`middleware.test.ts`, `useWebSocket.test.ts`, `login-actions.test.ts`)
    - 74 tests covering Next.js authentication middleware, WebSocket hook (connection/reconnection/cleanup), and login/logout flow (credentials, session cookies, open-redirect prevention).
+
+8. **Circuit breaker / service pause** (`test_service_pause.py`)
+   - Comprehensive tests for connection failure pause, consecutive errors pause, data fetch errors (backoff only, not pause), counter reset on success, manual pause/resume, status reflects circuit breaker state, and edge cases for thresholds. Replaces the former `test_circuit_breaker.py`.
 
 ### Suggested Future Tests
 

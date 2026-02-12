@@ -257,11 +257,19 @@ R:R: 1.47:1
 
 ## 📊 Monitoring
 
+### Web Dashboard Monitoring (pearlalgo.io)
+- **SystemStatusPanel**: Real-time readiness (Offline/Paused/Cooldown/Disarmed/Armed), execution state, circuit breaker, direction, session, errors
+- **Status badges**: Header badges for Agent, GW, AI, Market, Data, ML, Shadow savings (with hover tooltips)
+- **Kill switch**: With optional operator lock (`PEARL_OPERATOR_PASSPHRASE`)
+- **Session P&L**: Real-time P&L in status panel
+- **Pull-to-refresh**: Mobile gesture support
+
 ### Automatic Monitoring (via Telegram)
 - **Dashboard**: Hourly by default with price sparkline, MTF trends, session stats, performance
 - **Data quality alerts**: When data issues detected
 - **Signal notifications**: When trading signals are generated
 - **Service notifications**: Startup/shutdown/recovery alerts
+- **Notification tiers**: `CRITICAL`, `IMPORTANT`, `DEBUG` — low-priority notifications can be suppressed
 
 > **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message per `dashboard_chart_interval` (default 1h) with all key info.
 
@@ -379,7 +387,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 ### No Signals Generated
 
 1. **Check strategy session hours (StrategySessionOpen)**
-   - Signals are generated during your configured prop-firm session window (default in `config/config.yaml`: **18:00–16:10 ET**, NY time).
+   - Signals are generated during your configured prop-firm session window (default in `config/config.yaml`: **18:00–15:45 ET**, NY time).
    - Note: this is different from **FuturesMarketOpen** (CME ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break), which affects data freshness and Error 354 interpretation.
 2. **If `/signals` shows signals but you didn’t receive signal alerts**
    - Check Telegram `/status` for **Delivered: X sent • Y failed** and **Last send error**.
@@ -392,7 +400,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 4. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
 5. **Verify session is open:**
    ```bash
-   # Strategy session hours are defined by config/config.yaml (default: 18:00–16:10 ET)
+   # Strategy session hours are defined by config/config.yaml (default: 18:00–15:45 ET)
    ```
 
 ### Telegram Not Working
@@ -539,5 +547,5 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 ---
 
-**Last Updated:** 2025-12-18  
+**Last Updated:** 2026-02-12  
 **Current Configuration (example):** MNQ (Mini NQ) - Prop Firm Style Trading

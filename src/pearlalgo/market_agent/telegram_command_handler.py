@@ -143,7 +143,10 @@ class TelegramCommandHandler(
             raise ImportError("python-telegram-bot required for command handler")
         self.bot_token = bot_token
         self.chat_id = str(chat_id)
-        self._available_markets = ["NQ", "ES", "GC", "TV_PAPER_EVAL"]
+        # TV_PAPER_EVAL excluded: its data is shown in the NQ dashboard via
+        # the Tradovate Paper Eval section (queried from port 8001).  Having it
+        # as a switchable market produces a redundant/confusing second dashboard.
+        self._available_markets = ["NQ", "ES", "GC"]
         self.active_market = "NQ"
         self._repo_root = self._get_repo_root()
         self._knowledge_retriever = None
@@ -1834,6 +1837,15 @@ class TelegramCommandHandler(
           pip install playwright && playwright install chromium
         """
         chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
+        # Append ?account= param so the web app skips the account selector overlay
+        # and loads the correct dashboard directly.
+        if "?" not in chart_url:
+            if self.active_market == "TV_PAPER_EVAL":
+                chart_url += "?account=tv_paper"
+            else:
+                # Default (NQ/ES/GC) = IBKR Virtual, no param needed but
+                # pass explicit param to bypass the account selector gate.
+                chart_url += "?account=ibkr_virtual"
         return await capture_live_chart_screenshot(output_path=Path(output_path), url=str(chart_url))
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
@@ -4413,48 +4425,57 @@ class TelegramCommandHandler(
                 _tv_paper_api_key = os.getenv("PEARL_API_KEY") or ""
                 if _tv_paper_api_key:
                     _tv_paper_headers["X-API-Key"] = _tv_paper_api_key
-                async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=3)) as _sess:
-                    async with _sess.get("http://localhost:8001/api/state", headers=_tv_paper_headers) as _resp:
-                        if _resp.status == 200:
-                            _tv_paper_data = await _resp.json()
-                            _tv_paper_ch = _tv_paper_data.get("challenge")
-                            if _tv_paper_ch and _tv_paper_ch.get("enabled"):
-                                _m = _tv_paper_ch.get("tv_paper", {}) or {}
-                                _balance = _tv_paper_ch.get("current_balance", 0)
-                                _pnl = _tv_paper_ch.get("pnl", 0)
-                                _target = _tv_paper_ch.get("profit_target", 3000)
-                                _floor = _m.get("current_drawdown_floor", 48000)
-                                _locked = _m.get("drawdown_locked", False)
-                                _days_done = (_m.get("min_days") or {}).get("days_traded", 0)
-                                _days_req = (_m.get("min_days") or {}).get("days_required", 2)
-                                _consist = (_m.get("consistency") or {}).get("met", True)
-                                _trades = _tv_paper_ch.get("trades", 0)
-                                _wins = _tv_paper_ch.get("wins", 0)
-                                _losses = _trades - _wins
-                                _wr = _tv_paper_ch.get("win_rate", 0)
-                                _outcome = _tv_paper_ch.get("outcome", "active")
-                                _pnl_emoji = "🟢" if _pnl >= 0 else "🔴"
-                                _pnl_sign = "+" if _pnl >= 0 else ""
-                                _progress = min(100, max(0, (_pnl / _target * 100))) if _target > 0 else 0
+                _tv_paper_data = None
+                # Retry up to 2 times with generous timeout to avoid intermittent drops
+                for _attempt in range(2):
+                    try:
+                        async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=8)) as _sess:
+                            async with _sess.get("http://localhost:8001/api/state", headers=_tv_paper_headers) as _resp:
+                                if _resp.status == 200:
+                                    _tv_paper_data = await _resp.json()
+                                    break
+                    except Exception:
+                        if _attempt == 0:
+                            await asyncio.sleep(1)  # Brief pause before retry
+                if _tv_paper_data is not None:
+                    _tv_paper_ch = _tv_paper_data.get("challenge")
+                    if _tv_paper_ch and _tv_paper_ch.get("enabled"):
+                        _m = _tv_paper_ch.get("tv_paper", {}) or {}
+                        _balance = _tv_paper_ch.get("current_balance", 0)
+                        _pnl = _tv_paper_ch.get("pnl", 0)
+                        _target = _tv_paper_ch.get("profit_target", 3000)
+                        _floor = _m.get("current_drawdown_floor", 48000)
+                        _locked = _m.get("drawdown_locked", False)
+                        _days_done = (_m.get("min_days") or {}).get("days_traded", 0)
+                        _days_req = (_m.get("min_days") or {}).get("days_required", 2)
+                        _consist = (_m.get("consistency") or {}).get("met", True)
+                        _trades = _tv_paper_ch.get("trades", 0)
+                        _wins = _tv_paper_ch.get("wins", 0)
+                        _losses = _trades - _wins
+                        _wr = _tv_paper_ch.get("win_rate", 0)
+                        _outcome = _tv_paper_ch.get("outcome", "active")
+                        _pnl_emoji = "🟢" if _pnl >= 0 else "🔴"
+                        _pnl_sign = "+" if _pnl >= 0 else ""
+                        _progress = min(100, max(0, (_pnl / _target * 100))) if _target > 0 else 0
 
-                                message += "\n\n"
-                                message += "━━━━━━━━━━━━━━━━━━━━━\n"
-                                _challenge_display = _acct_label or "Tradovate Paper"
-                                message += f"🏆 *{_challenge_display} Eval*\n"
-                                _tv_paper_exec = (_tv_paper_data.get("execution") or {})
-                                _tv_paper_conn = _tv_paper_exec.get("connected", False)
-                                _tv_paper_conn_label = "🟢 CONNECTED" if _tv_paper_conn else "🔴 DISCONNECTED"
-                                message += f"Execution: {_tv_paper_conn_label}\n"
-                                message += f"Balance: `${_balance:,.2f}` | {_pnl_emoji} {_pnl_sign}${_pnl:,.2f}\n"
-                                if _outcome == "active":
-                                    message += f"Target: {_progress:.0f}% (${_pnl:,.0f}/${_target:,.0f})\n"
-                                elif _outcome == "pass":
-                                    message += "🎉 *PASSED*\n"
-                                elif _outcome == "fail":
-                                    message += "❌ *FAILED*\n"
-                                message += f"Floor: ${_floor:,.0f}{'🔒' if _locked else ''} | Days: {_days_done}/{_days_req} | {'✅' if _consist else '⚠️'} Consistency\n"
-                                if _trades > 0:
-                                    message += f"{_wins}W/{_losses}L • {_wr:.0f}% WR"
+                        message += "\n\n"
+                        message += "━━━━━━━━━━━━━━━━━━━━━\n"
+                        _challenge_display = _acct_label or "Tradovate Paper"
+                        message += f"🏆 *{_challenge_display} Eval*\n"
+                        _tv_paper_exec = (_tv_paper_data.get("execution") or {})
+                        _tv_paper_conn = _tv_paper_exec.get("connected", False)
+                        _tv_paper_conn_label = "🟢 CONNECTED" if _tv_paper_conn else "🔴 DISCONNECTED"
+                        message += f"Execution: {_tv_paper_conn_label}\n"
+                        message += f"Balance: `${_balance:,.2f}` | {_pnl_emoji} {_pnl_sign}${_pnl:,.2f}\n"
+                        if _outcome == "active":
+                            message += f"Target: {_progress:.0f}% (${_pnl:,.0f}/${_target:,.0f})\n"
+                        elif _outcome == "pass":
+                            message += "🎉 *PASSED*\n"
+                        elif _outcome == "fail":
+                            message += "❌ *FAILED*\n"
+                        message += f"Floor: ${_floor:,.0f}{'🔒' if _locked else ''} | Days: {_days_done}/{_days_req} | {'✅' if _consist else '⚠️'} Consistency\n"
+                        if _trades > 0:
+                            message += f"{_wins}W/{_losses}L • {_wr:.0f}% WR"
             except Exception as _tv_paper_err:
                 # Tradovate Paper API not available - silently skip
                 logger.debug(f"Tradovate Paper dashboard section skipped: {_tv_paper_err}")
@@ -6293,4 +6314,6 @@ def main() -> None:
     handler.run()
 
 if __name__ == "__main__":
+    main()
+ "__main__":
     main()

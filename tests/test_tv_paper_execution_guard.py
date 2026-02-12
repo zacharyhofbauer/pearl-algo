@@ -185,7 +185,7 @@ class TestPositionGuardSameDirectionAllowed:
     @pytest.mark.asyncio
     async def test_same_direction_with_room(self):
         adapter = _make_adapter()
-        adapter.config.max_net_positions = 3
+        adapter.config.max_positions = 3
 
         adapter._live_positions["999"] = {
             "contract_id": "999",

@@ -36,6 +36,18 @@ Primary environment variables:
 - `PEARL_API_KEY`
   - **Used by**: Web app and API server for authenticating dashboard requests (optional; required if auth is enabled).
   - **Purpose**: Shared secret for API key auth (see `pearlalgo_web_app` and `api_server.py`).
+- `PEARL_OPERATOR_PASSPHRASE` (or `PEARL_OPERATOR_PHRASE`)
+  - **Used by**: API server for kill switch, close-trades, and Pearl AI chat endpoints.
+  - **Purpose**: Required passphrase for critical operations (prevents accidental kills).
+- `PEARL_WEBAPP_AUTH_ENABLED`
+  - **Used by**: Next.js middleware in `pearlalgo_web_app`.
+  - **Purpose**: Enables passcode gate on the web dashboard. Auto-synced to `.env.local` by `pearl.sh`.
+- `PEARL_WEBAPP_PASSCODE`
+  - **Used by**: Next.js login flow in `pearlalgo_web_app`.
+  - **Purpose**: Passcode for web dashboard access. Auto-synced to `.env.local` by `pearl.sh`.
+- `PEARL_AI_API_ENABLED`
+  - **Used by**: `api_server.py` to expose `/api/pearl/*` endpoints.
+  - **Purpose**: Enable Pearl AI API endpoints on the web app API server.
 
 Optional logging environment variables (for systemd/journald):
 
@@ -163,7 +175,7 @@ These are used by the Tradovate Paper evaluation instance only:
 | `config/markets/tv_paper_eval.yaml` | Tradovate Paper overlay. Merged on top of base via deep merge. |
 | `~/.config/pearlalgo/secrets.env` | Secrets (Telegram, Tradovate, API keys). Never committed. |
 | `.env` | Non-sensitive defaults (IBKR ports, data provider). |
-| `pearlalgo_web_app/.env.local` | Web app API key (auto-synced from secrets by pearl.sh). |
+| `pearlalgo_web_app/.env.local` | Web app API key + auth settings (auto-synced by `pearl.sh sync_env_local`: `NEXT_PUBLIC_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE`). |
 
 ## 2. What belongs where
 
@@ -182,6 +194,10 @@ These are used by the Tradovate Paper evaluation instance only:
 - **Settings (`pearlalgo.config.settings`)** – infrastructure and environment glue (`src/pearlalgo/config/settings.py`):
   - Normalization of env vars
   - Validation of IBKR settings
+- **State I/O (`pearlalgo.utils.state_io`)** – low-level JSON I/O helpers (`src/pearlalgo/utils/state_io.py`):
+  - `atomic_write_json()` for crash-safe state persistence
+  - `load_json_file()` for consistent JSON reads with encoding handling
+  - Used by `market_agent.state_manager`, `api_server`, `telegram_command_handler`
 - **Strategy config (`pearlalgo.trading_bots.pearl_bot_auto`)** – trading logic parameters (`src/pearlalgo/trading_bots/pearl_bot_auto.py`):
   - ATR multipliers, risk/reward thresholds
   - Session definitions and regime parameters

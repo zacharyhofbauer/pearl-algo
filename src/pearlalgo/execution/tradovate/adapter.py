@@ -66,6 +66,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         # Cached contract symbol (resolved on connect)
         self._contract_symbol: Optional[str] = None
+        
+        # Partial fill tracking: order_id -> cumulative filled qty
+        self._pending_fills: Dict[str, float] = {}
         self._contract_id: Optional[int] = None
 
         # Connection state
@@ -209,7 +212,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             active_broker_positions = [
                 p for p in broker_positions if p.get("net_pos", 0) != 0
             ]
-            max_net_positions = getattr(self.config, "max_net_positions", 1)
+            max_net_positions = getattr(self.config, "max_positions", 1)
 
             # Block if at max broker positions
             if len(active_broker_positions) >= max_net_positions:
@@ -552,13 +555,45 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     # Safe: dict.pop is atomic in CPython; the _orders_lock is
                     # used for multi-step operations in async contexts.
                     self._open_orders.pop(order_id, None)
+                    # Clean up partial fill tracking
+                    self._pending_fills.pop(order_id, None)
 
             elif entity_type == "fill":
                 contract_id = str(entity.get("contractId", ""))
+                order_id = str(entity.get("orderId", ""))
+                fill_qty = float(entity.get("qty", 0))
                 logger.debug(
                     f"Tradovate fill: contract={contract_id}, "
-                    f"qty={entity.get('qty')}, price={entity.get('price')}"
+                    f"qty={fill_qty}, price={entity.get('price')}"
                 )
+                
+                # Track partial fills
+                if order_id:
+                    if order_id not in self._pending_fills:
+                        self._pending_fills[order_id] = 0.0
+                    self._pending_fills[order_id] += abs(fill_qty)
+                    
+                    # Check if order is complete
+                    order_info = self._open_orders.get(order_id)
+                    if order_info:
+                        order_qty = abs(float(order_info.get("quantity", 0)))
+                        filled_qty = self._pending_fills[order_id]
+                        if filled_qty >= order_qty:
+                            # Order fully filled
+                            self._pending_fills.pop(order_id, None)
+                        elif filled_qty > order_qty:
+                            # Overfill detected
+                            logger.warning(
+                                f"Tradovate fill overfill detected: order_id={order_id}, "
+                                f"order_qty={order_qty}, filled_qty={filled_qty}"
+                            )
+                        else:
+                            # Partial fill
+                            logger.info(
+                                f"Tradovate partial fill: order_id={order_id}, "
+                                f"filled={filled_qty}/{order_qty}"
+                            )
+                
                 # Persist fill immediately to tradovate_fills.json
                 try:
                     _ff = self._fills_file
@@ -570,11 +605,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     if _ff:
                         fill_record = {
                             "id": entity.get("id"),
-                            "order_id": entity.get("orderId"),
+                            "order_id": order_id,
                             "contract_id": contract_id,
                             "timestamp": entity.get("timestamp"),
                             "action": entity.get("action"),
-                            "qty": entity.get("qty", 0),
+                            "qty": fill_qty,
                             "price": entity.get("price", 0.0),
                             "net_pos": entity.get("netPos"),
                         }

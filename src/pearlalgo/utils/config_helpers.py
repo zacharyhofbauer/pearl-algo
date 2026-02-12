@@ -66,23 +66,44 @@ def safe_get_int(
     *,
     warn: bool = True,
     context: str = "",
+    lo: Optional[int] = None,
+    hi: Optional[int] = None,
 ) -> int:
     """Extract an int value from *cfg*, falling back to *default*.
 
     Accepts float-like strings (e.g. ``"3.0"`` → ``3``).
+    Optionally clamps the result to [lo, hi] range.
+
+    Args:
+        cfg: Configuration dictionary.
+        key: Key to look up.
+        default: Value returned when key is missing, ``None``, or invalid.
+        warn: If ``True``, log a warning on invalid values.
+        context: Optional context string included in the warning (e.g. module name).
+        lo: Optional lower bound for clamping.
+        hi: Optional upper bound for clamping.
     """
     val = cfg.get(key)
     if val is None:
-        return default
-    try:
-        return int(float(val))
-    except (TypeError, ValueError) as exc:
-        if warn:
-            ctx = f" [{context}]" if context else ""
-            logger.warning(
-                f"Invalid config value for {key!r}: {val!r} — using default {default}{ctx} ({exc})"
-            )
-        return default
+        result = default
+    else:
+        try:
+            result = int(float(val))
+        except (TypeError, ValueError) as exc:
+            if warn:
+                ctx = f" [{context}]" if context else ""
+                logger.warning(
+                    f"Invalid config value for {key!r}: {val!r} — using default {default}{ctx} ({exc})"
+                )
+            result = default
+    
+    # Apply clamping if bounds specified
+    if lo is not None:
+        result = max(lo, result)
+    if hi is not None:
+        result = min(hi, result)
+    
+    return result
 
 
 def safe_get_bool(

@@ -266,15 +266,8 @@ class MarketAgentTelegramNotifier:
             mtf_text = "Conflicting"
 
         # Confidence tier
-        if confidence >= 0.70:
-            conf_tier = "High"
-            conf_emoji = "🟢"
-        elif confidence >= 0.55:
-            conf_tier = "Moderate"
-            conf_emoji = "🟡"
-        else:
-            conf_tier = "Low"
-            conf_emoji = "🔴"
+        from pearlalgo.utils.telegram_alerts import format_signal_confidence_tier
+        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
 
         # Build message (mobile-friendly: no long separators)
         acct_prefix = f"[{self.account_label}] " if self.account_label else ""

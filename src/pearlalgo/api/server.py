@@ -865,7 +865,8 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
             return positions
 
         # IBKR Virtual: from signals.jsonl
-        signals = _get_signals(state_dir, max_lines=500)
+        # Optimize: only read recent signals (enough to find active positions, typically <50)
+        signals = _get_signals(state_dir, max_lines=100)
         positions = []
         for s in signals:
             if s.get("status") == "exited":
@@ -902,7 +903,10 @@ def _get_trades_for_broadcast(state_dir: Path, limit: int = 50) -> List[Dict[str
             trades = _get_paired_tradovate_trades(state_dir)
             return trades[-limit:]
 
-        signals = _get_signals(state_dir, max_lines=max(500, limit * 10))
+        # Optimize: only read enough lines to get 'limit' exited trades (typically need ~2-3x limit)
+        # Cap at 1000 to avoid reading entire file for large signals.jsonl
+        read_lines = min(max(limit * 3, 100), 1000)
+        signals = _get_signals(state_dir, max_lines=read_lines)
         trades = []
         for s in signals:
             if s.get("status") != "exited":
@@ -1210,11 +1214,11 @@ class ConnectionManager:
                                 # These were previously HTTP-only (30s poll).  Including them
                                 # here gives the frontend ~2s latency on trade updates.
                                 "positions": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_get_positions_for_broadcast, _state_dir)),
+                                    None, partial(_cached, "positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir)),
                                 "recent_trades": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_get_trades_for_broadcast, _state_dir, 50)),
+                                    None, partial(_cached, "trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50)),
                                 "performance_summary": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_get_performance_summary_for_broadcast, _state_dir)),
+                                    None, partial(_cached, "performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir)),
                                 # Signal activity & execution state
                                 "signal_rejections_24h": state.get("signal_rejections_24h"),
                                 "last_signal_decision": state.get("last_signal_decision"),
@@ -1426,9 +1430,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "performance": _compute_performance_stats(_state_dir),
                         "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                         "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                        "positions": _get_positions_for_broadcast(_state_dir),
-                        "recent_trades": _get_trades_for_broadcast(_state_dir, 50),
-                        "performance_summary": _get_performance_summary_for_broadcast(_state_dir),
+                        "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir),
+                        "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50),
+                        "performance_summary": _cached("performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir),
                         "cadence_metrics": _get_cadence_metrics_enhanced(state),
                         "market_regime": _get_market_regime(state),
                         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -1504,9 +1508,9 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "performance": _compute_performance_stats(_state_dir),
                                     "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
                                     "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                                    "positions": _get_positions_for_broadcast(_state_dir),
-                                    "recent_trades": _get_trades_for_broadcast(_state_dir, 50),
-                                    "performance_summary": _get_performance_summary_for_broadcast(_state_dir),
+                                    "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir),
+                                    "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50),
+                                    "performance_summary": _cached("performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir),
                                     "cadence_metrics": _get_cadence_metrics_enhanced(state),
                                     "market_regime": _get_market_regime(state),
                                     "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -3357,8 +3361,11 @@ async def get_trades(
         return trades[-limit:]
 
     # IBKR Virtual: existing signals.jsonl logic
+    # Optimize: only read enough lines to get 'limit' exited trades (typically need ~2-3x limit)
     signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=max(500, limit * 10))
+    # Read from tail: start with limit*3, but cap at 1000 to avoid reading entire file
+    read_lines = min(max(limit * 3, 100), 1000)
+    signals = _load_jsonl_file(signals_file, max_lines=read_lines)
     
     trades = []
     for s in signals:
@@ -3411,7 +3418,8 @@ async def get_positions(
         if positions:
             try:
                 signals_file = _state_dir / "signals.jsonl"
-                signals = _load_jsonl_file(signals_file, max_lines=300)
+                # Only read recent signals (enough to match positions, typically <50)
+                signals = _load_jsonl_file(signals_file, max_lines=100)
                 active_signals = [
                     s for s in signals
                     if s.get("status") == "entered" and s.get("signal", {}).get("stop_loss")
@@ -3747,7 +3755,10 @@ async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
 
 
 @app.get("/api/sessions")
-async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
+async def get_sessions(
+    hours: int = Query(default=6, ge=1, le=24),
+    _key: Optional[str] = Depends(verify_api_key),
+):
     """Get session boundaries for RTH/ETH shading."""
     now = datetime.now(timezone.utc)
     

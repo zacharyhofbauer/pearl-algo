@@ -211,23 +211,8 @@ def format_duration_short(seconds: float | None) -> str:
     Returns:
         e.g. '45s', '12m', '3h15m', or '?' if None.
     """
-    if seconds is None:
-        return "?"
-    try:
-        s = float(seconds)
-    except (ValueError, TypeError):
-        return "?"
-    if s < 0:
-        return "?"
-    if s < 60:
-        return f"{int(s)}s"
-    if s < 3600:
-        return f"{int(s // 60)}m"
-    hours = int(s // 3600)
-    mins = int((s % 3600) // 60)
-    if mins > 0:
-        return f"{hours}h{mins}m"
-    return f"{hours}h"
+    from pearlalgo.utils.telegram_alerts import format_duration
+    return format_duration(seconds, compact=True)
 
 
 def format_hold_duration(minutes: float) -> str:
@@ -239,9 +224,8 @@ def format_hold_duration(minutes: float) -> str:
     Returns:
         e.g. '45m' or '2h 15m'.
     """
-    if minutes < 60:
-        return f"{int(minutes)}m"
-    return f"{int(minutes / 60)}h {int(minutes % 60)}m"
+    from pearlalgo.utils.telegram_alerts import format_duration
+    return format_duration(minutes * 60, compact=False)
 
 
 # ---------------------------------------------------------------------------

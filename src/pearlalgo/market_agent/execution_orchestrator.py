@@ -240,20 +240,47 @@ class ExecutionOrchestrator:
             logger.debug("Error reading close_signals_requested: %s", exc)
             return []
 
-    def clear_close_signals_requested(self) -> None:
-        """Clear the close_signals_requested list in state.json."""
+    def clear_close_signals_requested(self, signal_ids: list = None) -> None:
+        """Clear specific signal close requests or all of them from state.json."""
         try:
-            self._state_manager.update_state({"close_signals_requested": []})
+            state = self._state_manager.load_state()
+        except Exception as exc:
+            logger.debug("Error loading state for close_signals_requested: %s", exc)
+            return
+        if not isinstance(state, dict):
+            return
+
+        current_requests = state.get("close_signals_requested", [])
+        if signal_ids is None:
+            # Clear all
+            state.pop("close_signals_requested", None)
+            state.pop("close_signals_requested_time", None)
+        else:
+            # Remove specific signal_ids
+            state["close_signals_requested"] = [s for s in current_requests if s not in signal_ids]
+            if not state["close_signals_requested"]:
+                state.pop("close_signals_requested", None)
+                state.pop("close_signals_requested_time", None)
+
+        try:
+            self._state_manager.save_state(state)
         except Exception as exc:
             logger.debug("Error clearing close_signals_requested: %s", exc)
 
     def clear_close_all_flag(self) -> None:
         """Clear close_all_requested flags in state.json."""
         try:
-            self._state_manager.update_state({
-                "close_all_requested": False,
-                "close_all_requested_at": None,
-            })
+            state = self._state_manager.load_state()
+        except Exception as exc:
+            logger.debug("Error loading state for close_all_flag: %s", exc)
+            return
+        if not isinstance(state, dict):
+            return
+        state.pop("close_all_requested", None)
+        state.pop("close_all_requested_time", None)
+        state.pop("close_all_requested_at", None)
+        try:
+            self._state_manager.save_state(state)
         except Exception as exc:
             logger.debug("Error clearing close_all_flag: %s", exc)
 

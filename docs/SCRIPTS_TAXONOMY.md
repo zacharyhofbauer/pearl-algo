@@ -129,6 +129,12 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
 - `./pearl.sh chart start` - Start API server + Next.js chart
 - `./pearl.sh chart stop` - Stop web app services
 - `./pearl.sh chart restart` - Restart web app
+- `./pearl.sh chart deploy` - Build production bundle + restart (recommended after frontend code changes)
+- `./pearl.sh start --no-chart` - Start all services except web app
+
+**pearl.sh auto-sync:**
+- `sync_env_local()` merges `PEARL_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE` into `pearlalgo_web_app/.env.local` on every start/restart
+- Chart auto-builds if no production build exists
 
 **Components:**
 - `scripts/pearlalgo_web_app/api_server.py`

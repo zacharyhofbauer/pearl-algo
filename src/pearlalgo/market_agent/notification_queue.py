@@ -144,6 +144,10 @@ class NotificationQueue:
             "dropped": 0,
             "retried": 0,
         }
+        # Circuit-breaker dedup: suppress duplicate CB notifications within a cooldown window.
+        self._last_cb_reason: Optional[str] = None
+        self._last_cb_time: float = 0.0
+        self._cb_cooldown_seconds: float = 300.0  # 5 minutes
 
     async def start(self) -> None:
         """Start the background notification processor."""
@@ -407,7 +411,19 @@ class NotificationQueue:
         self, reason: str, details: Optional[Dict[str, Any]] = None,
         priority: Priority = Priority.CRITICAL, tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Enqueue a circuit breaker alert."""
+        """Enqueue a circuit breaker alert (with cooldown-based dedup)."""
+        now = datetime.now(timezone.utc).timestamp()
+        if (
+            self._last_cb_reason == reason
+            and now - self._last_cb_time < self._cb_cooldown_seconds
+        ):
+            logger.debug(
+                f"Circuit breaker notification suppressed (duplicate within "
+                f"{self._cb_cooldown_seconds}s): {reason}"
+            )
+            return True  # Already sent — treat as success
+        self._last_cb_reason = reason
+        self._last_cb_time = now
         return await self.enqueue("circuit_breaker", {"reason": reason, "details": details}, priority=priority, tier=tier)
 
     async def enqueue_dashboard(

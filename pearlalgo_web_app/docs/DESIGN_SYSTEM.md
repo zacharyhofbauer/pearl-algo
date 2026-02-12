@@ -347,6 +347,23 @@ Run tests:
 npm run test
 ```
 
+## Key Components (v0.2.5)
+
+| Component | Purpose |
+|-----------|---------|
+| `SystemStatusPanel.tsx` | Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch with operator lock, session P&L, execution state, circuit breaker |
+| `DataPanelsContainer.tsx` | Panel wrapper with layout variants |
+| `InfoTooltip.tsx` | Tooltip component (used by status badges) |
+| `StatDisplay.tsx` | Stat display component |
+
+### Dashboard Header Badges
+
+The header includes status badges for Agent, GW, AI, Market, Data, ML, and Shadow savings. Each badge has a hover tooltip showing detailed status. Implemented in `app/page.tsx`.
+
+### Pull-to-Refresh
+
+Mobile gesture support for dashboard refresh, implemented in `app/page.tsx`.
+
 ## File Structure
 
 ```
@@ -356,9 +373,15 @@ components/
     InfoTooltip.tsx    # Tooltip component
     StatDisplay.tsx    # Stat display component
   DataPanelsContainer.tsx  # Panel wrapper with variants
+  SystemStatusPanel.tsx    # System status panel (readiness, kill switch, P&L)
 
 app/
   globals.css          # Design tokens and global styles
+  page.tsx             # Dashboard (status badges, pull-to-refresh, agent banner)
+
+styles/
+  components/
+    _chart.css         # Chart actions (responsive, floating freshness indicator)
 
 docs/
   DESIGN_SYSTEM.md     # This file

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 
+from pearlalgo.api.server import verify_api_key
 from pearlalgo.utils.logger import logger
 
 # Module-level audit logger reference (set by server.py on startup)
@@ -82,6 +83,7 @@ async def get_audit_events(
     end_date: Optional[str] = Query(None, description="ISO datetime end"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(50, ge=1, le=500, description="Items per page"),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Query audit events with optional filters and pagination."""
     if _audit_logger is None:
@@ -125,6 +127,7 @@ async def get_equity_history(
     account: Optional[str] = Query(None, description="Filter by account"),
     start_date: Optional[str] = Query(None, description="ISO datetime start"),
     end_date: Optional[str] = Query(None, description="ISO datetime end"),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Query equity snapshot history for charting."""
     if _audit_logger is None:
@@ -149,6 +152,7 @@ async def get_reconciliation(
     account: Optional[str] = Query(None, description="Filter by account"),
     start_date: Optional[str] = Query(None, description="ISO datetime start"),
     end_date: Optional[str] = Query(None, description="ISO datetime end"),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Query reconciliation results."""
     if _audit_logger is None:
@@ -176,6 +180,7 @@ async def get_signal_decisions(
     end_date: Optional[str] = Query(None, description="ISO datetime end"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Query signal decision log (generated + rejected signals)."""
     if _audit_logger is None:
@@ -236,6 +241,7 @@ async def export_audit_events(
     event_type: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    _key: Optional[str] = Depends(verify_api_key),
 ):
     """Export audit events as CSV or JSON file."""
     if _audit_logger is None:

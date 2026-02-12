@@ -110,6 +110,8 @@ A nightly cleanup job prunes events older than the configured retention period.
 
 All endpoints require the `PEARL_API_KEY` header. Times default to UTC.
 
+**Performance:** Historical queries (start date > 24h ago) use a TTL cache to avoid repeated SQLite scans. Recent queries (within the last 24h) always hit the database for freshness.
+
 ### GET /api/audit/events
 
 Query the full event log with filters.
