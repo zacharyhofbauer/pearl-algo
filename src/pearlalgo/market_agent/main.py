@@ -136,6 +136,14 @@ async def main():
     if args.config:
         logger.info(f"Starting Market Agent Service (new config) | run_id={run_id}")
         config_data = _load_new_config(args.config)
+        # Validate with Pydantic schema (fails fast on bad config)
+        try:
+            from pearlalgo.config.schema_v2 import validate_config
+            config_data = validate_config(config_data)
+            logger.info("Config validated (schema_v2)")
+        except Exception as e:
+            logger.error(f"Config validation failed: {e}")
+            return
     else:
         logger.info(f"Starting Market Agent Service (legacy config) | run_id={run_id}")
         config_data = load_config_yaml()
