@@ -7,6 +7,7 @@ import ChallengePanel from '@/components/ChallengePanel'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
+import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
@@ -709,36 +710,13 @@ function PearlAlgoWebAppInner() {
   // Standard layout (all viewports)
   return (
     <>
-      {/* Skip navigation link for accessibility */}
-      <a href="#main-content" className="skip-link">Skip to main content</a>
       <PearlHeaderBar />
-      <main className="main-content" id="main-content">
-        {/* Pull-to-refresh indicator */}
-        <div
-          className={`pull-to-refresh ${pullRefreshing ? 'refreshing' : ''} ${pullDistance > 0 ? 'visible' : ''}`}
-          style={{
-            height: pullDistance > 0 ? pullDistance : 0,
-            opacity: pullDistance > 0 ? Math.min(pullDistance / PULL_THRESHOLD, 1) : 0,
-          }}
-        >
-          <div
-            className={`pull-icon ${pullRefreshing ? 'spinning' : ''}`}
-            style={{
-              transform: pullRefreshing ? 'none' : `rotate(${Math.min(pullDistance / PULL_THRESHOLD, 1) * 180}deg)`,
-            }}
-          >
-            {pullRefreshing ? '↻' : '↓'}
-          </div>
-          <div className="pull-text">
-            {pullRefreshing ? 'Refreshing...' : pullDistance >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}
-          </div>
-        </div>
-        <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
-          {renderHeader()}
-          {/* Status integrated into PearlHeaderBar */}
-          {renderChart()}
-
-          {/* Trades Dock (Open / Recent) - TradingView-style section */}
+      <DashboardLayout
+        isChartReady={isChartReady}
+        pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
+        header={renderHeader()}
+        chart={renderChart()}
+        panels={
           <TradeDockPanel
             positions={positions}
             recentTrades={recentTrades}
@@ -757,9 +735,8 @@ function PearlAlgoWebAppInner() {
             onRefresh={handleTradeRefresh}
             riskMetrics={agentState?.risk_metrics || null}
           />
-
-        </div>
-      </main>
+        }
+      />
     </>
   )
 }
