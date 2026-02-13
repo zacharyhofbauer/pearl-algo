@@ -4,6 +4,40 @@
 
 ---
 
+## TEMP: IBKR Data + Tradovate Demo Execution (Hybrid Mode)
+
+> **Status:** Tradovate market data WebSocket returns `UnknownSymbol` (support ticket open).
+> Using IBKR for data, Tradovate demo for execution until resolved.
+> Once fixed, run `compare_data_quality.py` and evaluate switching to pure Tradovate (Path A).
+
+```bash
+# 1. Start IBKR Gateway (data source — must be running first)
+./scripts/gateway/gateway.sh start
+
+# 2. Launch Tradovate Paper agent (IBKR data + Tradovate execution)
+./scripts/lifecycle/tv_paper_eval.sh start --background
+
+# 3. Check status
+./scripts/lifecycle/tv_paper_eval.sh status
+
+# 4. View dashboard
+#    http://localhost:3000?api_port=8001
+
+# 5. Stop
+./scripts/lifecycle/tv_paper_eval.sh stop
+```
+
+**When Tradovate MD is fixed — retest:**
+
+```bash
+source .venv/bin/activate
+python3 scripts/testing/compare_data_quality.py --bars 300 --symbol MNQ --timeframe 1m
+```
+
+If Tradovate data quality is good, switch `PEARLALGO_DATA_PROVIDER=tradovate` in `.env` (Path A).
+
+---
+
 ## 0. Restart Everything (Full System)
 
 **Single command to restart all services:**
