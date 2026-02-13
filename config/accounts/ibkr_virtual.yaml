@@ -1,0 +1,16 @@
+# ==========================================================================
+# IBKR Virtual (legacy / data-only) - Execution inactive
+# ==========================================================================
+# For NQ agent runs that use IBKR for data only. Live trading uses
+# config/accounts/tradovate_paper.yaml. IBKR execution is inactive.
+# ==========================================================================
+
+account:
+  name: ibkr_virtual
+  display_name: "IBKR Virtual (data-only)"
+  badge: "IBKR-DATA"
+  telegram_prefix: "IBKR-VIR"
+
+execution:
+  adapter: tradovate
+  # IBKR execution is inactive; use Tradovate for any live trading.

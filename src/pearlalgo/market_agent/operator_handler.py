@@ -7,12 +7,17 @@ feedback from the web API.  Receives all dependencies via constructor injection.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.state_io import (
+    atomic_write_jsonl,
+    file_lock,
+    load_json_file,
+    load_jsonl_file,
+)
 from pearlalgo.market_agent.notification_queue import Priority
 
 if TYPE_CHECKING:
@@ -54,8 +59,7 @@ class OperatorHandler:
         - force: Whether to apply even if signal already exited
         """
         try:
-            with open(grade_file, "r") as f:
-                grade_req = json.load(f)
+            grade_req = load_json_file(Path(grade_file))
 
             signal_id = grade_req.get("signal_id", "")
             signal_type = grade_req.get("signal_type", "unknown")
@@ -95,19 +99,14 @@ class OperatorHandler:
             feedback_file = self.state_manager.state_dir / "feedback.jsonl"
             if feedback_file.exists():
                 try:
-                    updated_lines = []
-                    with open(feedback_file, "r") as f:
-                        for line in f:
-                            try:
-                                rec = json.loads(line.strip())
-                                if rec.get("signal_id") == signal_id and not rec.get("applied_to_learning"):
-                                    rec["applied_to_learning"] = applied
-                                    rec["applied_at"] = datetime.now(timezone.utc).isoformat()
-                                updated_lines.append(json.dumps(rec))
-                            except json.JSONDecodeError:
-                                updated_lines.append(line.strip())
-                    with open(feedback_file, "w") as f:
-                        f.write("\n".join(updated_lines) + "\n")
+                    lock_path = Path(str(feedback_file) + ".lock")
+                    with file_lock(lock_path):
+                        records = load_jsonl_file(feedback_file, max_lines=50000)
+                        for rec in records:
+                            if rec.get("signal_id") == signal_id and not rec.get("applied_to_learning"):
+                                rec["applied_to_learning"] = applied
+                                rec["applied_at"] = datetime.now(timezone.utc).isoformat()
+                        atomic_write_jsonl(feedback_file, records)
                 except Exception as e:
                     logger.warning(f"Could not update feedback file: {e}")
 
@@ -167,8 +166,7 @@ class OperatorHandler:
         new_signal_ids: list[str] = []
         for fp in files[:50]:
             try:
-                raw = fp.read_text(encoding="utf-8")
-                rec = json.loads(raw) if raw else {}
+                rec = load_json_file(fp)
                 if not isinstance(rec, dict):
                     continue
 
@@ -276,8 +274,7 @@ class OperatorHandler:
 
         for fp in files[:50]:
             try:
-                raw = fp.read_text(encoding="utf-8")
-                rec = json.loads(raw) if raw else {}
+                rec = load_json_file(fp)
                 if not isinstance(rec, dict):
                     continue
 

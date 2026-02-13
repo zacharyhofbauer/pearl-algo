@@ -514,3 +514,41 @@ def is_market_open(dt: Optional[datetime] = None) -> bool:
     """Convenience function to check if market is open."""
     return get_market_hours().is_market_open(dt)
 
+
+def is_within_trading_window(
+    dt: Optional[datetime] = None,
+    start_hour_et: int = 18,
+    start_minute_et: int = 0,
+    end_hour_et: int = 16,
+    end_minute_et: int = 10,
+) -> bool:
+    """
+    Check if the given time (ET) falls within a daily trading window that may cross midnight.
+
+    Used e.g. for Tradovate Paper session: 6 PM ET - 4:10 PM ET next day.
+    Defaults: start 18:00 ET, end 16:10 ET (window spans midnight).
+
+    Args:
+        dt: Datetime to check (default: now); converted to ET.
+        start_hour_et: Window start hour (0-23).
+        start_minute_et: Window start minute.
+        end_hour_et: Window end hour (0-23).
+        end_minute_et: Window end minute.
+
+    Returns:
+        True if et_time is in [start, midnight) or [midnight, end).
+    """
+    if dt is None:
+        dt = datetime.now(UTC)
+    if dt.tzinfo is None:
+        dt = UTC.localize(dt)
+    else:
+        dt = dt.astimezone(UTC)
+    et_dt = dt.astimezone(ET)
+    et_time = et_dt.time()
+    start_t = time(start_hour_et, start_minute_et)
+    end_t = time(end_hour_et, end_minute_et)
+    if start_t > end_t:
+        return et_time >= start_t or et_time < end_t
+    return start_t <= et_time < end_t
+

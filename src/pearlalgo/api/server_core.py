@@ -714,10 +714,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Route modules (health; more to follow per plan 15A)
-from pearlalgo.api.routes.health import router as _health_router
-app.include_router(_health_router)
-
 
 # ---------------------------------------------------------------------------
 # Request body size limit middleware (defence-in-depth against OOM)
@@ -3193,67 +3189,4 @@ async def get_markers(
     return markers
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def main():
-    global _market, _state_dir
-    import pearlalgo.api.server_core as _core
-
-    parser = argparse.ArgumentParser(description="Pearl Algo Web App API Server")
-    parser.add_argument("--market", default=os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET))
-    parser.add_argument("--host", default=os.getenv("API_HOST", DEFAULT_HOST))
-    parser.add_argument("--port", type=int, default=int(os.getenv("API_PORT", DEFAULT_PORT)))
-    parser.add_argument("--data-dir", default=os.getenv("PEARLALGO_STATE_DIR", None),
-                        help="Explicit data directory path (overrides --market resolution)")
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
-    args = parser.parse_args()
-
-    _market = str(args.market or DEFAULT_MARKET).strip().upper()
-    if args.data_dir:
-        _state_dir = Path(args.data_dir)
-        if not _state_dir.exists():
-            print(f"WARNING: --data-dir {_state_dir} does not exist, creating it")
-            _state_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        _state_dir = _resolve_state_dir(_market)
-    # Sync globals into server_core so route modules (e.g. health) see them
-    _core._market = _market
-    _core._state_dir = _state_dir
-
-    print(f"Starting Pearl Algo Web App API Server")
-    print(f"  Market: {_market}")
-    print(f"  State dir: {_state_dir}")
-    print(f"  Listening: http://{args.host}:{args.port}")
-    print(f"  Auto-reload: {'ON' if args.reload else 'OFF'}")
-    print(f"")
-    print(f"Endpoints:")
-    print(f"  GET /api/candles?symbol=MNQ&timeframe=5m&bars=72")
-    print(f"  GET /api/indicators?symbol=MNQ&timeframe=5m&bars=72")
-    print(f"  GET /api/markers?hours=6")
-    print(f"  GET /api/state")
-    print(f"  GET /api/trades")
-    print(f"  GET /health")
-    print(f"")
-    print(f"Tips:")
-    print(f"  - Use --reload for development (auto-restarts on file changes)")
-    print(f"  - Set API_PORT=8001 to use different port")
-    print(f"  - Kill server: pkill -f 'api_server.py'")
-
-    if args.reload:
-        # Use uvicorn's reload feature for development
-        uvicorn.run(
-            "pearlalgo.api.server:app",
-            host=args.host,
-            port=args.port,
-            reload=True,
-            reload_dirs=[str(PROJECT_ROOT / "src" / "pearlalgo" / "api")],
-            log_level="info",
-        )
-    else:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-
-
-if __name__ == "__main__":
-    main()
+# Main is in pearlalgo.api.server (thin wrapper that includes routers and runs uvicorn).

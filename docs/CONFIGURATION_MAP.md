@@ -10,13 +10,13 @@ Primary environment variables:
 
 - `TELEGRAM_BOT_TOKEN`
   - **Used by**:
-    - `config/config.yaml` (`telegram.bot_token`)
+    - `config/base.yaml` or account YAML (`telegram.bot_token`)
     - `pearlalgo.market_agent.main` (fallback when config.yaml not fully populated)
     - `pearlalgo.market_agent.telegram_command_handler.main`
   - **Purpose**: Bot token for Telegram notifications and command handler.
 - `TELEGRAM_CHAT_ID`
   - **Used by**:
-    - `config/config.yaml` (`telegram.chat_id`)
+    - `config/base.yaml` or account YAML (`telegram.chat_id`)
     - `pearlalgo.market_agent.main`
     - `pearlalgo.market_agent.telegram_command_handler.main`
   - **Purpose**: Authorized chat ID for notifications and bot commands.
@@ -65,7 +65,7 @@ Optional AI/LLM environment variables (for OpenAI integration):
 
 No other environment variables are required by the running agent; keep any additions explicit and documented here.
 
-### 1.2 Service configuration (`config/config.yaml`)
+### 1.2 Service configuration (`config/base.yaml` + account YAML)
 
 Key sections and their consumers:
 
@@ -111,11 +111,11 @@ Key sections and their consumers:
   - **Used by**: `pearlalgo.market_agent.audit_logger` and audit retention/cleanup logic.
   - **Key fields**: `retention_days` (general events, default 90), `snapshot_retention_days` (equity snapshots, default 365).
   - **Purpose**: How long audit events and snapshots are kept before pruning.
-- **Tradovate Paper overlay** (`config/markets/tv_paper_eval.yaml`): Overrides for challenge (e.g. `challenge.stage: tv_paper_eval`), `trading_circuit_breaker` (e.g. `enable_tv_paper_eval_gate`, `tv_paper_*` limits), `data.ibkr_data_client_id`, session, execution, and signal_forwarding. See `docs/ACCOUNT_GUIDE.md` and the overlay file for full list.
+- **Tradovate Paper account** (`config/accounts/tradovate_paper.yaml`): Overrides for challenge (e.g. `challenge.stage: tv_paper_eval`), `trading_circuit_breaker` (e.g. `enable_tv_paper_eval_gate`, `tv_paper_*` limits), `data.ibkr_data_client_id`, session, execution. See `docs/ACCOUNT_GUIDE.md` and the file for full list.
 
 Notes:
-- Base config `config/config.yaml` is merged with optional overlays from `PEARLALGO_CONFIG_PATH`
-  (e.g., `config/markets/nq.yaml`). Overlay values override base values.
+- Base config `config/base.yaml` is merged with the account overlay passed via `--config`
+  (e.g., `config/accounts/tradovate_paper.yaml`). Overlay values override base values.
 - `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF)
   control how often 5m/15m history is refreshed.
   This reduces repeated IBKR historical requests when the service runs with a fast scan interval.
@@ -164,15 +164,15 @@ These are used by the Tradovate Paper evaluation instance only:
 - `IBKR_DATA_CLIENT_ID=51` -- IBKR data client ID for Tradovate Paper (avoids clash with IBKR Virtual=11)
 - `IB_CLIENT_ID_LIVE_CHART=97` -- Chart data client ID for Tradovate Paper API (avoids clash with IBKR Virtual=96)
 - `PEARLALGO_STATE_DIR=data/agent_state/TV_PAPER_EVAL` -- Isolated state directory
-- `PEARLALGO_CONFIG_PATH=config/markets/tv_paper_eval.yaml` -- Tradovate Paper config overlay
+- `PEARLALGO_CONFIG_PATH=config/accounts/tradovate_paper.yaml` (or pass `--config`) -- Tradovate Paper account config
 - `API_PORT=8001` -- Tradovate Paper API server port
 
 ### 1.4 Config files
 
 | File | Purpose |
 |------|---------|
-| `config/config.yaml` | Base config (IBKR Virtual). All settings. |
-| `config/markets/tv_paper_eval.yaml` | Tradovate Paper overlay. Merged on top of base via deep merge. |
+| `config/base.yaml` | Base config. All shared settings. |
+| `config/accounts/tradovate_paper.yaml` | Tradovate Paper account. Merged on top of base via deep merge. |
 | `~/.config/pearlalgo/secrets.env` | Secrets (Telegram, Tradovate, API keys). Never committed. |
 | `.env` | Non-sensitive defaults (IBKR ports, data provider). |
 | `pearlalgo_web_app/.env.local` | Web app API key + auth settings (auto-synced by `pearl.sh sync_env_local`: `NEXT_PUBLIC_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE`). |

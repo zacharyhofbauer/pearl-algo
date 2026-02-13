@@ -129,7 +129,7 @@ ps aux | grep "pearlalgo.market_agent.main"
 ## 🔧 Configuration
 
 ### Main Configuration File
-Edit `config/config.yaml` to customize behavior:
+Edit `config/base.yaml` and `config/accounts/tradovate_paper.yaml` to customize behavior:
 
 ```yaml
 # Trading Symbol
@@ -381,7 +381,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 4. **Verify configuration:**
    ```bash
-   cat config/config.yaml
+   cat config/accounts/tradovate_paper.yaml
    ```
 
 ### No Signals Generated
@@ -400,7 +400,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 4. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
 5. **Verify session is open:**
    ```bash
-   # Strategy session hours are defined by config/config.yaml (default: 18:00–15:45 ET)
+   # Strategy session hours are defined by config (default: 18:00–15:45 ET)
    ```
 
 ### Telegram Not Working
@@ -520,7 +520,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 ## 📁 File Locations
 
 **Configuration:**
-- `config/config.yaml` - Main configuration file
+- `config/base.yaml` and `config/accounts/tradovate_paper.yaml` - Configuration files
 - `.env` - Environment variables (not in git)
 
 **Process Management:**

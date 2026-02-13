@@ -28,7 +28,7 @@ def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
 
 
 @dataclass
-class TradeRecord:
+class StrategyTradeRecord:
     """Represents a single trade from signals.jsonl with exited status."""
     signal_type: str
     direction: str
@@ -67,7 +67,7 @@ class SummaryRow:
         return asdict(self)
 
 
-def iter_exited_signals(signals_path: Path) -> Iterable[TradeRecord]:
+def iter_exited_signals(signals_path: Path) -> Iterable[StrategyTradeRecord]:
     """
     Iterate over exited trades from a signals.jsonl file.
 
@@ -75,7 +75,7 @@ def iter_exited_signals(signals_path: Path) -> Iterable[TradeRecord]:
         signals_path: Path to signals.jsonl file
 
     Yields:
-        TradeRecord for each exited trade
+        StrategyTradeRecord for each exited trade
     """
     with open(signals_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -101,7 +101,7 @@ def iter_exited_signals(signals_path: Path) -> Iterable[TradeRecord]:
             exit_time = _parse_iso(rec.get("exit_time"))
             entry_time = _parse_iso(rec.get("entry_time"))
             regime = (signal.get("regime") or {}) if isinstance(signal.get("regime"), dict) else {}
-            yield TradeRecord(
+            yield StrategyTradeRecord(
                 signal_type=str(signal_type),
                 direction=str(direction),
                 pnl=pnl,
@@ -138,12 +138,12 @@ def compute_drawdown(pnls: List[Tuple[Optional[datetime], float]]) -> float:
     return float(max_dd)
 
 
-def summarize(records: List[TradeRecord]) -> SummaryRow:
+def summarize(records: List[StrategyTradeRecord]) -> SummaryRow:
     """
     Summarize a list of trade records into aggregate statistics.
 
     Args:
-        records: List of TradeRecord objects
+        records: List of StrategyTradeRecord objects
 
     Returns:
         SummaryRow with aggregate statistics
@@ -191,9 +191,9 @@ def rank_rows(rows: List[SummaryRow]) -> List[Dict[str, Any]]:
     return ranked
 
 
-def _group_by(records: List[TradeRecord], key_fn) -> List[SummaryRow]:
+def _group_by(records: List[StrategyTradeRecord], key_fn) -> List[SummaryRow]:
     """Group records by a key function and summarize each group."""
-    groups: Dict[str, List[TradeRecord]] = {}
+    groups: Dict[str, List[StrategyTradeRecord]] = {}
     for r in records:
         key = key_fn(r)
         groups.setdefault(key, []).append(r)

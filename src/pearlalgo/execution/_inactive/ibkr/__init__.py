@@ -1,11 +1,11 @@
 """
-IBKR Execution Adapter
+IBKR Execution Adapter (INACTIVE).
 
-Provides execution capabilities via Interactive Brokers Gateway.
-Uses bracket orders with entry, stop loss, and take profit.
+Legacy execution via Interactive Brokers Gateway. Kept for reference only.
+Active execution is Tradovate-only. See execution/tradovate/ for the active adapter.
 """
 
-from pearlalgo.execution.ibkr.adapter import IBKRExecutionAdapter
+from .adapter import IBKRExecutionAdapter
 
 __all__ = ["IBKRExecutionAdapter"]
 

@@ -78,15 +78,14 @@ from pearlalgo.market_agent.observability_orchestrator import ObservabilityOrche
 from pearlalgo.market_agent.state_builder import StateBuilder
 
 # Execution layer imports (optional - only used if execution.enabled)
+# IBKR execution is inactive; see execution/_inactive/ibkr/
 try:
     from pearlalgo.execution.base import ExecutionAdapter, ExecutionConfig
-    from pearlalgo.execution.ibkr.adapter import IBKRExecutionAdapter
     EXECUTION_AVAILABLE = True
 except ImportError:
     EXECUTION_AVAILABLE = False
     ExecutionAdapter = None  # type: ignore
     ExecutionConfig = None  # type: ignore
-    IBKRExecutionAdapter = None  # type: ignore
 
 # Tradovate execution adapter (optional - only for prop firm / Tradovate Paper)
 try:
@@ -686,15 +685,18 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
         self._execution_config: Optional["ExecutionConfig"] = None
         execution_settings = service_config.get("execution", {})
         execution_adapter_name = str(
-            (execution_settings or {}).get("adapter", "ibkr")
+            (execution_settings or {}).get("adapter", "tradovate")
         ).strip().lower()
         
         if EXECUTION_AVAILABLE and execution_settings.get("enabled", False):
             try:
+                if execution_adapter_name in ("ibkr", "interactivebrokers"):
+                    raise NotImplementedError(
+                        "IBKR execution is inactive. Use Tradovate (execution.adapter: tradovate). "
+                        "See execution/_inactive/ibkr/ for legacy code."
+                    )
                 self._execution_config = ExecutionConfig.from_dict(execution_settings)
-                if execution_adapter_name in ("ibkr", "", "interactivebrokers"):
-                    self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
-                elif execution_adapter_name == "tradovate" and TRADOVATE_AVAILABLE:
+                if execution_adapter_name in ("tradovate", "") and TRADOVATE_AVAILABLE:
                     tv_config = TradovateConfig.from_env()
                     self.execution_adapter = TradovateExecutionAdapter(
                         self._execution_config, tradovate_config=tv_config,

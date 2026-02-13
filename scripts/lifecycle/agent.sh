@@ -60,11 +60,11 @@ cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/logs"
 
 if [ -z "$CONFIG_PATH" ]; then
-    DEFAULT_CONFIG="$PROJECT_DIR/config/markets/${MARKET_LOWER}.yaml"
+    DEFAULT_CONFIG="$PROJECT_DIR/config/accounts/tradovate_paper.yaml"
     if [ -f "$DEFAULT_CONFIG" ]; then
         CONFIG_PATH="$DEFAULT_CONFIG"
     else
-        CONFIG_PATH="$PROJECT_DIR/config/config.yaml"
+        CONFIG_PATH="$PROJECT_DIR/config/base.yaml"
     fi
 fi
 
@@ -227,7 +227,7 @@ if [ "$BACKGROUND_MODE" = true ]; then
         mv "$LOG_FILE" "${LOG_FILE}.1"
         echo "📁 Rotated previous log to ${LOG_FILE}.1"
     fi
-    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.main >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.main --config "$CONFIG_PATH" --data-dir "$STATE_DIR" >> "$LOG_FILE" 2>&1 &
     SERVICE_PID=$!
     echo $SERVICE_PID > "$PID_FILE"
     echo "✅ Agent $MARKET_UPPER started in background (PID: $SERVICE_PID)"
@@ -239,7 +239,7 @@ echo "=== Starting Agent $MARKET_UPPER (Foreground Mode) ==="
 echo "   Press Ctrl+C to stop"
 echo ""
 
-"$PYTHON_CMD" -m pearlalgo.market_agent.main &
+"$PYTHON_CMD" -m pearlalgo.market_agent.main --config "$CONFIG_PATH" --data-dir "$STATE_DIR" &
 SERVICE_PID=$!
 echo $SERVICE_PID > "$PID_FILE"
 

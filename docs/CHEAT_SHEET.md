@@ -303,7 +303,7 @@ tail -f logs/web_app.log           # Next.js
 | Base config (shared) | `config/base.yaml` |
 | Tradovate Paper config | `config/accounts/tradovate_paper.yaml` |
 | IBKR Paper config | `config/accounts/ibkr_paper.yaml` |
-| Legacy config | `config/config.yaml` (still works) |
+| Config | `config/base.yaml` + `config/accounts/tradovate_paper.yaml` |
 | Credentials | `~/.config/pearlalgo/secrets.env` |
 | Env defaults | `.env` |
 | Tradovate Paper state | `data/tradovate/paper/` |
@@ -346,7 +346,7 @@ tail -f logs/web_app.log           # Next.js
 
 | Component | IBKR Virtual | Tradovate Paper |
 |-----------|-----------|------|
-| Config | `config/config.yaml` | `config/markets/tv_paper_eval.yaml` |
+| Config | `config/base.yaml` | `config/accounts/tradovate_paper.yaml` |
 | State dir | `data/agent_state/NQ/` | `data/tradovate/paper/` |
 | API port | 8000 | 8001 |
 | Signal gen | `strategy.analyze()` (independent) | `strategy.analyze()` (independent) |
@@ -354,7 +354,7 @@ tail -f logs/web_app.log           # Next.js
 | Execution | Disabled (virtual) | Tradovate paper (armed) |
 | Telegram label | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
 
-**Rule:** `config.yaml` changes only affect IBKR Virtual. `tv_paper_eval.yaml` only affects Tradovate Paper. `service.py` changes affect both.
+**Rule:** Single account (Tradovate Paper). Use `--config config/accounts/tradovate_paper.yaml` to start the agent.
 
 ---
 

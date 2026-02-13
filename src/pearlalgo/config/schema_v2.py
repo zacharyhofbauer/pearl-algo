@@ -47,7 +47,7 @@ class ExecutionConfig(BaseModel):
     enabled: bool = False
     armed: bool = False
     mode: str = "dry_run"
-    adapter: str = "ibkr"
+    adapter: str = "tradovate"
     max_positions: int = 1
     max_orders_per_day: int = 20
     max_daily_loss: float = 500.0

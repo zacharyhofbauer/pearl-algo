@@ -63,14 +63,14 @@ def _get_account_label(service_config: Dict[str, Any]) -> str:
     accounts_cfg = service_config.get("accounts", {}) or {}
     if tv_paper_stage in _TV_PAPER_STAGES:
         return accounts_cfg.get("tv_paper", {}).get("telegram_prefix") or "TV-PAPER"
-    return accounts_cfg.get("ibkr_virtual", {}).get("telegram_prefix") or "IBKR-VIR"
+    return accounts_cfg.get("tradovate_paper", {}).get("telegram_prefix") or "TV-PAPER"
 
 
 def _get_audit_account_type(service_config: Dict[str, Any]) -> str:
-    """Return ``'tradovate_paper'`` or ``'ibkr_virtual'`` based on challenge stage."""
+    """Return audit account type; single-account model uses tradovate_paper."""
     challenge_cfg = service_config.get("challenge", {}) or {}
     tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-    return "tradovate_paper" if tv_paper_stage in _TV_PAPER_STAGES else "ibkr_virtual"
+    return "tradovate_paper" if tv_paper_stage in _TV_PAPER_STAGES else "tradovate_paper"
 
 
 def _build_notification_queue(

@@ -202,7 +202,7 @@ check_chart_status() {
 }
 
 check_tv_paper_status() {
-    local pidfile="$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid"
+    local pidfile="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
     local api_ok=$(curl -s http://localhost:8001/health 2>/dev/null | grep -c "ok" || echo 0)
     
     if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
@@ -281,7 +281,7 @@ show_quick_status() {
     local agent_status=$([ -f "$agent_pid_file" ] && kill -0 "$(cat "$agent_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
-    local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid"
+    local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
     local tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
@@ -463,7 +463,7 @@ start_all() {
     start_agent
     sleep 2
     # Start Tradovate Paper if config exists
-    if [ -f "$SCRIPT_DIR/config/markets/tv_paper_eval.yaml" ]; then
+    if [ -f "$SCRIPT_DIR/config/accounts/tradovate_paper.yaml" ]; then
         echo -e "${CYAN}▶ Starting Tradovate Paper Eval...${NC}"
         ./scripts/lifecycle/tv_paper_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   Tradovate Paper start failed (non-critical)${NC}"
         echo ""
@@ -561,7 +561,7 @@ stop_all() {
     stop_tunnel
     stop_chart
     # Stop Tradovate Paper if running
-    if [ -f "$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.pid" ] || [ -f "$SCRIPT_DIR/logs/api_TV_PAPER_EVAL.pid" ]; then
+    if [ -f "$SCRIPT_DIR/logs/agent_TV_PAPER.pid" ] || [ -f "$SCRIPT_DIR/logs/api_TV_PAPER.pid" ]; then
         echo -e "${CYAN}■ Stopping Tradovate Paper Eval...${NC}"
         ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
         echo ""
@@ -716,7 +716,7 @@ handle_tv_paper() {
             ./scripts/lifecycle/tv_paper_eval.sh api --background
             ;;
         logs)
-            tail -f "$SCRIPT_DIR/logs/agent_TV_PAPER_EVAL.log"
+            tail -f "$SCRIPT_DIR/logs/agent_TV_PAPER.log"
             ;;
         *)
             echo "Usage: ./pearl.sh tv-paper <start|stop|status|restart|api|logs>"

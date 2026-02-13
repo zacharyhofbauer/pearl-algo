@@ -168,40 +168,96 @@ class TestServiceLoopFailures:
         # The test passes by not crashing.
 
     @pytest.mark.asyncio
-    async def test_state_save_failure_does_not_crash(self, configured_service):
-        """When state_manager.save_state raises IOError, the service should
-        log the error but not crash."""
+    async def test_state_save_failure_does_not_crash(self, configured_service, caplog):
+        """When state_manager.save_state raises IOError inside _run_loop, the loop
+        should catch it, increment error_count, and continue (not crash)."""
+        from datetime import datetime, timezone
+
         service = configured_service
+        service.running = True
+        service.shutdown_requested = False
+        service.paused = False
+        service._signal_follower_mode = False
+        service._enable_new_bar_gating = False
 
-        # Make save_state raise
+        # Succeed through fetch and strategy so we reach _save_state in the loop
+        service.data_fetcher.fetch_latest_data = AsyncMock(return_value={
+            "df": pd.DataFrame({
+                "Open": [17500.0], "High": [17510.0], "Low": [17490.0],
+                "Close": [17505.0], "Volume": [1000],
+                "timestamp": [datetime.now(timezone.utc)],
+            }),
+            "latest_bar": {"close": 17505.0, "timestamp": datetime.now(timezone.utc).isoformat()},
+        })
+        service.strategy.analyze = MagicMock(return_value=[])
+
+        # Make save_state raise so the loop hits the exception path
         service.state_manager.save_state = MagicMock(side_effect=IOError("Disk full"))
-
-        # _save_state calls state_manager.save_state; verify it handles the error
+        service.state_manager.append_event = MagicMock()
         service._state_dirty = True
+        service.state_save_interval = 1
+        service.cycle_count = 0
 
-        # Call _save_state with force=True - the IOError should propagate from
-        # save_state, but we verify the service's higher-level loop catches it
-        # by testing the _save_state path directly.
-        try:
-            service._save_state(force=True)
-            # If _save_state wraps the error, we're fine
-        except IOError:
-            # The raw IOError propagates -- verify the loop wraps it
-            pass
+        # Stub loop dependencies and stop after one cycle
+        service.notification_queue = MagicMock()
+        service.notification_queue.enqueue_data_quality_alert = AsyncMock()
+        service.notification_queue.enqueue_circuit_breaker = AsyncMock()
+        service.notification_queue.enqueue_heartbeat = AsyncMock()
+        service.execution_orchestrator = MagicMock()
+        service.execution_orchestrator.check_daily_reset = MagicMock()
+        service.execution_orchestrator.check_execution_health = AsyncMock()
+        service.scheduled_tasks = MagicMock()
+        for m in ("check_morning_briefing", "check_market_close_summary", "check_follower_heartbeat",
+                  "check_signal_pruning", "check_audit_retention", "check_equity_snapshot"):
+            setattr(service.scheduled_tasks, m, AsyncMock())
+        service._check_execution_control_flags = AsyncMock()
+        service._check_data_quality = AsyncMock()
+        service._handle_close_all_requests = AsyncMock()
+        service._check_pearl_suggestions = AsyncMock()
+        service._check_dashboard = AsyncMock()
+        service.cadence_scheduler = None
+        service._adaptive_cadence_enabled = False
 
-        # Verify that the service itself is still in a usable state
-        assert service.state_manager is not None, "state_manager should still be set"
-        # The service should be able to continue to the next cycle
+        def stop_after_one(*args, **kwargs):
+            service.shutdown_requested = True
+        service._sleep_until_next_cycle = AsyncMock(side_effect=stop_after_one)
+        service._interruptible_sleep = AsyncMock(side_effect=stop_after_one)
+
+        initial_errors = service.error_count
+        with caplog.at_level(logging.ERROR):
+            await service._run_loop()
+
+        assert service.error_count > initial_errors, (
+            "error_count should have incremented after state save IOError"
+        )
+        assert service.state_manager is not None
 
     @pytest.mark.asyncio
     async def test_execution_adapter_failure_during_signal_processing(
         self, configured_service, caplog
     ):
-        """When the execution adapter raises during signal processing, the
-        signal handler should catch the error without losing the signal."""
-        service = configured_service
+        """When process_signal raises inside _run_loop (e.g. execution adapter
+        failure), the loop should catch it, increment error_count, and continue."""
+        from datetime import datetime, timezone
 
-        # Create a mock signal
+        service = configured_service
+        service.running = True
+        service.shutdown_requested = False
+        service.paused = False
+        service._signal_follower_mode = False
+        service._enable_new_bar_gating = False
+
+        # Data fetch succeeds
+        service.data_fetcher.fetch_latest_data = AsyncMock(return_value={
+            "df": pd.DataFrame({
+                "Open": [17500.0], "High": [17510.0], "Low": [17490.0],
+                "Close": [17505.0], "Volume": [1000],
+                "timestamp": [datetime.now(timezone.utc)],
+            }),
+            "latest_bar": {"close": 17505.0, "timestamp": datetime.now(timezone.utc).isoformat()},
+        })
+
+        # Strategy returns one signal so we call process_signal
         test_signal = {
             "type": "momentum_ema_cross",
             "direction": "long",
@@ -212,17 +268,46 @@ class TestServiceLoopFailures:
             "symbol": "MNQ",
             "position_size": 1,
         }
+        service.strategy.analyze = MagicMock(return_value=[test_signal])
 
-        # Mock the signal handler's process_signal to simulate execution failure
+        # process_signal raises (e.g. broker connection dropped)
         service._signal_handler.process_signal = AsyncMock(
             side_effect=RuntimeError("Broker connection dropped mid-order")
         )
+        service._signal_handler.get_signal_count = MagicMock(return_value=0)
 
-        # Verify that calling process_signal raises (the signal handler
-        # propagates the error) — the service loop's try/except around
-        # signal processing will catch it.
-        with pytest.raises(RuntimeError, match="Broker connection dropped"):
-            await service._signal_handler.process_signal(test_signal)
+        # Stub loop dependencies and stop after one cycle
+        service.notification_queue = MagicMock()
+        service.notification_queue.enqueue_data_quality_alert = AsyncMock()
+        service.notification_queue.enqueue_circuit_breaker = AsyncMock()
+        service.notification_queue.enqueue_heartbeat = AsyncMock()
+        service.notification_queue.enqueue_raw_message = AsyncMock()
+        service.execution_orchestrator = MagicMock()
+        service.execution_orchestrator.check_daily_reset = MagicMock()
+        service.execution_orchestrator.check_execution_health = AsyncMock()
+        service.scheduled_tasks = MagicMock()
+        for m in ("check_morning_briefing", "check_market_close_summary", "check_follower_heartbeat",
+                  "check_signal_pruning", "check_audit_retention", "check_equity_snapshot"):
+            setattr(service.scheduled_tasks, m, AsyncMock())
+        service._check_execution_control_flags = AsyncMock()
+        service._check_data_quality = AsyncMock()
+        service._handle_close_all_requests = AsyncMock()
+        service._check_pearl_suggestions = AsyncMock()
+        service._check_dashboard = AsyncMock()
+        service.state_manager.append_event = MagicMock()
+        service.cadence_scheduler = None
+        service._adaptive_cadence_enabled = False
 
-        # The signal handler was called (signal was not silently dropped)
-        service._signal_handler.process_signal.assert_called_once_with(test_signal)
+        def stop_after_one(*args, **kwargs):
+            service.shutdown_requested = True
+        service._sleep_until_next_cycle = AsyncMock(side_effect=stop_after_one)
+        service._interruptible_sleep = AsyncMock(side_effect=stop_after_one)
+
+        initial_errors = service.error_count
+        with caplog.at_level(logging.ERROR):
+            await service._run_loop()
+
+        assert service.error_count > initial_errors, (
+            "error_count should have incremented after process_signal failure"
+        )
+        service._signal_handler.process_signal.assert_called_once()

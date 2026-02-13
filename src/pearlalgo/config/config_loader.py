@@ -46,11 +46,11 @@ from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
 
 
-# Stubs for deleted config_schema.py and adapters.py (restructure cleanup).
-# Schema validation now handled by schema_v2.py in the new --config path.
+# Schema validation: use schema_v2 for the --config path.
 def validate_config(data):
-    """No-op stub: schema validation moved to schema_v2.py."""
-    return data
+    """Delegate to schema_v2 for type-checked validation."""
+    from pearlalgo.config import schema_v2
+    return schema_v2.validate_config(data)
 
 def build_strategy_config_from_yaml(base, config_data):
     """Inline stub: merge config_data strategy keys into base dict."""
@@ -118,7 +118,8 @@ def service_config_override(overrides: Dict[str, Any]):
     finally:
         try:
             _SERVICE_CONFIG_OVERRIDE.reset(token)
-        except Exception:
+        except Exception as e:
+            logger.debug("ContextVar reset failed, clearing override: %s", e)
             _SERVICE_CONFIG_OVERRIDE.set(None)
 
 
@@ -297,7 +298,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enabled": defaults.EXECUTION_ENABLED,
         "armed": defaults.EXECUTION_ARMED,
         "mode": defaults.EXECUTION_MODE,
-        "adapter": "ibkr",
+        "adapter": "tradovate",
         "max_positions": defaults.MAX_POSITIONS,
         "max_orders_per_day": defaults.MAX_ORDERS_PER_DAY,
         "max_daily_loss": defaults.MAX_DAILY_LOSS,

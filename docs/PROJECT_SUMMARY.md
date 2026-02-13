@@ -1,9 +1,10 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.5  
-**Last Updated:** 2026-02-12 (State module refactor, notification tiers, web dashboard SystemStatusPanel, Tradovate partial fills)  
+**Version:** 0.2.4 (aligns with pyproject.toml)  
+**Last Updated:** 2026-02-13 (Single-account consolidation, config consolidation, notifications module)  
 **Status:** Production-Ready  
-**Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
+**Trading Style:** Prop Firm - Intraday Swings & Quick Scalps  
+**Active account:** Tradovate Paper only; IBKR is data-only (execution inactive).
 
 ---
 
@@ -33,7 +34,7 @@
 ### Key Highlights
 
 - ✅ **Fully Automated**: Runs 24/7 with minimal intervention
-- ✅ **Prop Firm Optimized**: MNQ futures with explicit risk caps and guardrails (see `config/config.yaml`)
+- ✅ **Prop Firm Optimized**: MNQ futures with explicit risk caps and guardrails (see `config/base.yaml` + `config/accounts/tradovate_paper.yaml`)
 - ✅ **Scalping Focus**: Adaptive cadence (5s active, 30s idle, 300s closed) + confidence/R:R filters + adaptive stops/sizing
 - ✅ **Real-time Data**: Connects to Interactive Brokers (IBKR) Gateway for live market data
 - ✅ **Intelligent Signals**: Uses technical analysis to generate high-confidence trading signals
@@ -62,7 +63,7 @@ The MNQ Trading Agent is designed to:
 - **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 15:45 ET (NY time). Positions must be flat by 15:45.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
-- **Trading Style**: Prop-firm intraday swings and scalps; sizing/risk thresholds are configured in `config/config.yaml`
+- **Trading Style**: Prop-firm intraday swings and scalps; sizing/risk thresholds are configured in `config/base.yaml` and `config/accounts/tradovate_paper.yaml`
 
 ### Design Philosophy
 

@@ -23,7 +23,6 @@ from pathlib import Path
 import yaml
 
 from pearlalgo.utils.logger import logger
-from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.config.config_loader import build_strategy_config
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.factory import create_data_provider
@@ -131,22 +130,22 @@ async def main():
     args = _parse_args()
 
     # ---------------------------------------------------------------
-    # Config loading: new parameterized mode or legacy
+    # Config loading: --config required (base.yaml + account overlay)
     # ---------------------------------------------------------------
-    if args.config:
-        logger.info(f"Starting Market Agent Service (new config) | run_id={run_id}")
-        config_data = _load_new_config(args.config)
-        # Validate with Pydantic schema (fails fast on bad config)
-        try:
-            from pearlalgo.config.schema_v2 import validate_config
-            config_data = validate_config(config_data)
-            logger.info("Config validated (schema_v2)")
-        except Exception as e:
-            logger.error(f"Config validation failed: {e}")
-            return
-    else:
-        logger.info(f"Starting Market Agent Service (legacy config) | run_id={run_id}")
-        config_data = load_config_yaml()
+    if not args.config:
+        logger.error(
+            "Missing --config. Example: --config config/accounts/tradovate_paper.yaml"
+        )
+        return
+    logger.info(f"Starting Market Agent Service | run_id={run_id}")
+    config_data = _load_new_config(args.config)
+    try:
+        from pearlalgo.config.schema_v2 import validate_config
+        config_data = validate_config(config_data)
+        logger.info("Config validated (schema_v2)")
+    except Exception as e:
+        logger.error(f"Config validation failed: {e}")
+        return
 
     # Telegram config: env vars take precedence
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")

@@ -218,17 +218,19 @@ class OrderManager:
             sig_type = str(signal.get("type") or "")
             if sig_type in multipliers:
                 size = int(round(size * float(multipliers.get(sig_type) or 1.0)))
-        except Exception:
-            pass
+        except (TypeError, ValueError) as e:
+            logger.debug("Order manager: signal_type_size_multipliers parse failed: %s", e)
 
         # Clamp to risk min/max
         try:
             min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
-        except Exception:
+        except (TypeError, ValueError) as e:
+            logger.debug("Order manager: min_position_size parse failed, using 1: %s", e)
             min_size = 1
         try:
             max_size = int(self._risk_settings.get("max_position_size", size) or size)
-        except Exception:
+        except (TypeError, ValueError) as e:
+            logger.debug("Order manager: max_position_size parse failed, using size: %s", e)
             max_size = size
 
         size = max(min_size, min(max_size, size))
@@ -280,7 +282,8 @@ class OrderManager:
             current_size = signal.get("position_size", 1)
             try:
                 current_size = int(current_size)
-            except Exception:
+            except (TypeError, ValueError) as e:
+                logger.debug("Order manager: position_size parse in ML sizing: %s", e)
                 current_size = 1
 
             adjusted_size = max(1, int(round(current_size * multiplier)))
@@ -289,8 +292,8 @@ class OrderManager:
             try:
                 max_size = int(self._risk_settings.get("max_position_size", adjusted_size) or adjusted_size)
                 adjusted_size = min(adjusted_size, max_size)
-            except Exception:
-                pass
+            except (TypeError, ValueError) as e:
+                logger.debug("Order manager: max_position_size parse in ML sizing: %s", e)
 
             signal["position_size"] = adjusted_size
 
@@ -332,24 +335,30 @@ class OrderManager:
             "reason": None,
         }
 
-        # Check minimum
+        # Check minimum (fail-safe: reject if config unreadable)
         try:
             min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
             if size < min_size:
                 result["valid"] = False
                 result["reason"] = f"Size {size} below minimum {min_size}"
                 return result
-        except Exception:
-            pass
+        except (TypeError, ValueError) as e:
+            logger.warning("Order manager: could not read min_position_size (rejecting order): %s", e)
+            result["valid"] = False
+            result["reason"] = "Configuration error: min position size invalid"
+            return result
 
-        # Check maximum
+        # Check maximum (fail-safe: reject if config unreadable)
         try:
             max_size = int(self._risk_settings.get("max_position_size", 999) or 999)
             if size > max_size:
                 result["adjusted_size"] = max_size
                 result["reason"] = f"Size reduced from {size} to {max_size} (max limit)"
-        except Exception:
-            pass
+        except (TypeError, ValueError) as e:
+            logger.warning("Order manager: could not read max_position_size (rejecting order): %s", e)
+            result["valid"] = False
+            result["reason"] = "Configuration error: max position size invalid"
+            return result
 
         # Check account-based limits if provided
         if account_value is not None and account_value > 0:
@@ -364,8 +373,8 @@ class OrderManager:
                     if adjusted < result["adjusted_size"]:
                         result["adjusted_size"] = adjusted
                         result["reason"] = f"Size reduced to {adjusted} (max {max_pct:.0%} of account)"
-            except Exception:
-                pass
+            except (TypeError, ValueError) as e:
+                logger.debug("Order manager: could not apply account-based limit: %s", e)
 
         return result
 

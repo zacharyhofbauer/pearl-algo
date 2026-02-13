@@ -15,7 +15,6 @@ Design:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from pearlalgo.utils.formatting import pnl_emoji
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_utc_timestamp
+from pearlalgo.utils.state_io import atomic_write_json, load_json_file
 
 
 @dataclass
@@ -157,8 +157,7 @@ class ChallengeTracker:
         """Load current attempt from state file (or create new)."""
         if self.state_file.exists():
             try:
-                with open(self.state_file) as f:
-                    data = json.load(f)
+                data = load_json_file(self.state_file)
                 attempt = ChallengeAttempt.from_dict(data.get("current_attempt", {}))
                 # If last attempt ended, start a new one
                 if attempt.outcome != "active":
@@ -190,8 +189,7 @@ class ChallengeTracker:
                 "current_attempt": self.current_attempt.to_dict(),
                 "last_updated": get_utc_timestamp(),
             }
-            with open(self.state_file, "w") as f:
-                json.dump(state, f, indent=2)
+            atomic_write_json(self.state_file, state, indent=2)
         except Exception as e:
             logger.error(f"Could not save challenge state: {e}")
 
@@ -201,15 +199,14 @@ class ChallengeTracker:
             history: List[Dict[str, Any]] = []
             if self.history_file.exists():
                 try:
-                    with open(self.history_file) as f:
-                        history = json.load(f)
+                    raw = load_json_file(self.history_file)
+                    history = raw if isinstance(raw, list) else []
                 except Exception:
                     history = []
 
             history.append(attempt.to_dict())
 
-            with open(self.history_file, "w") as f:
-                json.dump(history, f, indent=2)
+            atomic_write_json(self.history_file, history, indent=2)
         except Exception as e:
             logger.error(f"Could not save challenge history: {e}")
 
@@ -388,8 +385,8 @@ class ChallengeTracker:
         history: List[Dict[str, Any]] = []
         if self.history_file.exists():
             try:
-                with open(self.history_file) as f:
-                    history = json.load(f)
+                raw = load_json_file(self.history_file)
+                history = raw if isinstance(raw, list) else []
             except Exception:
                 history = []
 
@@ -402,15 +399,14 @@ class ChallengeTracker:
         fails = 0
         if self.history_file.exists():
             try:
-                with open(self.history_file) as f:
-                    history = json.load(f)
-                if isinstance(history, list):
-                    for attempt in history:
-                        outcome = str(attempt.get("outcome", "")).lower()
-                        if outcome == "pass":
-                            passes += 1
-                        elif outcome == "fail":
-                            fails += 1
+                raw = load_json_file(self.history_file)
+                history = raw if isinstance(raw, list) else []
+                for attempt in history:
+                    outcome = str(attempt.get("outcome", "")).lower()
+                    if outcome == "pass":
+                        passes += 1
+                    elif outcome == "fail":
+                        fails += 1
             except Exception:
                 pass
         return {"passed": passes, "failed": fails}

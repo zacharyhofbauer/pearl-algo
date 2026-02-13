@@ -5,7 +5,7 @@ Business logic for strategy analysis, reporting, and diagnostics.
 """
 
 from pearlalgo.analytics.strategy_report import (
-    TradeRecord,
+    StrategyTradeRecord,
     SummaryRow,
     build_report,
 )
@@ -23,7 +23,7 @@ from pearlalgo.analytics.incident_analysis import (
 )
 
 __all__ = [
-    "TradeRecord",
+    "StrategyTradeRecord",
     "SummaryRow",
     "build_report",
     "build_doctor_rollup",

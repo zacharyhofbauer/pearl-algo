@@ -32,6 +32,7 @@ from pearlalgo.utils.state_io import (
     atomic_write_json,
     create_minimal_signal_record,
     file_lock,
+    load_json_file,
 )
 from pearlalgo.utils.paths import (
     ensure_state_dir,
@@ -250,17 +251,42 @@ class _SignalStore:
         self._sqlite_enabled = enabled
         self._trade_db = trade_db
 
+    def _signals_meta_path(self) -> Path:
+        return self._signals_file.parent / "signals_meta.json"
+
+    def _read_signal_count_sidecar(self) -> Optional[int]:
+        """Read signal count from sidecar if present and valid."""
+        meta = load_json_file(self._signals_meta_path())
+        if isinstance(meta, dict) and "count" in meta:
+            try:
+                return int(meta["count"])
+            except (TypeError, ValueError):
+                pass
+        return None
+
+    def _write_signal_count_sidecar(self, count: int) -> None:
+        """Write signal count to sidecar for O(1) reads on next load."""
+        try:
+            atomic_write_json(self._signals_meta_path(), {"count": count})
+        except Exception as e:
+            logger.debug("Could not write signals_meta.json: %s", e)
+
     def get_signal_count(self) -> int:
         if self._signal_count is None:
-            try:
-                if self._signals_file.exists():
-                    with open(self._signals_file, "r") as f:
-                        self._signal_count = sum(1 for _ in f)
-                else:
+            sidecar = self._read_signal_count_sidecar()
+            if sidecar is not None:
+                self._signal_count = sidecar
+            else:
+                try:
+                    if self._signals_file.exists():
+                        with open(self._signals_file, "r") as f:
+                            self._signal_count = sum(1 for _ in f)
+                    else:
+                        self._signal_count = 0
+                    self._write_signal_count_sidecar(self._signal_count)
+                except Exception as e:
+                    logger.warning(f"Failed to count signals, defaulting to 0: {e}")
                     self._signal_count = 0
-            except Exception as e:
-                logger.warning(f"Failed to count signals, defaulting to 0: {e}")
-                self._signal_count = 0
         return self._signal_count
 
     def invalidate_signals_cache(self) -> None:
@@ -329,10 +355,13 @@ class _SignalStore:
             if not self._signals_file.exists():
                 return
 
-            line_count = 0
-            with open(self._signals_file, "r") as f:
-                for _ in f:
-                    line_count += 1
+            # Prefer sidecar count to avoid a full file read when possible
+            line_count = self._read_signal_count_sidecar()
+            if line_count is None:
+                line_count = 0
+                with open(self._signals_file, "r") as f:
+                    for _ in f:
+                        line_count += 1
 
             if line_count <= self._max_signal_lines:
                 return
@@ -341,17 +370,15 @@ class _SignalStore:
             skip_count = line_count - keep_count
             archive_path = self._signals_file.parent / "signals_archive.jsonl"
 
+            # Single pass: archive first skip_count lines, collect the rest
+            keep_lines: list[str] = []
             with open(self._signals_file, "r") as src:
                 with open(archive_path, "a") as archive:
                     for i, line in enumerate(src):
                         if i < skip_count:
                             archive.write(line)
-
-            keep_lines: list[str] = []
-            with open(self._signals_file, "r") as src:
-                for i, line in enumerate(src):
-                    if i >= skip_count:
-                        keep_lines.append(line)
+                        else:
+                            keep_lines.append(line)
 
             import tempfile as _tempfile
             tmp_fd, tmp_name = _tempfile.mkstemp(
@@ -371,6 +398,7 @@ class _SignalStore:
                 raise
 
             self._signal_count = keep_count
+            self._write_signal_count_sidecar(keep_count)
             self.invalidate_signals_cache()
 
             logger.info(
@@ -433,6 +461,7 @@ class _SignalStore:
 
                     if self._signal_count is not None:
                         self._signal_count += 1
+                        self._write_signal_count_sidecar(self._signal_count)
 
                     self._signals_cache = None
 
@@ -456,6 +485,7 @@ class _SignalStore:
 
                 if self._signal_count is not None:
                     self._signal_count += 1
+                    self._write_signal_count_sidecar(self._signal_count)
 
             # Dual-write to SQLite
             try:

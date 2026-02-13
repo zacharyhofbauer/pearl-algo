@@ -36,7 +36,7 @@ cp env.example .env
 # Edit .env with TELEGRAM_* and IBKR_* values
 ```
 
-Service behavior is configured in `config/config.yaml`.
+Service behavior is configured in `config/base.yaml` and `config/accounts/tradovate_paper.yaml` (use `--config config/accounts/tradovate_paper.yaml` when starting the agent).
 
 ### Run (operator scripts)
 

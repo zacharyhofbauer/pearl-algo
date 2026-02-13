@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from pearlalgo.analytics.strategy_report import (
-    TradeRecord,
+    StrategyTradeRecord,
     SummaryRow,
     iter_exited_signals,
     compute_drawdown,
@@ -21,15 +21,15 @@ from pearlalgo.analytics.strategy_report import (
 )
 
 
-class TestTradeRecord:
-    """Tests for TradeRecord dataclass."""
+class TestStrategyTradeRecord:
+    """Tests for StrategyTradeRecord dataclass."""
 
     def test_hold_minutes_calculation(self):
         """Hold minutes should be correctly calculated from entry/exit times."""
         entry = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         exit_time = datetime(2024, 1, 1, 10, 30, 0, tzinfo=timezone.utc)
 
-        record = TradeRecord(
+        record = StrategyTradeRecord(
             signal_type="test",
             direction="long",
             pnl=100.0,
@@ -45,7 +45,7 @@ class TestTradeRecord:
 
     def test_hold_minutes_none_when_missing_times(self):
         """Hold minutes should be None if entry or exit time is missing."""
-        record = TradeRecord(
+        record = StrategyTradeRecord(
             signal_type="test",
             direction="long",
             pnl=100.0,
@@ -65,7 +65,7 @@ class TestTradeRecord:
         entry = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
         exit_time = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-        record = TradeRecord(
+        record = StrategyTradeRecord(
             signal_type="test",
             direction="long",
             pnl=-50.0,
@@ -173,7 +173,7 @@ class TestSummarize:
     def test_single_winning_trade(self):
         """Single winning trade should compute correctly."""
         records = [
-            TradeRecord(
+            StrategyTradeRecord(
                 signal_type="test",
                 direction="long",
                 pnl=100.0,
@@ -199,7 +199,7 @@ class TestSummarize:
     def test_mixed_trades(self):
         """Mixed winning and losing trades should aggregate correctly."""
         records = [
-            TradeRecord(
+            StrategyTradeRecord(
                 signal_type="test",
                 direction="long",
                 pnl=100.0,
@@ -210,7 +210,7 @@ class TestSummarize:
                 regime="bullish",
                 volatility="normal",
             ),
-            TradeRecord(
+            StrategyTradeRecord(
                 signal_type="test",
                 direction="short",
                 pnl=-50.0,

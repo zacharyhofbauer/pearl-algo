@@ -24,7 +24,7 @@ from pearlalgo.utils.paths import parse_utc_timestamp
 
 
 @dataclass
-class TradeRecord:
+class IncidentTradeRecord:
     """Single closed trade parsed from the signals JSONL file."""
 
     signal_id: str
@@ -85,9 +85,9 @@ def _percentile(values: List[float], pct: float) -> Optional[float]:
 def load_trades(
     signals_file: Path,
     start_utc: datetime,
-) -> Tuple[List[TradeRecord], List[Dict[str, Any]]]:
+) -> Tuple[List[IncidentTradeRecord], List[Dict[str, Any]]]:
     """Load closed trades from *signals_file* that exited after *start_utc*."""
-    trades: List[TradeRecord] = []
+    trades: List[IncidentTradeRecord] = []
     raw_records: List[Dict[str, Any]] = []
     if not signals_file.exists():
         return trades, raw_records
@@ -142,7 +142,7 @@ def load_trades(
             exit_price = _safe_float(record.get("exit_price"), 0.0)
 
             trades.append(
-                TradeRecord(
+                IncidentTradeRecord(
                     signal_id=str(record.get("signal_id") or ""),
                     exit_time=exit_time,
                     entry_time=entry_time,
@@ -212,7 +212,7 @@ def load_events(
 # ---------------------------------------------------------------------------
 
 
-def compute_exposure(trades: List[TradeRecord]) -> Dict[str, Any]:
+def compute_exposure(trades: List[IncidentTradeRecord]) -> Dict[str, Any]:
     """Compute concurrent-position and stop-risk exposure metrics."""
     intervals: List[Tuple[datetime, int]] = []
     risk_events: List[Tuple[datetime, float]] = []
@@ -270,11 +270,11 @@ def compute_exposure(trades: List[TradeRecord]) -> Dict[str, Any]:
 
 
 def group_stats(
-    trades: List[TradeRecord],
-    key_fn: Callable[[TradeRecord], Any],
+    trades: List[IncidentTradeRecord],
+    key_fn: Callable[[IncidentTradeRecord], Any],
 ) -> Dict[str, Dict[str, Any]]:
     """Group *trades* by *key_fn* and compute per-bucket statistics."""
-    buckets: Dict[str, List[TradeRecord]] = defaultdict(list)
+    buckets: Dict[str, List[IncidentTradeRecord]] = defaultdict(list)
     for t in trades:
         buckets[str(key_fn(t) or "unknown")].append(t)
     results: Dict[str, Dict[str, Any]] = {}
@@ -293,7 +293,7 @@ def group_stats(
 
 
 def build_incident_report(
-    trades: List[TradeRecord],
+    trades: List[IncidentTradeRecord],
     start_utc: datetime,
     event_counts: Dict[str, int],
     challenge_state: Optional[Dict[str, Any]],

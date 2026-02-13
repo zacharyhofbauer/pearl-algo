@@ -587,7 +587,10 @@ class MarketAgentDataFetcher:
                 return True
             try:
                 return (now - last).total_seconds() >= float(ttl_s)
-            except Exception:
+            except (TypeError, ValueError):
+                return True
+            except Exception as e:
+                logger.debug("Data fetcher: _expired check failed (treating as expired): %s", e)
                 return True
 
         need_5m = _expired(self._mtf_last_refresh_5m, self._mtf_refresh_seconds_5m) or self._data_buffer_5m is None

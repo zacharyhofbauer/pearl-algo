@@ -315,9 +315,21 @@ def get_signals(state_dir: Path, max_lines: int = 2000) -> List[Dict[str, Any]]:
 # Cursor-based paginated signals reader
 # ---------------------------------------------------------------------------
 
-# Per-directory tracking of the file offset we last read to.
-_signals_cursor: Dict[str, int] = {}  # state_dir_str -> last_read_byte_offset
+# Per-directory tracking of the file offset we last read to. LRU-capped to avoid
+# unbounded memory growth in long-running processes (e.g. multi-agent setups).
+_SIGNALS_CURSOR_MAX = 10
+_signals_cursor: OrderedDict[str, int] = OrderedDict()  # state_dir_str -> last_read_byte_offset
 _signals_cursor_lock = threading.Lock()
+
+
+def _signals_cursor_set(key: str, value: int) -> None:
+    """Set cursor for key, evicting oldest entry if at capacity."""
+    with _signals_cursor_lock:
+        if key in _signals_cursor:
+            _signals_cursor.move_to_end(key)
+        _signals_cursor[key] = value
+        while len(_signals_cursor) > _SIGNALS_CURSOR_MAX:
+            _signals_cursor.popitem(last=False)
 
 
 def get_signals_paginated(

@@ -25,7 +25,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
 from pearlalgo.utils.logger import logger
-from pearlalgo.utils.market_hours import ET
+from pearlalgo.utils.market_hours import ET, is_within_trading_window
 
 
 @dataclass
@@ -1171,19 +1171,24 @@ class TradingCircuitBreaker:
         """
         from datetime import time as _time_cls
         now_utc = datetime.now(timezone.utc)
-        try:
-            now_et = now_utc.astimezone(ET)
-        except Exception:
-            now_et = now_utc
-
-        # ── Check 1: Trading hours ────────────────────────────────────
-        et_time = now_et.time()
-        session_open = _time_cls(self.config.tv_paper_trading_start_hour_et, 0)
-        session_close = _time_cls(self.config.tv_paper_trading_end_hour_et, self.config.tv_paper_trading_end_minute_et)
-
-        # Trading window: 6 PM ET -> 4:10 PM ET next day (crosses midnight)
-        in_session = (et_time >= session_open) or (et_time < session_close)
+        in_session = is_within_trading_window(
+            now_utc,
+            start_hour_et=self.config.tv_paper_trading_start_hour_et,
+            start_minute_et=0,
+            end_hour_et=self.config.tv_paper_trading_end_hour_et,
+            end_minute_et=self.config.tv_paper_trading_end_minute_et,
+        )
         if not in_session:
+            try:
+                now_et = now_utc.astimezone(ET)
+                et_time = now_et.time()
+            except Exception:
+                et_time = now_utc.time()
+            session_open = _time_cls(self.config.tv_paper_trading_start_hour_et, 0)
+            session_close = _time_cls(
+                self.config.tv_paper_trading_end_hour_et,
+                self.config.tv_paper_trading_end_minute_et,
+            )
             return CircuitBreakerDecision(
                 allowed=False,
                 reason="tv_paper_outside_trading_hours",
