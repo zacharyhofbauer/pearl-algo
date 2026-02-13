@@ -65,8 +65,9 @@ class ServiceLifecycleMixin:
         market_data = {}
         try:
             # Try to fetch a bar quickly so startup can include price.
+            # Use a lightweight path to avoid slow startup when IBKR is flaky.
             try:
-                market_data = await asyncio.wait_for(self.data_fetcher.fetch_latest_data(), timeout=5.0) or {}
+                market_data = await self.data_fetcher.fetch_startup_snapshot(timeout_seconds=2.5) or {}
             except (asyncio.TimeoutError, Exception) as e:
                 logger.debug(f"Could not fetch market data for startup: {e}")
                 market_data = {}

@@ -77,6 +77,23 @@ python3 -m pearlalgo.pearl_ai.eval.ci --changed-only --mock
 ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit
 ```
 
+### Option 5: IBKR vs Tradovate data quality comparison
+Run this before going full Tradovate (data + execution) to see if Tradovate’s bars match IBKR.
+
+**Prerequisites:**
+- IBKR Gateway running on `localhost:4001`
+- Tradovate credentials in `~/.config/pearlalgo/secrets.env`: `TRADOVATE_USERNAME`, `TRADOVATE_PASSWORD`, `TRADOVATE_CID`, `TRADOVATE_SEC`
+- Use the project venv so `pandas` and deps are available (see [First-Time Setup](../CHEAT_SHEET.md#6-first-time-setup) or run with `.venv/bin/python3`)
+
+```bash
+.venv/bin/python3 scripts/testing/compare_data_quality.py
+# Or: source .venv/bin/activate && python3 scripts/testing/compare_data_quality.py
+
+# Options: --bars 500 --symbol MNQ --timeframe 1m --output report.json
+```
+
+The script prints a recommendation: use Tradovate data (Path A), keep IBKR data + Tradovate execution (Path B), or re-run with more bars. See [CHEAT_SHEET §7](../CHEAT_SHEET.md#7-ibkr-vs-tradovate-data-comparison) for prerequisites and troubleshooting.
+
 ---
 
 ## 🎯 Testing Levels

@@ -20,8 +20,9 @@ Output:
     - Recommendation: which data source to use
 
 Requires:
-    - IBKR Gateway running on localhost:4002
-    - Tradovate credentials in environment (TRADOVATE_USERNAME, TRADOVATE_PASSWORD, etc.)
+    - IBKR Gateway running on localhost:4001 (default; use --ibkr-port to change)
+    - Tradovate credentials in environment (TRADOVATE_USERNAME, TRADOVATE_PASSWORD, TRADOVATE_CID, TRADOVATE_SEC)
+    - Tradovate account with market data subscription (401 on MD WebSocket = no entitlement)
 """
 
 from __future__ import annotations
@@ -51,7 +52,6 @@ try:
         load_dotenv(env_path, override=False)
 except ImportError:
     pass
-
 
 # ---------------------------------------------------------------------------
 # IBKR data fetch
@@ -84,15 +84,26 @@ async def fetch_ibkr_candles(
         else:
             duration_str = f"{total_minutes * 60} S"
 
-        contract = Contract(symbol=symbol, secType="FUT", exchange="CME", currency="USD")
-        qualified = await ib.qualifyContractsAsync(contract)
-        if not qualified:
-            print(f"[IBKR] Could not qualify contract for {symbol}")
+        # Use CONTFUT (continuous futures) to auto-select front-month, then get the underlying FUT
+        cont_contract = Contract(symbol=symbol, secType="CONTFUT", exchange="CME", currency="USD")
+        qualified_cont = await ib.qualifyContractsAsync(cont_contract)
+        if not qualified_cont:
+            print(f"[IBKR] Could not qualify continuous contract for {symbol}")
             return None
 
-        print(f"[IBKR] Fetching {bars} bars of {symbol} {timeframe} data...")
+        # Get the actual front-month FUT contract from the continuous
+        details = await ib.reqContractDetailsAsync(qualified_cont[0])
+        if not details:
+            print(f"[IBKR] Could not get contract details for {symbol}")
+            return None
+
+        # Use the underlying contract (the actual front-month future)
+        front_month = details[0].contract
+        print(f"[IBKR] Using front-month contract: {front_month.localSymbol}")
+
+        print(f"[IBKR] Fetching {bars} bars of {front_month.localSymbol} {timeframe} data...")
         ibkr_bars = await ib.reqHistoricalDataAsync(
-            qualified[0],
+            front_month,
             endDateTime="",
             durationStr=duration_str,
             barSizeSetting=bar_size,
@@ -150,10 +161,10 @@ async def fetch_tradovate_candles(
 
     # Map timeframe to Tradovate chart parameters
     tf_map = {
-        "1m": {"elementSize": 1, "elementSizeUnit": "MinuteBar"},
-        "5m": {"elementSize": 5, "elementSizeUnit": "MinuteBar"},
-        "15m": {"elementSize": 15, "elementSizeUnit": "MinuteBar"},
-        "1h": {"elementSize": 60, "elementSizeUnit": "MinuteBar"},
+        "1m": {"elementSize": 1, "elementSizeUnit": "UnderlyingUnits"},
+        "5m": {"elementSize": 5, "elementSizeUnit": "UnderlyingUnits"},
+        "15m": {"elementSize": 15, "elementSizeUnit": "UnderlyingUnits"},
+        "1h": {"elementSize": 60, "elementSizeUnit": "UnderlyingUnits"},
     }
     chart_params = tf_map.get(timeframe)
     if chart_params is None:
@@ -182,10 +193,11 @@ async def fetch_tradovate_candles(
                 auth_data = await resp.json()
 
             access_token = auth_data.get("accessToken")
+            md_access = auth_data.get("mdAccessToken")
+            md_token = md_access if md_access else access_token
             if not access_token:
                 print(f"[TV] No access token in auth response")
                 return None
-
             print(f"[TV] Authenticated as {config.username}")
 
             # Resolve contract ID for the symbol
@@ -205,73 +217,175 @@ async def fetch_tradovate_candles(
             print(f"[TV] Resolved {symbol} -> contract {contract_name} (id={contract_id})")
 
             # Fetch chart data via market data WebSocket
-            # Tradovate provides historical bars via md/getChart
             md_url = config.md_url
             print(f"[TV] Connecting to market data WebSocket: {md_url}")
 
-            async with session.ws_connect(md_url) as ws:
-                # Authorize on MD WebSocket
-                auth_msg = f"authorize\n0\n\n{access_token}"
-                await ws.send_str(auth_msg)
+            async with session.ws_connect(md_url, timeout=15) as ws:
+                # Tradovate MD WebSocket: first char = type (o/s/a), rest = JSON
+                def parse_frame(raw: str) -> tuple[str, list]:
+                    if not raw:
+                        return "", []
+                    T = raw[0]
+                    try:
+                        payload = json.loads(raw[1:]) if len(raw) > 1 else []
+                    except json.JSONDecodeError:
+                        return T, []
+                    return T, payload if isinstance(payload, list) else [payload]
 
-                # Wait for auth response
-                auth_response = await asyncio.wait_for(ws.receive(), timeout=10)
-                if "s" not in str(auth_response.data) or "200" not in str(auth_response.data):
-                    print(f"[TV] MD auth response: {auth_response.data}")
+                def _raw(msg) -> str:
+                    d = getattr(msg, "data", None)
+                    if d is None:
+                        return ""
+                    if isinstance(d, str):
+                        return d
+                    if isinstance(d, (bytes, bytearray)):
+                        return d.decode("utf-8", errors="ignore")
+                    return str(d)
 
-                # Request chart data
+                # First frame is "o" (open)
+                first = await asyncio.wait_for(ws.receive(), timeout=5)
+                raw = _raw(first)
+                T, _ = parse_frame(raw)
+                if T != "o":
+                    print(f"[TV] Expected open frame 'o', got: {raw[:80]}")
+
+                # Authorize with the raw token in the message body.
+                # JSON-quoting the token can cause MD auth to fail with 401.
+                await ws.send_str(f"authorize\n0\n\n{md_token}")
+
+                # Wait for auth response: type 's' or 'a', item with i==0, s==200 (401 = access denied, e.g. no MD subscription)
+                auth_ok = False
+                auth_401_printed = False
+                while True:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=10)
+                    raw = _raw(msg)
+                    T, data = parse_frame(raw)
+                    if T in ("s", "a"):
+                        dict_items = [item for item in data if isinstance(item, dict)]
+                        for item in dict_items:
+                            if item.get("i") != 0:
+                                continue
+                            status = item.get("s")
+                            if status == 200:
+                                auth_ok = True
+                                break
+                            if status == 401:
+                                if not auth_401_printed:
+                                    print(f"[TV] MD access denied (401). d={item.get('d')}")
+                                    print("[TV] Next steps: 1) API key → Market Data enabled. 2) CME Bundle active. 3) CME ILS on file with Tradovate—contact support if still 401.")
+                                    auth_401_printed = True
+                                break
+                        if auth_ok or any(item.get("i") == 0 and item.get("s") == 401 for item in dict_items):
+                            break
+                    if T and T != "o" and not auth_ok:
+                        print(f"[TV] Auth response: {raw[:120]}")
+
+                if not auth_ok:
+                    print("[TV] MD authorization failed")
+                    return None
+
+                # Request chart (withHistogram=False avoids known API issues with historical)
+                end_ts = datetime.now(timezone.utc)
+                start_ts = end_ts - timedelta(hours=24)
                 chart_request = {
                     "symbol": contract_name,
                     "chartDescription": {
                         "underlyingType": "MinuteBar",
                         "elementSize": chart_params["elementSize"],
                         "elementSizeUnit": chart_params["elementSizeUnit"],
-                        "withHistogram": True,
+                        "withHistogram": False,
                     },
                     "timeRange": {
-                        "closestTimestamp": datetime.now(timezone.utc).isoformat(),
-                        "asFarAsTimestamp": (
-                            datetime.now(timezone.utc) - timedelta(hours=24)
-                        ).isoformat(),
+                        "closestTimestamp": end_ts.isoformat(),
+                        "asFarAsTimestamp": start_ts.isoformat(),
                     },
                 }
-                chart_msg = f"md/getChart\n1\n\n{json.dumps(chart_request)}"
-                await ws.send_str(chart_msg)
+                await ws.send_str(f"md/getChart\n1\n\n{json.dumps(chart_request)}")
 
-                # Collect bars from responses
+                # Response to getChart: type 's' gives i==1, d.realtimeId; type 'a' has d.charts (can come first)
+                realtime_id = None
                 all_bars = []
-                timeout_at = asyncio.get_event_loop().time() + 15
+                eoh_seen = False
+                while realtime_id is None:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=10)
+                    raw = _raw(msg)
+                    T, data = parse_frame(raw)
+                    if T in ("a", "s"):
+                        for item in data:
+                            if not isinstance(item, dict):
+                                continue
+                            # Initial response to md/getChart request
+                            if item.get("i") == 1:
+                                status = item.get("s")
+                                if status and status != 200:
+                                    print(f"[TV] md/getChart failed ({status}): {item.get('d')}")
+                                    return None
+                                d_resp = item.get("d") or {}
+                                if isinstance(d_resp, dict):
+                                    if d_resp.get("errorText"):
+                                        print(
+                                            f"[TV] md/getChart rejected: {d_resp.get('errorText')} "
+                                            f"(code={d_resp.get('errorCode')}, mode={d_resp.get('mode')})"
+                                        )
+                                        return None
+                                    realtime_id = d_resp.get("realtimeId") or d_resp.get("subscriptionId")
 
-                while asyncio.get_event_loop().time() < timeout_at:
+                            # Chart payloads can arrive in the same 'a' frames
+                            d_raw = item.get("d")
+                            d = d_raw if isinstance(d_raw, dict) else {}
+                            for chart in (d.get("charts") or []):
+                                if not isinstance(chart, dict):
+                                    continue
+                                rid = chart.get("id")
+                                if rid is not None and realtime_id is None:
+                                    realtime_id = rid
+                                if rid is not None and rid == realtime_id:
+                                    all_bars.extend(chart.get("bars") or [])
+                                    if chart.get("eoh"):
+                                        eoh_seen = True
+
+                if realtime_id is None:
+                    print("[TV] No subscription id from getChart response")
+                    return None
+
+                # Collect more bars from type 'a' frames until eoh or timeout
+                timeout_at = asyncio.get_event_loop().time() + 30
+                last_heartbeat = asyncio.get_event_loop().time()
+
+                while asyncio.get_event_loop().time() < timeout_at and not eoh_seen:
                     try:
                         msg = await asyncio.wait_for(ws.receive(), timeout=5)
-                        data_str = str(msg.data)
-
-                        # Parse Tradovate's response format
-                        if "charts" in data_str or "bars" in data_str:
-                            # Try to extract JSON from the response
-                            lines = data_str.split("\n")
-                            for line in lines:
-                                line = line.strip()
-                                if line.startswith("{") or line.startswith("["):
-                                    try:
-                                        parsed = json.loads(line)
-                                        if isinstance(parsed, dict):
-                                            charts = parsed.get("charts", [])
-                                            for chart in charts:
-                                                bars_data = chart.get("bars", [])
-                                                all_bars.extend(bars_data)
-                                            if charts:
-                                                break
-                                    except json.JSONDecodeError:
-                                        pass
-
-                        # Check if we got an end-of-history marker
-                        if "eoh" in data_str.lower():
-                            break
-
+                        raw = _raw(msg)
+                        T, data = parse_frame(raw)
+                        if T == "a" and data:
+                            for item in data:
+                                if not isinstance(item, dict):
+                                    continue
+                                d_raw = item.get("d")
+                                d = d_raw if isinstance(d_raw, dict) else {}
+                                for chart in (d.get("charts") or []):
+                                    if not isinstance(chart, dict):
+                                        continue
+                                    if chart.get("id") != realtime_id:
+                                        continue
+                                    for b in (chart.get("bars") or []):
+                                        all_bars.append(b)
+                                    if chart.get("eoh"):
+                                        eoh_seen = True
+                                        break
+                        # Heartbeat: send [] every 2.5s to keep connection alive
+                        now = asyncio.get_event_loop().time()
+                        if now - last_heartbeat >= 2.5:
+                            await ws.send_str("[]")
+                            last_heartbeat = now
                     except asyncio.TimeoutError:
-                        break
+                        if all_bars and eoh_seen:
+                            break
+                        now = asyncio.get_event_loop().time()
+                        if now - last_heartbeat >= 2.5:
+                            await ws.send_str("[]")
+                            last_heartbeat = now
+                        continue
 
                 if not all_bars:
                     print("[TV] No bars received from market data WebSocket")
@@ -288,7 +402,7 @@ async def fetch_tradovate_candles(
                             "high": float(bar.get("high", 0)),
                             "low": float(bar.get("low", 0)),
                             "close": float(bar.get("close", 0)),
-                            "volume": int(bar.get("upVolume", 0) + bar.get("downVolume", 0)),
+                            "volume": int(bar.get("upVolume", 0)) + int(bar.get("downVolume", 0)),
                         })
 
                 if not rows:
@@ -308,6 +422,22 @@ async def fetch_tradovate_candles(
 # ---------------------------------------------------------------------------
 # Comparison
 # ---------------------------------------------------------------------------
+
+def _bar_period_minutes(timeframe: str) -> int:
+    """Return bar period in minutes for alignment."""
+    return {"1m": 1, "5m": 5, "15m": 15, "1h": 60}.get(timeframe, 1)
+
+
+def _normalize_index_to_bar_start(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Floor timestamps to bar-start so IBKR and Tradovate bars align."""
+    period_min = _bar_period_minutes(timeframe)
+    freq = "h" if period_min >= 60 else f"{period_min}min"
+    normalized = df.index.floor(freq)
+    out = df.copy()
+    out.index = normalized
+    out = out[~out.index.duplicated(keep="last")]
+    return out
+
 
 def compare_dataframes(
     ibkr_df: pd.DataFrame | None,
@@ -334,9 +464,11 @@ def compare_dataframes(
     report["ibkr_bars"] = len(ibkr_df)
     report["tv_bars"] = len(tv_df)
 
-    # Find overlapping timestamps (within 30s tolerance for alignment)
-    ibkr_idx = set(ibkr_df.index)
-    tv_idx = set(tv_df.index)
+    # Align to bar-boundary timestamps so we can match bars across brokers
+    ibkr_norm = _normalize_index_to_bar_start(ibkr_df, timeframe)
+    tv_norm = _normalize_index_to_bar_start(tv_df, timeframe)
+    ibkr_idx = set(ibkr_norm.index)
+    tv_idx = set(tv_norm.index)
     common = sorted(ibkr_idx & tv_idx)
 
     report["common_bars"] = len(common)
@@ -351,9 +483,9 @@ def compare_dataframes(
         )
         return report
 
-    # Compare OHLCV on common timestamps
-    ibkr_common = ibkr_df.loc[common]
-    tv_common = tv_df.loc[common]
+    # Compare OHLCV on common (normalized) timestamps
+    ibkr_common = ibkr_norm.loc[common]
+    tv_common = tv_norm.loc[common]
 
     price_diffs = {}
     for col in ["open", "high", "low", "close"]:
@@ -458,7 +590,7 @@ async def main():
     parser.add_argument("--bars", type=int, default=300, help="Number of bars to compare (default: 300)")
     parser.add_argument("--timeframe", default="1m", help="Timeframe: 1m, 5m, 15m, 1h (default: 1m)")
     parser.add_argument("--ibkr-host", default="127.0.0.1", help="IBKR Gateway host")
-    parser.add_argument("--ibkr-port", type=int, default=4002, help="IBKR Gateway port")
+    parser.add_argument("--ibkr-port", type=int, default=4001, help="IBKR Gateway port")
     parser.add_argument("--ibkr-client-id", type=int, default=99, help="IBKR client ID (use unused ID)")
     parser.add_argument("--output", default=None, help="Save report to JSON file")
     args = parser.parse_args()

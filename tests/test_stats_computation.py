@@ -191,7 +191,7 @@ class TestComputeDailyStats:
     def test_signals_with_wins_and_losses(self, tmp_state_dir):
         """Should correctly compute stats with mixed wins and losses."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).isoformat()
+        recent_ts = (now_utc + timedelta(minutes=1)).isoformat()
 
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 150.0},
@@ -210,7 +210,7 @@ class TestComputeDailyStats:
     def test_filters_non_exited_signals(self, tmp_state_dir):
         """Should only count signals with status='exited'."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).isoformat()
+        recent_ts = (now_utc + timedelta(minutes=1)).isoformat()
 
         signals = [
             {"status": "active", "exit_time": recent_ts, "pnl": 100.0},
@@ -227,7 +227,7 @@ class TestComputeDailyStats:
         """Should only include signals from the current trading day."""
         # A signal from 3 days ago should not be included
         old_ts = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
-        recent_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        recent_ts = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
 
         signals = [
             {"status": "exited", "exit_time": old_ts, "pnl": 999.0},
@@ -242,7 +242,7 @@ class TestComputeDailyStats:
     def test_handles_z_suffix_timestamps(self, tmp_state_dir):
         """Should parse timestamps with Z suffix correctly."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        recent_ts = (now_utc + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 100.0},
@@ -256,7 +256,7 @@ class TestComputeDailyStats:
     def test_handles_malformed_lines(self, tmp_state_dir):
         """Should skip malformed JSONL lines gracefully."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).isoformat()
+        recent_ts = (now_utc + timedelta(minutes=1)).isoformat()
 
         lines = [
             "not valid json",
@@ -271,7 +271,7 @@ class TestComputeDailyStats:
     def test_pnl_is_rounded(self, tmp_state_dir):
         """Should round daily_pnl to 2 decimal places."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).isoformat()
+        recent_ts = (now_utc + timedelta(minutes=1)).isoformat()
 
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 33.333},
@@ -286,7 +286,7 @@ class TestComputeDailyStats:
     def test_zero_pnl_counted_as_win(self, tmp_state_dir):
         """Should count zero P&L as a win (pnl >= 0)."""
         now_utc = datetime.now(timezone.utc)
-        recent_ts = (now_utc - timedelta(hours=1)).isoformat()
+        recent_ts = (now_utc + timedelta(minutes=1)).isoformat()
 
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 0.0},
@@ -367,9 +367,9 @@ class TestComputePerformanceStats:
         """Should correctly separate wins and losses."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=2)).isoformat(), "pnl": 100, "is_win": True},
-            {"exit_time": (now - timedelta(hours=4)).isoformat(), "pnl": -50, "is_win": False},
-            {"exit_time": (now - timedelta(hours=6)).isoformat(), "pnl": -25, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=4)).isoformat(), "pnl": -50, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=6)).isoformat(), "pnl": -25, "is_win": False},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -383,10 +383,10 @@ class TestComputePerformanceStats:
         """Should compute a winning streak from most recent trades."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 100, "is_win": True},
-            {"exit_time": (now - timedelta(hours=2)).isoformat(), "pnl": 50, "is_win": True},
-            {"exit_time": (now - timedelta(hours=3)).isoformat(), "pnl": 75, "is_win": True},
-            {"exit_time": (now - timedelta(hours=4)).isoformat(), "pnl": -30, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": 50, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": 75, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=4)).isoformat(), "pnl": -30, "is_win": False},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -398,9 +398,9 @@ class TestComputePerformanceStats:
         """Should compute a losing streak from most recent trades."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": -30, "is_win": False},
-            {"exit_time": (now - timedelta(hours=2)).isoformat(), "pnl": -20, "is_win": False},
-            {"exit_time": (now - timedelta(hours=3)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": -30, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": -20, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": 100, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -413,7 +413,7 @@ class TestComputePerformanceStats:
         now = datetime.now(timezone.utc)
         trades = [
             {"pnl": 100, "is_win": True},  # no exit_time
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 50, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 50, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -424,8 +424,8 @@ class TestComputePerformanceStats:
         """Should round P&L to 2 decimal places."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 33.333, "is_win": True},
-            {"exit_time": (now - timedelta(hours=2)).isoformat(), "pnl": 66.666, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 33.333, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": 66.666, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -436,7 +436,7 @@ class TestComputePerformanceStats:
         """A recent trade should appear in all three windows."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 100, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -467,7 +467,7 @@ class TestClearStatsCache:
     def test_clears_after_computation(self, tmp_state_dir):
         """Should force recomputation after cache clear."""
         now = datetime.now(timezone.utc)
-        recent_ts = (now - timedelta(hours=1)).isoformat()
+        recent_ts = (now + timedelta(minutes=1)).isoformat()
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 100.0},
         ]
@@ -498,7 +498,7 @@ class TestCacheTTL:
     def test_cached_result_returned_within_ttl(self, tmp_state_dir):
         """Should return cached result when within TTL."""
         now = datetime.now(timezone.utc)
-        recent_ts = (now - timedelta(hours=1)).isoformat()
+        recent_ts = (now + timedelta(minutes=1)).isoformat()
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 100.0},
         ]
@@ -519,7 +519,7 @@ class TestCacheTTL:
     def test_cache_refreshed_after_ttl(self, tmp_state_dir):
         """Should recompute after the cache TTL expires."""
         now = datetime.now(timezone.utc)
-        recent_ts = (now - timedelta(hours=1)).isoformat()
+        recent_ts = (now + timedelta(minutes=1)).isoformat()
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 100.0},
         ]
@@ -542,7 +542,7 @@ class TestCacheTTL:
     def test_use_cache_false_bypasses_cache(self, tmp_state_dir):
         """Should always recompute when use_cache=False."""
         now = datetime.now(timezone.utc)
-        recent_ts = (now - timedelta(hours=1)).isoformat()
+        recent_ts = (now + timedelta(minutes=1)).isoformat()
         signals = [
             {"status": "exited", "exit_time": recent_ts, "pnl": 100.0},
         ]
@@ -562,7 +562,7 @@ class TestCacheTTL:
         """Should cache compute_performance_stats results too."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 100, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -570,7 +570,7 @@ class TestCacheTTL:
 
         # Overwrite with new data
         trades_new = [
-            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": 999, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 999, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades_new)
 

@@ -1013,6 +1013,7 @@ class IBKRExecutor:
         client_id: int,
         reconnect_delay: float = 5.0,
         max_reconnect_attempts: int = 5,
+        connect_on_startup: bool = False,
     ):
         """
         Initialize IBKR executor.
@@ -1023,12 +1024,15 @@ class IBKRExecutor:
             client_id: Client ID for connection
             reconnect_delay: Initial delay between reconnection attempts (seconds)
             max_reconnect_attempts: Maximum reconnection attempts before giving up
+            connect_on_startup: If True, connect immediately when executor thread starts.
+                If False, defer connection attempts until the first submitted task.
         """
         self.host = host
         self.port = port
         self.client_id = client_id
         self.reconnect_delay = reconnect_delay
         self.max_reconnect_attempts = max_reconnect_attempts
+        self.connect_on_startup = connect_on_startup
 
         # IB connection (owned by executor thread)
         self.ib: Optional[IB] = None
@@ -1140,11 +1144,15 @@ class IBKRExecutor:
         # Initialize IB connection
         self.ib = IB()
 
-        # Connect on startup
-        try:
-            self._ensure_connected()
-        except Exception as e:
-            logger.error(f"Failed to connect on startup: {e}")
+        # Optional eager connect (disabled by default to avoid slow/failing startup
+        # when Gateway is temporarily unavailable).
+        if self.connect_on_startup:
+            try:
+                self._ensure_connected()
+            except Exception as e:
+                logger.error(f"Failed to connect on startup: {e}")
+        else:
+            logger.info("IBKRExecutor startup: deferred connection (connect on first task)")
 
         # Main loop
         while not self._shutdown_event.is_set():

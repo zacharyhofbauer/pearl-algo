@@ -60,5 +60,8 @@ live-chart/node_modules/
 .vscode/
 *.swp
 secrets.env
+# Auto-generated API spec
+openapi.json
+
 # Junk files created by MagicMock state_dir in tests
 <MagicMock*

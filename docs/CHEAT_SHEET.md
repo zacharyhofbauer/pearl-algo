@@ -413,6 +413,39 @@ python3 scripts/testing/test_all.py telegram
 
 ---
 
+## 7. IBKR vs Tradovate Data Comparison
+
+**Purpose:** Compare chart data from both brokers to decide whether to use Tradovate for data + execution (Path A) or keep IBKR data + Tradovate execution (Path B).
+
+### Run the comparison
+
+```bash
+source .venv/bin/activate   # or: use .venv/bin/python3
+python3 scripts/testing/compare_data_quality.py
+```
+
+**Options:** `--bars 500` `--symbol MNQ` `--timeframe 1m` `--output report.json`
+
+### Prerequisites
+
+| Source | Requirement |
+|--------|-------------|
+| **IBKR** | Gateway (or TWS) running with API enabled on port **4001** |
+| **Tradovate** | Credentials in `~/.config/pearlalgo/secrets.env` or `.env`: `TRADOVATE_USERNAME`, `TRADOVATE_PASSWORD`, `TRADOVATE_CID`, `TRADOVATE_SEC` |
+| **Tradovate MD** | Account must have API market data (CME Bundle + CME ILS on file with Tradovate). If you get 401 on MD WebSocket, contact Tradovate support. |
+
+### If you see errors
+
+- **`ModuleNotFoundError: No module named 'pandas'`** → Use the project venv: `python3 -m venv .venv` then `.venv/bin/pip install -e .` (or `make install`), then run with `.venv/bin/python3` or after `source .venv/bin/activate`.
+- **`ConnectionRefusedError ... 127.0.0.1:4001`** → Start IBKR Gateway (`./pearl.sh gateway start`).
+- **`[TV] MD access denied (401)`** → Tradovate account does not have API market data; resolve with Tradovate (API key + CME subscription/ILS).
+
+### Output
+
+The script prints bar counts, price/volume differences, and a **recommendation**: Path A (Tradovate data OK), Path B (prefer IBKR data), or re-run with more bars.
+
+---
+
 ## Key Concepts
 
 - **StrategySessionOpen**: When the strategy generates signals (config session window)

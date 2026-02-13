@@ -277,6 +277,42 @@ class TestFetchLatestData:
         assert result["latest_bar"] is None
 
 
+class TestFetchStartupSnapshot:
+    """Test lightweight startup snapshot fetch path."""
+
+    @pytest.mark.asyncio
+    @patch("pearlalgo.market_agent.data_fetcher.load_service_config")
+    async def test_startup_snapshot_fetches_latest_bar_only(self, mock_config, mock_data_provider, sample_latest_bar):
+        """Startup snapshot should return latest_bar without historical fetch."""
+        mock_config.return_value = {"data": {}}
+        mock_data_provider.get_latest_bar = AsyncMock(return_value=sample_latest_bar)
+
+        fetcher = MarketAgentDataFetcher(mock_data_provider, config={"symbol": "MNQ"})
+        result = await fetcher.fetch_startup_snapshot(timeout_seconds=1.0)
+
+        assert result["latest_bar"] is not None
+        assert result["latest_bar"]["close"] == sample_latest_bar["close"]
+        mock_data_provider.fetch_historical.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("pearlalgo.market_agent.data_fetcher.load_service_config")
+    async def test_startup_snapshot_times_out_gracefully(self, mock_config, mock_data_provider):
+        """Startup snapshot should fail open on provider timeout."""
+        mock_config.return_value = {"data": {}}
+
+        async def _slow_latest_bar(_symbol):
+            await asyncio.sleep(0.2)
+            return {"close": 1.0}
+
+        mock_data_provider.get_latest_bar = _slow_latest_bar
+
+        fetcher = MarketAgentDataFetcher(mock_data_provider, config={"symbol": "MNQ"})
+        result = await fetcher.fetch_startup_snapshot(timeout_seconds=0.01)
+
+        assert result["latest_bar"] is None
+        mock_data_provider.fetch_historical.assert_not_called()
+
+
 class TestFetchBaseHistoricalData:
     """Test _fetch_base_historical_data method."""
 

@@ -101,6 +101,37 @@ class MarketAgentDataFetcher:
             f"base_cache_enabled={self._enable_base_cache}, mtf_cache_enabled={self._enable_mtf_cache}"
         )
 
+    async def fetch_startup_snapshot(self, timeout_seconds: float = 2.0) -> Dict:
+        """
+        Fetch a lightweight startup snapshot.
+
+        This intentionally avoids historical/MTF fetches and retry loops so service
+        startup stays responsive even when the broker connection is flaky.
+        """
+        symbol = self.config.get("symbol", "MNQ")
+        latest_bar = None
+
+        if not hasattr(self.data_provider, "get_latest_bar"):
+            return {"latest_bar": None}
+
+        try:
+            if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
+                latest_bar = await asyncio.wait_for(
+                    self.data_provider.get_latest_bar(symbol),
+                    timeout=timeout_seconds,
+                )
+            else:
+                loop = asyncio.get_event_loop()
+                latest_bar = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: self.data_provider.get_latest_bar(symbol)),
+                    timeout=timeout_seconds,
+                )
+        except Exception as e:
+            logger.debug(f"Startup snapshot unavailable for {symbol}: {e}")
+            latest_bar = None
+
+        return {"latest_bar": latest_bar}
+
     @async_retry_with_backoff(
         max_retries=3,
         initial_delay=1.0,

@@ -172,6 +172,7 @@ class IBKRProvider(DataProvider):
             client_id=self.client_id,
             reconnect_delay=2.0,  # Faster retries
             max_reconnect_attempts=3,  # Fail faster
+            connect_on_startup=False,  # Keep process startup fast; connect on demand
         )
         self._executor.start()
 
