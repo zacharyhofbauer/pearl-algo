@@ -383,10 +383,10 @@ class TestComputePerformanceStats:
         """Should compute a winning streak from most recent trades."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 100, "is_win": True},
-            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": 50, "is_win": True},
-            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": 75, "is_win": True},
-            {"exit_time": (now + timedelta(minutes=4)).isoformat(), "pnl": -30, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": -30, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": 50, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=4)).isoformat(), "pnl": 75, "is_win": True},
         ]
         _write_performance_json(tmp_state_dir, trades)
 
@@ -398,9 +398,9 @@ class TestComputePerformanceStats:
         """Should compute a losing streak from most recent trades."""
         now = datetime.now(timezone.utc)
         trades = [
-            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": -30, "is_win": False},
-            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": -20, "is_win": False},
-            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=1)).isoformat(), "pnl": 100, "is_win": True},
+            {"exit_time": (now + timedelta(minutes=2)).isoformat(), "pnl": -30, "is_win": False},
+            {"exit_time": (now + timedelta(minutes=3)).isoformat(), "pnl": -20, "is_win": False},
         ]
         _write_performance_json(tmp_state_dir, trades)
 

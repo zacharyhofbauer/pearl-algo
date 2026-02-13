@@ -52,8 +52,6 @@ def validate_config(data):
     """No-op stub: schema validation moved to schema_v2.py."""
     return data
 
-FullServiceConfig = None  # type: ignore
-
 def build_strategy_config_from_yaml(base, config_data):
     """Inline stub: merge config_data strategy keys into base dict."""
     result = dict(base)
@@ -510,43 +508,6 @@ def load_market_hours_overrides(
     except Exception as e:
         logger.warning(f"Could not load market hours overrides: {e}")
         return set(), {}
-
-
-def validate_service_config(
-    config_path: Optional[Path] = None,
-    *,
-    raise_on_error: bool = True,
-) -> Optional["FullServiceConfig"]:
-    """
-    Validate service configuration against the Pydantic schema.
-
-    This provides comprehensive type checking and constraint validation
-    for the config.yaml file. Use this at startup to catch configuration
-    errors early.
-
-    Args:
-        config_path: Path to config.yaml (defaults to config/config.yaml)
-        raise_on_error: If True, raises ValidationError on invalid config.
-                       If False, logs warning and returns None.
-
-    Returns:
-        Validated FullServiceConfig instance, or None if validation failed
-        and raise_on_error is False.
-
-    Raises:
-        pydantic.ValidationError: If config is invalid and raise_on_error is True
-    """
-    try:
-        config_data = load_config_yaml(config_path)
-        validated = validate_config(config_data)
-        logger.info("Configuration validated successfully against schema")
-        return validated
-    except Exception as e:
-        if raise_on_error:
-            raise
-        logger.warning(f"Configuration validation failed: {e}")
-        return None
-
 
 
 
