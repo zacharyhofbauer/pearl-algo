@@ -42,6 +42,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import pearlalgo_web_app.api_server as api_mod  # noqa: E402
 # Real server module: patch this so request handlers see patched globals
 import pearlalgo.api.server as _server_impl  # noqa: E402
+# server_core has its own globals referenced by routes/health.py
+import pearlalgo.api.server_core as _server_core  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -170,6 +172,9 @@ def _patch_globals(state_dir):
         patch.object(_server_impl, "_operator_enabled", False),
         patch.object(_server_impl, "_data_provider", None),
         patch.object(_server_impl, "_data_provider_error", "mocked-away"),
+        # routes/health.py imports verify_api_key from server_core
+        patch.object(_server_core, "_auth_enabled", False),
+        patch.object(_server_core, "_api_keys", set()),
     ]
     for p in patches:
         p.start()

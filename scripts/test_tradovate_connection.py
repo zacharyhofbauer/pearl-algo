@@ -221,7 +221,7 @@ async def main():
         print(f"\n  All tests passed! Tradovate connection is working.")
         print(f"  Your account: {client.account_name} (id={client.account_id})")
         print(f"\n  Next steps:")
-        print(f"    1. Set execution.enabled=true in config/markets/tv_paper_eval.yaml")
+        print(f"    1. Set execution.enabled=true in config/accounts/tradovate_paper.yaml")
         print(f"    2. Launch: ./scripts/lifecycle/tv_paper_eval.sh start --background")
         print(f"    3. View: http://localhost:3000?api_port=8001")
     else:

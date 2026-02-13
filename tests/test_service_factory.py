@@ -312,7 +312,7 @@ class TestAccountLabel:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_non_tv_paper_stages_produce_ibkr_virtual_label(
+    def test_non_tv_paper_stages_produce_tv_paper_label_too(
         self,
         mock_fetcher_cls,
         mock_state_mgr_cls,
@@ -323,6 +323,7 @@ class TestAccountLabel:
         stage: str,
         tmp_path: Path,
     ) -> None:
+        """After Tradovate-only consolidation, all stages produce TV-PAPER."""
         mock_state_mgr_cls.return_value.state_dir = tmp_path
         svc_cfg = _stub_service_config(challenge={"stage": stage})
 
@@ -335,8 +336,8 @@ class TestAccountLabel:
 
         mock_tg_cls.assert_called_once()
         call_kwargs = mock_tg_cls.call_args
-        assert call_kwargs.kwargs.get("account_label") == "IBKR-VIR" or (
-            call_kwargs.args and "IBKR-VIR" in call_kwargs.args
+        assert call_kwargs.kwargs.get("account_label") == "TV-PAPER" or (
+            call_kwargs.args and "TV-PAPER" in call_kwargs.args
         )
 
 

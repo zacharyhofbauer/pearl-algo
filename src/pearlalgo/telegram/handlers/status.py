@@ -17,7 +17,7 @@ from pearlalgo.telegram.formatters.keyboards import (
     back_to_menu_keyboard,
     main_menu_keyboard,
 )
-from pearlalgo.telegram.utils import safe_send
+from pearlalgo.telegram.utils import reply_html as _reply
 
 logger = logging.getLogger(__name__)
 
@@ -57,24 +57,3 @@ async def handle_menu(update: Any, context: Any) -> None:
     await _reply(update, msg, reply_markup=keyboard)
 
 
-async def _reply(update: Any, text: str, **kwargs) -> None:
-    """Send a reply using either message.reply_html or callback_query.edit."""
-    try:
-        if update.callback_query:
-            try:
-                await update.callback_query.edit_message_text(
-                    text=text, parse_mode="HTML", **kwargs,
-                )
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    # Fall back to sending a new message
-                    if update.effective_chat:
-                        await safe_send(
-                            update.effective_chat.send_message,
-                            text,
-                            **kwargs,
-                        )
-        elif update.message:
-            await safe_send(update.message.reply_html, text, **kwargs)
-    except Exception as e:
-        logger.error(f"Reply failed: {e}")

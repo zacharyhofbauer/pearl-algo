@@ -22,6 +22,7 @@ fastapi = pytest.importorskip("fastapi", reason="FastAPI not installed")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import pearlalgo.api.server as server_mod  # noqa: E402
+import pearlalgo.api.server_core as server_core_mod  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -118,6 +119,9 @@ def _patch_server(state_dir):
         patch.object(server_mod, "_operator_enabled", False),
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
+        # routes/health.py imports verify_api_key from server_core
+        patch.object(server_core_mod, "_auth_enabled", False),
+        patch.object(server_core_mod, "_api_keys", set()),
     ]
     for p in patches:
         p.start()

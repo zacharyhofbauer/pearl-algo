@@ -9,15 +9,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.telegram.utils import escape_html
+from pearlalgo.utils.formatting import format_pnl as _canonical_pnl
 
 
 def format_pnl(pnl: float) -> str:
-    """Format a P&L value with sign, currency, and emoji indicator."""
-    if pnl > 0:
-        return f"+${pnl:,.2f}"
-    elif pnl < 0:
-        return f"-${abs(pnl):,.2f}"
-    return "$0.00"
+    """Format a P&L value with emoji, sign, and currency."""
+    emoji, text = _canonical_pnl(pnl)
+    return f"{emoji} {text}"
 
 
 def format_win_rate(wins: int, losses: int) -> str:

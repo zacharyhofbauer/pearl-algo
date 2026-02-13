@@ -23,16 +23,16 @@ class TestFormatPnl:
     """format_pnl returns HTML-friendly P&L string."""
 
     def test_positive_pnl(self):
-        assert format_pnl(125.50) == "+$125.50"
+        assert format_pnl(125.50) == "🟢 +$125.50"
 
     def test_negative_pnl(self):
-        assert format_pnl(-50.25) == "-$50.25"
+        assert format_pnl(-50.25) == "🔴 -$50.25"
 
     def test_zero_pnl(self):
-        assert format_pnl(0) == "$0.00"
+        assert format_pnl(0) == "🟢 +$0.00"
 
     def test_large_pnl(self):
-        assert format_pnl(12345.67) == "+$12,345.67"
+        assert format_pnl(12345.67) == "🟢 +$12,345.67"
 
 
 class TestFormatWinRate:

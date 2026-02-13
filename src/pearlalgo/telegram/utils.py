@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +107,25 @@ async def safe_send(
                     logger.error(f"Telegram send failed after {max_retries} attempts: {e}")
 
     return last_msg
+
+
+async def reply_html(update: Any, text: str, **kwargs) -> None:
+    """Send reply via callback_query.edit or message.reply_html."""
+    try:
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(
+                    text=text, parse_mode="HTML", **kwargs,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    if update.effective_chat:
+                        await safe_send(
+                            update.effective_chat.send_message,
+                            text,
+                            **kwargs,
+                        )
+        elif update.message:
+            await safe_send(update.message.reply_html, text, **kwargs)
+    except Exception as e:
+        logger.error(f"Reply failed: {e}")
