@@ -411,14 +411,7 @@ class SignalHandler:
                     f"⚠️ Trading circuit breaker would block (warn-only): {cb_decision.reason} | "
                     f"details={cb_decision.details}"
                 )
-                if cb_decision.severity == "critical":
-                    asyncio.create_task(
-                        self.notification_queue.enqueue_circuit_breaker(
-                            f"Risk warning (warn-only): {cb_decision.reason}",
-                            cb_decision.details,
-                            priority=Priority.HIGH,
-                        )
-                    )
+                # Don't send to Telegram in warn_only — we're still allowing the trade, so no action needed; avoids spam.
                 return True  # Allow in warn-only mode
             else:
                 logger.warning(

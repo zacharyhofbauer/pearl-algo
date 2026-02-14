@@ -20,6 +20,7 @@ from pearlalgo.utils.telegram_markdown import escape_markdown_v2 as _canonical_e
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.utils.paths import ensure_state_dir, parse_utc_timestamp
+from pearlalgo.utils.state_io import atomic_write_json, file_lock, load_json_file
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
     TelegramPrefs,
@@ -1911,8 +1912,27 @@ class MarketAgentTelegramNotifier:
             fut_dot = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪️"
             ses_dot = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪️"
 
-            # Simple 2-line startup message with account label
+            # Coalesce with other agents: if another agent sent "Started" in last 90s, send short line only
+            data_dir, _ = self._shared_cb_telegram_cooldown_paths()
+            started_file = data_dir / ".telegram_agent_started.json"
+            started_lock = data_dir / ".telegram_agent_started.lock"
+            started_cooldown = 90.0
+            now_ts = current_time.timestamp()
             acct_tag = f" [{self.account_label}]" if self.account_label else ""
+            send_short = False
+
+            with file_lock(started_lock):
+                last = load_json_file(started_file)
+                last_sent = last.get("sent_at") or 0.0
+                if (now_ts - last_sent) < started_cooldown:
+                    send_short = True
+                atomic_write_json(started_file, {"sent_at": now_ts, "market": market})
+
+            if send_short:
+                msg = f"🚀 *{market} agent also started{acct_tag}*"
+                await self.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
+                return True
+
             msg = f"🚀 *{market} Agent Started{acct_tag}* • {time_str}\n"
             msg += f"{fut_dot} Futures {ses_dot} Session\n\n"
             msg += "Use /start for full dashboard"
@@ -2020,21 +2040,38 @@ class MarketAgentTelegramNotifier:
             ErrorHandler.handle_telegram_error(e, "send_weekly_summary")
             return False
 
+    def _shared_cb_telegram_cooldown_paths(self) -> tuple[Path, Path]:
+        """Return (data_dir, sent_file) for shared circuit-breaker Telegram dedupe."""
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        data_dir = project_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir, data_dir / ".telegram_cb_sent.json"
+
     async def send_circuit_breaker_alert(self, reason: str, details: Optional[Dict] = None) -> bool:
         """
         Send circuit breaker activation alert.
-        
-        Args:
-            reason: Reason for circuit breaker activation
-            details: Additional details
-            
-        Returns:
-            True if sent successfully
+        Uses a shared file so multiple agents (NQ + MNQ) only send one Telegram message.
         """
         if not self.enabled or not self.telegram:
             return False
 
         try:
+            data_dir, sent_file = self._shared_cb_telegram_cooldown_paths()
+            lock_path = data_dir / ".telegram_cb_sent.lock"
+            cooldown_seconds = 300.0
+            now = datetime.now(timezone.utc).timestamp()
+
+            with file_lock(lock_path):
+                last = load_json_file(sent_file)
+                last_reason = last.get("reason")
+                last_sent = last.get("sent_at") or 0.0
+                if last_reason == reason and (now - last_sent) < cooldown_seconds:
+                    logger.debug(
+                        "Circuit breaker Telegram skipped (shared cooldown): %s", reason
+                    )
+                    return True
+                atomic_write_json(sent_file, {"reason": reason, "sent_at": now})
+
             # Format message with clear explanation (escaped for markdown safety)
             message = "🛑 *Circuit Breaker Activated*\n\n"
             message += f"*Reason:* {safe_label(str(reason))}\n"

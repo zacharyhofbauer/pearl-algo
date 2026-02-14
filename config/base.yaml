@@ -67,6 +67,7 @@ circuit_breaker:
   max_consecutive_errors: 10
   max_connection_failures: 10
   max_data_fetch_errors: 5
+  pause_on_connection_failures: true   # false = never pause for data/connection blips (e.g. Tradovate data-only)
 
 trading_circuit_breaker:
   enabled: true

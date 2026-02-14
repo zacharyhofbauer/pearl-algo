@@ -188,13 +188,13 @@ Pearl runs two isolated accounts:
 
 ### Architecture (Post-Restructure)
 
-Each agent runs its own strategy independently. No signal forwarding between agents.
+Each agent runs its own strategy independently. **Trades go directly to Tradovate only — no IBKR Virtual copy or forwarding.**
 
 ```
 Tradovate Paper Agent
   -> IBKR Gateway data (client ID 50/51)
   -> strategy.analyze() (independent)
-  -> Tradovate bracket order execution
+  -> follower_execute() -> place_bracket() -> Tradovate only
   -> State: data/tradovate/paper/
   -> API: port 8001
 ```

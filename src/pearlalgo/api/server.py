@@ -2650,6 +2650,32 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
         raise HTTPException(status_code=500, detail=f"Failed to write kill flag: {str(e)[:200]}")
 
 
+@app.post("/api/resume")
+async def resume_service(_: str = Depends(require_operator_or_api_key)):
+    """
+    Request the agent to resume (unpause) after a circuit-breaker or manual pause.
+
+    Writes ``resume_request.flag`` into the state directory. The agent clears
+    paused state and connection_failures on its next cycle.
+    """
+    _check_rate_limit("resume")
+
+    sd = _require_state_dir()
+
+    try:
+        sd.mkdir(parents=True, exist_ok=True)
+        flag_file = sd / "resume_request.flag"
+        payload = {
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "source": "web",
+        }
+        flag_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info("resume: wrote %s", flag_file)
+        return {"ok": True, "message": "Resume requested; agent will unpause on next cycle."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write resume flag: {str(e)[:200]}")
+
+
 @app.post("/api/close-all-trades", status_code=202)
 async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     """

@@ -559,6 +559,7 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
         self.max_data_fetch_errors = circuit_breaker_settings.get("max_data_fetch_errors", 5)
         self.connection_failures = 0
         self.max_connection_failures = circuit_breaker_settings.get("max_connection_failures", 10)
+        self.pause_on_connection_failures = circuit_breaker_settings.get("pause_on_connection_failures", True)
         self._cb_connection_notified = False  # Guard: only send circuit breaker notification once per event
         
         # Virtual trade exit manager (extracted from this class)
@@ -709,6 +710,13 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                     f"armed={self._execution_config.armed}, "
                     f"max_positions={self._execution_config.max_positions}"
                 )
+                # Tradovate Paper: use follower path so every strategy signal goes to Tradovate
+                if execution_adapter_name == "tradovate":
+                    self._signal_follower_mode = True
+                    logger.info(
+                        "Tradovate Paper: signal follower mode ON — strategy signals execute via "
+                        "follower_execute -> place_bracket (Tradovate)"
+                    )
             except Exception as e:
                 logger.error(f"Failed to initialize execution adapter: {e}", exc_info=True)
                 self.execution_adapter = None
@@ -1985,6 +1993,15 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
             state_dir = self.state_manager.state_dir
 
             # ==========================================================================
+            # Resume request (web API / manual) — checked every cycle including when paused
+            # ==========================================================================
+            resume_file = state_dir / "resume_request.flag"
+            if resume_file.exists():
+                self.resume()
+                resume_file.unlink(missing_ok=True)
+                logger.info("Resumed from resume_request.flag")
+
+            # ==========================================================================
             # Process operator requests (web UI feedback, shadow-only)
             # ==========================================================================
             try:
@@ -2258,7 +2275,15 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 if hasattr(executor, 'is_connected'):
                     connection_status = "connected" if executor.is_connected() else "disconnected"
         except Exception as e:
-            logger.debug(f"Non-critical: {e}")
+            logger.debug(f"Non-critical connection check: {e}")
+
+        # Fallback: if executor check failed but we're getting fresh data, we're connected
+        if connection_status in ("unknown", "disconnected"):
+            try:
+                if self.data_fetcher.get_buffer_size() > 0 and self.connection_failures == 0:
+                    connection_status = "connected"
+            except Exception:
+                pass
 
         # Get latest bar for order book info
         latest_bar = None

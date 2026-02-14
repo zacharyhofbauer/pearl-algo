@@ -111,6 +111,12 @@ class ServiceLifecycleMixin:
         self.last_dashboard_chart_sent = now  # Prevent auto-chart on first cycle
         logger.info("Startup complete - user can use /start for dashboard")
 
+        # Persist running=True so dashboard shows agent online immediately
+        try:
+            self._save_state(force=True)
+        except Exception as e:
+            logger.warning(f"Could not save startup state: {e}", exc_info=True)
+
         # Connect execution adapter if enabled
         if self.execution_adapter is not None:
             try:

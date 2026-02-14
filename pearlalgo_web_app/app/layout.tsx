@@ -40,7 +40,25 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="PEARL" />
       </head>
-      <body>{children}</body>
+      <body>
+        <noscript>
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#0a0a0f',
+            color: '#b0b8c8',
+            fontFamily: 'system-ui, sans-serif',
+            padding: 24,
+            textAlign: 'center',
+          }}>
+            <p>Pearl Algo Dashboard requires JavaScript. Please enable it and reload.</p>
+          </div>
+        </noscript>
+        {children}
+      </body>
     </html>
   )
 }

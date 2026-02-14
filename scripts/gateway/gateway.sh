@@ -142,12 +142,9 @@ _api_listening() {
 
 
 _ensure_xvfb() {
-  echo "Ensuring Xvfb virtual display is running..."
   if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
-    Xvfb :99 -screen 0 1024x768x24 &
+    Xvfb :99 -screen 0 1024x768x24 >/dev/null 2>&1 &
     sleep 2
-  else
-    echo "Xvfb already running on DISPLAY=:99"
   fi
   export DISPLAY=:99
 }
@@ -257,6 +254,10 @@ cmd_start() {
     echo "⚠️  IB Gateway is already running!"
     ps aux | grep "IBC.jar" | grep -v grep
     echo ""
+    if _api_listening; then
+      echo "   API is ready — treating as success (e.g. after restart)."
+      exit 0
+    fi
     echo "To stop it: ./scripts/gateway/gateway.sh stop"
     exit 1
   fi
@@ -353,6 +354,10 @@ cmd_start_vnc() {
     echo "⚠️  IB Gateway is already running!"
     ps aux | grep "IBC.jar" | grep -v grep
     echo ""
+    if _api_listening; then
+      echo "   API is ready — treating as success."
+      exit 0
+    fi
     echo "To stop it: ./scripts/gateway/gateway.sh stop"
     exit 1
   fi
@@ -417,6 +422,12 @@ cmd_stop() {
 
   if _gateway_running; then
     echo "⚠️  Process didn't stop gracefully, force killing..."
+    pkill -9 -f "java.*IBC.jar" || true
+    sleep 2
+  fi
+
+  if _gateway_running; then
+    echo "   Retrying force kill..."
     pkill -9 -f "java.*IBC.jar" || true
     sleep 1
   fi
@@ -1142,26 +1153,32 @@ EOF
 
     cat > config-auto.ini << EOF
 # IB Controller Configuration - Read-Only Data Access
-# This configuration enables API access for data retrieval only (no trading)
+# Reduces login prompts: set IBKR_USERNAME/IBKR_PASSWORD in .env; use ReadOnlyLogin=yes to skip 2FA for data-only.
 
-# Credentials (from environment if available)
+# Credentials - MUST set in .env or you get login dialog every time
 IbLoginId=${IBKR_USERNAME:-}
 IbPassword=${IBKR_PASSWORD:-}
 
 # Trading mode: paper (recommended) or live
 TradingMode=${trading_mode}
 
-# API Settings
+# Read-only = data only, no trading. ReadOnlyLogin=yes skips 2FA prompt when IB allows (data-only mode).
 ReadOnlyApi=${read_only_api}
+ReadOnlyLogin=yes
 EnableAPI=yes
 
 # IB Directory (where Gateway settings are stored)
 IbDir=$JTS_DIR
 
-# Auto-restart settings (optional - keeps Gateway running)
-AutoRestart=yes
-RestartDaily=yes
-RestartTime=03:00
+# Auto-accept API connections (no "Accept incoming connection?" popup)
+AcceptIncomingConnectionAction=accept
+
+# Paper account warning - auto-accept so no dialog
+AcceptNonBrokerageAccountWarning=yes
+
+# Do NOT restart daily - every restart forces a fresh login + 2FA. Set RestartDaily=yes in this file if you want daily restarts.
+AutoRestart=no
+RestartDaily=no
 
 # Logging
 LogComponents=yes
@@ -1191,6 +1208,49 @@ EOF
   echo "     ./scripts/gateway/gateway.sh status"
   echo "  3. Test API handshake:"
   echo "     ./scripts/gateway/gateway.sh test-api"
+  echo ""
+  echo "If you get login/2FA prompts often: put IBKR_USERNAME and IBKR_PASSWORD in .env;"
+  echo "  then run: ./scripts/gateway/gateway.sh reduce-login-prompts"
+}
+
+
+cmd_reduce_login_prompts() {
+  cd "$PROJECT_DIR"
+  echo "=== Reduce IBKR Gateway Login Prompts ==="
+  echo ""
+  _ensure_ibkr_install
+  local cfg="$IBC_DIR/config-auto.ini"
+  if [ ! -f "$cfg" ]; then
+    echo "❌ No config found: $cfg"
+    echo "   Run setup first: ./scripts/gateway/gateway.sh setup readonly yes"
+    exit 1
+  fi
+  cp "$cfg" "${cfg}.backup.$(date +%Y%m%d_%H%M%S)"
+  echo "   Backed up config to ${cfg}.backup.*"
+  _set_ini_or_append() {
+    local key="$1"
+    local val="$2"
+    if grep -q "^${key}=" "$cfg" 2>/dev/null; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$cfg"
+    else
+      echo "${key}=${val}" >> "$cfg"
+    fi
+  }
+  _set_ini_or_append "RestartDaily" "no"
+  _set_ini_or_append "AutoRestart" "no"
+  _set_ini_or_append "ReadOnlyLogin" "yes"
+  _set_ini_or_append "AcceptIncomingConnectionAction" "accept"
+  _set_ini_or_append "AcceptNonBrokerageAccountWarning" "yes"
+  echo "   ✅ Set RestartDaily=no, AutoRestart=no, ReadOnlyLogin=yes, AcceptIncomingConnectionAction=accept"
+  echo ""
+  echo "1. Ensure credentials are in .env so Gateway can auto-login:"
+  echo "   IBKR_USERNAME=your_username"
+  echo "   IBKR_PASSWORD=your_password"
+  echo "2. Restart Gateway once so it uses the new config:"
+  echo "   ./scripts/gateway/gateway.sh stop"
+  echo "   ./scripts/gateway/gateway.sh start"
+  echo "3. If IB still asks for 2FA: approve on the mobile app; with ReadOnlyLogin=yes it may skip 2FA on later starts (data-only)."
+  echo ""
 }
 
 
@@ -1478,6 +1538,7 @@ Commands:
   vnc-setup           One-time VNC setup for manual login
   vnc-config-api      One-time API config guidance via VNC
   disable-sleep       Disable auto-sleep (host helper)
+  reduce-login-prompts  Patch IBC config to reduce login/2FA prompts (RestartDaily=no, ReadOnlyLogin=yes, etc.)
   help            Show this help
 EOF
 }
@@ -1571,6 +1632,9 @@ case "$cmd" in
     ;;
   disable-sleep)
     cmd_disable_sleep "$@"
+    ;;
+  reduce-login-prompts)
+    cmd_reduce_login_prompts "$@"
     ;;
   *)
     echo "Unknown command: $cmd" >&2

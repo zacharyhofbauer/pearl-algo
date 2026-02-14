@@ -74,7 +74,14 @@ function AccountGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!ready) return null
+  if (!ready) {
+    return (
+      <div className="account-gate-loading" role="status" aria-label="Loading dashboard">
+        <div className="account-gate-loading-spinner" />
+        <span className="account-gate-loading-text">Loading…</span>
+      </div>
+    )
+  }
 
   return <>{children}</>
 }

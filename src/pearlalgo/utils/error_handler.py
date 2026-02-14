@@ -73,6 +73,13 @@ class ErrorHandler:
         Returns:
             True if this appears to be an IBKR connection error
         """
+        # If we have usable data, not a connection error (executor state can be stale)
+        try:
+            df = market_data.get("df")
+            if df is not None and not df.empty and market_data.get("latest_bar") is not None:
+                return False
+        except Exception:
+            pass
         # Only check for IBKR connection errors - skip for mock/test providers
         try:
             if data_provider:

@@ -145,51 +145,77 @@ class ServiceLoopMixin:
                         self.connection_failures += 1
                         self.data_fetch_errors += 1
                         self.error_count += 1
+                        run_cycle_despite_connection_error = False
 
-                        # Circuit breaker: pause service if too many connection failures
+                        # Circuit breaker: pause service if too many connection failures (unless disabled)
                         if self.connection_failures >= self.max_connection_failures:
-                            logger.error(
-                                "Circuit breaker triggered: connection failures",
-                                extra={
-                                    "connection_failures": self.connection_failures,
-                                    "max_connection_failures": self.max_connection_failures,
-                                    "cycle": self.cycle_count,
-                                },
-                            )
-                            # Audit: connection drop threshold
-                            if self.audit_logger is not None:
-                                self.audit_logger.log_system_event(
-                                    AuditEventType.CONNECTION_DROP,
-                                    {
+                            if getattr(self, "pause_on_connection_failures", True):
+                                logger.error(
+                                    "Circuit breaker triggered: connection failures",
+                                    extra={
                                         "connection_failures": self.connection_failures,
                                         "max_connection_failures": self.max_connection_failures,
                                         "cycle": self.cycle_count,
                                     },
                                 )
-                            # Guard: only send the circuit breaker notification once per event
-                            # (prevents duplicates if the service re-enters this path)
-                            if not self._cb_connection_notified:
-                                self._cb_connection_notified = True
-                                await self.notification_queue.enqueue_circuit_breaker(
-                                    "IB Gateway connection lost",
-                                    {
-                                        "connection_failures": self.connection_failures,
-                                        "error_type": "connection",
-                                        "action_taken": "Service paused - IB Gateway appears to be down",
-                                    },
-                                    priority=Priority.CRITICAL,
-                                )
-                            self.paused = True
-                            self.pause_reason = "connection_failures"
+                                # Audit: connection drop threshold
+                                if self.audit_logger is not None:
+                                    self.audit_logger.log_system_event(
+                                        AuditEventType.CONNECTION_DROP,
+                                        {
+                                            "connection_failures": self.connection_failures,
+                                            "max_connection_failures": self.max_connection_failures,
+                                            "cycle": self.cycle_count,
+                                        },
+                                    )
+                                # Guard: only send the circuit breaker notification once per event
+                                if not self._cb_connection_notified:
+                                    self._cb_connection_notified = True
+                                    await self.notification_queue.enqueue_circuit_breaker(
+                                        "IB Gateway connection lost",
+                                        {
+                                            "connection_failures": self.connection_failures,
+                                            "error_type": "connection",
+                                            "action_taken": "Service paused - IB Gateway appears to be down",
+                                        },
+                                        priority=Priority.CRITICAL,
+                                    )
+                                self.paused = True
+                                self.pause_reason = "connection_failures"
+                            else:
+                                # pause_on_connection_failures=false: if we have usable data, run loop anyway
+                                # (executor may report disconnected while data is actually flowing)
+                                df = market_data.get("df")
+                                if df is not None and not df.empty:
+                                    self.data_fetch_errors = 0
+                                    self.connection_failures = 0
+                                    self._cb_connection_notified = False
+                                    self.last_successful_cycle = datetime.now(timezone.utc)
+                                    run_cycle_despite_connection_error = True
+                                    logger.info(
+                                        "Connection-failure threshold hit but pause disabled; data usable, continuing cycle",
+                                        extra={"cycle": self.cycle_count},
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Connection failures threshold reached (pause disabled for this account)",
+                                        extra={
+                                            "connection_failures": self.connection_failures,
+                                            "max_connection_failures": self.max_connection_failures,
+                                            "cycle": self.cycle_count,
+                                        },
+                                    )
+                                    await self._handle_connection_failure()
+                                    await self._sleep_until_next_cycle()
+                                    continue
                         else:
-                            # Only send fetch_failure alert when NOT hitting the circuit
-                            # breaker threshold — the CB alert already covers this info.
                             await self._handle_connection_failure()
 
-                        await self._sleep_until_next_cycle()
-                        continue
+                        if not run_cycle_despite_connection_error:
+                            await self._sleep_until_next_cycle()
+                            continue
 
-                    # Success - reset error counters
+                    # Success - reset error counters (or run_cycle_despite_connection_error with data)
                     self.data_fetch_errors = 0
                     self.connection_failures = 0
                     self._cb_connection_notified = False

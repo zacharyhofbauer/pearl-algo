@@ -38,6 +38,24 @@ class StateBuilder:
     def __init__(self, service: "MarketAgentService") -> None:
         self.service = service
 
+    def _get_connection_status(self) -> str:
+        """Determine gateway connection status."""
+        try:
+            dp = self.service.data_fetcher.data_provider
+            if hasattr(dp, '_executor') and hasattr(dp._executor, 'is_connected'):
+                if dp._executor.is_connected():
+                    return "connected"
+                # Executor says disconnected, but if we have fresh data it's a stale check
+                if self.service.data_fetcher.get_buffer_size() > 0 and self.service.connection_failures == 0:
+                    return "connected"
+                return "disconnected"
+        except Exception:
+            pass
+        # Fallback: infer from data flow
+        if self.service.data_fetcher.get_buffer_size() > 0 and self.service.connection_failures == 0:
+            return "connected"
+        return "unknown"
+
     def build_state(self) -> Dict[str, Any]:
         """Build and return the complete state dictionary.
 
@@ -152,6 +170,7 @@ class StateBuilder:
             "error_count": self.service.error_count,
             "consecutive_errors": self.service.consecutive_errors,
             "connection_failures": self.service.connection_failures,
+            "connection_status": self._get_connection_status(),
             "data_fetch_errors": self.service.data_fetch_errors,
             # Data quality
             "buffer_size": self.service.data_fetcher.get_buffer_size(),

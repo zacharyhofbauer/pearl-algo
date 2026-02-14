@@ -51,6 +51,11 @@ execution:
 data:
   ibkr_data_client_id: 51
 
+# Circuit breaker: never pause for connection/data blips (IBKR data-only; execution is Tradovate)
+circuit_breaker:
+  max_connection_failures: 50
+  pause_on_connection_failures: false
+
 # Trading circuit breaker overrides
 trading_circuit_breaker:
   mode: warn_only

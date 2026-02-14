@@ -1,6 +1,6 @@
 # Account Types & Architecture
 
-> How PearlAlgo manages multiple accounts, data sources, and signal forwarding.
+> How PearlAlgo manages multiple accounts and data sources. **Trades go directly to Tradovate only — no IBKR Virtual copy or signal forwarding.**
 
 ---
 
@@ -11,9 +11,9 @@ PearlAlgo runs two isolated account types side by side:
 | | IBKR Virtual | Tradovate Paper |
 |---|---|---|
 | **Purpose** | Data collection + virtual P&L tracking | Paper trading on Tradovate demo |
-| **Broker orders** | None — all P&L is simulated | Real bracket orders on Tradovate demo account |
-| **Signal role** | Writer (generates signals) | Follower (reads forwarded signals) |
-| **State directory** | `data/agent_state/NQ/` | `data/agent_state/TV_PAPER_EVAL/` |
+| **Broker orders** | None — all P&L is simulated | **Real bracket orders on Tradovate only** (direct) |
+| **Signal role** | Runs own strategy (no execution) | **Runs own strategy; orders go straight to Tradovate** |
+| **State directory** | `data/agent_state/NQ/` | `data/tradovate/paper/` |
 | **API port** | 8000 | 8001 |
 | **Telegram label** | `IBKR-VIR` | `TV-PAPER` |
 | **Dashboard URL** | `https://pearlalgo.io` | `https://pearlalgo.io/?account=tv_paper` |
@@ -22,15 +22,15 @@ PearlAlgo runs two isolated account types side by side:
 
 - Connects to Interactive Brokers Gateway for real-time market data.
 - Runs the full strategy (`strategy.analyze()`), generates signals, and tracks virtual P&L.
-- **No orders are ever sent to the broker.** Execution is disabled; all trades are simulated internally.
-- Useful for strategy development, backtesting validation, and as the canonical signal source.
+- **No orders are ever sent to any broker.** Execution is disabled; all trades are simulated internally.
+- Useful for strategy development and backtesting. **No signals are copied or forwarded to Tradovate.**
 
-### Tradovate Paper
+### Tradovate Paper (direct execution only)
 
-- Receives forwarded signals from IBKR Virtual (does NOT run its own strategy).
-- Places real bracket orders (entry + stop loss + take profit) on a Tradovate demo/paper account.
-- All dashboard numbers come directly from Tradovate fills and equity — no virtual tracking.
-- Used for prop firm evaluation attempts (e.g., Tradovate Paper 50K Rapid).
+- **Runs its own strategy** (`pearl_bot_auto` / `strategy.analyze()`) on IBKR market data (client IDs 50/51).
+- **Trades go directly to Tradovate** — no IBKR Virtual, no shared signal file, no copy/forward step.
+- Places real bracket orders (entry + stop loss + take profit) on the Tradovate demo account.
+- All dashboard numbers come from Tradovate fills and equity. Used for prop firm evaluation (e.g. 50K Rapid).
 
 ---
 
@@ -38,7 +38,7 @@ PearlAlgo runs two isolated account types side by side:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    IBKR Gateway (port 4002)               │
+│                    IBKR Gateway (port 4001)               │
 │         Real-time streaming data for ALL accounts         │
 └────────────┬─────────────────────────┬───────────────────┘
              │                         │
@@ -46,21 +46,20 @@ PearlAlgo runs two isolated account types side by side:
      │  IBKR Virtual │        │Tradovate Paper│
      │  (client 10)  │        │  (client 50)  │
      │               │        │               │
-     │  strategy +   │        │  data from    │
-     │  virtual P&L  │        │  IBKR only    │
-     └───────┬───────┘        └───────┬───────┘
-             │                        │
-             │  shared_signals.jsonl   │
-             └────────────►───────────┘
+     │  strategy +   │        │  strategy +   │
+     │  virtual P&L  │        │  direct       │
+     │  (no orders)  │        │  Tradovate    │
+     └───────────────┘        │  orders only  │
+                              └───────┬───────┘
                                       │
                               ┌───────▼───────┐
-                              │   Tradovate    │
-                              │  (execution    │
-                              │   only)        │
+                              │   Tradovate   │
+                              │  (execution   │
+                              │   only)       │
                               └───────────────┘
 ```
 
-**Key point:** IBKR provides market data for **both** accounts. Tradovate is execution-only for Tradovate Paper accounts.
+**Key point:** IBKR provides market data for both. **Tradovate Paper runs its own strategy and sends orders directly to Tradovate — no signal forwarding from IBKR Virtual.**
 
 ### Why IBKR Stays as Data Source
 
@@ -71,33 +70,23 @@ PearlAlgo runs two isolated account types side by side:
 
 ---
 
-## 3. Signal Forwarding
+## 3. Execution Path (Tradovate Only)
 
-IBKR Virtual is the **writer**; Tradovate Paper is the **follower**.
+**No signal forwarding.** Each account is independent.
+
+- **IBKR Virtual:** Strategy runs, virtual P&L only. No orders sent anywhere.
+- **Tradovate Paper:** Same strategy runs on IBKR data (client 50/51); when a signal is generated it goes **directly** to Tradovate via `follower_execute` → `place_bracket()`. No copy from IBKR Virtual.
 
 ```
-IBKR Virtual (WRITER)                 Tradovate Paper (FOLLOWER)
-  IBKR -> strategy.analyze()            _read_shared_signals()
-       |                                      |
-  shared_signals.jsonl  ----------->  dedup (direction, bar_ts)
-       |                                      |
-  virtual P&L + IBKR-VIR TG             eval gate -> Tradovate bracket order
-                                              |
-                                        TV-PAPER Telegram
+Tradovate Paper agent
+  IBKR data (client 50/51) -> strategy.analyze() -> signals
+       -> follower_execute() -> place_bracket() -> Tradovate only
 ```
-
-**How it works:**
-
-1. IBKR Virtual runs `strategy.analyze()` on every bar and writes signals to `data/shared_signals.jsonl`.
-2. Tradovate Paper polls the shared file for new signals.
-3. Signals are deduped by `(direction, bar_timestamp)` to prevent double-entry.
-4. The eval gate (circuit breaker + challenge rules) decides whether to forward to Tradovate.
-5. If approved, a bracket order (OSO) is placed on Tradovate.
 
 **Safety guards:**
 
-- Shared signals file is cleared on Tradovate Paper restart (no replay of stale signals).
-- Market-closed check runs before processing any forwarded signal.
+- Eval gate (circuit breaker + challenge rules) can block execution.
+- Market-closed and session checks run before placing orders.
 - Auto-flat is disabled — Tradovate bracket orders handle all exits.
 
 ---

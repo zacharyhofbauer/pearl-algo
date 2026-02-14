@@ -3,7 +3,7 @@
 # PEARL Master Control Script
 # Purpose: Unified start/stop/restart/status for all PEARL services
 # Usage:
-#   ./pearl.sh start       Start all services (Gateway → Agent → Telegram)
+#   ./pearl.sh start       Start all services (Gateway → Tradovate Paper → Telegram)
 #   ./pearl.sh stop        Stop all services gracefully
 #   ./pearl.sh restart     Restart all services
 #   ./pearl.sh status      Show status of all services
@@ -15,7 +15,7 @@
 #   ./pearl.sh telegram start|stop|status
 #
 # Options:
-#   --market NQ|ES|GC    Market to trade (default: NQ)
+#   --market MNQ         Market to trade (default: MNQ)
 #   --no-telegram        Skip Telegram handler
 #   --foreground         Run agent in foreground (for debugging)
 # ============================================================================
@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Defaults
-MARKET="${PEARL_MARKET:-NQ}"
+MARKET="${PEARL_MARKET:-MNQ}"
 NO_TELEGRAM=false
 NO_CHART=false
 FOREGROUND=false
@@ -44,7 +44,7 @@ parse_options() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --market)
-                MARKET="${2:-NQ}"
+                MARKET="${2:-MNQ}"
                 shift 2
                 ;;
             --no-telegram)
@@ -237,8 +237,8 @@ check_api_status() {
     if [ -n "${PEARL_API_KEY:-}" ]; then
         header=(-H "X-API-Key: $PEARL_API_KEY")
     fi
-    if curl -s "${header[@]}" "http://localhost:8000/api/state" &>/dev/null; then
-        local data=$(curl -s "${header[@]}" "http://localhost:8000/api/state")
+    if curl -s "${header[@]}" "http://localhost:8001/api/state" &>/dev/null; then
+        local data=$(curl -s "${header[@]}" "http://localhost:8001/api/state")
         local pnl=$(echo "$data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d.get('daily_pnl', 0):+.2f}\")" 2>/dev/null || echo "N/A")
         local trades=$(echo "$data" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d.get('daily_wins',0)}W/{d.get('daily_losses',0)}L\")" 2>/dev/null || echo "N/A")
         echo -e "${GREEN}●${NC} API - P&L: \$$pnl | Trades: $trades"
@@ -260,7 +260,6 @@ show_status() {
     
     echo -e "${CYAN}Services:${NC}"
     check_gateway_status || true
-    check_agent_status || true
     check_tv_paper_status || true
     check_telegram_status || true
     check_chart_status || true
@@ -277,8 +276,6 @@ show_quick_status() {
     activate_venv
     
     local gw_status=$(./scripts/gateway/gateway.sh api-ready &>/dev/null && echo "✅" || echo "❌")
-    local agent_pid_file="$SCRIPT_DIR/logs/agent_$MARKET.pid"
-    local agent_status=$([ -f "$agent_pid_file" ] && kill -0 "$(cat "$agent_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
@@ -286,7 +283,7 @@ show_quick_status() {
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
     
-    echo -e "PEARL: GW $gw_status | Agent $agent_status | TV-Paper $tv_paper_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
+    echo -e "PEARL: GW $gw_status | TV-Paper $tv_paper_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
 }
 
 # ============================================================================
@@ -335,15 +332,20 @@ start_chart() {
 
     local LOG_DIR="$SCRIPT_DIR/logs"
     local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"
-    local API_PORT="${PEARL_API_PORT:-8000}"
     local CHART_PORT="${PEARL_CHART_PORT:-3001}"
 
-    # Start IBKR Virtual API server on port 8000 (only if not already running)
-    if ! pgrep -f "api_server.py.*--port $API_PORT" &>/dev/null && ! pgrep -f "api_server.py$" &>/dev/null; then
-        python3 scripts/pearlalgo_web_app/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/web_app_api.log" 2>&1 &
-        echo "   API server started (port $API_PORT)"
+    # Start TV Paper API (the only API - port 8001)
+    if ! pgrep -f "api_server.py.*--port 8001" &>/dev/null; then
+        local TV_STATE_DIR="$SCRIPT_DIR/data/tradovate/paper"
+        if [ -d "$TV_STATE_DIR" ]; then
+            .venv/bin/python scripts/pearlalgo_web_app/api_server.py \
+                --market TV_PAPER_EVAL \
+                --data-dir "$TV_STATE_DIR" \
+                --port 8001 >> "$LOG_DIR/api_TV_PAPER.log" 2>&1 &
+            echo "   API server started (port 8001)"
+        fi
     else
-        echo "   API server already running (port $API_PORT)"
+        echo "   API server already running (port 8001)"
     fi
 
     # Start web interface (only if not already running)
@@ -460,11 +462,9 @@ start_all() {
     # Start in dependency order
     start_gateway
     sleep 2
-    start_agent
-    sleep 2
-    # Start Tradovate Paper if config exists
+    # Start Tradovate Paper (MNQ) if config exists
     if [ -f "$SCRIPT_DIR/config/accounts/tradovate_paper.yaml" ]; then
-        echo -e "${CYAN}▶ Starting Tradovate Paper Eval...${NC}"
+        echo -e "${CYAN}▶ Starting Tradovate Paper Eval (MNQ)...${NC}"
         ./scripts/lifecycle/tv_paper_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   Tradovate Paper start failed (non-critical)${NC}"
         echo ""
     fi
@@ -506,15 +506,8 @@ stop_telegram() {
 
 stop_chart() {
     echo -e "${CYAN}■ Stopping Web App...${NC}"
-    # Kill only the IBKR Virtual API server (port 8000), NOT Tradovate Paper (port 8001)
-    local api_pids=$(pgrep -f "api_server.py" 2>/dev/null || true)
-    for pid in $api_pids; do
-        # Check if this is the Tradovate Paper API (port 8001) -- skip it
-        if grep -q "8001" /proc/$pid/cmdline 2>/dev/null; then
-            continue
-        fi
-        kill "$pid" 2>/dev/null && echo "   Stopped API server (PID $pid)"
-    done
+    # Kill all API servers and web app
+    pkill -f "api_server.py" 2>/dev/null && echo "   Stopped API server(s)" || true
     pkill -f "next-server" 2>/dev/null || true
     pkill -f "next dev" 2>/dev/null || true
     pkill -f "server\.js.*standalone" 2>/dev/null || true
@@ -545,7 +538,7 @@ stop_tunnel() {
 
 stop_gateway() {
     echo -e "${CYAN}■ Stopping IB Gateway...${NC}"
-    ./scripts/gateway/gateway.sh stop 2>/dev/null || true
+    ./scripts/gateway/gateway.sh stop || true
     echo ""
 }
 
@@ -566,7 +559,6 @@ stop_all() {
         ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
         echo ""
     fi
-    stop_agent
     stop_telegram
     stop_gateway
     
@@ -745,9 +737,18 @@ handle_tunnel() {
             curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://pearlalgo.io/ 2>/dev/null | grep -q "200" && echo "✅ https://pearlalgo.io" || echo "❌ unreachable"
             ;;
         restart)
-            handle_tunnel stop
-            sleep 2
-            start_tunnel
+            if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+                echo -e "${CYAN}■ Restarting Cloudflare Tunnel (systemd)...${NC}"
+                if systemctl restart cloudflared-pearlalgo 2>/dev/null; then
+                    echo "   Tunnel restarted (systemd)"
+                else
+                    echo -e "   ${YELLOW}Run: sudo systemctl restart cloudflared-pearlalgo${NC}"
+                fi
+            else
+                handle_tunnel stop
+                sleep 2
+                start_tunnel
+            fi
             ;;
         setup)
             echo "Run: sudo ./scripts/setup-cloudflared-service.sh"
@@ -778,7 +779,7 @@ show_help() {
     echo "Usage: ./pearl.sh <command> [options]"
     echo ""
     echo -e "${CYAN}Commands:${NC}"
-    echo "  start       Start all services (Gateway → Agent → Telegram → Chart)"
+    echo "  start       Start all services (Gateway → Tradovate Paper → Telegram → Chart)"
     echo "  stop        Stop all services gracefully"
     echo "  restart     Restart all services"
     echo "  status      Show detailed status of all services"
@@ -786,7 +787,7 @@ show_help() {
     echo ""
     echo -e "${CYAN}Individual Services:${NC}"
     echo "  gateway <start|stop|status>    Control IB Gateway"
-    echo "  agent <start|stop|status>      Control Market Agent (IBKR Virtual)"
+    echo "  agent <start|stop|status>      Control market agent (optional)"
     echo "  tv-paper <start|stop|status|restart|api|logs>  Control Tradovate Paper Eval"
     echo ""
     echo "  telegram <start|stop|status>   Control Telegram Handler"
@@ -794,7 +795,7 @@ show_help() {
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
     echo ""
     echo -e "${CYAN}Options:${NC}"
-    echo "  --market NQ|ES|GC    Market to trade (default: NQ)"
+    echo "  --market MNQ         Market to trade (default: MNQ)"
     echo "  --no-telegram        Skip Telegram handler"
     echo "  --no-chart           Skip Web App"
     echo "  --foreground         Run agent in foreground"
