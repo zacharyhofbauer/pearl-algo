@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import path from 'path'
+import fs from 'fs'
 
-const PROJECT_ROOT = path.resolve(process.cwd(), '..')
+function findProjectRoot(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, 'scripts', 'export_archive_ibkr.py'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return path.resolve(process.cwd(), '..')
+}
+
+const PROJECT_ROOT = findProjectRoot()
 
 function runSingleTrade(tradeId: string): Promise<string> {
   return new Promise((resolve, reject) => {

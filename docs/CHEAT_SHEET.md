@@ -182,7 +182,7 @@ sleep 5
 
 Pearl runs a single live account:
 - **Tradovate Paper** (port 8001): Real orders on Tradovate paper (demo) — the only live execution account
-- **IBKR Virtual** (port 8000): Archived/historical only — IBKR Gateway still provides market data
+- **IBKR Virtual** (archived): Historical data only — served by Next.js API routes (`/api/archive/ibkr`), not a separate Python server
 
 ### Architecture (Post-Restructure)
 
@@ -293,7 +293,7 @@ Account switcher dropdown in the header bar toggles between accounts.
 |----------|---------|---------|
 | `IB_CLIENT_ID_LIVE_CHART` | `96` | IBKR chart client ID (IBKR Virtual) |
 | `PEARL_API_KEY` | secrets.env | API authentication |
-| `PEARL_API_PORT` | `8000` | IBKR Virtual API |
+| `PEARL_API_PORT` | `8001` | Tradovate Paper API |
 | `PEARL_CHART_PORT` | `3001` | Next.js web app |
 
 Tradovate Paper uses client ID 97, set by `tv_paper_eval.sh`.
@@ -391,7 +391,7 @@ tail -f logs/web_app.log           # Next.js
 |-----------|--------------------------|--------------------------|
 | Config | `config/base.yaml` | `config/accounts/tradovate_paper.yaml` |
 | State dir | `data/archive/ibkr_virtual/` | `data/tradovate/paper/` |
-| API port | 8000 (historical only) | 8001 |
+| API port | N/A (Next.js `/api/archive/ibkr`) | 8001 |
 | Signal gen | — | `strategy.analyze()` (aggressive `pearl_bot_auto` settings) |
 | Dashboard data | — | Tradovate API |
 | Execution | Archived (no agent running) | Tradovate paper (armed) |

@@ -353,7 +353,7 @@ npm run test
 |-------|---------|------------|
 | `/` | Landing page — portfolio overview, links to live dashboard and archive | `app/page.tsx` (LandingPage), `NavBar`, `_landing.css` |
 | `/dashboard` | Live Tradovate Paper dashboard — charts, positions, performance | Dashboard layout, `NavBar`, chart/panel components |
-| `/archive/ibkr` | IBKR Virtual archive — historical trades, equity curve, daily P&L | Archive layout, `NavBar`, `components/archive/*` |
+| `/archive/ibkr` | IBKR Virtual archive — full history explorer with analytics, charts, and trade detail | Archive layout, `NavBar`, `components/archive/*` |
 
 ### Landing Page Components
 
@@ -361,7 +361,7 @@ The landing page (`/`) includes:
 
 - **Hero** — PEARL logo (pearl-emoji.png), heading, subtitle. Content is vertically centered in the viewport with a subtle text glow.
 - **Cards** — Two links: Tradovate Paper (live) and IBKR Virtual (archived). Cards show live stats fetched from `/tv_paper/api/state` and `/api/archive/ibkr?mode=summary`, with skeleton shimmer while loading and fallback to hardcoded values on error. Each card has `aria-description` for screen readers.
-- **Journey Timeline** — Semantic `<ol role="list">` with milestones (Dec 30 → Feb 3 → Feb 12 → Now). CSS connector line runs horizontally on desktop and vertically on mobile (≤480px).
+- **Journey Timeline** — Semantic `<ol role="list">` with 7 milestones (Nov 25 → Dec 30 → Jan 29 → Feb 3 → Feb 5 → Feb 12 → Now). Positive milestones in green, negative in red. CSS connector line runs horizontally on desktop and vertically on mobile (≤768px).
 
 ### NavBar
 
@@ -371,6 +371,22 @@ Shared top navigation (`components/NavBar.tsx`):
 - Dashboard link to `/dashboard?account=tv_paper` — active when path starts with `/dashboard`.
 - Archive link to `/archive/ibkr` — active when path starts with `/archive`.
 - Right-side badge pills were removed (they duplicated the links and were hidden on mobile).
+
+### Archive Page Components
+
+The archive page (`/archive/ibkr`) includes:
+
+- **Hero Header** — Account name, ARCHIVED badge, large P&L hero number (+$23,248), trade count, trading day count, date range.
+- **Stats Grid (2x4)** — Total P&L, Win Rate, Profit Factor, Expectancy (row 1); Trades, Avg Hold, Best Day (with date), Worst Day (with date) (row 2). Green/red coloring on financial values.
+- **Direction Breakdown** — `DirectionBreakdown.tsx`: Long vs Short side-by-side with P&L comparison bars, trade counts, win rates.
+- **Exit Reason Bar** — `ExitReasonBar.tsx`: Horizontal stacked bar showing distribution of exit reasons (stop loss, take profit, close all, daily flat, weekend flat, manual) with color legend.
+- **Equity Curve** — `EquityCurve.tsx`: Line chart (lightweight-charts) with zero reference line, 280px height.
+- **Daily P&L Chart** — `DailyPnLChart.tsx`: Histogram chart with green/red bars, zero line.
+- **Trade Table** — `TradeTable.tsx`: All 1,573 trades with pagination (50/page), direction filter (All/Long/Short), win/loss filter, hold duration column, sortable columns, alternating row shading.
+- **Trade Detail** — `TradeDetail.tsx`: Slide-over panel on row click showing entry/exit times, prices, spread, P&L, hold duration, exit reason with explanation. Closes on Escape or backdrop click. Full-screen on mobile.
+- **Loading Skeletons** — Shimmer animation on skeleton stat cards and chart placeholders while data loads.
+
+Data comes from `/api/archive/ibkr` (modes: `summary`, `daily`, `equity`, `stats`) and `/api/archive/ibkr/trades`. Backend script: `scripts/export_archive_ibkr.py`.
 
 ## Key Components (v0.2.5)
 
@@ -401,7 +417,14 @@ components/
   NavBar.tsx           # Main navigation (PEARL, Dashboard, Archive)
   DataPanelsContainer.tsx  # Panel wrapper with variants
   SystemStatusPanel.tsx    # System status panel (readiness, kill switch, P&L)
-  archive/             # Archive page components
+  archive/
+    StatsCards.tsx      # 2x4 stats grid (P&L, win rate, profit factor, etc.)
+    DirectionBreakdown.tsx  # Long vs Short comparison panel
+    ExitReasonBar.tsx   # Stacked bar for exit reason distribution
+    EquityCurve.tsx     # Cumulative P&L line chart
+    DailyPnLChart.tsx   # Daily P&L histogram
+    TradeTable.tsx      # Paginated, filterable, sortable trade table
+    TradeDetail.tsx     # Slide-over trade detail panel
 
 app/
   globals.css          # Design tokens and global styles
@@ -413,6 +436,7 @@ styles/
   components/
     _landing.css       # Landing page styles
     _navbar.css        # NavBar styles
+    _archive.css       # Archive page styles (hero, stats grid, analytics, trade detail)
     _chart.css         # Chart actions (responsive, floating freshness indicator)
 
 docs/

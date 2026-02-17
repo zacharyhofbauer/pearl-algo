@@ -1,9 +1,21 @@
 import { NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import path from 'path'
+import fs from 'fs'
 
-/** Project root (parent of pearlalgo_web_app) */
-const PROJECT_ROOT = path.resolve(process.cwd(), '..')
+/** Resolve project root by walking up from cwd until we find scripts/ */
+function findProjectRoot(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, 'scripts', 'export_archive_ibkr.py'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return path.resolve(process.cwd(), '..')
+}
+
+const PROJECT_ROOT = findProjectRoot()
 
 function runExport(mode: string, limit?: number, offset?: number): Promise<string> {
   return new Promise((resolve, reject) => {
