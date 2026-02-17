@@ -18,9 +18,9 @@
   padding: 6px 10px;
   gap: 6px;
   overflow: hidden;
-  /* Account for pearl header bar height so content doesn't overlap */
-  height: calc(100vh - var(--pearl-header-height, 32px));
-  max-height: calc(100vh - var(--pearl-header-height, 32px));
+  /* Account for NavBar height so content doesn't overlap */
+  height: calc(100vh - var(--nav-bar-height, 48px));
+  max-height: calc(100vh - var(--nav-bar-height, 48px));
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: 1fr;
@@ -31,36 +31,14 @@
   padding: 0;
 }
 
-.dashboard.ultrawide-mode .header-row-main {
+.dashboard.ultrawide-mode .header-row-single {
   padding: 6px 12px;
   gap: 16px;
-}
-
-/* Hide secondary header row - not needed on bar monitor */
-.dashboard.ultrawide-mode .header-row-secondary {
-  display: none;
 }
 
 .dashboard.ultrawide-mode .stale-warning {
   padding: 4px 12px;
   font-size: var(--font-size-sm);
-}
-
-.dashboard.ultrawide-mode .header-brand {
-  gap: 8px;
-}
-
-.dashboard.ultrawide-mode .header-logo {
-  width: 24px;
-  height: 24px;
-}
-
-.dashboard.ultrawide-mode .header-symbol {
-  font-size: 18px;
-}
-
-.dashboard.ultrawide-mode .header-app-name {
-  display: none;
 }
 
 .dashboard.ultrawide-mode .header-stats-row {

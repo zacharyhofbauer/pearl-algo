@@ -1,5 +1,9 @@
 /* NavBar - Shared top navigation across all pages */
 
+:root {
+  --nav-bar-height: 48px;
+}
+
 .nav-bar {
   display: flex;
   align-items: center;
@@ -64,11 +68,89 @@
   color: var(--accent-cyan);
 }
 
+/* Dashboard context (symbol, status dot, AI preview) — only on /dashboard */
+.nav-dashboard-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: var(--space-4);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: var(--font-size-sm);
+}
+
+.nav-context-symbol {
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(var(--accent-cyan-rgb), 0.12);
+}
+
+.nav-context-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.nav-context-dot.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
+
+.nav-context-dot.live {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+  animation: nav-pulse-live 2s infinite ease-in-out;
+}
+
+.nav-context-dot.shadow {
+  background: #ffc107;
+  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+}
+
+.nav-context-dot.market-closed {
+  background: var(--accent-red, #ff5252);
+  box-shadow: 0 0 4px var(--accent-red, #ff5252);
+}
+
+@keyframes nav-pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.nav-context-preview {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
 @media (max-width: 640px) {
   .nav-bar {
     flex-wrap: wrap;
     padding: var(--space-3) var(--space-4);
     min-height: 44px;
+  }
+
+  .nav-dashboard-context {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    padding-top: var(--space-2);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .nav-context-preview {
+    max-width: 120px;
   }
 
   .nav-bar-links {

@@ -590,7 +590,6 @@ select:focus-visible {
 }
 
 /* Status text contrast improvements */
-.pearl-header-status-text,
 .status-text-muted {
   color: rgba(180, 188, 200, 1);
 }

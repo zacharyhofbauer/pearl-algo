@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
-import PearlHeaderBar from '@/components/PearlHeaderBar'
 import AccountStrip from '@/components/AccountStrip'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
@@ -382,31 +381,14 @@ export default function DashboardPageInner() {
 
   // getAIMode is replaced by aiStatus.aiMode from useAIStatus hook
 
-  // Combined header - all info in one modern compact section
+  // Combined header - single row: timeframes left, status badges right
   const renderHeader = () => {
-    const agentMode = getAgentModeBadge()
-    const regime = getRegimeBadge()
-    const countdown = formatMarketCountdownFromStatus()
-    const stale = isDataStale()
     const aiMode = aiStatus.aiMode
-    const dirGate = agentState?.ai_status?.direction_gating
 
     return (
       <header className="header-combined">
-        {/* Main Header Row */}
-        <div className="header-row-main">
-          {/* Brand */}
-          <div className="header-brand">
-            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
-            <div className="header-titles">
-              <span className="header-breadcrumb">Dashboard · Tradovate Paper · {agentState?.config?.symbol || 'MNQ'}</span>
-            </div>
-          </div>
-
-          {/* Stats */}
-          {/* Moved daily P&L / W-L / positions into the Trades dock header for better visibility */}
-
-          {/* Timeframe */}
+        <div className="header-row-single">
+          {/* Left: Timeframe buttons */}
           <div className="header-timeframe">
             {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
               <button
@@ -418,10 +400,8 @@ export default function DashboardPageInner() {
               </button>
             ))}
           </div>
-        </div>
 
-        {/* Secondary Row - System Status + AI Metrics */}
-        <div className="header-row-secondary">
+          {/* Right: Status badges */}
           <div className="header-badges">
             {/* System status badges - tap for explanation */}
             {agentState && (
@@ -447,7 +427,7 @@ export default function DashboardPageInner() {
                 className={`badge ai-badge ${aiStatus.aiMode}`}
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
               >
-                🧠 {aiStatus.aiMode.toUpperCase()}
+                {aiStatus.aiMode.toUpperCase()}
                 {agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
                   <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
                 )}
@@ -458,7 +438,7 @@ export default function DashboardPageInner() {
                 className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
               >
-                {marketStatus.is_open ? '🟢 OPEN' : '🔴 CLOSED'}
+                {marketStatus.is_open ? 'OPEN' : 'CLOSED'}
               </span>
             )}
             {agentState && (
@@ -635,9 +615,7 @@ export default function DashboardPageInner() {
 
   // Standard layout (all viewports)
   return (
-    <>
-      <PearlHeaderBar />
-      <DashboardLayout
+    <DashboardLayout
         isChartReady={isChartReady}
         pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
         header={renderHeader()}
@@ -676,6 +654,5 @@ export default function DashboardPageInner() {
           </>
         }
       />
-    </>
   )
 }
