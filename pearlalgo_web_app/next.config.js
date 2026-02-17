@@ -1,3 +1,38 @@
+// @ts-check
+const withPWA = require('@ducanh2912/next-pwa').default({
+  dest: 'public',
+  disable: process.env.NODE_ENV === 'development',
+  fallbacks: {
+    document: '/~offline',
+  },
+  extendDefaultRuntimeCaching: true,
+  workboxOptions: {
+    runtimeCaching: [
+      {
+        urlPattern: /^https?:\/\/.*\/(api|tv_paper\/api)\//,
+        handler: 'NetworkOnly',
+        options: { cacheName: 'api-requests' },
+      },
+      {
+        urlPattern: /^https?:\/\/.*\/_next\/static\/.*/,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'static-assets',
+          expiration: { maxEntries: 64, maxAgeSeconds: 365 * 24 * 60 * 60 },
+        },
+      },
+      {
+        urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico|woff2?)$/,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'static-images-fonts',
+          expiration: { maxEntries: 64, maxAgeSeconds: 365 * 24 * 60 * 60 },
+        },
+      },
+    ],
+  },
+})
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -49,4 +84,4 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+module.exports = withPWA(nextConfig)

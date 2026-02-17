@@ -57,6 +57,8 @@ def _register_handlers(app) -> None:
     )
     from pearlalgo.telegram.handlers.analytics import handle_trades, handle_performance
     from pearlalgo.telegram.handlers.config import handle_settings
+    from pearlalgo.telegram.handlers.health import handle_health
+    from pearlalgo.telegram.handlers.doctor import handle_doctor
 
     # Command handlers
     app.add_handler(CommandHandler("start", handle_menu))
@@ -65,6 +67,8 @@ def _register_handlers(app) -> None:
     app.add_handler(CommandHandler("trades", handle_trades))
     app.add_handler(CommandHandler("performance", handle_performance))
     app.add_handler(CommandHandler("settings", handle_settings))
+    app.add_handler(CommandHandler("health", handle_health))
+    app.add_handler(CommandHandler("doctor", handle_doctor))
     app.add_handler(CommandHandler("help", _handle_help))
 
     # Callback query handler for inline keyboard buttons
@@ -75,9 +79,14 @@ async def _handle_help(update, context) -> None:
     """Handle /help -- show available commands."""
     msg = (
         "<b>PearlAlgo Commands</b>\n\n"
-        "/status — Agent state, P&amp;L, positions\n"
+        "<b>Monitoring</b>\n"
+        "/status — Balance, P&amp;L, positions, AI status\n"
         "/trades — Recent trade history\n"
-        "/performance — Performance summary\n"
+        "/performance — Performance by period\n\n"
+        "<b>Diagnostics</b>\n"
+        "/health — System health, connectivity, data quality\n"
+        "/doctor — Signal rejections, risk metrics, ML filter\n\n"
+        "<b>Controls</b>\n"
         "/settings — Current configuration\n"
         "/menu — Main menu with buttons\n"
         "/help — This message"
@@ -107,6 +116,8 @@ async def _handle_callback(update, context) -> None:
     )
     from pearlalgo.telegram.handlers.analytics import handle_trades, handle_performance
     from pearlalgo.telegram.handlers.config import handle_settings
+    from pearlalgo.telegram.handlers.health import handle_health
+    from pearlalgo.telegram.handlers.doctor import handle_doctor
 
     routes = {
         "cmd:menu": handle_menu,
@@ -114,6 +125,8 @@ async def _handle_callback(update, context) -> None:
         "cmd:trades": handle_trades,
         "cmd:performance": handle_performance,
         "cmd:settings": handle_settings,
+        "cmd:health": handle_health,
+        "cmd:doctor": handle_doctor,
         "cmd:start": handle_start_agent,
         "cmd:stop": handle_stop_agent,
         "cmd:kill_switch": handle_kill_switch_confirm,

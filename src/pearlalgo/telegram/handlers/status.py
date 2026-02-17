@@ -52,7 +52,13 @@ async def handle_status(update: Any, context: Any) -> None:
 
 async def handle_menu(update: Any, context: Any) -> None:
     """Handle /menu or /start -- show the main menu."""
-    msg = "📊 <b>PearlAlgo</b> — What would you like to do?"
+    msg = (
+        "🐚 <b>PearlAlgo</b> — Tradovate Paper\n\n"
+        "📊 <b>Status</b> — Balance, P&amp;L, positions\n"
+        "📈 <b>Trades</b> — Recent trade history\n"
+        "💚 <b>Health</b> — System health &amp; connectivity\n"
+        "🩺 <b>Doctor</b> — Signal &amp; risk diagnostics"
+    )
     keyboard = main_menu_keyboard()
     await _reply(update, msg, reply_markup=keyboard)
 

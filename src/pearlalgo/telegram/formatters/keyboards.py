@@ -16,7 +16,14 @@ except ImportError:
 
 
 def main_menu_keyboard(agent_state: str = "unknown") -> Optional["InlineKeyboardMarkup"]:
-    """Build the main menu inline keyboard."""
+    """Build the main menu inline keyboard.
+
+    Layout:
+      Row 1: Status | Trades          (monitoring)
+      Row 2: Health | Doctor           (diagnostics)
+      Row 3: Start/Stop | Settings     (controls)
+      Row 4: Kill Switch | Flatten All (emergency)
+    """
     if not TELEGRAM_AVAILABLE:
         return None
 
@@ -27,19 +34,24 @@ def main_menu_keyboard(agent_state: str = "unknown") -> Optional["InlineKeyboard
         InlineKeyboardButton("📈 Trades", callback_data="cmd:trades"),
     ]
 
-    row2 = []
-    if is_running:
-        row2.append(InlineKeyboardButton("⏹️ Stop", callback_data="cmd:stop"))
-    else:
-        row2.append(InlineKeyboardButton("▶️ Start", callback_data="cmd:start"))
-    row2.append(InlineKeyboardButton("⚙️ Settings", callback_data="cmd:settings"))
+    row2 = [
+        InlineKeyboardButton("💚 Health", callback_data="cmd:health"),
+        InlineKeyboardButton("🩺 Doctor", callback_data="cmd:doctor"),
+    ]
 
-    row3 = [
+    row3 = []
+    if is_running:
+        row3.append(InlineKeyboardButton("⏹️ Stop", callback_data="cmd:stop"))
+    else:
+        row3.append(InlineKeyboardButton("▶️ Start", callback_data="cmd:start"))
+    row3.append(InlineKeyboardButton("⚙️ Settings", callback_data="cmd:settings"))
+
+    row4 = [
         InlineKeyboardButton("🚨 Kill Switch", callback_data="cmd:kill_switch"),
         InlineKeyboardButton("📋 Flatten All", callback_data="cmd:flatten"),
     ]
 
-    return InlineKeyboardMarkup([row1, row2, row3])
+    return InlineKeyboardMarkup([row1, row2, row3, row4])
 
 
 def confirm_keyboard(action: str) -> Optional["InlineKeyboardMarkup"]:

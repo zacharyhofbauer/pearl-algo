@@ -43,41 +43,72 @@ def format_position(pos: Dict[str, Any]) -> str:
 def format_status_message(data: Dict[str, Any]) -> str:
     """Format a full status response into an HTML message.
 
-    Expected data keys: agent_state, symbol, pnl, positions, account
+    Pulls from /api/state which has challenge, daily_pnl, performance, etc.
     """
-    account = data.get("account", {})
-    badge = account.get("badge", "")
-    display_name = escape_html(account.get("display_name", "Agent"))
+    running = data.get("running", False)
+    paused = data.get("paused", False)
+    market_open = data.get("futures_market_open", False)
 
-    state = data.get("agent_state", "unknown")
-    state_emoji = {"running": "🟢", "stopped": "🔴", "paused": "⏸️"}.get(state, "⚪")
+    if paused:
+        state_str = "⏸️ Paused"
+    elif running:
+        state_str = "🟢 Running"
+    else:
+        state_str = "🔴 Stopped"
 
-    symbol = escape_html(str(data.get("symbol", "MNQ")))
-
-    # P&L section
-    pnl_data = data.get("pnl", {})
-    total_pnl = pnl_data.get("total_pnl", 0.0)
-    wins = pnl_data.get("wins", 0)
-    losses = pnl_data.get("losses", 0)
+    market_str = "🟢 Open" if market_open else "🔴 Closed"
 
     lines = [
-        f"<b>{display_name}</b> [{badge}]",
-        f"{state_emoji} {state.capitalize()} | {symbol}",
-        "",
-        f"<b>P&amp;L:</b> {format_pnl(total_pnl)}",
-        f"<b>Win Rate:</b> {format_win_rate(wins, losses)}",
+        "<b>📊 Tradovate Paper</b>\n",
+        f"<b>Agent:</b> {state_str}",
+        f"<b>Market:</b> {market_str}",
     ]
 
-    # Open positions
-    positions = data.get("positions", [])
-    if positions:
-        lines.append(f"\n<b>Open Positions ({len(positions)}):</b>")
-        for pos in positions[:10]:  # Limit to 10
-            lines.append(format_position(pos))
-        if len(positions) > 10:
-            lines.append(f"  ... and {len(positions) - 10} more")
+    # Challenge / balance data
+    challenge = data.get("challenge")
+    if challenge and isinstance(challenge, dict):
+        balance = challenge.get("current_balance")
+        total_pnl = challenge.get("pnl")
+        trades = challenge.get("trades", 0)
+        wins = challenge.get("wins", 0)
+        wr = challenge.get("win_rate")
+
+        if balance is not None:
+            lines.append(f"\n<b>Balance:</b> ${balance:,.2f}")
+        if total_pnl is not None:
+            lines.append(f"<b>Total P&amp;L:</b> {format_pnl(total_pnl)}")
+        if trades:
+            wr_str = f"  ({wr:.1f}%)" if wr is not None else ""
+            lines.append(f"<b>Trades:</b> {trades} ({wins}W/{trades - wins}L){wr_str}")
+
+    # Today's P&L
+    daily_pnl = data.get("daily_pnl")
+    daily_trades = data.get("daily_trades", 0)
+    daily_wins = data.get("daily_wins", 0)
+    daily_losses = data.get("daily_losses", 0)
+    if daily_pnl is not None:
+        lines.append(f"\n<b>Today:</b> {format_pnl(daily_pnl)}")
+        if daily_trades > 0:
+            lines.append(f"  {daily_trades} trades ({daily_wins}W/{daily_losses}L)")
+
+    # Active positions
+    active_count = data.get("active_trades_count", 0)
+    unrealized = data.get("active_trades_unrealized_pnl")
+    if active_count > 0:
+        upnl_str = f"  {format_pnl(unrealized)}" if unrealized is not None else ""
+        lines.append(f"\n<b>Open Positions:</b> {active_count}{upnl_str}")
     else:
         lines.append("\n<i>No open positions</i>")
+
+    # AI status
+    ai = data.get("ai_status")
+    if ai and isinstance(ai, dict):
+        ai_mode = ai.get("mode", "")
+        ai_headline = ai.get("headline", "")
+        if ai_mode:
+            lines.append(f"\n<b>AI:</b> {escape_html(ai_mode)}")
+        if ai_headline:
+            lines.append(f"  {escape_html(ai_headline[:100])}")
 
     return "\n".join(lines)
 

@@ -89,6 +89,30 @@ export default function TradeDetail({ trade, onClose }: Props) {
             <span className="trade-detail-label">Exit Price</span>
             <span className="trade-detail-value">{trade.exit_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
           </div>
+          <div className="trade-detail-price-diff">
+            <div className="trade-detail-price-bar-track">
+              <div
+                className={`trade-detail-price-bar-fill ${trade.exit_price >= trade.entry_price ? 'positive' : 'negative'}`}
+                style={(() => {
+                  const lo = Math.min(trade.entry_price, trade.exit_price)
+                  const hi = Math.max(trade.entry_price, trade.exit_price)
+                  const pad = Math.max(0.5, (hi - lo) * 0.2)
+                  const low = lo - pad
+                  const high = hi + pad
+                  const left = ((Math.min(trade.entry_price, trade.exit_price) - low) / (high - low)) * 100
+                  const width = (spread / (high - low)) * 100
+                  return { left: `${left}%`, width: `${width}%` }
+                })()}
+              />
+            </div>
+            <div className="trade-detail-price-diff-labels">
+              <span>{trade.entry_price.toFixed(2)}</span>
+              <span className={`trade-detail-price-delta ${trade.exit_price >= trade.entry_price ? 'positive' : 'negative'}`}>
+                {trade.exit_price >= trade.entry_price ? '+' : ''}{(trade.exit_price - trade.entry_price).toFixed(2)} pts
+              </span>
+              <span>{trade.exit_price.toFixed(2)}</span>
+            </div>
+          </div>
           <div className="trade-detail-row">
             <span className="trade-detail-label">Spread</span>
             <span className="trade-detail-value">{spread.toFixed(2)} pts</span>

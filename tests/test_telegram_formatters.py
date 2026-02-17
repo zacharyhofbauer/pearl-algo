@@ -78,31 +78,39 @@ class TestFormatStatusMessage:
 
     def test_minimal_data(self):
         data = {
-            "agent_state": "running",
-            "symbol": "MNQ",
-            "account": {"display_name": "Agent", "badge": ""},
-            "pnl": {"total_pnl": 0.0, "wins": 0, "losses": 0},
-            "positions": [],
+            "running": False,
+            "paused": False,
+            "futures_market_open": False,
+            "active_trades_count": 0,
         }
         msg = format_status_message(data)
-        assert "running" in msg.lower()
-        assert "MNQ" in msg
-        assert "P&amp;L" in msg or "P&L" in msg
+        assert "Tradovate Paper" in msg
+        assert "Stopped" in msg
         assert "No open positions" in msg
 
-    def test_with_positions(self):
+    def test_with_challenge_data(self):
         data = {
-            "agent_state": "running",
-            "symbol": "MNQ",
-            "account": {"display_name": "Paper", "badge": "PAPER"},
-            "pnl": {"total_pnl": 100.0, "wins": 2, "losses": 1},
-            "positions": [
-                {"direction": "long", "entry_price": 18000, "position_size": 1, "signal_id": "s1"},
-            ],
+            "running": True,
+            "paused": False,
+            "futures_market_open": True,
+            "challenge": {
+                "current_balance": 52856.70,
+                "pnl": 2856.70,
+                "trades": 234,
+                "wins": 112,
+                "win_rate": 47.9,
+            },
+            "daily_pnl": -645.91,
+            "daily_trades": 7,
+            "daily_wins": 3,
+            "daily_losses": 4,
+            "active_trades_count": 1,
+            "active_trades_unrealized_pnl": 25.50,
         }
         msg = format_status_message(data)
-        assert "Open Positions (1)" in msg
-        assert "+$100.00" in msg
+        assert "52,856" in msg
+        assert "+$2,856.70" in msg
+        assert "Open Positions" in msg
 
 
 class TestFormatTradesMessage:

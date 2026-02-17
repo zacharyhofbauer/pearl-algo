@@ -93,8 +93,19 @@ export default function TradeTable({ trades, onTradeClick }: TradeTableProps) {
 
   const handleFilterChange = () => setPage(0)
 
-  const sortArrow = (key: keyof TradeRow) =>
-    sortKey === key ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : ''
+  const SortIcon = ({ keyName }: { keyName: keyof TradeRow }) => {
+    if (sortKey !== keyName) return null
+    const Arrow = sortDir === 'asc' ? (
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className="archive-sort-icon" aria-hidden>
+        <path d="M5 2L8 6H2L5 2z" />
+      </svg>
+    ) : (
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className="archive-sort-icon" aria-hidden>
+        <path d="M5 8L2 4h6L5 8z" />
+      </svg>
+    )
+    return <span className="archive-sort-indicator">{Arrow}</span>
+  }
 
   return (
     <div className="archive-table-section">
@@ -128,12 +139,12 @@ export default function TradeTable({ trades, onTradeClick }: TradeTableProps) {
         <table className="archive-trade-table">
           <thead>
             <tr>
-              <th onClick={() => handleSort('direction')} className="sortable">Dir{sortArrow('direction')}</th>
-              <th onClick={() => handleSort('exit_time')} className="sortable">Time{sortArrow('exit_time')}</th>
-              <th onClick={() => handleSort('entry_price')} className="sortable">Entry{sortArrow('entry_price')}</th>
-              <th onClick={() => handleSort('exit_price')} className="sortable">Exit{sortArrow('exit_price')}</th>
-              <th onClick={() => handleSort('pnl')} className="sortable">P&L{sortArrow('pnl')}</th>
-              <th onClick={() => handleSort('hold_duration_minutes')} className="sortable">Hold{sortArrow('hold_duration_minutes')}</th>
+              <th onClick={() => handleSort('direction')} className="sortable">Dir <SortIcon keyName="direction" /></th>
+              <th onClick={() => handleSort('exit_time')} className="sortable">Time <SortIcon keyName="exit_time" /></th>
+              <th onClick={() => handleSort('entry_price')} className="sortable">Entry <SortIcon keyName="entry_price" /></th>
+              <th onClick={() => handleSort('exit_price')} className="sortable">Exit <SortIcon keyName="exit_price" /></th>
+              <th onClick={() => handleSort('pnl')} className="sortable">P&L <SortIcon keyName="pnl" /></th>
+              <th onClick={() => handleSort('hold_duration_minutes')} className="sortable">Hold <SortIcon keyName="hold_duration_minutes" /></th>
               <th>Reason</th>
             </tr>
           </thead>

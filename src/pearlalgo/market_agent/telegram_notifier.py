@@ -108,7 +108,7 @@ class MarketAgentTelegramNotifier:
         self.enabled = enabled
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.account_label = account_label  # e.g. "Tradovate Paper" or None for IBKR Virtual
+        self.account_label = account_label  # e.g. "Tradovate Paper"
         self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
         

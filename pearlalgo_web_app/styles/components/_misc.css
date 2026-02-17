@@ -906,3 +906,48 @@
   background: rgba(0, 212, 255, 0.08);
 }
 
+/* ============================================
+   OFFLINE FALLBACK PAGE (PWA)
+   ============================================ */
+
+.offline-page {
+  min-height: calc(100dvh - 48px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--bg-primary);
+}
+
+.offline-content {
+  text-align: center;
+  max-width: 360px;
+}
+
+.offline-content h1 {
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+  margin-bottom: var(--space-3);
+}
+
+.offline-content p {
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-5);
+}
+
+.offline-link {
+  display: inline-block;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-cyan);
+  color: var(--accent-cyan);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.offline-link:hover {
+  background: rgba(0, 212, 255, 0.1);
+}
+
