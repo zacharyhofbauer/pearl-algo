@@ -12,7 +12,7 @@
 }
 
 /* Mobile - optimized compact layout */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .data-panels {
     padding: 4px;
   }

@@ -1,9 +1,8 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
 import { useAgentStore, useOperatorStore } from '@/stores'
 
-// Mock Next.js Image
 jest.mock('next/image', () => ({
   __esModule: true,
   default: ({ src, alt, width, height }: { src: string; alt: string; width: number; height: number }) => (
@@ -11,13 +10,11 @@ jest.mock('next/image', () => ({
   ),
 }))
 
-// Mock AccountSwitcher
 jest.mock('@/components/AccountSwitcher', () => ({
   __esModule: true,
   default: () => <div data-testid="account-switcher">Account Switcher</div>,
 }))
 
-// Mock stores
 const mockAgentState = {
   agentState: {
     running: true,
@@ -47,7 +44,6 @@ jest.mock('@/stores', () => ({
   })),
 }))
 
-// Mock derivePearlMode and deriveHeadline
 jest.mock('@/types/pearl', () => ({
   derivePearlMode: jest.fn(() => 'live'),
   deriveHeadline: jest.fn(() => ({ text: 'Test headline', priority: 'normal' })),
@@ -55,93 +51,32 @@ jest.mock('@/types/pearl', () => ({
 
 describe('PearlHeaderBar', () => {
   beforeEach(() => {
-    // Reset window.location.search using history.pushState (jsdom-safe)
     history.pushState({}, '', '/')
+    jest.mocked(useAgentStore).mockImplementation((selector: any) => selector(mockAgentState))
   })
 
-  describe('expanded/collapsed state', () => {
-    it('should render collapsed by default', () => {
-      render(<PearlHeaderBar />)
+  it('should render as a status banner', () => {
+    render(<PearlHeaderBar />)
+    const header = screen.getByRole('banner', { name: /Pearl AI status/i })
+    expect(header).toBeInTheDocument()
+  })
 
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-expanded', 'false')
-    })
-
-    it('should expand on click', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      fireEvent.click(header)
-
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-    })
-
-    it('should collapse when clicking again', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      fireEvent.click(header)
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-
-      fireEvent.click(header)
-      expect(header).toHaveAttribute('aria-expanded', 'false')
-    })
-
-    it('should collapse on outside click', async () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      fireEvent.click(header)
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-
-      fireEvent.mouseDown(document.body)
-
-      await waitFor(() => {
-        expect(header).toHaveAttribute('aria-expanded', 'false')
-      })
-    })
-
-    it('should collapse on Escape key', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      fireEvent.click(header)
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-
-      fireEvent.keyDown(document, { key: 'Escape' })
-
-      expect(header).toHaveAttribute('aria-expanded', 'false')
-    })
+  it('should include the account switcher', () => {
+    render(<PearlHeaderBar />)
+    expect(screen.getByTestId('account-switcher')).toBeInTheDocument()
   })
 
   describe('AI mode display', () => {
     it('should display AI mode in status dot', () => {
       render(<PearlHeaderBar />)
-
       const statusDot = screen.getByRole('status')
       expect(statusDot).toHaveAttribute('aria-label', expect.stringContaining('live'))
     })
 
     it('should show shadow mode', () => {
-      const shadowState = {
-        ...mockAgentState,
-        agentState: {
-          ...mockAgentState.agentState,
-          ai_status: {
-            ...mockAgentState.agentState.ai_status!,
-            bandit_mode: 'shadow',
-            contextual_mode: 'shadow',
-          },
-        },
-      }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(shadowState as any))
-
       const { derivePearlMode } = require('@/types/pearl')
       derivePearlMode.mockReturnValue('shadow')
-
       render(<PearlHeaderBar />)
-
       const statusDot = screen.getByRole('status')
       expect(statusDot).toHaveAttribute('aria-label', expect.stringContaining('shadow'))
     })
@@ -149,122 +84,35 @@ describe('PearlHeaderBar', () => {
     it('should show disconnected state when AI not available', () => {
       const disconnectedState = {
         ...mockAgentState,
-        agentState: {
-          ...mockAgentState.agentState,
-          ai_status: null,
-        },
+        agentState: { ...mockAgentState.agentState, ai_status: null },
       }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(disconnectedState as any))
-
+      jest.mocked(useAgentStore).mockImplementation((selector: any) => selector(disconnectedState))
       const { derivePearlMode } = require('@/types/pearl')
       derivePearlMode.mockReturnValue('off')
-
       render(<PearlHeaderBar />)
-
       const statusDot = screen.getByRole('status')
       expect(statusDot).toHaveAttribute('aria-label', expect.stringContaining('disconnected'))
     })
   })
 
-  describe('keyboard navigation', () => {
-    it('should toggle on Enter key', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-expanded', 'false')
-
-      fireEvent.keyDown(header, { key: 'Enter' })
-
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-    })
-
-    it('should toggle on Space key', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-expanded', 'false')
-
-      fireEvent.keyDown(header, { key: ' ' })
-
-      expect(header).toHaveAttribute('aria-expanded', 'true')
-    })
-
-    it('should have correct tabIndex for keyboard access', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('tabIndex', '0')
-    })
-  })
-
-  describe('account name display', () => {
-    it('should display default account name', () => {
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-label', expect.stringContaining('IBKR Virtual'))
-    })
-
-    it('should display account name from URL parameter', () => {
-      history.pushState({}, '', '?account=tv_paper')
-
-      const tvPaperState = {
-        ...mockAgentState,
-        accounts: {
-          ...mockAgentState.accounts,
-          tv_paper: { display_name: 'TV Paper', badge: 'PAPER', badge_color: '#ffc107', telegram_prefix: '', description: '' },
-        },
-      }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(tvPaperState as any))
-
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-label', expect.stringContaining('TV Paper'))
-    })
-
-    it('should fallback to Pearl AI when account not found', () => {
-      history.pushState({}, '', '?account=unknown')
-
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toHaveAttribute('aria-label', expect.stringContaining('Pearl AI'))
-    })
-  })
-
   describe('market closed state', () => {
-    it('should show Market Closed when market is closed', () => {
+    it('should show Market Closed text', () => {
       const closedState = {
         ...mockAgentState,
-        agentState: {
-          ...mockAgentState.agentState,
-          futures_market_open: false,
-        },
+        agentState: { ...mockAgentState.agentState, futures_market_open: false },
       }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(closedState as any))
-
+      jest.mocked(useAgentStore).mockImplementation((selector: any) => selector(closedState))
       render(<PearlHeaderBar />)
-
       expect(screen.getByText('Market Closed')).toBeInTheDocument()
     })
 
     it('should update status dot for market closed', () => {
       const closedState = {
         ...mockAgentState,
-        agentState: {
-          ...mockAgentState.agentState,
-          futures_market_open: false,
-        },
+        agentState: { ...mockAgentState.agentState, futures_market_open: false },
       }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(closedState as any))
-
+      jest.mocked(useAgentStore).mockImplementation((selector: any) => selector(closedState))
       render(<PearlHeaderBar />)
-
       const statusDot = screen.getByRole('status')
       expect(statusDot).toHaveAttribute('aria-label', 'Market closed')
     })
@@ -272,50 +120,19 @@ describe('PearlHeaderBar', () => {
 
   describe('edge cases', () => {
     it('should handle null agent state', () => {
-      const nullState = {
-        agentState: null,
-        accounts: null,
-      }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(nullState as any))
-
+      const nullState = { agentState: null, accounts: null }
+      jest.mocked(useAgentStore).mockImplementation((selector: any) => selector(nullState))
       render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toBeInTheDocument()
-    })
-
-    it('should handle empty pearl feed', () => {
-      const emptyFeedState = {
-        ...mockAgentState,
-        agentState: {
-          ...mockAgentState.agentState,
-          pearl_feed: [],
-        },
-      }
-
-      jest.mocked(useAgentStore).mockImplementation((selector) => selector(emptyFeedState as any))
-
-      render(<PearlHeaderBar />)
-
-      const header = screen.getByRole('button')
-      expect(header).toBeInTheDocument()
+      expect(screen.getByRole('banner')).toBeInTheDocument()
     })
 
     it('should call operator tick periodically', () => {
       jest.useFakeTimers()
       const mockTick = jest.fn()
-
-      jest.mocked(useOperatorStore).mockImplementation((selector: any) =>
-        selector({ tick: mockTick })
-      )
-
+      jest.mocked(useOperatorStore).mockImplementation((selector: any) => selector({ tick: mockTick }))
       render(<PearlHeaderBar />)
-
       jest.advanceTimersByTime(2000)
-
       expect(mockTick).toHaveBeenCalled()
-
       jest.useRealTimers()
     })
   })

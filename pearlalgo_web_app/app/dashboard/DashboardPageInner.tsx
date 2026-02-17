@@ -16,12 +16,9 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { formatTimeFromDate, formatRelativeTime, formatMarketCountdown } from '@/lib/formatters'
 import type { IChartApi } from 'lightweight-charts'
 
-import { VolumeProfilePanel } from '@/components/indicators'
-
 import {
   useAgentStore,
   useChartStore,
-  useChartSettingsStore,
   useUIStore,
   type Timeframe,
   type Position,
@@ -638,20 +635,6 @@ export default function DashboardPageInner() {
     </div>
   )
 
-  // Chart settings store for indicator visibility
-  const showVolumeProfilePanel = useChartSettingsStore((s) => s.showVolumeProfilePanel)
-
-  // Volume Profile section component
-  const renderVolumeProfile = () => (
-    showVolumeProfilePanel && indicators.volumeProfile && (
-      <VolumeProfilePanel
-        data={indicators.volumeProfile}
-        currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-        height={300}
-      />
-    )
-  )
-
   // Standard layout (all viewports)
   return (
     <>
@@ -663,11 +646,14 @@ export default function DashboardPageInner() {
         chart={renderChart()}
         panels={
           <>
-            <ChallengePanel
-              challenge={agentState?.challenge ?? null}
-              equityCurve={agentState?.equity_curve ?? []}
-            />
-            <TradeDockPanel
+            <ErrorBoundary panelName="Challenge">
+              <ChallengePanel
+                challenge={agentState?.challenge ?? null}
+                equityCurve={agentState?.equity_curve ?? []}
+              />
+            </ErrorBoundary>
+            <ErrorBoundary panelName="Trades">
+              <TradeDockPanel
             positions={positions}
             recentTrades={recentTrades}
             symbol={agentState?.config?.symbol || 'MNQ'}
@@ -685,6 +671,7 @@ export default function DashboardPageInner() {
             onRefresh={handleTradeRefresh}
             riskMetrics={agentState?.risk_metrics || null}
           />
+            </ErrorBoundary>
           </>
         }
       />

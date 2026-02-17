@@ -3,8 +3,9 @@ import './globals.css'
 import NavBar from '@/components/NavBar'
 
 export const metadata: Metadata = {
-  title: 'Pearl Algo Web App',
-  description: 'Pearl Algo trading dashboard and monitoring',
+  metadataBase: new URL('https://pearlalgo.io'),
+  title: 'PEARL Algo — Algorithmic Trading Dashboard',
+  description: 'Live algorithmic trading on MNQ futures. Real-time charts, trade analytics, and performance tracking. Built with transparency.',
   manifest: '/manifest.json',
   icons: {
     icon: '/logo.png',
@@ -12,6 +13,28 @@ export const metadata: Metadata = {
     apple: [
       { url: '/apple-icon-180-v4.png', sizes: '180x180', type: 'image/png' },
     ],
+  },
+  openGraph: {
+    title: 'PEARL Algo — Algorithmic Trading Dashboard',
+    description: 'Live algorithmic trading on MNQ futures. Real-time charts, trade analytics, and performance tracking.',
+    url: 'https://pearlalgo.io',
+    siteName: 'PEARL Algo',
+    images: [
+      {
+        url: '/pearl-emoji.png',
+        width: 512,
+        height: 512,
+        alt: 'PEARL Algo',
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'PEARL Algo — Algorithmic Trading Dashboard',
+    description: 'Live algorithmic trading on MNQ futures. Real-time charts, trade analytics, and performance tracking.',
+    images: ['/pearl-emoji.png'],
   },
   appleWebApp: {
     capable: true,

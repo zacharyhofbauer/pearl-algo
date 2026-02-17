@@ -67,7 +67,7 @@
 }
 
 /* Mobile chart actions - below info bar, smaller */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .chart-actions {
     top: 32px;
     left: 6px;
@@ -240,7 +240,7 @@
 }
 
 /* Mobile - compact, everything fits */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .chart-info-bar {
     padding: 3px 6px;
     gap: 5px;

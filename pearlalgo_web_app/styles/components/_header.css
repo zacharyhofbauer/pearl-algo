@@ -490,7 +490,7 @@
 .header-legend .legend-marker.loss { color: var(--color-loss-exit); }  /* Loss exit - orange */
 
 /* Mobile Responsive */
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   /* Compact mobile header - show all data */
   .header-combined {
     margin-bottom: 4px;

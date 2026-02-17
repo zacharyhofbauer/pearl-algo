@@ -53,7 +53,11 @@ export async function GET(request: Request) {
   try {
     const raw = await runExport(mode, limit, offset)
     const data = JSON.parse(raw)
-    return NextResponse.json(data)
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800',
+      },
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })

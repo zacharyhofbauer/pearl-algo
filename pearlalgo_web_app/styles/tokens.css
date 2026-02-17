@@ -189,3 +189,16 @@
   --scrollbar-width: 8px;
   --scrollbar-width-thin: 6px;
 }
+
+/*
+ * Canonical Responsive Breakpoints
+ * (CSS custom properties cannot be used in @media queries,
+ *  so these are documented here as reference for all CSS files)
+ *
+ *   480px  — Small phone (compact layout, stacked elements)
+ *   640px  — Large phone / small tablet (nav collapses, cards stack)
+ *   768px  — Tablet (landing goes mobile, archive goes 2-col stats)
+ *   1024px — Desktop (full layout)
+ *   1440px — Wide desktop (extra breathing room)
+ *   2200px — Ultrawide (expanded chart, multi-column panels)
+ */
