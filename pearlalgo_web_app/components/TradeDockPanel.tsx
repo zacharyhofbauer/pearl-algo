@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import type { DirectionBreakdown, Position, StatusBreakdown } from '@/stores'
+import type { DirectionBreakdown, Position, StatusBreakdown, SignalRejections, LastSignalDecision } from '@/stores'
 import { apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
 import {
@@ -78,9 +78,13 @@ interface TradeDockPanelProps {
   onRefresh?: () => void
   /** Risk metrics from agent state (Sharpe, Sortino, drawdown, streaks, etc.) */
   riskMetrics?: RiskMetrics | null
+  /** Signal rejections in last 24h */
+  signalRejections?: SignalRejections | null
+  /** Last signal decision made by the agent */
+  lastSignalDecision?: LastSignalDecision | null
 }
 
-type Tab = 'open' | 'recent'
+type Tab = 'positions' | 'history' | 'stats' | 'signals'
 
 function TradeDockPanel({
   positions,
@@ -99,8 +103,10 @@ function TradeDockPanel({
   activeTradesCount,
   onRefresh,
   riskMetrics,
+  signalRejections,
+  lastSignalDecision,
 }: TradeDockPanelProps) {
-  const [tab, setTab] = useState<Tab>('open')
+  const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(true)
   const [showPerf, setShowPerf] = useState(true)
@@ -270,30 +276,23 @@ function TradeDockPanel({
       >
         <div className="trade-dock">
           <div className="trade-dock-tabs" role="tablist" aria-label="Trades">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'open'}
-              className={`trade-dock-tab ${tab === 'open' ? 'active' : ''}`}
-              onClick={() => {
-                setTab('open')
-                setExpandedId(null)
-              }}
-            >
-              Open <span className="trade-dock-count">{openCount}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'recent'}
-              className={`trade-dock-tab ${tab === 'recent' ? 'active' : ''}`}
-              onClick={() => {
-                setTab('recent')
-                setExpandedId(null)
-              }}
-            >
-              Recent <span className="trade-dock-count">{recentCount}</span>
-            </button>
+            {([
+              { id: 'positions' as Tab, label: 'Positions', count: openCount },
+              { id: 'history' as Tab, label: 'History', count: recentCount },
+              { id: 'stats' as Tab, label: 'Stats' },
+              { id: 'signals' as Tab, label: 'Signals' },
+            ]).map(({ id, label, count }) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={`trade-dock-tab ${tab === id ? 'active' : ''}`}
+                onClick={() => { setTab(id); setExpandedId(null) }}
+              >
+                {label}{count !== undefined ? <span className="trade-dock-count">{count}</span> : null}
+              </button>
+            ))}
 
             <div className="trade-dock-spacer" />
 
@@ -306,19 +305,10 @@ function TradeDockPanel({
           </div>
 
           <div className="trade-dock-content">
+            {/* ── Stats Tab ── */}
+            {tab === 'stats' && (
+              <>
             {performanceSummary && (
-              <div className="trade-stats-summary-wrapper">
-                <button
-                  className="trade-stats-summary-toggle"
-                  onClick={() => setShowPerf(!showPerf)}
-                  type="button"
-                  aria-expanded={showPerf}
-                >
-                  <span className="trade-stats-summary-label">Performance</span>
-                  <span className="trade-stats-summary-icon" aria-hidden="true">{showPerf ? '▲' : '▼'}</span>
-                </button>
-
-                {showPerf && (
                   <div className="trade-perf-strip">
                     {([
                       ['Today', performanceSummary.td],
@@ -334,16 +324,13 @@ function TradeDockPanel({
                           {p.pnl >= 0 ? '+' : '-'}${Math.abs(p.pnl).toFixed(0)}
                         </div>
                         <div className="trade-perf-sub">
-                          {p.trades} trades • {p.win_rate.toFixed(0)}%
+                          {p.trades} trades &bull; {p.win_rate.toFixed(0)}%
                         </div>
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
             )}
 
-            {/* Risk Metrics: Sharpe, Sortino, Profit Factor, Expectancy, Streaks, Drawdown */}
             {riskMetrics && (
               <div className="trade-stats-summary-wrapper">
                 <button
@@ -418,72 +405,122 @@ function TradeDockPanel({
               </div>
             )}
 
-            {tab === 'recent' && hasSummaryData && (
-              <div className="trade-stats-summary-wrapper">
-                <button
-                  className="trade-stats-summary-toggle"
-                  onClick={() => setShowSummary(!showSummary)}
-                  type="button"
-                  aria-expanded={showSummary}
-                >
-                  <span className="trade-stats-summary-label">Trade Stats</span>
-                  <span className="trade-stats-summary-icon" aria-hidden="true">{showSummary ? '▲' : '▼'}</span>
-                </button>
+            {hasSummaryData && (
+              <div className="trade-stats-summary">
+                {directionBreakdown && (
+                  <div className="trade-stats-row">
+                    <span className="trade-stats-label">Direction:</span>
+                    <div className="trade-stats-values">
+                      <span className="direction-long">
+                        LONG: {directionBreakdown.long.count} ({formatSummaryPnL(directionBreakdown.long.pnl)})
+                      </span>
+                      <span className="direction-short">
+                        SHORT: {directionBreakdown.short.count} ({formatSummaryPnL(directionBreakdown.short.pnl)})
+                      </span>
+                    </div>
+                  </div>
+                )}
 
-                {showSummary && (
-                  <div className="trade-stats-summary">
-                    {directionBreakdown && (
-                      <div className="trade-stats-row">
-                        <span className="trade-stats-label">Direction:</span>
-                        <div className="trade-stats-values">
-                          <span className="direction-long">
-                            LONG: {directionBreakdown.long.count} ({formatSummaryPnL(directionBreakdown.long.pnl)})
-                          </span>
-                          <span className="direction-short">
-                            SHORT: {directionBreakdown.short.count} ({formatSummaryPnL(directionBreakdown.short.pnl)})
-                          </span>
-                        </div>
-                      </div>
-                    )}
+                {statusBreakdown && (
+                  <div className="trade-stats-row">
+                    <span className="trade-stats-label">Status:</span>
+                    <div className="trade-stats-values">
+                      <span className="badge-entered">{statusBreakdown.entered} Active</span>
+                      <span className="badge-exited">{statusBreakdown.exited} Closed</span>
+                      {statusBreakdown.cancelled > 0 && (
+                        <span className="badge-cancelled">{statusBreakdown.cancelled} Cancelled</span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-                    {statusBreakdown && (
-                      <div className="trade-stats-row">
-                        <span className="trade-stats-label">Status:</span>
-                        <div className="trade-stats-values">
-                          <span className="badge-entered">{statusBreakdown.entered} Active</span>
-                          <span className="badge-exited">{statusBreakdown.exited} Closed</span>
-                          {statusBreakdown.cancelled > 0 && (
-                            <span className="badge-cancelled">{statusBreakdown.cancelled} Cancelled</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {sortedExitReasons.length > 0 && (
-                      <div className="exit-reason-stats">
-                        <span className="trade-stats-label">Win% by Exit:</span>
-                        <div className="exit-reason-grid">
-                          {sortedExitReasons.map(([reason, stats]) => {
-                            const winRate = (stats.wins / stats.total) * 100
-                            return (
-                              <div key={reason} className="exit-reason-stat">
-                                <span className="exit-reason-name">{reason}</span>
-                                <span className={`exit-reason-winrate ${winRate >= 50 ? 'positive' : 'negative'}`}>
-                                  {winRate.toFixed(0)}%
-                                </span>
-                                <span className="exit-reason-count">({stats.total})</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
+                {sortedExitReasons.length > 0 && (
+                  <div className="exit-reason-stats">
+                    <span className="trade-stats-label">Win% by Exit:</span>
+                    <div className="exit-reason-grid">
+                      {sortedExitReasons.map(([reason, stats]) => {
+                        const winRate = (stats.wins / stats.total) * 100
+                        return (
+                          <div key={reason} className="exit-reason-stat">
+                            <span className="exit-reason-name">{reason}</span>
+                            <span className={`exit-reason-winrate ${winRate >= 50 ? 'positive' : 'negative'}`}>
+                              {winRate.toFixed(0)}%
+                            </span>
+                            <span className="exit-reason-count">({stats.total})</span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {tab === 'open' ? (
+            {!performanceSummary && !riskMetrics && !hasSummaryData && (
+              <div className="trade-dock-empty">No stats data available</div>
+            )}
+              </>
+            )}
+
+            {/* ── Signals Tab ── */}
+            {tab === 'signals' && (
+              <div className="signals-tab-content">
+                {signalRejections && (
+                  <div className="signals-section">
+                    <div className="signals-section-title">Signal Rejections (24h)</div>
+                    {([
+                      ['Direction Gating', signalRejections.direction_gating],
+                      ['ML Filter', signalRejections.ml_filter],
+                      ['Circuit Breaker', signalRejections.circuit_breaker],
+                      ['Session Filter', signalRejections.session_filter],
+                      ['Max Positions', signalRejections.max_positions],
+                    ] as Array<[string, number]>).map(([label, count]) => (
+                      <div key={label} className="signals-row">
+                        <span className="signals-label">{label}</span>
+                        <span className={`signals-value ${count > 0 ? 'negative' : ''}`}>{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {lastSignalDecision && (
+                  <div className="signals-section">
+                    <div className="signals-section-title">Last Signal Decision</div>
+                    <div className="signals-row">
+                      <span className="signals-label">Action</span>
+                      <span className={`signals-value ${lastSignalDecision.action === 'execute' ? 'positive' : 'negative'}`}>
+                        {lastSignalDecision.action === 'execute' ? 'EXECUTED' : 'SKIPPED'}
+                      </span>
+                    </div>
+                    <div className="signals-row">
+                      <span className="signals-label">Type</span>
+                      <span className="signals-value">{lastSignalDecision.signal_type}</span>
+                    </div>
+                    <div className="signals-row">
+                      <span className="signals-label">ML Prob</span>
+                      <span className="signals-value">{(lastSignalDecision.ml_probability * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="signals-row">
+                      <span className="signals-label">Reason</span>
+                      <span className="signals-value">{lastSignalDecision.reason}</span>
+                    </div>
+                    {lastSignalDecision.timestamp && (
+                      <div className="signals-row">
+                        <span className="signals-label">Time</span>
+                        <span className="signals-value">{formatRelativeTime(lastSignalDecision.timestamp)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!signalRejections && !lastSignalDecision && (
+                  <div className="trade-dock-empty">No signal data available</div>
+                )}
+              </div>
+            )}
+
+            {/* ── Positions Tab ── */}
+            {tab === 'positions' ? (
               openCount === 0 ? (
                 <div className="trade-dock-empty">No open positions</div>
               ) : (
@@ -686,7 +723,10 @@ function TradeDockPanel({
                   )}
                 </>
               )
-            ) : recentCount === 0 ? (
+            ) : null}
+
+            {/* ── History Tab ── */}
+            {tab === 'history' && (recentCount === 0 ? (
               <div className="trade-dock-empty">No recent trades</div>
             ) : (
               <>
@@ -798,7 +838,7 @@ function TradeDockPanel({
                   </button>
                 )}
               </>
-            )}
+            ))}
           </div>
         </div>
       </DataPanel>

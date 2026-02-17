@@ -77,7 +77,7 @@ describe('TradeDockPanel', () => {
     it('shows "No recent trades" when switching to Recent tab with empty data', () => {
       render(<TradeDockPanel positions={[]} recentTrades={[]} />)
 
-      const recentTab = screen.getByRole('tab', { name: /recent/i })
+      const recentTab = screen.getByRole('tab', { name: /history/i })
       fireEvent.click(recentTab)
 
       expect(screen.getByText('No recent trades')).toBeInTheDocument()
@@ -115,9 +115,8 @@ describe('TradeDockPanel', () => {
         />
       )
 
-      // The "Open" tab badge shows "2"
-      const openTab = screen.getByRole('tab', { name: /open/i })
-      expect(openTab).toHaveTextContent('2')
+      const posTab = screen.getByRole('tab', { name: /positions/i })
+      expect(posTab).toHaveTextContent('2')
     })
   })
 
@@ -159,7 +158,7 @@ describe('TradeDockPanel', () => {
       )
 
       // Switch to Recent tab
-      fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }))
 
       expect(screen.getByText('LONG')).toBeInTheDocument()
       expect(screen.getByText('SHORT')).toBeInTheDocument()
@@ -190,7 +189,7 @@ describe('TradeDockPanel', () => {
         />
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }))
 
       expect(screen.getByText('+$250.50')).toBeInTheDocument()
     })
@@ -203,7 +202,7 @@ describe('TradeDockPanel', () => {
         />
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }))
 
       expect(screen.getByText('-$75.25')).toBeInTheDocument()
     })
@@ -216,7 +215,7 @@ describe('TradeDockPanel', () => {
         />
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }))
 
       // The "—" dash is used for null P&L
       const pnlElements = screen.getAllByText('—')
@@ -317,7 +316,7 @@ describe('TradeDockPanel', () => {
         />
       )
 
-      fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /history/i }))
 
       // Should not crash, dashes should be present
       const dashes = screen.getAllByText('—')
@@ -355,7 +354,8 @@ describe('TradeDockPanel', () => {
           performanceSummary={SAMPLE_PERFORMANCE}
         />
       )
-      expect(screen.getByText('Performance')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: /stats/i }))
+      expect(screen.getByText('Today')).toBeInTheDocument()
     })
 
     it('should show Today, Yesterday, Week, Month, Year, All Time', () => {
@@ -366,6 +366,7 @@ describe('TradeDockPanel', () => {
           performanceSummary={SAMPLE_PERFORMANCE}
         />
       )
+      fireEvent.click(screen.getByRole('tab', { name: /stats/i }))
       expect(screen.getByText('Today')).toBeInTheDocument()
       expect(screen.getByText('Yesterday')).toBeInTheDocument()
       expect(screen.getByText('Week')).toBeInTheDocument()
@@ -412,7 +413,8 @@ describe('TradeDockPanel', () => {
           riskMetrics={SAMPLE_RISK_METRICS}
         />
       )
-      expect(screen.getByText('Risk Metrics')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: /stats/i }))
+      expect(screen.getByText('Sharpe:')).toBeInTheDocument()
       expect(screen.getByText('Sharpe:')).toBeInTheDocument()
       expect(screen.getByText('1.5')).toBeInTheDocument()
     })

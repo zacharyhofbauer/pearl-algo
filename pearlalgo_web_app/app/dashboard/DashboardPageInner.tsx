@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
 import PearlHeaderBar from '@/components/PearlHeaderBar'
-import ChallengePanel from '@/components/ChallengePanel'
+import AccountStrip from '@/components/AccountStrip'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
@@ -399,9 +399,7 @@ export default function DashboardPageInner() {
           <div className="header-brand">
             <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
             <div className="header-titles">
-              <span className="header-breadcrumb">Dashboard · Tradovate Paper</span>
-              <span className="header-symbol">MNQ</span>
-              <h1 className="header-app-name">Pearl Algo Web App</h1>
+              <span className="header-breadcrumb">Dashboard · Tradovate Paper · {agentState?.config?.symbol || 'MNQ'}</span>
             </div>
           </div>
 
@@ -646,31 +644,34 @@ export default function DashboardPageInner() {
         chart={renderChart()}
         panels={
           <>
-            <ErrorBoundary panelName="Challenge">
-              <ChallengePanel
-                challenge={agentState?.challenge ?? null}
-                equityCurve={agentState?.equity_curve ?? []}
-              />
-            </ErrorBoundary>
+            <AccountStrip
+              balance={agentState?.challenge?.current_balance ?? null}
+              totalPnl={agentState?.challenge?.pnl ?? null}
+              dailyPnl={agentState?.daily_pnl ?? null}
+              trades={agentState?.challenge?.trades ?? agentState?.daily_trades ?? null}
+              winRate={agentState?.challenge?.win_rate ?? null}
+            />
             <ErrorBoundary panelName="Trades">
               <TradeDockPanel
-            positions={positions}
-            recentTrades={recentTrades}
-            symbol={agentState?.config?.symbol || 'MNQ'}
-            currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-            openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
-            performanceSummary={performanceSummary}
-            directionBreakdown={agentState?.analytics?.direction_breakdown || null}
-            statusBreakdown={agentState?.analytics?.status_breakdown || null}
-            maxOpenRows={6}
-            maxRecentRows={10}
-            dailyPnL={agentState?.daily_pnl}
-            dailyWins={agentState?.daily_wins}
-            dailyLosses={agentState?.daily_losses}
-            activeTradesCount={agentState?.active_trades_count}
-            onRefresh={handleTradeRefresh}
-            riskMetrics={agentState?.risk_metrics || null}
-          />
+                positions={positions}
+                recentTrades={recentTrades}
+                symbol={agentState?.config?.symbol || 'MNQ'}
+                currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+                openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
+                performanceSummary={performanceSummary}
+                directionBreakdown={agentState?.analytics?.direction_breakdown || null}
+                statusBreakdown={agentState?.analytics?.status_breakdown || null}
+                maxOpenRows={6}
+                maxRecentRows={10}
+                dailyPnL={agentState?.daily_pnl}
+                dailyWins={agentState?.daily_wins}
+                dailyLosses={agentState?.daily_losses}
+                activeTradesCount={agentState?.active_trades_count}
+                onRefresh={handleTradeRefresh}
+                riskMetrics={agentState?.risk_metrics || null}
+                signalRejections={agentState?.signal_rejections_24h || null}
+                lastSignalDecision={agentState?.last_signal_decision || null}
+              />
             </ErrorBoundary>
           </>
         }

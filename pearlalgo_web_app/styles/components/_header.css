@@ -49,15 +49,15 @@
 
 .header-titles {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: baseline;
+  gap: var(--space-2);
 }
 
 .header-breadcrumb {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
 }
 
 .header-symbol {
@@ -928,7 +928,6 @@
 }
 
 .main-content {
-  padding-top: var(--pearl-header-height);
   overscroll-behavior-y: contain;
 }
 
@@ -978,10 +977,8 @@
 }
 
 .pearl-header-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  width: 100%;
   height: var(--pearl-header-height);
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
@@ -1035,15 +1032,6 @@
 .pearl-header-bar.expanded {
   background: var(--bg-elevated);
   border-bottom-color: var(--accent-cyan);
-}
-
-/* Backdrop overlay when dropdown is open */
-.pearl-header-bar.expanded::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  top: var(--pearl-header-height);
-  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
   z-index: -1;
   pointer-events: none;
@@ -2262,11 +2250,6 @@
 @supports (padding-top: env(safe-area-inset-top)) {
   .pearl-header-bar {
     padding-top: env(safe-area-inset-top);
-    height: calc(var(--pearl-header-height) + env(safe-area-inset-top));
-  }
-
-  .main-content {
-    padding-top: calc(var(--pearl-header-height) + env(safe-area-inset-top));
   }
 }
 

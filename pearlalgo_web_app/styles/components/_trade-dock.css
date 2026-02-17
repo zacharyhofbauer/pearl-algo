@@ -1,5 +1,97 @@
 /* TradeDockPanel - Trade Dock, Recent Trades, Trade Stats */
 
+/* ── Account Strip ──────────────────────────────────────────────────────── */
+
+.account-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-5);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.account-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.account-strip-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.account-strip-value {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.account-strip-value.positive { color: var(--accent-green); }
+.account-strip-value.negative { color: var(--accent-red); }
+
+@media (max-width: 480px) {
+  .account-strip {
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+  .account-strip-value {
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* ── Signals Tab ────────────────────────────────────────────────────────── */
+
+.signals-tab-content {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.signals-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.signals-section-title {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.signals-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: var(--space-1) 0;
+}
+
+.signals-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.signals-value {
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.signals-value.positive { color: var(--accent-green); }
+.signals-value.negative { color: var(--accent-red); }
+
 
 /* ============================================================================
    SECTION 1: Recent Trades Panel Styles
