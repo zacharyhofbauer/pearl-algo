@@ -116,99 +116,113 @@ def _apply_observance_rule(holiday_date: date) -> date:
 def get_cme_holidays_for_year(year: int) -> Set[date]:
     """
     Get CME equity futures holidays for a given year.
-    
-    Based on CME holiday calendar. Includes:
+
+    These are days when CME Globex is **fully closed** (no trading at all).
+    Days where Globex trades with an early close (MLK, Presidents Day,
+    Memorial Day, Labor Day) are handled in ``get_cme_early_closes_for_year``.
+
+    Fully closed:
     - New Year's Day (observed)
-    - Martin Luther King Jr. Day (3rd Monday of January)
-    - Presidents Day (3rd Monday of February)
     - Good Friday
-    - Memorial Day (last Monday of May)
     - Independence Day (observed)
-    - Labor Day (1st Monday of September)
     - Thanksgiving Day (4th Thursday of November)
     - Christmas Day (observed)
-    
+
     Returns:
         Set of holiday dates for the year
     """
     holidays: Set[date] = set()
-    
+
     # Fixed holidays with observance rules
     # New Year's Day
     new_years = _apply_observance_rule(date(year, 1, 1))
     holidays.add(new_years)
-    
-    # Independence Day
-    july_4th = _apply_observance_rule(date(year, 7, 4))
-    holidays.add(july_4th)
-    
-    # Christmas Day
-    christmas = _apply_observance_rule(date(year, 12, 25))
-    holidays.add(christmas)
-    
-    # Variable holidays
-    # MLK Day: 3rd Monday of January
-    mlk_day = _get_nth_weekday_of_month(year, 1, 0, 3)  # 0=Monday
-    holidays.add(mlk_day)
-    
-    # Presidents Day: 3rd Monday of February
-    presidents_day = _get_nth_weekday_of_month(year, 2, 0, 3)
-    holidays.add(presidents_day)
-    
+
     # Good Friday
     good_friday = _calculate_good_friday(year)
     holidays.add(good_friday)
-    
-    # Memorial Day: Last Monday of May
-    memorial_day = _get_last_weekday_of_month(year, 5, 0)
-    holidays.add(memorial_day)
-    
-    # Labor Day: 1st Monday of September
-    labor_day = _get_nth_weekday_of_month(year, 9, 0, 1)
-    holidays.add(labor_day)
-    
+
+    # Independence Day
+    july_4th = _apply_observance_rule(date(year, 7, 4))
+    holidays.add(july_4th)
+
     # Thanksgiving: 4th Thursday of November
     thanksgiving = _get_nth_weekday_of_month(year, 11, 3, 4)  # 3=Thursday
     holidays.add(thanksgiving)
-    
+
+    # Christmas Day
+    christmas = _apply_observance_rule(date(year, 12, 25))
+    holidays.add(christmas)
+
     return holidays
 
 
 def get_cme_early_closes_for_year(year: int) -> Dict[date, int]:
     """
     Get CME equity futures early close times for a given year.
-    
-    Common early closes (12:15 PM CT = 1:15 PM ET):
+
+    CME Globex equity index futures trade on certain holidays but close
+    early (typically 1:00 PM ET / 12:00 PM CT).  These are NOT fully
+    closed — the overnight Globex session runs normally and only the
+    daytime portion is shortened.
+
+    Early-close holidays (Globex open, early close ~1 PM ET):
+    - MLK Day (3rd Monday of January)
+    - Presidents Day (3rd Monday of February)
+    - Memorial Day (last Monday of May)
+    - Labor Day (1st Monday of September)
+
+    Early-close eves:
     - Day before Independence Day (if weekday)
     - Day after Thanksgiving (Black Friday)
     - Christmas Eve (if weekday)
     - New Year's Eve (if weekday)
-    
+
     Returns:
         Dict mapping dates to close hour (in ET)
     """
     early_closes: Dict[date, int] = {}
-    
+
+    # --- Holiday early closes (Globex open, RTH closed, early close) ---
+
+    # MLK Day: 3rd Monday of January
+    mlk_day = _get_nth_weekday_of_month(year, 1, 0, 3)
+    early_closes[mlk_day] = 13
+
+    # Presidents Day: 3rd Monday of February
+    presidents_day = _get_nth_weekday_of_month(year, 2, 0, 3)
+    early_closes[presidents_day] = 13
+
+    # Memorial Day: Last Monday of May
+    memorial_day = _get_last_weekday_of_month(year, 5, 0)
+    early_closes[memorial_day] = 13
+
+    # Labor Day: 1st Monday of September
+    labor_day = _get_nth_weekday_of_month(year, 9, 0, 1)
+    early_closes[labor_day] = 13
+
+    # --- Eve / half-day early closes ---
+
     # Day before Independence Day (if weekday)
     july_3rd = date(year, 7, 3)
     if july_3rd.weekday() < 5:  # Weekday
-        early_closes[july_3rd] = 13  # 1:15 PM ET
-    
+        early_closes[july_3rd] = 13
+
     # Black Friday (day after Thanksgiving)
     thanksgiving = _get_nth_weekday_of_month(year, 11, 3, 4)
     black_friday = thanksgiving + timedelta(days=1)
     early_closes[black_friday] = 13
-    
+
     # Christmas Eve (if weekday)
     christmas_eve = date(year, 12, 24)
     if christmas_eve.weekday() < 5:
         early_closes[christmas_eve] = 13
-    
+
     # New Year's Eve (if weekday)
     new_years_eve = date(year, 12, 31)
     if new_years_eve.weekday() < 5:
         early_closes[new_years_eve] = 13
-    
+
     return early_closes
 
 
@@ -315,14 +329,17 @@ class MarketHours:
             logger.debug(f"Market closed: Holiday override ({et_date.year}-{et_date.month}-{et_date.day})")
             return False
 
-        # Check for early close (calculated + overrides)
+        # Check for early close (calculated + overrides).
+        # Early close means the daytime session ends at ``early_close_hour`` ET,
+        # but the normal overnight Globex session reopens at 6 PM ET.
+        # So we only block the window [early_close_hour, 18:00) ET.
         calculated_early_closes = self._get_early_closes_for_year(et_date.year)
         early_close_hour = calculated_early_closes.get(et_date)
         if early_close_hour is None:
             early_close_hour = self.early_closes.get((et_date.year, et_date.month, et_date.day))
         if early_close_hour is not None:
-            if et_time >= time(early_close_hour, 0):
-                logger.debug(f"Market closed: Early close at {early_close_hour}:00 ET")
+            if time(early_close_hour, 0) <= et_time < time(18, 0):
+                logger.debug(f"Market closed: Early close at {early_close_hour}:00 ET (reopens 18:00 ET)")
                 return False
 
         # CME futures daily maintenance break (Mon–Thu 17:00–18:00 ET).

@@ -192,6 +192,7 @@ async def main():
         state_dir=state_dir,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
+        service_config=config_data,
     )
     service = MarketAgentService(deps=deps)
 

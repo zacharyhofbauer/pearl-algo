@@ -938,18 +938,34 @@ def check_key_level_signals(
 def check_trading_session(dt: datetime, config: Dict) -> bool:
     """
     Check if within trading hours - from Trading Sessions.pine.
-    
-    Supports overnight sessions (e.g., 18:00→16:10) where start > end.
+
+    Supports overnight sessions (e.g., 18:00→15:45) where start > end.
     In that case, the session spans midnight: current >= start OR current <= end.
+
+    Session hours are resolved from (in priority order):
+    1. ``config["session"]["start_time"]`` / ``config["session"]["end_time"]`` (YAML format "HH:MM")
+    2. ``config["start_hour"]`` / ``config["end_hour"]`` (legacy integer keys)
     """
     try:
         et_tz = ZoneInfo("America/New_York")
         et_time = dt.astimezone(et_tz) if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(et_tz)
-        
-        start_time = dt_time(config["start_hour"], config["start_minute"])
-        end_time = dt_time(config["end_hour"], config["end_minute"])
+
+        # Prefer the nested ``session`` dict from YAML config when present.
+        session_cfg = config.get("session") if hasattr(config, "get") else None
+        if isinstance(session_cfg, dict) and "start_time" in session_cfg:
+            # Parse "HH:MM" strings
+            sh, sm = (int(x) for x in str(session_cfg["start_time"]).split(":"))
+            eh, em = (int(x) for x in str(session_cfg["end_time"]).split(":"))
+        else:
+            sh = config["start_hour"]
+            sm = config["start_minute"]
+            eh = config["end_hour"]
+            em = config["end_minute"]
+
+        start_time = dt_time(sh, sm)
+        end_time = dt_time(eh, em)
         current_time = et_time.time()
-        
+
         # Handle overnight sessions (start > end means session crosses midnight)
         if start_time > end_time:
             # Overnight: in session if current >= start OR current <= end
