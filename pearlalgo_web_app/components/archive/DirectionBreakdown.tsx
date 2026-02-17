@@ -1,5 +1,7 @@
 'use client'
 
+import React from 'react'
+
 interface DirectionStats {
   trades: number
   wins: number
@@ -18,7 +20,7 @@ function formatPnL(n: number): string {
   return n >= 0 ? `+$${s}` : `-$${s}`
 }
 
-export default function DirectionBreakdown({ directions }: Props) {
+const DirectionBreakdown = React.memo(function DirectionBreakdown({ directions }: Props) {
   const long = directions['long']
   const short = directions['short']
   if (!long && !short) return null
@@ -51,4 +53,5 @@ export default function DirectionBreakdown({ directions }: Props) {
       )}
     </div>
   )
-}
+})
+export default DirectionBreakdown

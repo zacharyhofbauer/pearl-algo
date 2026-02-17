@@ -138,7 +138,7 @@
 .uw-symbol {
   font-size: 16px;
   font-weight: 700;
-  color: #00d4ff;
+  color: var(--accent-cyan);
   letter-spacing: 0.5px;
 }
 
@@ -156,8 +156,8 @@
   font-weight: 700;
 }
 
-.uw-pnl.positive { color: #00e676; }
-.uw-pnl.negative { color: #ff5252; }
+.uw-pnl.positive { color: var(--accent-green); }
+.uw-pnl.negative { color: var(--accent-red); }
 
 .uw-trades {
   font-size: 12px;
@@ -191,7 +191,7 @@
 }
 
 .uw-tf-btn.active {
-  color: #00d4ff;
+  color: var(--accent-cyan);
   background: rgba(0, 212, 255, 0.15);
 }
 
@@ -208,12 +208,12 @@
 
 .uw-status.live {
   background: rgba(0, 230, 118, 0.12);
-  color: #00e676;
+  color: var(--accent-green);
 }
 
 .uw-status.stale {
   background: rgba(255, 82, 82, 0.12);
-  color: #ff5252;
+  color: var(--accent-red);
 }
 
 .uw-status-dot {

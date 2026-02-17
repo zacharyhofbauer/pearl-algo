@@ -110,13 +110,13 @@
 }
 
 .nav-context-dot.shadow {
-  background: #ffc107;
+  background: var(--accent-yellow);
   box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
 }
 
 .nav-context-dot.market-closed {
-  background: var(--accent-red, #ff5252);
-  box-shadow: 0 0 4px var(--accent-red, #ff5252);
+  background: var(--accent-red, var(--accent-red));
+  box-shadow: 0 0 4px var(--accent-red, var(--accent-red));
 }
 
 @keyframes nav-pulse-live {

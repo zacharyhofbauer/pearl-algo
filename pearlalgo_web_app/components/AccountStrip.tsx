@@ -1,5 +1,7 @@
 'use client'
 
+import React from 'react'
+
 interface AccountStripProps {
   balance: number | null
   totalPnl: number | null
@@ -22,7 +24,7 @@ function formatPnL(n: number | null): string {
   return n >= 0 ? `+$${formatted}` : `-$${formatted}`
 }
 
-export default function AccountStrip({ balance, totalPnl, dailyPnl, trades, winRate }: AccountStripProps) {
+const AccountStrip = React.memo(function AccountStrip({ balance, totalPnl, dailyPnl, trades, winRate }: AccountStripProps) {
   const tintClass = dailyPnl !== null ? (dailyPnl >= 0 ? 'tint-positive' : 'tint-negative') : ''
   return (
     <div className={`account-strip ${tintClass}`}>
@@ -52,4 +54,6 @@ export default function AccountStrip({ balance, totalPnl, dailyPnl, trades, winR
       </div>
     </div>
   )
-}
+})
+
+export default AccountStrip

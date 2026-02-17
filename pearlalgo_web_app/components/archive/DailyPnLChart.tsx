@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { createChart, IChartApi, HistogramData } from 'lightweight-charts'
 
 interface DayData {
@@ -15,7 +15,7 @@ interface DailyPnLChartProps {
   height?: number
 }
 
-export default function DailyPnLChart({ data, height = 200 }: DailyPnLChartProps) {
+const DailyPnLChart = React.memo(function DailyPnLChart({ data, height = 200 }: DailyPnLChartProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartApiRef = useRef<IChartApi | null>(null)
 
@@ -71,4 +71,5 @@ export default function DailyPnLChart({ data, height = 200 }: DailyPnLChartProps
   }
 
   return <div ref={chartRef} className="archive-daily-pnl-chart" />
-}
+})
+export default DailyPnLChart

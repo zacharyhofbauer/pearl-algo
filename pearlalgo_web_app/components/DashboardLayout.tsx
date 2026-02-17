@@ -16,7 +16,7 @@ interface DashboardLayoutProps {
   panels: React.ReactNode
 }
 
-export default function DashboardLayout({
+const DashboardLayout = React.memo(function DashboardLayout({
   isChartReady,
   pull,
   header,
@@ -60,4 +60,6 @@ export default function DashboardLayout({
       </main>
     </>
   )
-}
+})
+
+export default DashboardLayout

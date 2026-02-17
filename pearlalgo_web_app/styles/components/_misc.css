@@ -837,7 +837,7 @@
 
 .trade-ticker-item .ticker-direction.short {
   background: rgba(255, 110, 199, 0.15);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 .trade-ticker-item .ticker-pnl {

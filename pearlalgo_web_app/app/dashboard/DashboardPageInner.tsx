@@ -517,22 +517,11 @@ export default function DashboardPageInner() {
     <div className="chart-wrapper">
       {/* Agent/Execution offline banner */}
       {agentState && (agentState.running === false || agentState.execution_state?.enabled === false) && (
-        <div style={{
-          background: 'rgba(244, 67, 54, 0.15)',
-          border: '1px solid rgba(244, 67, 54, 0.4)',
-          borderRadius: 6,
-          padding: '8px 14px',
-          margin: '0 0 8px 0',
-          fontSize: '0.82rem',
-          color: 'var(--color-danger, #f44336)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <span style={{ fontWeight: 600 }}>
+        <div className="agent-offline-banner">
+          <span className="agent-offline-title">
             {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISABLED'}
           </span>
-          <span style={{ opacity: 0.7 }}>
+          <span className="agent-offline-message">
             {agentState.running === false
               ? 'The trading agent is not running. Data may be stale.'
               : 'Execution is disabled. Orders will not be placed.'}

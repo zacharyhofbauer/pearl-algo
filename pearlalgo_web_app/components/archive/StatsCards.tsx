@@ -1,5 +1,7 @@
 'use client'
 
+import React from 'react'
+
 interface StatsCardsProps {
   totalPnl: number
   totalTrades: number
@@ -34,7 +36,7 @@ function formatShortDate(dateStr: string): string {
   }
 }
 
-export default function StatsCards({
+const StatsCards = React.memo(function StatsCards({
   totalPnl, totalTrades, winRate, bestDay, bestDayDate,
   worstDay, worstDayDate, profitFactor, expectancy, avgHoldMinutes,
 }: StatsCardsProps) {
@@ -88,4 +90,5 @@ export default function StatsCards({
       )}
     </div>
   )
-}
+})
+export default StatsCards

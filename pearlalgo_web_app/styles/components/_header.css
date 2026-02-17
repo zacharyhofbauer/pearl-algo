@@ -303,11 +303,11 @@
 }
 .header-badges .gw-badge.ok {
   background: rgba(0, 230, 118, 0.10);
-  color: #00e676;
+  color: var(--accent-green);
 }
 .header-badges .gw-badge.error {
   background: rgba(255, 82, 82, 0.12);
-  color: #ff5252;
+  color: var(--accent-red);
 }
 
 /* Data freshness badge */
@@ -317,11 +317,11 @@
 }
 .header-badges .data-badge.ok {
   background: rgba(0, 230, 118, 0.10);
-  color: #00e676;
+  color: var(--accent-green);
 }
 .header-badges .data-badge.stale {
   background: rgba(255, 82, 82, 0.12);
-  color: #ff5252;
+  color: var(--accent-red);
 }
 
 /* Circuit breaker badge */
@@ -331,11 +331,11 @@
 }
 .header-badges .cb-badge.tripped {
   background: rgba(255, 82, 82, 0.15);
-  color: #ff5252;
+  color: var(--accent-red);
 }
 .header-badges .cb-badge.ok {
   background: rgba(0, 230, 118, 0.08);
-  color: #66bb6a;
+  color: var(--accent-green-light);
 }
 
 /* Direction gating badge */
@@ -345,13 +345,13 @@
 }
 .header-badges .gate-badge.blocking {
   background: rgba(255, 193, 7, 0.12);
-  color: #ffc107;
+  color: var(--accent-yellow);
 }
 
 /* Shadow counters badge */
 .header-badges .shadow-badge {
   background: rgba(171, 71, 188, 0.10);
-  color: #ce93d8;
+  color: var(--accent-purple-light);
   opacity: 0.8;
 }
 
@@ -362,7 +362,7 @@
 }
 .header-badges .ml-badge.good {
   background: rgba(0, 230, 118, 0.08);
-  color: #66bb6a;
+  color: var(--accent-green-light);
 }
 
 /* Shadow net saved badge */
@@ -373,11 +373,11 @@
 }
 .header-badges .saved-badge.positive {
   background: rgba(0, 230, 118, 0.10);
-  color: #00e676;
+  color: var(--accent-green);
 }
 .header-badges .saved-badge.negative {
   background: rgba(255, 82, 82, 0.10);
-  color: #ff5252;
+  color: var(--accent-red);
 }
 
 /* Health Indicators (legacy - kept for backward compat) */
@@ -819,6 +819,7 @@
   gap: 8px;
   overflow: hidden;
   transition: height 0.25s ease, opacity 0.2s ease;
+  will-change: height, opacity;
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;

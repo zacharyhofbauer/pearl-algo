@@ -148,9 +148,9 @@
   height: 2px;
   border-radius: 1px;
 }
-.lg-line.ema9 { background: #00d4ff; }
-.lg-line.ema21 { background: #ffc107; }
-.lg-line.vwap { background: #2962ff; }
+.lg-line.ema9 { background: var(--accent-cyan); }
+.lg-line.ema21 { background: var(--accent-yellow); }
+.lg-line.vwap { background: var(--accent-blue); }
 
 .mk {
   font-size: clamp(8px, 2vw, 10px);
@@ -327,9 +327,9 @@
 }
 
 /* Chart line colors - exact match */
-.legend-line.ema9 { background: #00d4ff; }
-.legend-line.ema21 { background: #ffc107; }
-.legend-line.vwap { background: #2962ff; }
+.legend-line.ema9 { background: var(--accent-cyan); }
+.legend-line.ema21 { background: var(--accent-yellow); }
+.legend-line.vwap { background: var(--accent-blue); }
 
 /* Marker colors - exact match */
 .marker-sym {

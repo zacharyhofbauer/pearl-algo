@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import type { WebSocketStatus } from '@/hooks/useWebSocket'
 import { formatTimeAgo } from '@/utils/formatting'
 
@@ -16,7 +16,7 @@ interface DataFreshnessIndicatorProps {
   onGoLive?: () => void  // Chart action: scroll to real time
 }
 
-export default function DataFreshnessIndicator({
+const DataFreshnessIndicator = React.memo(function DataFreshnessIndicator({
   lastUpdate,
   wsStatus,
   dataSource,
@@ -300,4 +300,5 @@ export default function DataFreshnessIndicator({
       )}
     </div>
   )
-}
+})
+export default DataFreshnessIndicator

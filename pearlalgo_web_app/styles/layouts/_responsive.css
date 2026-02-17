@@ -59,141 +59,6 @@
   }
 
   /* ===================
-     PEARL AI PANEL - Priority styling
-     =================== */
-  .pearl-insights-panel {
-    border: 1px solid rgba(171, 71, 188, 0.4);
-    box-shadow: 0 2px 12px rgba(171, 71, 188, 0.15);
-  }
-
-  .pearl-insights-panel .data-panel-header {
-    background: linear-gradient(90deg, rgba(171, 71, 188, 0.2), rgba(0, 212, 255, 0.15));
-  }
-
-  .pearl-insights {
-    gap: 12px;
-  }
-
-  /* AI Pills - horizontal scroll or wrap */
-  .pearl-ai-status {
-    gap: 8px;
-  }
-
-  .pearl-ai-status .ai-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .ai-pill {
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 9px;
-  }
-
-  .ai-pill-label {
-    font-size: 8px;
-  }
-
-  .ai-pill-mode {
-    font-size: 8px;
-    padding: 1px 4px;
-  }
-
-  /* AI Lift & Gating - compact inline */
-  .ai-lift-compact,
-  .ai-gating-compact {
-    font-size: 10px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.2);
-  }
-
-  /* Current Insight Card */
-  .pearl-current-insight {
-    padding: 10px;
-    border-radius: 8px;
-  }
-
-  .insight-header {
-    margin-bottom: 6px;
-    gap: 6px;
-  }
-
-  .insight-icon {
-    font-size: 14px;
-  }
-
-  .insight-label {
-    font-size: 10px;
-  }
-
-  .insight-message {
-    font-size: 12px;
-    line-height: 1.4;
-    margin-bottom: 8px;
-  }
-
-  .insight-action {
-    font-size: 11px;
-    margin-bottom: 8px;
-  }
-
-  .insight-buttons {
-    gap: 8px;
-  }
-
-  .pearl-btn {
-    padding: 6px 12px;
-    font-size: 11px;
-    border-radius: 6px;
-  }
-
-  /* No Insight State */
-  .pearl-no-insight {
-    padding: 12px;
-    font-size: 12px;
-  }
-
-  /* Shadow Impact Row - 2x2 grid */
-  .shadow-impact-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-  }
-
-  .shadow-impact-row .impact-item {
-    padding: 6px 4px;
-    text-align: center;
-  }
-
-  .shadow-impact-row .impact-value {
-    font-size: 12px;
-  }
-
-  .shadow-impact-row .impact-label {
-    font-size: 8px;
-  }
-
-  /* Shadow Details */
-  .shadow-details {
-    font-size: 11px;
-  }
-
-  .shadow-stats-compact {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 10px;
-  }
-
-  .history-toggle-btn,
-  .details-toggle {
-    font-size: 10px;
-    padding: 4px 8px;
-  }
-
-  /* ===================
      PERFORMANCE PANEL
      =================== */
   .stats-grid {
@@ -212,7 +77,7 @@
   }
 
   .stat-card .stat-value {
-    font-size: 13px;
+    font-size: clamp(11px, 2.5vw, 13px);
   }
 
   /* ===================
@@ -239,7 +104,7 @@
   }
 
   .challenge-stat .value {
-    font-size: 12px;
+    font-size: clamp(10px, 2.2vw, 12px);
   }
 
   /* ===================
@@ -260,18 +125,18 @@
   }
 
   .risk-item .risk-value {
-    font-size: 13px;
+    font-size: clamp(11px, 2.5vw, 13px);
   }
 
   /* ===================
      MARKET REGIME PANEL
      =================== */
   .regime-display {
-    padding: 10px;
+    padding: clamp(8px, 2vw, 10px);
   }
 
   .regime-name {
-    font-size: 14px;
+    font-size: clamp(12px, 2.5vw, 14px);
   }
 
   .regime-confidence {
@@ -292,15 +157,15 @@
   }
 
   .position-card {
-    padding: 10px;
+    padding: clamp(8px, 2vw, 10px);
   }
 
   .position-header {
-    font-size: 12px;
+    font-size: clamp(10px, 2.2vw, 12px);
   }
 
   .position-pnl {
-    font-size: 14px;
+    font-size: clamp(12px, 2.5vw, 14px);
   }
 
   /* ===================
@@ -321,7 +186,7 @@
   }
 
   .trade-pnl {
-    font-size: 13px;
+    font-size: clamp(11px, 2.5vw, 13px);
   }
 
   .trade-time {
@@ -346,7 +211,7 @@
   }
 
   .equity-stat-value {
-    font-size: 12px;
+    font-size: clamp(10px, 2.2vw, 12px);
   }
 
   /* ===================
@@ -431,7 +296,7 @@
   }
 
   .analytics-value {
-    font-size: 13px;
+    font-size: clamp(11px, 2.5vw, 13px);
   }
 
   /* ===================
@@ -469,11 +334,6 @@
 
   .data-panel-content {
     padding: 8px;
-  }
-
-  /* Shadow impact - 2x2 grid on tiny screens */
-  .shadow-impact-row {
-    grid-template-columns: repeat(2, 1fr);
   }
 
   /* Stats grids - 2 columns */
@@ -596,7 +456,7 @@
   .agent-mode-badge,
   .regime-header-badge {
     padding: var(--space-1) var(--space-2);
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   /* Calendar heatmap */
@@ -617,7 +477,7 @@
   }
 
   .calendar-stat-label {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   .calendar-stat-value {
@@ -782,7 +642,7 @@
   }
 
   .header .page-name {
-    font-size: 10px;
+    font-size: clamp(9px, 2vw, 10px);
   }
 
   .header-badges {
@@ -804,7 +664,7 @@
   }
 
   .market-status-badge {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
     padding: 2px 6px;
   }
 
@@ -814,7 +674,7 @@
   }
 
   .stale-data-banner {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
     padding: var(--space-2);
     margin-bottom: var(--space-2);
   }
@@ -917,7 +777,7 @@
   }
 
   .streak-label {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   .streak-badge {
@@ -947,7 +807,7 @@
   }
 
   .streak-message {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   /* Rejection trend - compact */
@@ -981,7 +841,7 @@
 
   .rejection-bar-label {
     min-width: 70px;
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   .rejection-bar-track {
@@ -990,7 +850,7 @@
 
   .rejection-bar-value {
     min-width: 45px;
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   /* Grid utilities mobile */
@@ -1000,7 +860,7 @@
 
   /* Stat display mobile */
   .stat-display-label {
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
   }
 
   .stat-display-value {
@@ -1025,7 +885,7 @@
 
   .analytics-tab {
     padding: 4px 5px;
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
     font-weight: 500;
     flex-shrink: 0;
     white-space: nowrap;
@@ -1049,7 +909,7 @@
 
   .perf-tab {
     padding: 4px 6px;
-    font-size: 9px;
+    font-size: clamp(8px, 1.8vw, 9px);
     flex-shrink: 0;
     white-space: nowrap;
   }

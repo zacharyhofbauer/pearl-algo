@@ -97,7 +97,7 @@ export default function LandingPage() {
       <div className="landing-hero">
         <Image
           src="/pearl-emoji.png"
-          alt=""
+          alt="PEARL Algo"
           width={64}
           height={64}
           className="landing-hero-icon"

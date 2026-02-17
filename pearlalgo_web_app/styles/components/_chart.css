@@ -1,5 +1,27 @@
 /* CandlestickChart - Chart container, Info Bar, Tooltips, Annotations, Indicators */
 
+/* Agent offline banner */
+.agent-offline-banner {
+  background: rgba(var(--accent-red-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-red-rgb), 0.4);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 0 0 8px 0;
+  font-size: 0.82rem;
+  color: var(--accent-red);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-offline-title {
+  font-weight: 600;
+}
+
+.agent-offline-message {
+  opacity: 0.7;
+}
+
 /* =====================================================
    CHART ACTIONS
    ===================================================== */
@@ -166,8 +188,8 @@
   letter-spacing: -0.3px;
 }
 
-.chart-info-bar .info-price.up .price-value { color: #00e676; }
-.chart-info-bar .info-price.down .price-value { color: #ff5252; }
+.chart-info-bar .info-price.up .price-value { color: var(--accent-green); }
+.chart-info-bar .info-price.down .price-value { color: var(--accent-red); }
 
 /* Countdown Section */
 .chart-info-bar .info-countdown {
@@ -181,7 +203,7 @@
 .chart-info-bar .countdown-dot {
   width: 6px;
   height: 6px;
-  background: #00e676;
+  background: var(--accent-green);
   border-radius: 50%;
   animation: pulse-dot 2s ease-in-out infinite;
 }
@@ -223,9 +245,9 @@
   border-radius: 1px;
 }
 
-.chart-info-bar .line.ema9 { background: #00d4ff; }
-.chart-info-bar .line.ema21 { background: #ffc107; }
-.chart-info-bar .line.vwap { background: #2962ff; }
+.chart-info-bar .line.ema9 { background: var(--accent-cyan); }
+.chart-info-bar .line.ema21 { background: var(--accent-yellow); }
+.chart-info-bar .line.vwap { background: var(--accent-blue); }
 
 .chart-info-bar .mkr { font-size: 10px; }
 .chart-info-bar .mkr.entry { color: rgba(180, 180, 180, 0.9); }  /* Gray arrow */
@@ -380,12 +402,12 @@
 
 .tooltip-direction.long {
   background: rgba(var(--accent-cyan-rgb), 0.15);
-  color: #00d4ff;
+  color: var(--accent-cyan);
 }
 
 .tooltip-direction.short {
   background: rgba(255, 110, 199, 0.15);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 .tooltip-body {
@@ -427,7 +449,7 @@
 }
 
 .tooltip-pnl.positive {
-  color: #00e676;
+  color: var(--accent-green);
   background: rgba(0, 230, 118, 0.08);
 }
 
@@ -501,7 +523,7 @@
 
 .tooltip-signal-tag.bullish {
   background: rgba(0, 230, 118, 0.15);
-  color: #00e676;
+  color: var(--accent-green);
 }
 
 .tooltip-signal-tag.bearish {
@@ -565,7 +587,7 @@
 }
 
 .tooltip-total-pnl.positive {
-  color: #00e676;
+  color: var(--accent-green);
 }
 
 .tooltip-total-pnl.negative {
@@ -662,7 +684,7 @@
 }
 
 .trade-pnl.positive {
-  color: #00e676;
+  color: var(--accent-green);
 }
 
 .trade-pnl.negative {

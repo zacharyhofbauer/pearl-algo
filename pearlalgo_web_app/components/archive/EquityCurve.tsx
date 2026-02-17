@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { createChart, IChartApi, LineData } from 'lightweight-charts'
 
 interface DataPoint {
@@ -13,7 +13,7 @@ interface EquityCurveProps {
   height?: number
 }
 
-export default function EquityCurve({ data, height = 280 }: EquityCurveProps) {
+const EquityCurve = React.memo(function EquityCurve({ data, height = 280 }: EquityCurveProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartApiRef = useRef<IChartApi | null>(null)
 
@@ -80,4 +80,5 @@ export default function EquityCurve({ data, height = 280 }: EquityCurveProps) {
   }
 
   return <div ref={chartRef} className="archive-equity-curve" />
-}
+})
+export default EquityCurve

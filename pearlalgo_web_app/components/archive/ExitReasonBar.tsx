@@ -1,5 +1,7 @@
 'use client'
 
+import React from 'react'
+
 interface ExitReason {
   reason: string
   count: number
@@ -28,7 +30,7 @@ const REASON_LABELS: Record<string, string> = {
   manual_close_requested: 'Manual',
 }
 
-export default function ExitReasonBar({ reasons, total }: Props) {
+const ExitReasonBar = React.memo(function ExitReasonBar({ reasons, total }: Props) {
   if (!reasons.length || total === 0) return null
 
   return (
@@ -60,4 +62,5 @@ export default function ExitReasonBar({ reasons, total }: Props) {
       </div>
     </div>
   )
-}
+})
+export default ExitReasonBar

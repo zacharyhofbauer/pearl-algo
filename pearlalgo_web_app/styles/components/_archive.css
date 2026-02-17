@@ -215,7 +215,7 @@
 }
 
 .dir-long .dir-breakdown-label { color: var(--accent-cyan); }
-.dir-short .dir-breakdown-label { color: #ff6ec7; }
+.dir-short .dir-breakdown-label { color: var(--color-short); }
 
 .dir-breakdown-pnl {
   font-size: var(--font-size-xl);
@@ -241,7 +241,7 @@
 .dir-short .dir-breakdown-bar-fill {
   height: 100%;
   border-radius: 3px;
-  background: #ff6ec7;
+  background: var(--color-short);
   transition: width 0.5s ease;
 }
 
@@ -368,7 +368,7 @@
 
 .archive-filter-btn.filter-short.active {
   background: rgba(255, 110, 199, 0.15);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 .archive-filter-count {
@@ -440,7 +440,7 @@
 
 .dir-badge.short {
   background: rgba(255, 110, 199, 0.2);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 /* ── Pagination ───────────────────────────────────────────────────────── */
