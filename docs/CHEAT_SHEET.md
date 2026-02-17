@@ -53,18 +53,16 @@ If Tradovate data quality is good, switch `PEARLALGO_DATA_PROVIDER=tradovate` in
    - Web app frontend (Next.js on port 3001)
    - Tradovate Paper API (port 8001)
    - Telegram handler
-   - IBKR Virtual agent (NQ)
-   - IBKR Gateway
+   - Tradovate Paper agent
+   - IBKR Gateway (data provider)
 
 2. **Waits 3 seconds** (cleanup time)
 
 3. **Starts** (dependency order):
-   - IBKR Gateway
-   - IBKR Virtual agent (NQ)
+   - IBKR Gateway (data provider)
    - Tradovate Paper agent + API (port 8001)
    - Telegram handler
    - Web app frontend (auto-builds if no production build exists)
-   - IBKR Virtual API server (port 8000)
    - Cloudflare tunnel
 
 4. **Auto-syncs** environment variables:
@@ -105,7 +103,7 @@ After restart, verify everything is running:
 | Service | Commands |
 |---------|----------|
 | **Gateway** | `./pearl.sh gateway start\|stop\|status` |
-| **Agent (IBKR Virtual)** | `./pearl.sh agent start\|stop\|status` |
+| **Agent (IBKR Virtual)** *(archived — data-only via Gateway)* | `./pearl.sh agent start\|stop\|status` |
 | **Tradovate Paper** | `./pearl.sh tv_paper start\|stop\|restart\|status` |
 | **Telegram** | `./pearl.sh telegram start\|stop\|status` |
 | **Web App** | `./pearl.sh chart start\|stop\|status` |
@@ -182,22 +180,34 @@ sleep 5
 
 ## 2. Tradovate Paper — 50K Rapid Evaluation
 
-Pearl runs two isolated accounts:
-- **IBKR Virtual** (port 8000): Virtual PnL on IBKR, no real orders
-- **Tradovate Paper** (port 8001): Real orders on Tradovate paper (demo)
+Pearl runs a single live account:
+- **Tradovate Paper** (port 8001): Real orders on Tradovate paper (demo) — the only live execution account
+- **IBKR Virtual** (port 8000): Archived/historical only — IBKR Gateway still provides market data
 
 ### Architecture (Post-Restructure)
 
-Each agent runs its own strategy independently. **Trades go directly to Tradovate only — no IBKR Virtual copy or forwarding.**
+Tradovate Paper is the single live agent. **Trades go directly to Tradovate only — no IBKR Virtual copy or forwarding.**
 
 ```
 Tradovate Paper Agent
   -> IBKR Gateway data (client ID 50/51)
-  -> strategy.analyze() (independent)
+  -> strategy.analyze() (aggressive settings from pearl_bot_auto)
   -> follower_execute() -> place_bracket() -> Tradovate only
   -> State: data/tradovate/paper/
   -> API: port 8001
 ```
+
+**Strategy settings** (from `pearl_bot_auto:` section in `config/base.yaml`):
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `ema_fast` | `5` | Faster EMAs for more signals |
+| `ema_slow` | `13` | (restored from old `config/markets/nq.yaml`) |
+| `min_confidence` | `0.40` | Lower threshold = more signals pass |
+| `allow_vwap_cross_entries` | `true` | Aggressive trigger |
+| `allow_vwap_retest_entries` | `true` | Aggressive trigger |
+| `allow_trend_momentum_entries` | `true` | Aggressive trigger |
+| `allow_trend_breakout_entries` | `true` | Aggressive trigger |
 
 ### Dashboard: Tradovate Only
 
@@ -320,7 +330,6 @@ First-time setup: `sudo ./scripts/setup-cloudflared-service.sh`
 ### Logs
 
 ```bash
-tail -f logs/agent_TV_PAPER.log          # IBKR Virtual agent
 tail -f logs/agent_TV_PAPER.log   # Tradovate Paper agent
 tail -f logs/api_TV_PAPER.log     # Tradovate Paper API server
 tail -f logs/web_app.log           # Next.js
@@ -336,12 +345,12 @@ tail -f logs/web_app.log           # Next.js
 |------|-------|
 | Base config (shared) | `config/base.yaml` |
 | Tradovate Paper config | `config/accounts/tradovate_paper.yaml` |
-| IBKR Paper config | `config/accounts/ibkr_paper.yaml` |
+| IBKR Virtual config (archived) | `config/accounts/ibkr_paper.yaml` |
 | Config | `config/base.yaml` + `config/accounts/tradovate_paper.yaml` |
 | Credentials | `~/.config/pearlalgo/secrets.env` |
 | Env defaults | `.env` |
 | Tradovate Paper state | `data/tradovate/paper/` |
-| IBKR Paper state (archived) | `data/archive/ibkr_virtual/` |
+| IBKR Virtual state (archived) | `data/archive/ibkr_virtual/` |
 | Scripts | `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/` |
 
 ### IBKR Client ID Map
@@ -378,17 +387,17 @@ tail -f logs/web_app.log           # Next.js
 
 ### Isolation Model
 
-| Component | IBKR Virtual | Tradovate Paper |
-|-----------|-----------|------|
+| Component | IBKR Virtual *(archived)* | Tradovate Paper *(live)* |
+|-----------|--------------------------|--------------------------|
 | Config | `config/base.yaml` | `config/accounts/tradovate_paper.yaml` |
-| State dir | `data/agent_state/NQ/` | `data/tradovate/paper/` |
-| API port | 8000 | 8001 |
-| Signal gen | `strategy.analyze()` (independent) | `strategy.analyze()` (independent) |
-| Dashboard data | `signals.jsonl` + `performance.json` | Tradovate API |
-| Execution | Disabled (virtual) | Tradovate paper (armed) |
+| State dir | `data/archive/ibkr_virtual/` | `data/tradovate/paper/` |
+| API port | 8000 (historical only) | 8001 |
+| Signal gen | — | `strategy.analyze()` (aggressive `pearl_bot_auto` settings) |
+| Dashboard data | — | Tradovate API |
+| Execution | Archived (no agent running) | Tradovate paper (armed) |
 | Telegram label | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
 
-**Rule:** Single account (Tradovate Paper). Use `--config config/accounts/tradovate_paper.yaml` to start the agent.
+**Rule:** Tradovate Paper is the single live execution account. IBKR Virtual is archived — IBKR Gateway still runs to provide market data. Use `--config config/accounts/tradovate_paper.yaml` to start the agent.
 
 ---
 
@@ -487,6 +496,7 @@ The script prints bar counts, price/volume differences, and a **recommendation**
 - **Base + overlay config**: `config/base.yaml` (shared) merged with `config/accounts/*.yaml` (per-account)
 - **Tradovate bracket order**: Entry + stop loss + take profit placed as OSO (one-sends-other)
 - **FIFO fill pairing**: Tradovate fills matched oldest-first to compute per-trade P&L
+- **Aggressive strategy (`pearl_bot_auto`)**: Profitable settings restored from old `config/markets/nq.yaml` — fast EMAs (5/13), low confidence threshold (0.40), all aggressive entry triggers enabled (VWAP cross, VWAP retest, trend momentum, trend breakout). Lives in the `pearl_bot_auto:` section of `config/base.yaml`
 
 ---
 

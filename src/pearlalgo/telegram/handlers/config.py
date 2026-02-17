@@ -52,7 +52,7 @@ async def handle_settings(update: Any, context: Any) -> None:
             "",
             "<b>Strategy:</b>",
             f"  Signals: {escape_html(', '.join(strategy.get('enabled_signals', [])))}",
-            f"  Min Confidence: {config.get('signals', {}).get('min_confidence', '?')}",
+            f"  Min Confidence: {config.get('min_confidence', config.get('signals', {}).get('min_confidence', '?'))}",
         ]
 
         keyboard = back_to_menu_keyboard()

@@ -159,6 +159,11 @@ class SignalHandler:
                 return  # Signal blocked by circuit breaker
 
             # ==========================================================================
+            # POSITION SIZING: Compute position size if not already set
+            # ==========================================================================
+            self._ensure_position_size(signal)
+
+            # ==========================================================================
             # ML FILTER (shadow): attach prediction for later analytics/lift measurement
             # ==========================================================================
             await self._apply_ml_filter(signal)
@@ -239,8 +244,8 @@ class SignalHandler:
         """Streamlined execution path for signal forwarding (Tradovate Paper follower).
 
         Skips ML filter, bandit policy, and contextual policy since these are
-        IBKR Virtual-specific. Only runs: circuit breaker -> tracking -> virtual entry ->
-        execution -> notification.
+        IBKR Virtual-specific. Only runs: circuit breaker -> position sizing ->
+        tracking -> virtual entry -> execution -> notification.
 
         Args:
             signal: Signal dictionary from strategy or forwarded source
@@ -251,6 +256,9 @@ class SignalHandler:
             # Circuit breaker check
             if not self._check_circuit_breaker(signal, None):
                 return
+
+            # Position sizing: compute if not already set
+            self._ensure_position_size(signal)
 
             # Intraday breach check (Tradovate Paper drawdown floor)
             if tv_paper_equity is not None and tv_paper_tracker is not None:
@@ -295,6 +303,42 @@ class SignalHandler:
     # ------------------------------------------------------------------
     # Shared helpers (eliminate duplication between process_signal & follower_execute)
     # ------------------------------------------------------------------
+
+    def _ensure_position_size(self, signal: Dict) -> None:
+        """Compute and set position_size on the signal if not already present.
+
+        Delegates to ``OrderManager.compute_base_position_size()`` which uses
+        strategy config (base_contracts, dynamic sizing, confidence thresholds)
+        and risk limits (min/max position size) to determine the correct size.
+
+        Without this step, signals from the strategy (which does not set
+        position_size) would be rejected by the execution adapter's
+        precondition check (``position_size <= 0``).
+        """
+        existing = signal.get("position_size")
+        if existing is not None:
+            if not isinstance(existing, int):
+                logger.warning(
+                    "position_size has unexpected type %s (value=%r); will recompute",
+                    type(existing).__name__, existing,
+                )
+            elif existing > 0:
+                return  # Already has a valid int size
+            else:
+                # existing is int but <= 0 (or invalid), fall through to compute
+                pass
+
+        try:
+            size = self.order_manager.compute_base_position_size(signal)
+            signal["position_size"] = size
+            logger.debug(
+                f"Position size computed: {size} contracts "
+                f"(confidence={signal.get('confidence', 'N/A')})"
+            )
+        except Exception as e:
+            # Fail closed: set 0 so execution adapter rejects as non_positive
+            signal["position_size"] = 0
+            logger.error(f"Position size computation failed, failing closed (position_size=0): {e}")
 
     def _validate_entry_price(self, signal: Dict, signal_id: Any) -> Optional[float]:
         """Validate entry_price from a signal dict.

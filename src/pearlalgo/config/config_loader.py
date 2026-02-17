@@ -53,7 +53,10 @@ def validate_config(data):
     return schema_v2.validate_config(data)
 
 def build_strategy_config_from_yaml(base, config_data):
-    """Inline stub: merge config_data strategy keys into base dict."""
+    """Merge YAML config sections and pearl_bot_auto overrides into the strategy config dict.
+
+    Section merges are shallow (nested dicts are replaced, not deep-merged).
+    """
     result = dict(base)
     for section in ("strategy", "signals", "risk", "data", "service", "execution",
                     "session", "challenge", "performance", "virtual_pnl", "auto_flat",
@@ -69,6 +72,19 @@ def build_strategy_config_from_yaml(base, config_data):
     for key in ("symbol", "timeframe", "scan_interval"):
         if key in config_data:
             result[key] = config_data[key]
+    # pearl_bot_auto section: flatten only StrategyParams keys to top-level
+    # so generate_signals() / StrategyParams can read them; unknown keys are ignored.
+    from pearlalgo.trading_bots.pearl_bot_auto import StrategyParams
+    allowed_keys = set(StrategyParams.model_fields.keys())
+    pba = config_data.get("pearl_bot_auto")
+    if isinstance(pba, dict):
+        for key, value in pba.items():
+            if key in allowed_keys:
+                result[key] = value
+            else:
+                logger.warning(
+                    "pearl_bot_auto key '%s' is not a StrategyParams field; ignoring", key
+                )
     return result
 
 def _apply_execution_env_overrides(execution_config):

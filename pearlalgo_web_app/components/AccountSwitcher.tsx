@@ -15,18 +15,12 @@ interface AccountDef {
   accountParam: string | null
   badge?: string
   badgeColor?: string
+  archived?: boolean
 }
 
-/** Fallback defaults used when the store has no accounts config yet */
+/** Fallback defaults used when the store has no accounts config yet.
+ * Tradovate Paper (live) first, IBKR Virtual (archived) second. */
 const ACCOUNT_DEFAULTS: AccountDef[] = [
-  {
-    id: 'ibkr_virtual',
-    label: 'IBKR Virtual',
-    shortLabel: 'IBKR',
-    accountParam: null, // default (no ?account param)
-    badge: 'VIRTUAL',
-    badgeColor: 'var(--color-blue, #448aff)',
-  },
   {
     id: 'tv_paper_eval',
     label: 'Tradovate Paper',
@@ -34,6 +28,15 @@ const ACCOUNT_DEFAULTS: AccountDef[] = [
     accountParam: 'tv_paper',
     badge: 'PAPER',
     badgeColor: 'var(--color-accent, #7c4dff)',
+  },
+  {
+    id: 'ibkr_virtual',
+    label: 'IBKR Virtual',
+    shortLabel: 'IBKR',
+    accountParam: null, // default (no ?account param)
+    badge: 'ARCHIVED',
+    badgeColor: 'rgba(255, 255, 255, 0.25)',
+    archived: true,
   },
 ]
 
@@ -55,13 +58,16 @@ export default function AccountSwitcher() {
   const storeAccounts = useAgentStore((s) => s.accounts)
 
   // Merge store config over fallback defaults (display_name, badge, etc.)
+  // For archived accounts, keep frontend badge/badgeColor
   const accounts = useMemo(() => {
     if (!storeAccounts) return ACCOUNT_DEFAULTS
     return ACCOUNT_DEFAULTS.map((def) => {
-      // Map to API key: ibkr_virtual→'ibkr_virtual', tv_paper_eval→'tv_paper' (the param value)
       const configKey = def.accountParam || def.id
       const cfg = storeAccounts[configKey]
       if (!cfg) return def
+      if (def.archived) {
+        return { ...def, label: cfg.display_name ?? def.label }
+      }
       return {
         ...def,
         label: cfg.display_name,
@@ -143,7 +149,7 @@ export default function AccountSwitcher() {
       onKeyDown={(e) => e.stopPropagation()}
     >
       <button
-        className="account-switcher-trigger"
+        className={`account-switcher-trigger${currentAccount.archived ? ' archived' : ''}`}
         onClick={handleToggle}
         onKeyDown={handleKeyDown}
         aria-expanded={open}
@@ -180,7 +186,7 @@ export default function AccountSwitcher() {
           {accounts.map((account) => (
             <button
               key={account.id}
-              className={`account-switcher-option ${account.id === currentAccount.id ? 'active' : ''}`}
+              className={`account-switcher-option ${account.id === currentAccount.id ? 'active' : ''}${account.archived ? ' archived' : ''}`}
               onClick={() => handleSelect(account)}
               role="option"
               aria-selected={account.id === currentAccount.id}
@@ -191,7 +197,9 @@ export default function AccountSwitcher() {
               }}>
                 {account.badge}
               </span>
-              <span className="account-option-label">{account.label}</span>
+              <span className="account-option-label">
+                {account.label}{account.archived ? ' (archived)' : ''}
+              </span>
               {account.id === currentAccount.id && (
                 <span className="account-option-check" aria-hidden="true">&#10003;</span>
               )}

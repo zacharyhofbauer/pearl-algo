@@ -128,3 +128,31 @@ class TestBuildStrategyConfig:
         result = build_strategy_config(base, config_data)
         assert result["symbol"] == "MNQ"
         assert result["timeframe"] == "1m"
+
+    def test_pearl_bot_auto_keys_flattened_to_top_level(self):
+        """pearl_bot_auto section should be flattened to top-level strategy keys."""
+        config_data = {
+            "symbol": "MNQ",
+            "timeframe": "1m",
+            "pearl_bot_auto": {
+                "ema_fast": 5,
+                "ema_slow": 13,
+                "min_confidence": 0.40,
+                "allow_trend_breakout_entries": True,
+            },
+        }
+        result = build_strategy_config({}, config_data)
+        assert result["ema_fast"] == 5
+        assert result["ema_slow"] == 13
+        assert result["min_confidence"] == 0.40
+        assert result["allow_trend_breakout_entries"] is True
+
+    def test_pearl_bot_auto_non_strategy_keys_ignored(self):
+        """Keys in pearl_bot_auto that are not StrategyParams fields should not clobber base."""
+        config_data = {
+            "symbol": "MNQ",
+            "pearl_bot_auto": {"symbol": "ES", "ema_fast": 5},
+        }
+        result = build_strategy_config({"symbol": "MNQ"}, config_data)
+        assert result["symbol"] == "MNQ"  # not clobbered by pearl_bot_auto.symbol
+        assert result["ema_fast"] == 5  # strategy key flattened

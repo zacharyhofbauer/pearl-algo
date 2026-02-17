@@ -20,18 +20,12 @@ interface AccountOption {
   param: string | null  // URL ?account= value (null = default/ibkr_virtual)
   badge: string
   badgeColor: string
+  archived?: boolean
 }
 
-/** Fallback defaults used when the store has no accounts config yet */
+/** Fallback defaults used when the store has no accounts config yet.
+ * Tradovate Paper (live) first, IBKR Virtual (archived) second. */
 const ACCOUNT_DEFAULTS: AccountOption[] = [
-  {
-    id: 'ibkr_virtual',
-    label: 'IBKR Virtual',
-    description: 'Live market data from IBKR, virtual P&L tracking',
-    param: null,
-    badge: 'VIRTUAL',
-    badgeColor: 'var(--accent-blue, #448aff)',
-  },
   {
     id: 'tv_paper_eval',
     label: 'Tradovate Paper',
@@ -39,6 +33,15 @@ const ACCOUNT_DEFAULTS: AccountOption[] = [
     param: 'tv_paper',
     badge: 'PAPER',
     badgeColor: 'var(--accent-purple, #7c4dff)',
+  },
+  {
+    id: 'ibkr_virtual',
+    label: 'IBKR Virtual',
+    description: 'Archived — full history since inception',
+    param: null,
+    badge: 'ARCHIVED',
+    badgeColor: 'rgba(255, 255, 255, 0.25)',
+    archived: true,
   },
 ]
 
@@ -54,13 +57,16 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
   const storeAccounts = useAgentStore((s) => s.accounts)
 
   // Merge store config over fallback defaults (display_name, badge, etc.)
+  // For archived accounts, keep frontend badge/description/badgeColor
   const accounts = useMemo(() => {
     if (!storeAccounts) return ACCOUNT_DEFAULTS
     return ACCOUNT_DEFAULTS.map((def) => {
-      // Map to API key: ibkr_virtual→'ibkr_virtual', tv_paper_eval→'tv_paper' (the param value)
       const configKey = def.param || def.id
       const cfg = storeAccounts[configKey]
       if (!cfg) return def
+      if (def.archived) {
+        return { ...def, label: cfg.display_name ?? def.label }
+      }
       return {
         ...def,
         label: cfg.display_name,
@@ -126,7 +132,7 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
             <button
               key={acct.id}
               ref={idx === 0 ? firstButtonRef : undefined}
-              className="account-selector-option"
+              className={`account-selector-option${acct.archived ? ' archived' : ''}`}
               onClick={() => {
                 // Persist choice
                 try {
@@ -144,6 +150,9 @@ export default function AccountSelector({ onSelect }: AccountSelectorProps) {
                 <span className="account-selector-label">{acct.label}</span>
               </div>
               <span className="account-selector-desc">{acct.description}</span>
+              {acct.archived && (
+                <span className="account-selector-view-history">View history</span>
+              )}
             </button>
           ))}
         </div>

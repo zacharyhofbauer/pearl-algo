@@ -871,6 +871,155 @@ class TestExecution:
 
 
 # ===========================================================================
+# Tests: Pipeline regression for position_size (5C / 11A)
+# ===========================================================================
+
+@pytest.mark.asyncio
+class TestPositionSizePipelineRegression:
+    """Pipeline tests: signal without position_size gets it set before execution adapter."""
+
+    async def test_process_signal_sets_position_size_before_execution(
+        self, state_manager, performance_tracker, notification_queue, order_manager
+    ):
+        """process_signal: signal without position_size reaches adapter with position_size > 0."""
+        signal = make_valid_signal()
+        signal.pop("position_size", None)
+
+        order_manager.compute_base_position_size.return_value = 2
+
+        mock_precond = MagicMock(execute=True)
+        mock_result = MagicMock(success=True, parent_order_id="ord-1")
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = mock_precond
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
+
+        cb = MagicMock()
+        cb.should_allow_signal.return_value = make_cb_decision(allowed=True)
+
+        h = SignalHandler(
+            state_manager=state_manager,
+            performance_tracker=performance_tracker,
+            notification_queue=notification_queue,
+            order_manager=order_manager,
+            trading_circuit_breaker=cb,
+            execution_adapter=mock_adapter,
+        )
+
+        await h.process_signal(signal)
+
+        passed_signal = mock_adapter.check_preconditions.call_args[0][0]
+        assert passed_signal.get("position_size", 0) > 0
+        passed_signal_place = mock_adapter.place_bracket.call_args[0][0]
+        assert passed_signal_place.get("position_size", 0) > 0
+
+    async def test_follower_execute_sets_position_size_before_execution(
+        self, state_manager, performance_tracker, notification_queue, order_manager
+    ):
+        """follower_execute: signal without position_size reaches adapter with position_size > 0."""
+        signal = make_valid_signal()
+        signal.pop("position_size", None)
+
+        order_manager.compute_base_position_size.return_value = 2
+
+        mock_precond = MagicMock(execute=True)
+        mock_result = MagicMock(success=True, parent_order_id="ord-1")
+        mock_adapter = MagicMock()
+        mock_adapter.check_preconditions.return_value = mock_precond
+        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
+
+        cb = MagicMock()
+        cb.should_allow_signal.return_value = make_cb_decision(allowed=True)
+
+        h = SignalHandler(
+            state_manager=state_manager,
+            performance_tracker=performance_tracker,
+            notification_queue=notification_queue,
+            order_manager=order_manager,
+            trading_circuit_breaker=cb,
+            execution_adapter=mock_adapter,
+        )
+
+        await h.follower_execute(signal)
+
+        passed_signal = mock_adapter.check_preconditions.call_args[0][0]
+        assert passed_signal.get("position_size", 0) > 0
+        passed_signal_place = mock_adapter.place_bracket.call_args[0][0]
+        assert passed_signal_place.get("position_size", 0) > 0
+
+
+# ===========================================================================
+# Tests: _ensure_position_size (9A)
+# ===========================================================================
+
+class TestEnsurePositionSize:
+    """Unit tests for _ensure_position_size."""
+
+    def test_no_position_size_computes_from_order_manager(self, handler):
+        """Signal with no position_size key should get size from order_manager."""
+        signal = make_valid_signal()
+        signal.pop("position_size", None)
+        handler.order_manager.compute_base_position_size.return_value = 3
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 3
+        handler.order_manager.compute_base_position_size.assert_called_once_with(signal)
+
+    def test_position_size_zero_recomputes(self, handler):
+        """Signal with position_size=0 should trigger recompute."""
+        signal = make_valid_signal()
+        signal["position_size"] = 0
+        handler.order_manager.compute_base_position_size.return_value = 2
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 2
+        handler.order_manager.compute_base_position_size.assert_called_once_with(signal)
+
+    def test_valid_position_size_preserved(self, handler):
+        """Signal with position_size=5 should be left unchanged."""
+        signal = make_valid_signal()
+        signal["position_size"] = 5
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 5
+        handler.order_manager.compute_base_position_size.assert_not_called()
+
+    def test_non_int_type_logs_warning_and_recomputes(self, handler):
+        """Signal with position_size='3' (non-int) should recompute (warning is implementation detail)."""
+        signal = make_valid_signal()
+        signal["position_size"] = "3"
+        handler.order_manager.compute_base_position_size.return_value = 2
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 2
+        handler.order_manager.compute_base_position_size.assert_called_once_with(signal)
+
+    def test_order_manager_exception_sets_zero(self, handler):
+        """When compute_base_position_size raises, signal should get position_size=0 (fail closed)."""
+        signal = make_valid_signal()
+        signal.pop("position_size", None)
+        handler.order_manager.compute_base_position_size.side_effect = RuntimeError("sizing error")
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 0
+
+    def test_negative_position_size_recomputes(self, handler):
+        """Signal with position_size=-1 should trigger recompute."""
+        signal = make_valid_signal()
+        signal["position_size"] = -1
+        handler.order_manager.compute_base_position_size.return_value = 1
+
+        handler._ensure_position_size(signal)
+
+        assert signal["position_size"] == 1
+        handler.order_manager.compute_base_position_size.assert_called_once_with(signal)
+
+
+# ===========================================================================
 # Tests: Virtual Entry Tracking
 # ===========================================================================
 

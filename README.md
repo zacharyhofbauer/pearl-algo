@@ -3,8 +3,8 @@
 ![Coverage](docs/assets/coverage-badge.svg)
 
 Production-ready market trading agent with a modular architecture:
-data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
-and optional execution + learning layers (disabled/safe by default).
+data providers (IBKR), strategy/signal generation with aggressive entry triggers, state + metrics, Telegram UI,
+and execution via Tradovate.
 
 ## Pearl Algo Web App (Telegram + Mini App)
 
@@ -38,20 +38,22 @@ cp env.example .env
 
 Service behavior is configured in `config/base.yaml` and `config/accounts/tradovate_paper.yaml` (use `--config config/accounts/tradovate_paper.yaml` when starting the agent).
 
+Strategy parameters (EMA periods, entry triggers, confidence thresholds) are configured in `config/base.yaml` under the `pearl_bot_auto:` section.
+
 ### Run (operator scripts)
 
 ```bash
-# Start IBKR Gateway
+# Start IBKR Gateway (data source)
 ./scripts/gateway/gateway.sh start
 
-# Start the market agent
-./scripts/lifecycle/agent.sh start --market NQ --background
+# Start Tradovate Paper agent + API
+./scripts/lifecycle/tv_paper_eval.sh start --background
 
-# Start Telegram command handler (menus)
+# Start Telegram command handler
 ./scripts/telegram/start_command_handler.sh --background
 
 # Check status
-./scripts/ops/status.sh --market NQ
+./scripts/lifecycle/tv_paper_eval.sh status
 ```
 
 ## Validation

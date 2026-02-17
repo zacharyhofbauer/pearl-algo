@@ -1,6 +1,19 @@
 /* Misc Components - Loading, Error, DataPanel, Help, Tooltips, Market Status, Login */
 
 /* ============================================
+   ARCHIVE BANNER (when viewing archived account)
+   ============================================ */
+
+.archive-banner {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--text-tertiary, rgba(255,255,255,0.5));
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+
+/* ============================================
    LOADING SCREEN
    ============================================ */
 

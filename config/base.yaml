@@ -125,7 +125,7 @@ storage:
 
 signals:
   duplicate_window_seconds: 120
-  min_confidence: 0.55
+  # min_confidence is set via pearl_bot_auto (flattened to top-level strategy config)
   min_risk_reward: 1.3
   duplicate_price_threshold_pct: 0.5
   volatility_threshold: 0.0001
@@ -159,6 +159,20 @@ signals:
         - ranging
         - trending_bullish
         - trending_bearish
+
+# Strategy-specific overrides for trading_bots/pearl_bot_auto.py
+# Restored from config/markets/nq.yaml (the profitable IBKR Virtual config)
+# These keys are flattened into the top-level config dict for generate_signals().
+pearl_bot_auto:
+  ema_fast: 5
+  ema_slow: 13
+  min_confidence: 0.40
+  allow_vwap_cross_entries: true
+  allow_vwap_retest_entries: true
+  allow_trend_momentum_entries: true
+  trend_momentum_atr_mult: 0.5
+  allow_trend_breakout_entries: true
+  trend_breakout_lookback_bars: 5
 
 strategy:
   enabled_signals:

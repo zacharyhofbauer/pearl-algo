@@ -1,101 +1,39 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import Image from 'next/image'
-import CandlestickChart from '@/components/CandlestickChart'
-import ChallengePanel from '@/components/ChallengePanel'
-import PearlHeaderBar from '@/components/PearlHeaderBar'
-import SystemStatusPanel from '@/components/SystemStatusPanel'
-import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
-import DashboardLayout from '@/components/DashboardLayout'
-import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
-import { useViewportType } from '@/hooks/useViewportType'
-import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
-import { useDashboardData } from '@/hooks/useDashboardData'
-import { useAIStatus } from '@/hooks/useAIStatus'
-import { ErrorBoundary } from '@/components/ErrorBoundary'
-import AccountSelector, { shouldShowAccountSelector } from '@/components/AccountSelector'
-import { getApiUrl } from '@/lib/api'
-import { formatTimeFromDate, formatRelativeTime, formatMarketCountdown } from '@/lib/formatters'
-import type { IChartApi } from 'lightweight-charts'
-
-// Indicator panels
-import { VolumeProfilePanel } from '@/components/indicators'
-
-// Import stores and types
-import {
-  useAgentStore,
-  useChartStore,
-  useChartSettingsStore,
-  useUIStore,
-  type Timeframe,
-  type IndicatorData,
-  type Position,
-  type PositionLine,
-  type DataSource,
-} from '@/stores'
-
-// Minimum bars to request for a full chart (500 = ~4 days on 5m, ~2 weeks on 1h)
-const MIN_BARS = 500
+import Link from 'next/link'
 
 /**
- * Account selection gate -- shown on first visit when no account is chosen.
- * Wraps the real dashboard so hooks inside PearlAlgoWebApp are never called
- * conditionally (React rules of hooks).
+ * Landing page - Portfolio overview and navigation hub.
+ * Links to /dashboard (Tradovate Paper live) and /archive/ibkr (IBKR Virtual historical).
  */
-function AccountGate({ children }: { children: React.ReactNode }) {
-  const [showPicker, setShowPicker] = useState(false)
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    // Show account selector on every clean URL (no ?account= param)
-    // Once user picks, the URL gets ?account=tv_paper and the selector won't show
-    if (shouldShowAccountSelector()) {
-      setShowPicker(true)
-    } else {
-      setReady(true)
-    }
-  }, [])
-
-  if (showPicker) {
-    return (
-      <AccountSelector
-        onSelect={(param) => {
-          setShowPicker(false)
-          if (param) {
-            const url = new URL(window.location.href)
-            url.searchParams.set('account', param)
-            window.location.href = url.toString()
-            return
-          }
-          setReady(true)
-        }}
-      />
-    )
-  }
-
-  if (!ready) {
-    return (
-      <div className="account-gate-loading" role="status" aria-label="Loading dashboard">
-        <div className="account-gate-loading-spinner" />
-        <span className="account-gate-loading-text">Loading…</span>
-      </div>
-    )
-  }
-
-  return <>{children}</>
-}
-
-export default function PearlAlgoWebAppWrapper() {
+export default function LandingPage() {
   return (
-    <AccountGate>
-      <PearlAlgoWebAppInner />
-    </AccountGate>
+    <main className="landing-page">
+      <div className="landing-hero">
+        <h1>PEARL Algo</h1>
+        <p className="landing-subtitle">Trading Dashboard</p>
+      </div>
+      <div className="landing-cards">
+        <Link href="/dashboard?account=tv_paper" className="landing-card landing-card-live">
+          <div className="landing-card-header">
+            <span className="landing-card-badge live">LIVE</span>
+            <h2>Tradovate Paper</h2>
+          </div>
+          <p>Live paper trading on Tradovate demo — 50K eval</p>
+          <span className="landing-card-cta">Open Dashboard →</span>
+        </Link>
+        <Link href="/archive/ibkr" className="landing-card landing-card-archive">
+          <div className="landing-card-header">
+            <span className="landing-card-badge archived">ARCHIVED</span>
+            <h2>IBKR Virtual</h2>
+          </div>
+          <p>Historical data — 1,573 trades, $23K+ P&L</p>
+          <span className="landing-card-cta">Explore History →</span>
+        </Link>
+      </div>
+    </main>
   )
 }
-
-function PearlAlgoWebAppInner() {
-  // Agent store
   const agentState = useAgentStore((s) => s.agentState)
   const setAgentState = useAgentStore((s) => s.setAgentState)
   const updateFromWebSocket = useAgentStore((s) => s.updateFromWebSocket)
@@ -657,17 +595,21 @@ function PearlAlgoWebAppInner() {
         {chartLoading && (
           <div className="loading-screen">
             <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
-            <div className="loading-text">Loading Live Data...</div>
+            <div className="loading-text">
+              {isArchivedAccount ? 'Loading Historical Data...' : 'Loading Live Data...'}
+            </div>
             <div className="loading-spinner"></div>
           </div>
         )}
         {chartError && !chartLoading && (
           <div className="no-data-container">
             <Image src="/pearl-emoji.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
-            <div className="no-data-title">No Live Data</div>
+            <div className="no-data-title">{isArchivedAccount ? 'No Data' : 'No Live Data'}</div>
             <div className="no-data-message">{chartError}</div>
             <div className="no-data-hint">
-              Start the Market Agent to see real-time data
+              {isArchivedAccount
+                ? 'Historical data may be unavailable for this account.'
+                : 'Start the Market Agent to see real-time data'}
             </div>
           </div>
         )}
@@ -718,6 +660,15 @@ function PearlAlgoWebAppInner() {
   return (
     <>
       <PearlHeaderBar />
+      {isArchivedAccount && (
+        <div
+          className="archive-banner"
+          role="status"
+          aria-label="Viewing archived account"
+        >
+          You are viewing an archived account — historical data only
+        </div>
+      )}
       <DashboardLayout
         isChartReady={isChartReady}
         pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
