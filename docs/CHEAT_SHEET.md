@@ -276,7 +276,7 @@ https://pearlalgo.io                         # IBKR Virtual
 https://pearlalgo.io/?account=tv_paper           # Tradovate Paper
 ```
 
-Account switcher dropdown in the header bar toggles between accounts.
+Account selection is via URL parameter (`?account=tv_paper`). The landing page provides links to each account.
 
 ### Dashboard Features
 

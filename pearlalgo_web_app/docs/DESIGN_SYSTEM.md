@@ -370,7 +370,7 @@ Shared top navigation (`components/NavBar.tsx`):
 - Brand link to `/` — highlights as active when on landing (`aria-current="page"`).
 - Dashboard link to `/dashboard?account=tv_paper` — active when path starts with `/dashboard`.
 - Archive link to `/archive/ibkr` — active when path starts with `/archive`.
-- Right-side badge pills were removed (they duplicated the links and were hidden on mobile).
+- **Dashboard context** (only on `/dashboard`): Symbol badge (MNQ, cyan), status dot (green=live, yellow=shadow, red=market closed), and AI preview text (truncated headline or market countdown). Uses `useAgentStore` and `useChartStore`.
 
 ### Archive Page Components
 
@@ -392,7 +392,7 @@ Data comes from `/api/archive/ibkr` (modes: `summary`, `daily`, `equity`, `stats
 
 | Component | Purpose |
 |-----------|---------|
-| `NavBar.tsx` | Main navigation: PEARL brand, Dashboard, Archive. Active route highlighting with `aria-current`. |
+| `NavBar.tsx` | Main navigation: PEARL brand, Dashboard, Archive. Active route highlighting with `aria-current`. Shows dashboard context (symbol, status dot, AI preview) when on `/dashboard`. |
 | `SystemStatusPanel.tsx` | Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch with operator lock, session P&L, execution state, circuit breaker |
 | `DataPanelsContainer.tsx` | Panel wrapper with layout variants |
 | `InfoTooltip.tsx` | Tooltip component (used by status badges) |

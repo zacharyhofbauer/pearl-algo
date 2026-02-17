@@ -21,8 +21,6 @@
 @import '../styles/components/_archive.css';
 @import '../styles/components/_status-panel.css';
 @import '../styles/components/_misc.css';
-@import '../styles/components/_analytics.css';
-@import '../styles/components/_pearl-insights.css';
 @import '../styles/components/_trade-dock.css';
 
 /* ============================================================================
@@ -563,8 +561,6 @@ body {
  * ============================================================================ */
 
 /* Focus Indicators (all viewports) */
-.pearl-btn:focus-visible,
-.pearl-dropdown-tab:focus-visible,
 button:focus-visible,
 [role="button"]:focus-visible,
 a:focus-visible,
@@ -574,15 +570,8 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* High contrast focus for destructive buttons */
-.pearl-btn.destructive:focus-visible,
-.kill-switch-btn:focus-visible {
-  outline-color: var(--accent-red);
-}
-
 /* Color Contrast Fixes */
 /* SHADOW badge — improve yellow on dark contrast */
-.pearl-dropdown-mode.shadow,
 .mode-badge.shadow {
   background: rgba(var(--accent-yellow-rgb), 0.2);
   color: #ffd54f;
@@ -609,24 +598,10 @@ select:focus-visible {
 /* Mobile read-only state visual feedback */
 @media (max-width: 768px) {
   /* Disabled/read-only controls — clearly non-interactive */
-  .pearl-btn:disabled,
-  .pearl-btn.disabled,
   [aria-disabled="true"] {
     opacity: 0.5;
     cursor: not-allowed;
     pointer-events: none;
-  }
-
-  /* Read-only mode banner */
-  .pearl-operator-strip.read-only {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px dashed rgba(255, 255, 255, 0.2);
-  }
-
-  /* Chat input in read-only mode */
-  .pearl-chat-input:disabled {
-    opacity: 0.4;
-    background: rgba(0, 0, 0, 0.2);
   }
 }
 

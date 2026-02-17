@@ -54,7 +54,7 @@ export interface PearlHeadline {
 }
 
 // ============================================================================
-// Unified Panel Data - Single prop to pass to PearlInsightsPanel
+// Unified Panel Data
 // ============================================================================
 
 export interface PearlPanelData {
