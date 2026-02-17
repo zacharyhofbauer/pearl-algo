@@ -23,8 +23,9 @@ function formatPnL(n: number | null): string {
 }
 
 export default function AccountStrip({ balance, totalPnl, dailyPnl, trades, winRate }: AccountStripProps) {
+  const tintClass = dailyPnl !== null ? (dailyPnl >= 0 ? 'tint-positive' : 'tint-negative') : ''
   return (
-    <div className="account-strip">
+    <div className={`account-strip ${tintClass}`}>
       <div className="account-strip-item">
         <span className="account-strip-label">Balance</span>
         <span className="account-strip-value">{formatMoney(balance)}</span>

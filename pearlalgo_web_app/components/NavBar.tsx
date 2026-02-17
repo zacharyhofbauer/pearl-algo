@@ -4,8 +4,9 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { useAgentStore } from '@/stores'
+import { useAgentStore, useChartStore } from '@/stores'
 import { derivePearlMode, deriveHeadline } from '@/types/pearl'
+import { formatMarketCountdown } from '@/lib/formatters'
 
 function truncateText(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}\u2026`
@@ -18,6 +19,7 @@ function cleanText(raw: string): string {
 export default function NavBar() {
   const pathname = usePathname()
   const agentState = useAgentStore((s) => s.agentState)
+  const marketStatus = useChartStore((s) => s.marketStatus)
 
   const isHome = pathname === '/' || pathname === ''
   const isDashboard = pathname?.startsWith('/dashboard')
@@ -45,12 +47,18 @@ export default function NavBar() {
       else statusDotClass = 'connected'
     }
 
+    let closedText = 'Market Closed'
+    if (!isMarketOpen && marketStatus?.next_open) {
+      const countdown = formatMarketCountdown(marketStatus.next_open)
+      if (countdown) closedText = countdown
+    }
+
     return {
       symbol: agentState.config?.symbol || 'MNQ',
       statusDotClass,
-      previewText: !isMarketOpen ? 'Market Closed' : previewText,
+      previewText: !isMarketOpen ? closedText : previewText,
     }
-  }, [isDashboard, agentState])
+  }, [isDashboard, agentState, marketStatus])
 
   return (
     <nav className="nav-bar" role="navigation" aria-label="Main">

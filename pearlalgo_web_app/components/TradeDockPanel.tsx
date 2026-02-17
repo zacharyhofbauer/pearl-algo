@@ -173,8 +173,8 @@ function TradeDockPanel({
         </div>
       )}
       <div className="dock-stat pos">
-        <span className="dock-stat-k">Pos</span>
-        <span className="dock-stat-v">{headerPosCount} pos</span>
+        <span className="dock-stat-k">POS</span>
+        <span className="dock-stat-v">{headerPosCount}</span>
       </div>
     </div>
   )

@@ -10,6 +10,17 @@
   background: var(--bg-card);
   border-top: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
+  transition: background 0.4s ease, border-color 0.4s ease;
+}
+
+.account-strip.tint-positive {
+  background: linear-gradient(135deg, rgba(var(--accent-green-rgb), 0.06) 0%, var(--bg-card) 60%);
+  border-top-color: rgba(var(--accent-green-rgb), 0.2);
+}
+
+.account-strip.tint-negative {
+  background: linear-gradient(135deg, rgba(var(--accent-red-rgb), 0.06) 0%, var(--bg-card) 60%);
+  border-top-color: rgba(var(--accent-red-rgb), 0.2);
 }
 
 .account-strip-item {
