@@ -1,14 +1,10 @@
 'use client'
 
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import DashboardPageInner from './DashboardPageInner'
 
-/**
- * Dashboard page - Live trading view (Tradovate Paper).
- * Redirects to ?account=tv_paper if not set, so API/WS always target the live account.
- */
-export default function DashboardPage() {
+function DashboardContent() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
@@ -31,4 +27,23 @@ export default function DashboardPage() {
   }
 
   return <DashboardPageInner />
+}
+
+/**
+ * Dashboard page - Live trading view (Tradovate Paper).
+ * Redirects to ?account=tv_paper if not set, so API/WS always target the live account.
+ */
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="account-gate-loading" role="status" aria-label="Loading dashboard">
+          <div className="account-gate-loading-spinner" />
+          <span className="account-gate-loading-text">Loading…</span>
+        </div>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
+  )
 }

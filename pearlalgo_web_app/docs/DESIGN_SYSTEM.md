@@ -347,10 +347,36 @@ Run tests:
 npm run test
 ```
 
+## Pages
+
+| Route | Purpose | Components |
+|-------|---------|------------|
+| `/` | Landing page — portfolio overview, links to live dashboard and archive | `app/page.tsx` (LandingPage), `NavBar`, `_landing.css` |
+| `/dashboard` | Live Tradovate Paper dashboard — charts, positions, performance | Dashboard layout, `NavBar`, chart/panel components |
+| `/archive/ibkr` | IBKR Virtual archive — historical trades, equity curve, daily P&L | Archive layout, `NavBar`, `components/archive/*` |
+
+### Landing Page Components
+
+The landing page (`/`) includes:
+
+- **Hero** — PEARL logo (pearl-emoji.png), heading, subtitle. Content is vertically centered in the viewport with a subtle text glow.
+- **Cards** — Two links: Tradovate Paper (live) and IBKR Virtual (archived). Cards show live stats fetched from `/tv_paper/api/state` and `/api/archive/ibkr?mode=summary`, with skeleton shimmer while loading and fallback to hardcoded values on error. Each card has `aria-description` for screen readers.
+- **Journey Timeline** — Semantic `<ol role="list">` with milestones (Dec 30 → Feb 3 → Feb 12 → Now). CSS connector line runs horizontally on desktop and vertically on mobile (≤480px).
+
+### NavBar
+
+Shared top navigation (`components/NavBar.tsx`):
+
+- Brand link to `/` — highlights as active when on landing (`aria-current="page"`).
+- Dashboard link to `/dashboard?account=tv_paper` — active when path starts with `/dashboard`.
+- Archive link to `/archive/ibkr` — active when path starts with `/archive`.
+- Right-side badge pills were removed (they duplicated the links and were hidden on mobile).
+
 ## Key Components (v0.2.5)
 
 | Component | Purpose |
 |-----------|---------|
+| `NavBar.tsx` | Main navigation: PEARL brand, Dashboard, Archive. Active route highlighting with `aria-current`. |
 | `SystemStatusPanel.tsx` | Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch with operator lock, session P&L, execution state, circuit breaker |
 | `DataPanelsContainer.tsx` | Panel wrapper with layout variants |
 | `InfoTooltip.tsx` | Tooltip component (used by status badges) |
@@ -358,11 +384,11 @@ npm run test
 
 ### Dashboard Header Badges
 
-The header includes status badges for Agent, GW, AI, Market, Data, ML, and Shadow savings. Each badge has a hover tooltip showing detailed status. Implemented in `app/page.tsx`.
+The header includes status badges for Agent, GW, AI, Market, Data, ML, and Shadow savings. Each badge has a hover tooltip showing detailed status. Implemented in the dashboard page.
 
 ### Pull-to-Refresh
 
-Mobile gesture support for dashboard refresh, implemented in `app/page.tsx`.
+Mobile gesture support for dashboard refresh, implemented in the dashboard page.
 
 ## File Structure
 
@@ -372,22 +398,31 @@ components/
     index.ts           # Export all UI primitives
     InfoTooltip.tsx    # Tooltip component
     StatDisplay.tsx    # Stat display component
+  NavBar.tsx           # Main navigation (PEARL, Dashboard, Archive)
   DataPanelsContainer.tsx  # Panel wrapper with variants
   SystemStatusPanel.tsx    # System status panel (readiness, kill switch, P&L)
+  archive/             # Archive page components
 
 app/
   globals.css          # Design tokens and global styles
-  page.tsx             # Dashboard (status badges, pull-to-refresh, agent banner)
+  page.tsx             # Landing page (hero, cards, timeline)
+  dashboard/           # Live Tradovate Paper dashboard
+  archive/ibkr/        # IBKR Virtual archive explorer
 
 styles/
   components/
+    _landing.css       # Landing page styles
+    _navbar.css        # NavBar styles
     _chart.css         # Chart actions (responsive, floating freshness indicator)
 
 docs/
   DESIGN_SYSTEM.md     # This file
 
 __tests__/
+  app/
+    LandingPage.test.tsx
   components/
+    NavBar.test.tsx
     ui/
       InfoTooltip.test.tsx
       StatDisplay.test.tsx

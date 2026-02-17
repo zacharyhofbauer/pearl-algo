@@ -53,6 +53,13 @@
   gap: 1px;
 }
 
+.header-breadcrumb {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .header-symbol {
   font-size: clamp(18px, 4vw, 24px);
   font-weight: 700;

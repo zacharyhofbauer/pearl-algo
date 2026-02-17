@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import NavBar from '@/components/NavBar'
 
 export const metadata: Metadata = {
   title: 'Pearl Algo Web App',
@@ -57,6 +58,7 @@ export default function RootLayout({
             <p>Pearl Algo Dashboard requires JavaScript. Please enable it and reload.</p>
           </div>
         </noscript>
+        <NavBar />
         {children}
       </body>
     </html>

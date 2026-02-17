@@ -1,700 +1,179 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
+
+/** Tradovate challenge stats from /api/state */
+interface TvStats {
+  evalNumber: number
+  balance: number
+}
+
+/** IBKR archive summary from /api/archive/ibkr?mode=summary */
+interface IbkrSummary {
+  total_trades: number
+  total_pnl: number
+  days?: number
+}
+
+function formatBalance(n: number): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n)
+}
+
+function formatPnL(n: number): string {
+  const s = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(n)
+  return n >= 0 ? s : s
+}
+
+function getTvApiBase(): string {
+  if (typeof window === 'undefined') return ''
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+  return isLocal ? 'http://localhost:8001' : '/tv_paper'
+}
 
 /**
- * Landing page - Portfolio overview and navigation hub.
+ * Landing page - Mission Control portfolio overview.
  * Links to /dashboard (Tradovate Paper live) and /archive/ibkr (IBKR Virtual historical).
  */
 export default function LandingPage() {
+  const [tvStats, setTvStats] = useState<TvStats | null>(null)
+  const [ibkrStats, setIbkrStats] = useState<IbkrSummary | null>(null)
+  const [tvLoading, setTvLoading] = useState(true)
+  const [ibkrLoading, setIbkrLoading] = useState(true)
+  useEffect(() => {
+    const base = getTvApiBase()
+    fetch(`${base}/api/state`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Not ok'))))
+      .then((data) => {
+        const ch = data?.challenge
+        if (ch && typeof ch.current_balance === 'number') {
+          setTvStats({
+            evalNumber: ch.attempt_number ?? 1,
+            balance: ch.current_balance,
+          })
+        }
+      })
+      .catch(() => {})
+      .finally(() => setTvLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/archive/ibkr?mode=summary')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Not ok'))))
+      .then((data) => {
+        if (data && typeof data.total_trades === 'number') {
+          let days: number | undefined
+          if (data.first_trade && data.last_trade) {
+            const a = new Date(data.first_trade).getTime()
+            const b = new Date(data.last_trade).getTime()
+            days = Math.max(1, Math.ceil((b - a) / (24 * 60 * 60 * 1000)))
+          }
+          setIbkrStats({
+            total_trades: data.total_trades,
+            total_pnl: data.total_pnl ?? 0,
+            days,
+          })
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIbkrLoading(false))
+  }, [])
+
+  const tvEval = tvStats ? `EVAL #${tvStats.evalNumber}` : 'EVAL #1'
+  const tvBalance = tvStats ? `${formatBalance(tvStats.balance)} balance` : '50K balance'
+  const ibkrTrades = ibkrStats ? `${formatBalance(ibkrStats.total_trades)} trades` : '1,573 trades'
+  const ibkrPnL = ibkrStats ? `${formatPnL(ibkrStats.total_pnl)} P&L` : '$23,248 P&L'
+  const ibkrDays = ibkrStats?.days ? `${ibkrStats.days} days` : '15 days'
+  const loading = tvLoading || ibkrLoading
+
   return (
     <main className="landing-page">
       <div className="landing-hero">
+        <Image
+          src="/pearl-emoji.png"
+          alt=""
+          width={64}
+          height={64}
+          className="landing-hero-icon"
+          priority
+        />
         <h1>PEARL Algo</h1>
         <p className="landing-subtitle">Trading Dashboard</p>
       </div>
       <div className="landing-cards">
-        <Link href="/dashboard?account=tv_paper" className="landing-card landing-card-live">
+        <Link
+          href="/dashboard?account=tv_paper"
+          className="landing-card landing-card-live"
+          aria-description="Open the live Tradovate Paper dashboard with 50K Rapid Evaluation"
+        >
           <div className="landing-card-header">
             <span className="landing-card-badge live">LIVE</span>
             <h2>Tradovate Paper</h2>
           </div>
-          <p>Live paper trading on Tradovate demo — 50K eval</p>
+          <p>Live paper trading on Tradovate demo — 50K Rapid Evaluation</p>
+          <div className="landing-card-stats">
+            <span>{loading && tvLoading ? <span className="landing-stat-skeleton" /> : tvEval}</span>
+            <span>{loading && tvLoading ? <span className="landing-stat-skeleton" /> : tvBalance}</span>
+          </div>
           <span className="landing-card-cta">Open Dashboard →</span>
         </Link>
-        <Link href="/archive/ibkr" className="landing-card landing-card-archive">
+        <Link
+          href="/archive/ibkr"
+          className="landing-card landing-card-archive"
+          aria-description="Explore archived IBKR Virtual trading history"
+        >
           <div className="landing-card-header">
             <span className="landing-card-badge archived">ARCHIVED</span>
             <h2>IBKR Virtual</h2>
           </div>
-          <p>Historical data — 1,573 trades, $23K+ P&L</p>
+          <p>Inception test account — full history preserved</p>
+          <div className="landing-card-stats">
+            <span>{loading && ibkrLoading ? <span className="landing-stat-skeleton" /> : ibkrTrades}</span>
+            <span>{loading && ibkrLoading ? <span className="landing-stat-skeleton" /> : ibkrPnL}</span>
+            <span>{loading && ibkrLoading ? <span className="landing-stat-skeleton" /> : ibkrDays}</span>
+          </div>
           <span className="landing-card-cta">Explore History →</span>
         </Link>
       </div>
+      <section className="landing-journey" aria-label="Trading journey timeline">
+        <h3 className="landing-journey-title">Journey</h3>
+        <ol className="landing-journey-track" role="list">
+          <li className="landing-journey-milestone">
+            <span className="landing-journey-date">Nov 25</span>
+            <span className="landing-journey-label">Project born</span>
+          </li>
+          <li className="landing-journey-milestone">
+            <span className="landing-journey-date">Dec 30</span>
+            <span className="landing-journey-label">First trade</span>
+          </li>
+          <li className="landing-journey-milestone milestone-positive">
+            <span className="landing-journey-date">Jan 29</span>
+            <span className="landing-journey-label">+$7.2K breakout</span>
+          </li>
+          <li className="landing-journey-milestone milestone-positive">
+            <span className="landing-journey-date">Feb 3</span>
+            <span className="landing-journey-label">Peak +$9.6K</span>
+          </li>
+          <li className="landing-journey-milestone milestone-negative">
+            <span className="landing-journey-date">Feb 5</span>
+            <span className="landing-journey-label">-$12.9K lesson</span>
+          </li>
+          <li className="landing-journey-milestone">
+            <span className="landing-journey-date">Feb 12</span>
+            <span className="landing-journey-label">IBKR archived</span>
+          </li>
+          <li className="landing-journey-milestone current">
+            <span className="landing-journey-date">Now</span>
+            <span className="landing-journey-label">TV Paper eval</span>
+          </li>
+        </ol>
+      </section>
     </main>
-  )
-}
-  const agentState = useAgentStore((s) => s.agentState)
-  const setAgentState = useAgentStore((s) => s.setAgentState)
-  const updateFromWebSocket = useAgentStore((s) => s.updateFromWebSocket)
-
-  // Chart store
-  const candles = useChartStore((s) => s.candles)
-  const indicators = useChartStore((s) => s.indicators)
-  const markers = useChartStore((s) => s.markers)
-  const marketStatus = useChartStore((s) => s.marketStatus)
-  const timeframe = useChartStore((s) => s.timeframe)
-  const barCount = useChartStore((s) => s.barCount)
-  const barSpacing = useChartStore((s) => s.barSpacing)
-  const chartLoading = useChartStore((s) => s.isLoading)
-  const chartError = useChartStore((s) => s.error)
-  const setCandles = useChartStore((s) => s.setCandles)
-  const setIndicators = useChartStore((s) => s.setIndicators)
-  const setMarkers = useChartStore((s) => s.setMarkers)
-  const setMarketStatus = useChartStore((s) => s.setMarketStatus)
-  const setTimeframe = useChartStore((s) => s.setTimeframe)
-  const setBarCount = useChartStore((s) => s.setBarCount)
-  const setBarSpacing = useChartStore((s) => s.setBarSpacing)
-  const setChartLoading = useChartStore((s) => s.setLoading)
-  const setChartError = useChartStore((s) => s.setError)
-
-  // UI store
-  const wsStatus = useUIStore((s) => s.wsStatus)
-  const isLive = useUIStore((s) => s.isLive)
-  const lastUpdate = useUIStore((s) => s.lastUpdate)
-  const dataSource = useUIStore((s) => s.dataSource)
-  const isFetching = useUIStore((s) => s.isFetching)
-  const setWsStatus = useUIStore((s) => s.setWsStatus)
-  const setIsLive = useUIStore((s) => s.setIsLive)
-  const setLastUpdate = useUIStore((s) => s.setLastUpdate)
-  const setIsFetching = useUIStore((s) => s.setIsFetching)
-  const recordFetch = useUIStore((s) => s.recordFetch)
-
-  // Local state for chart API reference (not suitable for global store)
-  const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
-
-  // Badge tooltip state (which badge explanation is showing)
-  const [badgeTip, setBadgeTip] = useState<string | null>(null)
-
-  // Local state for active positions (for chart price lines) - updated from HTTP + WebSocket
-  const [positions, setPositions] = useState<Position[]>([])
-  const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
-  const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
-
-  // Dashboard data hook - handles HTTP fetching with in-flight guard
-  const dashboardData = useDashboardData({
-    timeframe,
-    barCount,
-    wsStatus,
-  })
-
-  // Merge dashboard data from hook into local state (HTTP fetch results)
-  useEffect(() => {
-    if (dashboardData.positions.length > 0 || positions.length === 0) {
-      setPositions(dashboardData.positions)
-    }
-    if (dashboardData.recentTrades.length > 0 || recentTrades.length === 0) {
-      setRecentTrades(dashboardData.recentTrades)
-    }
-    if (dashboardData.performanceSummary !== null) {
-      setPerformanceSummary(dashboardData.performanceSummary)
-    }
-  }, [dashboardData.positions, dashboardData.recentTrades, dashboardData.performanceSummary])
-
-  // Convert positions to price lines for chart visualization (more visible than live price)
-  const positionLines = useMemo<PositionLine[]>(() => {
-    const lines: PositionLine[] = []
-
-    positions.forEach((pos) => {
-      // Entry price line - blue/purple, more visible
-      lines.push({
-        price: pos.entry_price,
-        // Slightly lighter (less busy) but still readable
-        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.42)' : 'rgba(156, 39, 176, 0.42)',
-        title: '',
-        kind: 'entry',
-        lineStyle: 2, // dashed
-        axisLabelVisible: true,
-      })
-
-      // Stop loss line - red, more visible
-      if (pos.stop_loss) {
-        lines.push({
-          price: pos.stop_loss,
-          color: 'rgba(244, 67, 54, 0.42)',
-          title: '',
-          kind: 'sl',
-          lineStyle: 2, // dashed
-          axisLabelVisible: true,
-        })
-      }
-
-      // Take profit line - green, more visible
-      if (pos.take_profit) {
-        lines.push({
-          price: pos.take_profit,
-          color: 'rgba(76, 175, 80, 0.42)',
-          title: '',
-          kind: 'tp',
-          lineStyle: 2, // dashed
-          axisLabelVisible: true,
-        })
-      }
-    })
-
-    return lines
-  }, [positions])
-
-  // Viewport detection for ultrawide layout
-  const viewport = useViewportType()
-
-  // WebSocket connection for real-time updates
-  useWebSocket({
-    url: getWebSocketUrl(),
-    reconnect: true,
-    reconnectInterval: 3000,
-    maxReconnectAttempts: 10,
-    pingInterval: 30000,
-    onStatusChange: (status) => {
-      setWsStatus(status)
-      // Set isLive=false on disconnect or error so the UI reflects reality
-      if (status === 'disconnected' || status === 'error') {
-        setIsLive(false)
-      }
-    },
-    onMessage: (message) => {
-      if (message.type === 'initial_state' || message.type === 'state_update' || message.type === 'full_refresh') {
-        const data = message.data
-        if (data) {
-          updateFromWebSocket(data)
-          setLastUpdate(new Date())
-          setIsLive(true)
-
-          // Consume positions, trades, and performance summary from WS
-          // (previously HTTP-only, now included in broadcast for ~2s latency)
-          if (data.positions !== undefined) {
-            setPositions(Array.isArray(data.positions) ? data.positions : [])
-          }
-          if (data.recent_trades !== undefined) {
-            setRecentTrades(Array.isArray(data.recent_trades) ? data.recent_trades : [])
-          }
-          if (data.performance_summary !== undefined) {
-            setPerformanceSummary(data.performance_summary || null)
-          }
-        }
-      }
-    },
-  })
-
-  // Responsive bar spacing - smaller on mobile
-  const getBarSpacing = useCallback(() => {
-    if (typeof window === 'undefined') return 10
-    return window.innerWidth < 768 ? 6 : 10
-  }, [])
-
-  // Calculate bar count based on viewport width - always request enough to fill chart
-  const calculateBarCount = useCallback(() => {
-    if (typeof window === 'undefined') return MIN_BARS
-    const width = window.innerWidth
-    const spacing = getBarSpacing()
-    const priceScaleWidth = 60
-    const availableWidth = width - priceScaleWidth - 40
-    const visibleBars = Math.floor(availableWidth / spacing)
-    // Request 50% more bars than visible to allow scrolling, with minimum
-    return Math.max(MIN_BARS, Math.floor(visibleBars * 1.5))
-  }, [getBarSpacing])
-
-  // Update bar count and spacing on resize
-  useEffect(() => {
-    const update = () => {
-      setBarSpacing(getBarSpacing())
-      setBarCount(calculateBarCount())
-    }
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [getBarSpacing, calculateBarCount, setBarSpacing, setBarCount])
-
-  // Callback for TradeDockPanel to trigger an immediate refetch after close actions
-  const handleTradeRefresh = useCallback(() => {
-    dashboardData.handleTradeRefresh()
-  }, [dashboardData])
-
-  const formatTime = formatTimeFromDate
-  const formatRelativeTimeFromDate = (date: Date | null) => {
-    if (!date) return 'Never'
-    return formatRelativeTime(date)
-  }
-  const formatMarketCountdownFromStatus = () => {
-    if (!marketStatus?.next_open) return null
-    return formatMarketCountdown(marketStatus.next_open)
-  }
-
-  // Use useAIStatus hook instead of inline logic
-  const aiStatus = useAIStatus(agentState?.ai_status)
-  const getAgentModeBadge = () => aiStatus.badge
-
-  const getRegimeBadge = () => {
-    if (!agentState?.market_regime) return null
-    const regime = agentState.market_regime
-    if (regime.confidence === 0 || regime.regime === 'unknown') return null
-
-    const icons: Record<string, string> = {
-      'trending_up': '📈',
-      'trending_down': '📉',
-      'ranging': '↔️',
-      'volatile': '⚡',
-    }
-    return {
-      icon: icons[regime.regime] || '❓',
-      label: regime.regime.replace('_', ' ').toUpperCase(),
-      confidence: Math.round(regime.confidence * 100)
-    }
-  }
-
-  // Stale threshold reduced to 60 seconds for better responsiveness
-  const STALE_THRESHOLD_SECONDS = 60
-
-  const isDataStale = () => {
-    if (!lastUpdate) return true
-    const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000)
-    return seconds > STALE_THRESHOLD_SECONDS
-  }
-
-  // Force refresh function for manual refresh button
-  const handleForceRefresh = useCallback(() => {
-    dashboardData.handleTradeRefresh()
-  }, [dashboardData])
-
-  // Pull-to-refresh (mobile touch) - uses window scroll position
-  const pullStartY = useRef(0)
-  const pullActive = useRef(false)
-  const pullDistanceRef = useRef(0)
-  const [pullDistance, setPullDistance] = useState(0)
-  const [pullRefreshing, setPullRefreshing] = useState(false)
-  const PULL_THRESHOLD = 70
-
-  // Keep ref in sync with state for use in touchend
-  useEffect(() => { pullDistanceRef.current = pullDistance }, [pullDistance])
-
-  useEffect(() => {
-    let refreshingRef = false
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (refreshingRef) return
-      // Check both window scroll and document scroll (cross-browser)
-      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0
-      if (scrollTop <= 5) {
-        pullStartY.current = e.touches[0].clientY
-        pullActive.current = false
-      } else {
-        pullStartY.current = 0
-      }
-    }
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (pullStartY.current === 0 || refreshingRef) return
-      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0
-      const diff = e.touches[0].clientY - pullStartY.current
-
-      if (diff > 10 && scrollTop <= 5) {
-        // Pulling down from top - activate
-        pullActive.current = true
-        e.preventDefault()
-        const distance = Math.min(diff * 0.4, 100)
-        setPullDistance(distance)
-      } else if (diff < -5 && !pullActive.current) {
-        // Scrolling up - cancel pull tracking
-        pullStartY.current = 0
-      }
-    }
-
-    const onTouchEnd = () => {
-      if (!pullActive.current || refreshingRef) {
-        if (!refreshingRef) setPullDistance(0)
-        pullStartY.current = 0
-        pullActive.current = false
-        return
-      }
-
-      if (pullDistanceRef.current >= PULL_THRESHOLD * 0.4) {
-        refreshingRef = true
-        setPullRefreshing(true)
-        setPullDistance(40)
-        dashboardData.handleTradeRefresh()
-        // Brief visual feedback before clearing pull state
-        setTimeout(() => {
-          refreshingRef = false
-          setPullRefreshing(false)
-          setPullDistance(0)
-        }, 800)
-      } else {
-        setPullDistance(0)
-      }
-      pullStartY.current = 0
-      pullActive.current = false
-    }
-
-    // Cancel pull if user scrolls via momentum after lifting finger
-    const onScroll = () => {
-      if (pullActive.current && !refreshingRef) {
-        pullActive.current = false
-        setPullDistance(0)
-      }
-    }
-
-    document.addEventListener('touchstart', onTouchStart, { passive: true })
-    document.addEventListener('touchmove', onTouchMove, { passive: false })
-    document.addEventListener('touchend', onTouchEnd, { passive: true })
-    document.addEventListener('touchcancel', onTouchEnd, { passive: true })
-    window.addEventListener('scroll', onScroll, { passive: true })
-
-    return () => {
-      document.removeEventListener('touchstart', onTouchStart)
-      document.removeEventListener('touchmove', onTouchMove)
-      document.removeEventListener('touchend', onTouchEnd)
-      document.removeEventListener('touchcancel', onTouchEnd)
-      window.removeEventListener('scroll', onScroll)
-    }
-  }, [dashboardData])
-
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : ''
-    return `${sign}$${pnl.toFixed(2)}`
-  }
-
-  // Track if chart is fully loaded (for screenshot detection)
-  const isChartReady = !chartLoading && !chartError && candles.length > 0
-
-  // Format next market open time
-  const formatNextOpen = (isoString: string | null) => {
-    if (!isoString) return ''
-    try {
-      const date = new Date(isoString)
-      return date.toLocaleString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        timeZoneName: 'short',
-      })
-    } catch {
-      return ''
-    }
-  }
-
-  // getAIMode is replaced by aiStatus.aiMode from useAIStatus hook
-
-  // Combined header - all info in one modern compact section
-  const renderHeader = () => {
-    const agentMode = getAgentModeBadge()
-    const regime = getRegimeBadge()
-    const countdown = formatMarketCountdownFromStatus()
-    const stale = isDataStale()
-    const aiMode = aiStatus.aiMode
-    const dirGate = agentState?.ai_status?.direction_gating
-
-    return (
-      <header className="header-combined">
-        {/* Main Header Row */}
-        <div className="header-row-main">
-          {/* Brand */}
-          <div className="header-brand">
-            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="header-logo" priority />
-            <div className="header-titles">
-              <span className="header-symbol">MNQ</span>
-              <h1 className="header-app-name">Pearl Algo Web App</h1>
-            </div>
-          </div>
-
-          {/* Stats */}
-          {/* Moved daily P&L / W-L / positions into the Trades dock header for better visibility */}
-
-          {/* Timeframe */}
-          <div className="header-timeframe">
-            {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
-              <button
-                key={tf}
-                className={`tf-btn ${timeframe === tf ? 'active' : ''}`}
-                onClick={() => setTimeframe(tf)}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Secondary Row - System Status + AI Metrics */}
-        <div className="header-row-secondary">
-          <div className="header-badges">
-            {/* System status badges - tap for explanation */}
-            {agentState && (
-              <span
-                className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'agent' ? null : 'agent') }}
-              >
-                <span className="badge-dot"></span>
-                {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
-              </span>
-            )}
-            {agentState && (
-              <span
-                className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'gw' ? null : 'gw') }}
-              >
-                <span className="badge-dot"></span>
-                GW
-              </span>
-            )}
-            {aiStatus.aiMode && (
-              <span
-                className={`badge ai-badge ${aiStatus.aiMode}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
-              >
-                🧠 {aiStatus.aiMode.toUpperCase()}
-                {agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
-                  <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
-                )}
-              </span>
-            )}
-            {marketStatus && (
-              <span
-                className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
-              >
-                {marketStatus.is_open ? '🟢 OPEN' : '🔴 CLOSED'}
-              </span>
-            )}
-            {agentState && (
-              <span
-                className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
-              >
-                <span className="badge-dot"></span>
-                Data
-              </span>
-            )}
-            {agentState?.ml_filter_performance?.lift_ok && agentState.ml_filter_performance.win_rate_pass != null && (
-              <span
-                className={`badge ml-badge ${(agentState.ml_filter_performance.lift_win_rate || 0) > 0.1 ? 'good' : 'neutral'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ml' ? null : 'ml') }}
-              >
-                ML {Math.round((agentState.ml_filter_performance.win_rate_pass) * 100)}%
-              </span>
-            )}
-            {agentState?.shadow_counters && (agentState.shadow_counters.blocked_total > 0) && (
-              <span
-                className={`badge saved-badge ${(agentState.shadow_counters.net_saved || 0) >= 0 ? 'positive' : 'negative'}`}
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'saved' ? null : 'saved') }}
-              >
-                {(agentState.shadow_counters.net_saved || 0) >= 0 ? '↑' : '↓'}${Math.abs(agentState.shadow_counters.net_saved || 0).toFixed(0)}
-              </span>
-            )}
-          </div>
-          {/* Badge explanation tooltip */}
-          {badgeTip && (
-            <div className="badge-tooltip" onClick={() => setBadgeTip(null)}>
-              {badgeTip === 'agent' && (
-                <p><strong>Agent</strong> — Trading scanner process. {agentState?.running ? 'Running and scanning for signals every cycle.' : 'Stopped. No signals are being generated.'}{agentState?.paused ? ' Currently paused due to circuit breaker or manual pause.' : ''}</p>
-              )}
-              {badgeTip === 'gw' && (
-                <p><strong>Gateway</strong> — IBKR Gateway connection. {agentState?.gateway_status?.status === 'online' ? `Online on port ${agentState.gateway_status.port}. Market data and execution available.` : 'Offline. No market data or execution. Check Gateway process.'}</p>
-              )}
-              {badgeTip === 'ai' && (() => {
-                const ai = agentState?.ai_status
-                const sc = agentState?.shadow_counters
-                return (
-                  <p><strong>AI/ML — {aiMode?.toUpperCase()}</strong> — {aiMode === 'shadow' ? 'Observing and scoring signals without blocking. ' : aiMode === 'live' ? 'Actively filtering signals. ' : 'AI systems disabled. '}
-                    {ai && <>Bandit: {ai.bandit_mode}, Ctx: {ai.contextual_mode}, Filter: {ai.ml_filter?.mode || 'off'}. </>}
-                    {sc && sc.would_block_total > 0 && <>{sc.would_block_total} signals would have been blocked if enforced.</>}
-                  </p>
-                )
-              })()}
-              {badgeTip === 'market' && (
-                <p><strong>Market</strong> — CME Futures session. {marketStatus?.is_open ? 'Market is open. Real-time data flowing.' : `Market closed${marketStatus?.close_reason ? ` (${marketStatus.close_reason})` : ''}. Historical data only.`}</p>
-              )}
-              {badgeTip === 'data' && (
-                <p><strong>Data Feed</strong> — {agentState?.data_fresh ? 'Fresh. Latest bar is recent and buffer has enough bars for indicators.' : 'Stale. Data may be delayed or unavailable. Check IBKR connection.'}</p>
-              )}
-              {badgeTip === 'ml' && (() => {
-                const ml = agentState?.ml_filter_performance
-                return (
-                  <p><strong>ML Filter</strong> — Win rate when ML says PASS: {ml?.win_rate_pass != null ? `${Math.round(ml.win_rate_pass * 100)}%` : 'N/A'} vs FAIL: {ml?.win_rate_fail != null ? `${Math.round(ml.win_rate_fail * 100)}%` : 'N/A'}. Lift: {ml?.lift_win_rate != null ? `+${Math.round(ml.lift_win_rate * 100)}%` : 'N/A'}. Based on {ml?.trades_passed || 0} PASS / {ml?.trades_blocked || 0} FAIL trades scored.</p>
-                )
-              })()}
-              {badgeTip === 'saved' && (() => {
-                const sc = agentState?.shadow_counters
-                const net = sc?.net_saved || 0
-                return (
-                  <p><strong>Shadow Savings</strong> — {net >= 0 ? `Would save $${net.toFixed(0)}` : `Would cost $${Math.abs(net).toFixed(0)}`} if circuit breaker was in enforce mode. Blocked signals: {sc?.blocked_total || 0} ({sc?.blocked_wins || 0}W / {sc?.blocked_losses || 0}L = ${(sc?.blocked_pnl || 0).toFixed(0)}). Allowed signals: {sc?.allowed_total || 0} ({sc?.allowed_wins || 0}W / {sc?.allowed_losses || 0}L = ${(sc?.allowed_pnl || 0).toFixed(0)}).</p>
-                )
-              })()}
-            </div>
-          )}
-        </div>
-      </header>
-    )
-  }
-
-  // Chart section component
-  const renderChart = () => (
-    <div className="chart-wrapper">
-      {/* Agent/Execution offline banner */}
-      {agentState && (agentState.running === false || agentState.execution_state?.enabled === false) && (
-        <div style={{
-          background: 'rgba(244, 67, 54, 0.15)',
-          border: '1px solid rgba(244, 67, 54, 0.4)',
-          borderRadius: 6,
-          padding: '8px 14px',
-          margin: '0 0 8px 0',
-          fontSize: '0.82rem',
-          color: 'var(--color-danger, #f44336)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-        }}>
-          <span style={{ fontWeight: 600 }}>
-            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISABLED'}
-          </span>
-          <span style={{ opacity: 0.7 }}>
-            {agentState.running === false
-              ? 'The trading agent is not running. Data may be stale.'
-              : 'Execution is disabled. Orders will not be placed.'}
-          </span>
-        </div>
-      )}
-      <div className="chart-container" role="img" aria-label="MNQ candlestick price chart with indicators">
-        <div className="chart-actions">
-          {/* Data Freshness Indicator with chart action buttons */}
-          <DataFreshnessIndicator
-            lastUpdate={lastUpdate}
-            wsStatus={wsStatus}
-            dataSource={dataSource}
-            isLoading={isFetching}
-            staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
-            onRefresh={handleForceRefresh}
-            onFitAll={() => {
-              if (mainChartApi && candles.length > 0) {
-                // Zoom to show last ~100 bars for a readable view
-                const visibleBars = Math.min(100, candles.length)
-                if (candles.length > visibleBars) {
-                  const fromTime = candles[candles.length - visibleBars].time as unknown as import('lightweight-charts').Time
-                  const toTime = candles[candles.length - 1].time as unknown as import('lightweight-charts').Time
-                  mainChartApi.timeScale().setVisibleRange({ from: fromTime, to: toTime })
-                } else {
-                  mainChartApi.timeScale().fitContent()
-                }
-                mainChartApi.timeScale().scrollToRealTime()
-              }
-            }}
-            onGoLive={() => mainChartApi?.timeScale().scrollToRealTime()}
-            variant="floating"
-          />
-        </div>
-        {chartLoading && (
-          <div className="loading-screen">
-            <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
-            <div className="loading-text">
-              {isArchivedAccount ? 'Loading Historical Data...' : 'Loading Live Data...'}
-            </div>
-            <div className="loading-spinner"></div>
-          </div>
-        )}
-        {chartError && !chartLoading && (
-          <div className="no-data-container">
-            <Image src="/pearl-emoji.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
-            <div className="no-data-title">{isArchivedAccount ? 'No Data' : 'No Live Data'}</div>
-            <div className="no-data-message">{chartError}</div>
-            <div className="no-data-hint">
-              {isArchivedAccount
-                ? 'Historical data may be unavailable for this account.'
-                : 'Start the Market Agent to see real-time data'}
-            </div>
-          </div>
-        )}
-        {!chartLoading && !chartError && candles.length > 0 && (
-          <ErrorBoundary
-            panelName="Chart"
-            fallback={
-              <div className="chart-error-fallback">
-                <div className="error-boundary-icon">⚠️</div>
-                <div className="error-boundary-title">Chart Error</div>
-                <div className="error-boundary-message">Failed to render chart</div>
-                <button className="error-boundary-retry" onClick={() => window.location.reload()}>
-                  Reload Page
-                </button>
-              </div>
-            }
-          >
-            <CandlestickChart
-              data={candles}
-              indicators={indicators}
-              markers={markers}
-              barSpacing={barSpacing}
-              timeframe={timeframe}
-              onChartReady={setMainChartApi}
-              positionLines={positionLines}
-            />
-          </ErrorBoundary>
-        )}
-      </div>
-    </div>
-  )
-
-  // Chart settings store for indicator visibility
-  const showVolumeProfilePanel = useChartSettingsStore((s) => s.showVolumeProfilePanel)
-
-  // Volume Profile section component
-  const renderVolumeProfile = () => (
-    showVolumeProfilePanel && indicators.volumeProfile && (
-      <VolumeProfilePanel
-        data={indicators.volumeProfile}
-        currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-        height={300}
-      />
-    )
-  )
-
-  // Standard layout (all viewports)
-  return (
-    <>
-      <PearlHeaderBar />
-      {isArchivedAccount && (
-        <div
-          className="archive-banner"
-          role="status"
-          aria-label="Viewing archived account"
-        >
-          You are viewing an archived account — historical data only
-        </div>
-      )}
-      <DashboardLayout
-        isChartReady={isChartReady}
-        pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
-        header={renderHeader()}
-        chart={renderChart()}
-        panels={
-          <TradeDockPanel
-            positions={positions}
-            recentTrades={recentTrades}
-            symbol={agentState?.config?.symbol || 'MNQ'}
-            currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-            openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
-            performanceSummary={performanceSummary}
-            directionBreakdown={agentState?.analytics?.direction_breakdown || null}
-            statusBreakdown={agentState?.analytics?.status_breakdown || null}
-            maxOpenRows={6}
-            maxRecentRows={10}
-            dailyPnL={agentState?.daily_pnl}
-            dailyWins={agentState?.daily_wins}
-            dailyLosses={agentState?.daily_losses}
-            activeTradesCount={agentState?.active_trades_count}
-            onRefresh={handleTradeRefresh}
-            riskMetrics={agentState?.risk_metrics || null}
-          />
-        }
-      />
-    </>
   )
 }

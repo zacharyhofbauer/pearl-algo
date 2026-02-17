@@ -5,17 +5,17 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
-  "theme_color": "#000000",
+  "theme_color": "#0a0a0f",
   "orientation": "any",
   "icons": [
     {
-      "src": "/apple-touch-icon.png?v=3",
+      "src": "/apple-icon-v4.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/apple-touch-icon-180x180.png?v=3",
+      "src": "/apple-icon-180-v4.png",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
