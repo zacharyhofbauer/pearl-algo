@@ -76,7 +76,8 @@ def trades(conn, limit=100, offset=0):
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT trade_id, signal_id, direction, entry_price, exit_price, pnl, is_win,
+        SELECT trade_id, signal_id, direction, entry_price, exit_price,
+               stop_loss, take_profit, pnl, is_win,
                exit_reason, entry_time, exit_time, hold_duration_minutes, regime
         FROM trades
         WHERE exit_time IS NOT NULL

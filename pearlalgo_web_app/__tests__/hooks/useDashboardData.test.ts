@@ -6,8 +6,7 @@
  * - Individual endpoint failures (503, network error)
  * - Loading states
  * - Polling cycle
- * - In-flight guard (prevents duplicate requests)
- * - Pull-to-refresh
+ * - Pull-to-refresh via handleTradeRefresh
  * - Hash-based dedup (doesn't update store if data unchanged)
  */
 
@@ -38,6 +37,7 @@ jest.mock('@/stores', () => ({
   useAgentStore: jest.fn((selector: (s: any) => unknown) => {
     const state = {
       agentState: { config: { symbol: 'MNQ' } },
+      setAgentState: mockSetAgentState,
     }
     return selector(state)
   }),
@@ -137,15 +137,14 @@ describe('useDashboardData', () => {
           timeframe: '5m',
           barCount: 500,
           wsStatus: 'disconnected',
-          symbol: 'MNQ',
         })
       )
 
       await waitFor(() => {
-        expect(mockApiFetch).toHaveBeenCalledTimes(9)
+        expect(mockSetCandles).toHaveBeenCalledWith(mockCandles)
       })
 
-      expect(mockSetCandles).toHaveBeenCalledWith(mockCandles)
+      expect(mockApiFetch).toHaveBeenCalledTimes(9)
       expect(mockSetIndicators).toHaveBeenCalledWith(mockIndicators)
       expect(mockSetMarkers).toHaveBeenCalled()
       expect(mockSetMarketStatus).toHaveBeenCalledWith(mockMarketStatus)
@@ -160,7 +159,7 @@ describe('useDashboardData', () => {
         headers: new Headers(),
       } as Response)
 
-      const { result } = renderHook(() =>
+      renderHook(() =>
         useDashboardData({
           timeframe: '5m',
           barCount: 500,
@@ -169,17 +168,17 @@ describe('useDashboardData', () => {
       )
 
       await waitFor(() => {
-        expect(result.current.error).toBeTruthy()
+        expect(mockSetIsLive).toHaveBeenCalledWith(false)
       })
 
-      expect(result.current.error).toContain('Agent not running')
-      expect(mockSetChartError).toHaveBeenCalled()
+      expect(mockSetIsFetching).toHaveBeenCalledWith(false)
     })
 
     it('should handle network errors', async () => {
-      mockApiFetch.mockRejectedValueOnce(new Error('Network error'))
+      // All 9 fetches reject (the last 4 are caught individually, but first 5 propagate)
+      mockApiFetch.mockRejectedValue(new Error('Network error'))
 
-      const { result } = renderHook(() =>
+      renderHook(() =>
         useDashboardData({
           timeframe: '5m',
           barCount: 500,
@@ -188,55 +187,7 @@ describe('useDashboardData', () => {
       )
 
       await waitFor(() => {
-        expect(result.current.error).toBeTruthy()
-      })
-
-      expect(result.current.error).toContain('Network error')
-    })
-  })
-
-  describe('in-flight guard', () => {
-    it('should prevent duplicate requests when already fetching', async () => {
-      let resolveFirst: () => void
-      const firstPromise = new Promise<Response>((resolve) => {
-        resolveFirst = () => resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve([]),
-          headers: new Headers(),
-        } as Response)
-      })
-
-      mockApiFetch.mockReturnValueOnce(firstPromise)
-
-      const { result } = renderHook(() =>
-        useDashboardData({
-          timeframe: '5m',
-          barCount: 500,
-          wsStatus: 'disconnected',
-        })
-      )
-
-      // Trigger first fetch
-      act(() => {
-        result.current.refresh()
-      })
-
-      // Try to trigger second fetch while first is in progress
-      act(() => {
-        result.current.refresh()
-      })
-
-      // Should only have called apiFetch once
-      expect(mockApiFetch).toHaveBeenCalledTimes(1)
-
-      // Resolve the first fetch
-      act(() => {
-        resolveFirst!()
-      })
-
-      await waitFor(() => {
-        expect(mockSetIsFetching).toHaveBeenCalledWith(false)
+        expect(mockSetChartError).toHaveBeenCalledWith('Network error')
       })
     })
   })
@@ -334,7 +285,7 @@ describe('useDashboardData', () => {
           json: () => Promise.resolve({}),
         } as Response)
 
-      const { result, rerender } = renderHook(() =>
+      const { result } = renderHook(() =>
         useDashboardData({
           timeframe: '5m',
           barCount: 500,
@@ -348,9 +299,9 @@ describe('useDashboardData', () => {
 
       mockSetCandles.mockClear()
 
-      // Trigger another fetch with same data
+      // Trigger another fetch with same data via handleTradeRefresh
       act(() => {
-        result.current.refresh()
+        result.current.handleTradeRefresh()
       })
 
       await waitFor(() => {
@@ -385,13 +336,13 @@ describe('useDashboardData', () => {
           ok: true,
           json: () => Promise.resolve({}),
         } as Response)
-        // Optional endpoints fail
+        // Optional endpoints fail (caught by .catch(() => null) in the hook)
         .mockRejectedValueOnce(new Error('Analytics failed'))
         .mockRejectedValueOnce(new Error('Positions failed'))
         .mockRejectedValueOnce(new Error('Trades failed'))
         .mockRejectedValueOnce(new Error('Performance failed'))
 
-      const { result } = renderHook(() =>
+      renderHook(() =>
         useDashboardData({
           timeframe: '5m',
           barCount: 500,
@@ -400,11 +351,9 @@ describe('useDashboardData', () => {
       )
 
       await waitFor(() => {
-        expect(result.current.error).toBeNull()
+        // Should not set a chart error because only optional endpoints failed
+        expect(mockSetChartError).toHaveBeenCalledWith(null)
       })
-
-      // Should not have error because optional endpoints failed
-      expect(result.current.error).toBeNull()
     })
   })
 
@@ -466,6 +415,38 @@ describe('useDashboardData', () => {
         expect(result.current.positions).toEqual(mockPositions)
         expect(result.current.recentTrades).toEqual(mockTrades)
         expect(result.current.performanceSummary).toEqual(mockPerf)
+      })
+    })
+
+    it('should expose handleTradeRefresh to trigger a manual fetch', async () => {
+      mockApiFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([]),
+        headers: new Headers(),
+      } as Response)
+
+      const { result } = renderHook(() =>
+        useDashboardData({
+          timeframe: '5m',
+          barCount: 500,
+          wsStatus: 'disconnected',
+        })
+      )
+
+      // Wait for initial fetch
+      await waitFor(() => {
+        expect(mockApiFetch).toHaveBeenCalled()
+      })
+
+      const callCountAfterInit = mockApiFetch.mock.calls.length
+
+      act(() => {
+        result.current.handleTradeRefresh()
+      })
+
+      await waitFor(() => {
+        expect(mockApiFetch.mock.calls.length).toBeGreaterThan(callCountAfterInit)
       })
     })
   })

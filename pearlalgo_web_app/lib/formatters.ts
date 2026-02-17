@@ -101,8 +101,8 @@ export function formatRelativeTime(isoString: string | Date | null): string {
  */
 export function formatPnL(pnl?: number | null): string {
   if (pnl === null || pnl === undefined || Number.isNaN(pnl)) return '—'
-  const sign = pnl >= 0 ? '+' : ''
-  return `${sign}$${pnl.toFixed(2)}`
+  const sign = pnl >= 0 ? '+' : '-'
+  return `${sign}$${Math.abs(pnl).toFixed(2)}`
 }
 
 /**
@@ -139,14 +139,14 @@ export function formatExitReason(reason: string): { text: string; type: string }
   if (lowerReason.includes('close_all') || lowerReason.includes('close all')) {
     return { text: 'Manual Close', type: 'manual' }
   }
+  if (lowerReason.includes('trail')) {
+    return { text: 'Trailing Stop', type: 'trail' }
+  }
   if (lowerReason.includes('stop') || lowerReason.includes('sl_')) {
     return { text: 'Stop Loss', type: 'stop' }
   }
   if (lowerReason.includes('target') || lowerReason.includes('tp_') || lowerReason.includes('profit')) {
     return { text: 'Target Hit', type: 'target' }
-  }
-  if (lowerReason.includes('trail')) {
-    return { text: 'Trailing Stop', type: 'trail' }
   }
   if (lowerReason.includes('time') || lowerReason.includes('eod') || lowerReason.includes('session')) {
     return { text: 'Time Exit', type: 'time' }
@@ -166,6 +166,7 @@ export function formatMarketCountdown(nextOpen?: string | null): string | null {
   
   try {
     const nextOpenDate = new Date(nextOpen)
+    if (Number.isNaN(nextOpenDate.getTime())) return null
     const now = new Date()
     const diffMs = nextOpenDate.getTime() - now.getTime()
     if (diffMs <= 0) return null

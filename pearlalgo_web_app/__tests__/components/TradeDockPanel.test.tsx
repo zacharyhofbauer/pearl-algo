@@ -205,8 +205,7 @@ describe('TradeDockPanel', () => {
 
       fireEvent.click(screen.getByRole('tab', { name: /recent/i }))
 
-      // formatPnL produces "$-75.25" (sign comes from toFixed, not prefix)
-      expect(screen.getByText('$-75.25')).toBeInTheDocument()
+      expect(screen.getByText('-$75.25')).toBeInTheDocument()
     })
 
     it('shows dash when P&L is null', () => {

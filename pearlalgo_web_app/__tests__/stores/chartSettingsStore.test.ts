@@ -1,29 +1,8 @@
 import { useChartSettingsStore, type ChartTheme } from '@/stores/chartSettingsStore'
 
-// Mock localStorage
-const localStorageMock = (() => {
-  let store: Record<string, string> = {}
-  return {
-    getItem: (key: string) => store[key] || null,
-    setItem: (key: string, value: string) => {
-      store[key] = value.toString()
-    },
-    removeItem: (key: string) => {
-      delete store[key]
-    },
-    clear: () => {
-      store = {}
-    },
-  }
-})()
-
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
-})
-
 describe('chartSettingsStore', () => {
   beforeEach(() => {
-    localStorageMock.clear()
+    window.localStorage.clear()
     useChartSettingsStore.setState({
       theme: 'dark',
       colors: {
@@ -119,7 +98,7 @@ describe('chartSettingsStore', () => {
     })
 
     it('should toggle all indicator types', () => {
-      const indicators: Array<keyof typeof useChartSettingsStore.getState().indicators> = [
+      const indicators = [
         'ema9',
         'ema21',
         'vwap',
@@ -252,7 +231,7 @@ describe('chartSettingsStore', () => {
     it('should persist theme changes', () => {
       useChartSettingsStore.getState().setTheme('tradingview')
 
-      const persisted = localStorageMock.getItem('pearl-chart-settings')
+      const persisted = window.localStorage.getItem('pearl-chart-settings')
       expect(persisted).toBeTruthy()
       const data = JSON.parse(persisted!)
       expect(data.state.theme).toBe('tradingview')
@@ -261,7 +240,7 @@ describe('chartSettingsStore', () => {
     it('should persist indicator visibility changes', () => {
       useChartSettingsStore.getState().toggleIndicator('bollingerBands')
 
-      const persisted = localStorageMock.getItem('pearl-chart-settings')
+      const persisted = window.localStorage.getItem('pearl-chart-settings')
       expect(persisted).toBeTruthy()
       const data = JSON.parse(persisted!)
       expect(data.state.indicators.bollingerBands).toBe(true)
@@ -270,7 +249,7 @@ describe('chartSettingsStore', () => {
     it('should persist panel visibility changes', () => {
       useChartSettingsStore.getState().toggleVolumeProfilePanel()
 
-      const persisted = localStorageMock.getItem('pearl-chart-settings')
+      const persisted = window.localStorage.getItem('pearl-chart-settings')
       expect(persisted).toBeTruthy()
       const data = JSON.parse(persisted!)
       expect(data.state.showVolumeProfilePanel).toBe(true)

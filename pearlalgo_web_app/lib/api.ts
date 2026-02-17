@@ -162,7 +162,7 @@ export function normalizeApiError(response: Response, raw?: string): ApiError {
 
   // Handle specific status codes with user-friendly messages
   if (response.status === 401) {
-    message = message || 'Authentication required.'
+    if (message === `API Error: ${response.status}`) message = 'Authentication required.'
   } else if (response.status === 403) {
     if (typeof detail === 'object' && detail !== null && 'message' in detail) {
       const detailMsg = String((detail as any).message)

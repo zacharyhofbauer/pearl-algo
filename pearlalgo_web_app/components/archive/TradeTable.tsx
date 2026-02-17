@@ -8,6 +8,8 @@ export interface TradeRow {
   direction: string
   entry_price: number
   exit_price: number
+  stop_loss: number | null
+  take_profit: number | null
   pnl: number
   is_win: number
   exit_reason: string

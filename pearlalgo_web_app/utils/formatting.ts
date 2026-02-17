@@ -12,8 +12,8 @@
  */
 export function formatPnL(pnl: number | null | undefined): string {
   if (pnl === null || pnl === undefined || Number.isNaN(pnl)) return '—'
-  const sign = pnl >= 0 ? '+' : ''
-  return `${sign}$${pnl.toFixed(2)}`
+  const sign = pnl >= 0 ? '+' : '-'
+  return `${sign}$${Math.abs(pnl).toFixed(2)}`
 }
 
 /**
@@ -32,13 +32,14 @@ export function formatCurrency(
   
   const { compact = false, showSign = false } = options
   
-  if (compact && value >= 1000) {
-    const sign = showSign ? (value >= 0 ? '+' : '') : ''
-    return `${sign}$${(value / 1000).toFixed(1)}k`
+  const prefix = showSign ? (value >= 0 ? '+' : '-') : (value < 0 ? '-' : '')
+  const abs = Math.abs(value)
+  
+  if (compact && abs >= 1000) {
+    return `${prefix}$${(abs / 1000).toFixed(1)}k`
   }
   
-  const sign = showSign ? (value >= 0 ? '+' : '') : ''
-  return `${sign}$${value.toFixed(compact ? 0 : 2)}`
+  return `${prefix}$${abs.toFixed(compact ? 0 : 2)}`
 }
 
 /**
@@ -71,7 +72,7 @@ export function formatTime(
   return d.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
-    hour12: options.hour12 ?? false,
+    ...(options.hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
   })
 }
 

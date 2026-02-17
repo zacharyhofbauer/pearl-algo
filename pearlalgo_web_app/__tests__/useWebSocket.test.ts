@@ -498,7 +498,6 @@ describe('useWebSocket hook', () => {
       expect(ws.send).not.toHaveBeenCalled()
     })
   })
-})
 
   describe('multiple disconnects (reconnect ref fix)', () => {
     it('should correctly count multiple reconnect attempts without stale closure', () => {

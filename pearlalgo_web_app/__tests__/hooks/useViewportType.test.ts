@@ -34,8 +34,8 @@ afterEach(() => {
 
 describe('useViewportType', () => {
   it('should detect desktop viewport', () => {
-    mockWindow.innerWidth = 1920
-    mockWindow.innerHeight = 1080
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1920 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 1080 })
 
     const { result } = renderHook(() => useViewportType())
 
@@ -46,8 +46,8 @@ describe('useViewportType', () => {
   })
 
   it('should detect ultrawide viewport', () => {
-    mockWindow.innerWidth = 2560
-    mockWindow.innerHeight = 720 // Ultrawide: width >= 2400, height <= 800, aspect >= 3
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 2560 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 720 })
 
     const { result } = renderHook(() => useViewportType())
 
@@ -56,8 +56,8 @@ describe('useViewportType', () => {
   })
 
   it('should detect tablet viewport', () => {
-    mockWindow.innerWidth = 768
-    mockWindow.innerHeight = 1024
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 768 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 1024 })
 
     const { result } = renderHook(() => useViewportType())
 
@@ -66,8 +66,8 @@ describe('useViewportType', () => {
   })
 
   it('should detect mobile viewport', () => {
-    mockWindow.innerWidth = 375
-    mockWindow.innerHeight = 667
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 667 })
 
     const { result } = renderHook(() => useViewportType())
 
@@ -76,18 +76,12 @@ describe('useViewportType', () => {
   })
 
   it('should respect ultrawide query parameter', () => {
-    // Mock URLSearchParams
+    // Use history.pushState to change the URL without redefining window.location
     const originalSearch = window.location.search
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      configurable: true,
-      value: {
-        ...window.location,
-        search: '?ultrawide=true',
-      },
-    })
+    history.pushState({}, '', '?ultrawide=true')
 
-    mockWindow.innerWidth = 1920 // Would normally be desktop
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1920 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 1080 })
 
     const { result } = renderHook(() => useViewportType())
 
@@ -95,25 +89,19 @@ describe('useViewportType', () => {
     expect(result.current.isUltrawide).toBe(true)
 
     // Restore original search
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      configurable: true,
-      value: {
-        ...window.location,
-        search: originalSearch,
-      },
-    })
+    history.pushState({}, '', originalSearch || '/')
   })
 
   it('should update on window resize', () => {
-    mockWindow.innerWidth = 1920
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1920 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 1080 })
 
     const { result } = renderHook(() => useViewportType())
 
     expect(result.current.type).toBe('desktop')
 
     // Simulate resize
-    mockWindow.innerWidth = 375
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 })
     act(() => {
       window.dispatchEvent(new Event('resize'))
     })

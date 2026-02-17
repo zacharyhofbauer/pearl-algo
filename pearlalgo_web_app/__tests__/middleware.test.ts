@@ -45,10 +45,11 @@ describe('Authentication Middleware', () => {
       expect(isPassThrough(res)).toBe(true)
     })
 
-    it('should allow access when PEARL_WEBAPP_AUTH_ENABLED is not set', async () => {
+    it('should default to auth enabled when PEARL_WEBAPP_AUTH_ENABLED is not set', async () => {
       delete process.env.PEARL_WEBAPP_AUTH_ENABLED
       const res = await middleware(createRequest('/dashboard'))
-      expect(isPassThrough(res)).toBe(true)
+      // Auth defaults to enabled for security -- should redirect to login
+      expect(isPassThrough(res)).toBe(false)
     })
   })
 

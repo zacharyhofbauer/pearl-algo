@@ -163,16 +163,16 @@ export interface PearlChatResponse {
 export function derivePearlMode(aiStatus: AIStatus | null, insights: PearlInsights | null): PearlMode {
   const shadowMetrics = insights?.shadow_metrics
   
+  // Check for live mode first (live takes precedence over shadow)
+  if (aiStatus?.bandit_mode === 'live') return 'live'
+  if (aiStatus?.contextual_mode === 'live') return 'live'
+  if (aiStatus?.ml_filter?.enabled && aiStatus.ml_filter.mode === 'live') return 'live'
+  
   // Check for shadow mode
   if (shadowMetrics?.mode === 'shadow') return 'shadow'
   if (aiStatus?.bandit_mode === 'shadow') return 'shadow'
   if (aiStatus?.contextual_mode === 'shadow') return 'shadow'
   if (aiStatus?.ml_filter?.enabled && aiStatus.ml_filter.mode === 'shadow') return 'shadow'
-  
-  // Check for live mode
-  if (aiStatus?.bandit_mode === 'live') return 'live'
-  if (aiStatus?.contextual_mode === 'live') return 'live'
-  if (aiStatus?.ml_filter?.enabled && aiStatus.ml_filter.mode === 'live') return 'live'
   
   return 'off'
 }

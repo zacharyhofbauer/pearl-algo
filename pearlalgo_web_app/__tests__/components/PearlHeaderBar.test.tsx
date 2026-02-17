@@ -11,12 +11,6 @@ jest.mock('next/image', () => ({
   ),
 }))
 
-// Mock PearlInsightsPanel
-jest.mock('@/components/PearlInsightsPanel', () => ({
-  __esModule: true,
-  default: ({ layout }: { layout: string }) => <div data-testid="pearl-insights-panel">Pearl Insights ({layout})</div>,
-}))
-
 // Mock AccountSwitcher
 jest.mock('@/components/AccountSwitcher', () => ({
   __esModule: true,
@@ -61,9 +55,8 @@ jest.mock('@/types/pearl', () => ({
 
 describe('PearlHeaderBar', () => {
   beforeEach(() => {
-    // Reset window.location.search
-    delete (window as any).location
-    window.location = { ...window.location, search: '' }
+    // Reset window.location.search using history.pushState (jsdom-safe)
+    history.pushState({}, '', '/')
   })
 
   describe('expanded/collapsed state', () => {
@@ -214,7 +207,7 @@ describe('PearlHeaderBar', () => {
     })
 
     it('should display account name from URL parameter', () => {
-      window.location.search = '?account=tv_paper'
+      history.pushState({}, '', '?account=tv_paper')
 
       const tvPaperState = {
         ...mockAgentState,
@@ -233,7 +226,7 @@ describe('PearlHeaderBar', () => {
     })
 
     it('should fallback to Pearl AI when account not found', () => {
-      window.location.search = '?account=unknown'
+      history.pushState({}, '', '?account=unknown')
 
       render(<PearlHeaderBar />)
 
@@ -313,9 +306,9 @@ describe('PearlHeaderBar', () => {
       jest.useFakeTimers()
       const mockTick = jest.fn()
 
-      jest.mocked(useOperatorStore).mockReturnValue({
-        tick: mockTick,
-      } as any)
+      jest.mocked(useOperatorStore).mockImplementation((selector: any) =>
+        selector({ tick: mockTick })
+      )
 
       render(<PearlHeaderBar />)
 

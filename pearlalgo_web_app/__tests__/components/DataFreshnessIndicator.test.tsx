@@ -69,6 +69,7 @@ describe('DataFreshnessIndicator', () => {
           wsStatus="disconnected"
           dataSource="unknown"
           isLoading={false}
+          variant="full"
         />
       )
 
@@ -154,7 +155,7 @@ describe('DataFreshnessIndicator', () => {
     })
   })
 
-  describe('display formatting', () => {
+  describe('display formatting (full variant)', () => {
     it('should display WebSocket status correctly', () => {
       render(
         <DataFreshnessIndicator
@@ -162,6 +163,7 @@ describe('DataFreshnessIndicator', () => {
           wsStatus="connected"
           dataSource="live"
           isLoading={false}
+          variant="full"
         />
       )
 
@@ -175,6 +177,7 @@ describe('DataFreshnessIndicator', () => {
           wsStatus="disconnected"
           dataSource="cached"
           isLoading={false}
+          variant="full"
         />
       )
 
@@ -182,18 +185,19 @@ describe('DataFreshnessIndicator', () => {
     })
 
     it('should show loading state', () => {
-      render(
+      const { container } = render(
         <DataFreshnessIndicator
           lastUpdate={new Date()}
           wsStatus="connecting"
           dataSource="live"
           isLoading={true}
+          variant="full"
         />
       )
 
-      const indicator = screen.getByRole('status')
-      expect(indicator).toHaveAttribute('aria-label', expect.stringContaining('fresh'))
-      expect(screen.getByText(/loading/i)).toBeInTheDocument()
+      // Full variant shows a loading overlay with spinner
+      expect(container.querySelector('.freshness-loading-overlay')).toBeInTheDocument()
+      expect(container.querySelector('.loading-spinner')).toBeInTheDocument()
     })
   })
 
@@ -292,7 +296,7 @@ describe('DataFreshnessIndicator', () => {
   })
 
   describe('edge cases', () => {
-    it('should handle all WebSocket statuses', () => {
+    it('should handle all WebSocket statuses in full variant', () => {
       const statuses: WebSocketStatus[] = ['connected', 'connecting', 'disconnected', 'error']
 
       statuses.forEach((status) => {
@@ -302,6 +306,7 @@ describe('DataFreshnessIndicator', () => {
             wsStatus={status}
             dataSource="live"
             isLoading={false}
+            variant="full"
           />
         )
         expect(screen.getByText(/WS|POLL|ERR/)).toBeInTheDocument()
@@ -309,7 +314,7 @@ describe('DataFreshnessIndicator', () => {
       })
     })
 
-    it('should handle all data sources', () => {
+    it('should handle all data sources in full variant', () => {
       const sources: Array<'live' | 'cached' | 'unknown'> = ['live', 'cached', 'unknown']
 
       sources.forEach((source) => {
@@ -319,6 +324,7 @@ describe('DataFreshnessIndicator', () => {
             wsStatus="connected"
             dataSource={source}
             isLoading={false}
+            variant="full"
           />
         )
         expect(screen.getByText(/LIVE|CACHE|\?/)).toBeInTheDocument()

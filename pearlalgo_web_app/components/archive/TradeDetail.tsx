@@ -94,6 +94,28 @@ export default function TradeDetail({ trade, onClose }: Props) {
             <span className="trade-detail-value">{spread.toFixed(2)} pts</span>
           </div>
 
+          {(trade.stop_loss != null || trade.take_profit != null) && (
+            <>
+              <div className="trade-detail-divider" />
+              {trade.stop_loss != null && (
+                <div className="trade-detail-row">
+                  <span className="trade-detail-label">Stop Loss</span>
+                  <span className="trade-detail-value" style={{ color: 'var(--accent-red)' }}>
+                    {trade.stop_loss.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
+              {trade.take_profit != null && (
+                <div className="trade-detail-row">
+                  <span className="trade-detail-label">Take Profit</span>
+                  <span className="trade-detail-value" style={{ color: 'var(--accent-green)' }}>
+                    {trade.take_profit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="trade-detail-divider" />
 
           <div className="trade-detail-row">
