@@ -119,6 +119,15 @@ class VirtualTradeManager:
             logger.warning(f"Failed to retrieve recent signals for trade exits: {e}")
             return
 
+        # Build signal_id -> signal data lookup from "generated" records
+        # (needed because append-only JSONL "entered" lines may lack the signal key)
+        _signal_data_map: Dict[str, Dict] = {}
+        for _rec in recent:
+            if isinstance(_rec, dict) and _rec.get("status") == "generated" and "signal" in _rec:
+                _sid = str(_rec.get("signal_id") or "")
+                if _sid:
+                    _signal_data_map[_sid] = _rec["signal"]
+
         # Precompute bar arrays once (vectorized)
         try:
             bar_times = pd.to_datetime(df["timestamp"])
@@ -142,6 +151,10 @@ class VirtualTradeManager:
                 sig_id = str(rec.get("signal_id") or "")
                 if not sig_id or sig_id in exited_this_cycle:
                     continue
+
+                # Merge signal data from generated record if missing
+                if not rec.get("signal") and sig_id in _signal_data_map:
+                    rec = {**rec, "signal": _signal_data_map[sig_id]}
 
                 exit_info = self._check_single_trade_exit(
                     rec, sig_id, bar_times_arr, bar_highs, bar_lows, df,
@@ -200,6 +213,7 @@ class VirtualTradeManager:
             logger.warning(f"Failed to parse stop/target for virtual trade exit: {e}")
             return None
         if stop <= 0 or target <= 0:
+            logger.warning(f"Skipping exit check for {rec.get('signal_id', '?')}: stop={stop}, target={target} (missing signal data?)")
             return None
 
         # Vectorized hit masks
