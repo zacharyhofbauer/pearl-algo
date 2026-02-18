@@ -901,6 +901,95 @@
   font-size: 12px;
 }
 
+/* ── Working Orders ────────────────────────────────────────────────── */
+
+.trade-dock-working-orders {
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.trade-dock-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: var(--space-2);
+}
+
+.working-order-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px 0;
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.working-order-type {
+  font-weight: 600;
+  min-width: 72px;
+  color: var(--text-secondary);
+}
+
+.working-order-type.stop-loss { color: var(--accent-red); }
+.working-order-type.take-profit { color: var(--accent-green); }
+.working-order-type.stop { color: var(--accent-red); }
+.working-order-type.limit { color: var(--accent-cyan); }
+
+.working-order-side {
+  font-weight: 600;
+  min-width: 28px;
+}
+
+.working-order-side.buy { color: var(--accent-cyan); }
+.working-order-side.sell { color: var(--color-short, #ff6ec7); }
+
+.working-order-qty {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  min-width: 20px;
+}
+
+.working-order-price {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  margin-left: auto;
+}
+
+/* ── Order Stats ──────────────────────────────────────────────────── */
+
+.trade-dock-order-stats {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-color);
+}
+
+.order-stat-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.3px;
+}
+
+.order-stat-pill.filled {
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--accent-green);
+}
+
+.order-stat-pill.cancelled {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-tertiary);
+}
+
+.order-stat-pill.rejected {
+  background: rgba(var(--accent-red-rgb), 0.12);
+  color: var(--accent-red);
+}
+
 @media (max-width: 768px) {
   .trade-dock-wrapper {
     padding: 0;

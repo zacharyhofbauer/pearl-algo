@@ -617,6 +617,8 @@ export default function DashboardPageInner() {
               dailyPnl={agentState?.daily_pnl ?? null}
               trades={agentState?.challenge?.trades ?? agentState?.daily_trades ?? null}
               winRate={agentState?.challenge?.win_rate ?? null}
+              equity={agentState?.tradovate_account?.equity ?? null}
+              openPnl={agentState?.tradovate_account?.open_pnl ?? null}
             />
             <ErrorBoundary panelName="Trades">
               <TradeDockPanel
@@ -638,6 +640,8 @@ export default function DashboardPageInner() {
                 riskMetrics={agentState?.risk_metrics || null}
                 signalRejections={agentState?.signal_rejections_24h || null}
                 lastSignalDecision={agentState?.last_signal_decision || null}
+                workingOrders={agentState?.tradovate_account?.working_orders}
+                orderStats={agentState?.tradovate_account?.order_stats || null}
               />
             </ErrorBoundary>
           </>

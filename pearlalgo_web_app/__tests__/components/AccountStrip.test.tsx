@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import AccountStrip from '@/components/AccountStrip'
 
 describe('AccountStrip', () => {
-  it('renders all 5 stat labels (Balance, Today, Total P&L, Trades, Win Rate)', () => {
+  it('renders all 5 stat labels (Equity, Today, Total P&L, Trades, Win Rate)', () => {
     render(
       <AccountStrip
         balance={52856.7}
@@ -13,7 +13,7 @@ describe('AccountStrip', () => {
         winRate={65.5}
       />
     )
-    expect(screen.getByText('Balance')).toBeInTheDocument()
+    expect(screen.getByText('Equity')).toBeInTheDocument()
     expect(screen.getByText('Today')).toBeInTheDocument()
     expect(screen.getByText('Total P&L')).toBeInTheDocument()
     expect(screen.getByText('Trades')).toBeInTheDocument()

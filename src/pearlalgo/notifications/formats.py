@@ -1675,50 +1675,27 @@ def format_glanceable_card(
     account_label: str | None = None,
 ) -> str:
     """
-    Build ultra-compact glanceable dashboard (5-7 lines max).
-    
-    DESIGN: Mobile-first, one-screen-no-scroll format.
-    
-    Layout:
+    Build ultra-compact glanceable dashboard card.
+
+    Clean, modern format matching the web app style:
     ```
-    MNQ • 6:17 AM ET | 📈 Symbol: MNQ
-    🤖 Trading Bot: pearl_bot_auto | 🧠 AI: Ready
-    
-    🔴 Agent: STOPPED • 🟢 Gateway: RUNNING
-    🚫 Execution: OFF
-    ⚪ Futures: ? • ⚪ Session: ?
-    
-    📊 0 scans • 0 gen / 0 sent • 0 bars • 0 errors
-    
-    💡 Start agent to begin
+    🐚 PEARL — Tradovate Paper
+    MNQ • 06:30 PM ET
+
+    Agent 🟢  GW 🟢  Data 🟢
+    Market 🟢  Session 🟢
+
+    🎯 2 Active  |  🟢 +$150.00
     ```
-    
-    Args:
-        symbol: Trading symbol (e.g., "MNQ")
-        time_str: Current time string (e.g., "6:17 AM ET")
-        agent_running: Whether agent service is running
-        gateway_running: Whether gateway is running
-        latest_price: Latest price (optional)
-        daily_pnl: Today's P&L (optional)
-        active_trades_count: Number of active trades
-        futures_market_open: Futures market gate status
-        strategy_session_open: Strategy session gate status
-        market: Market code (e.g., "NQ")
-        trading_bot: Trading bot name (e.g., "pearl_bot_auto")
-        ai_ready: Whether AI/model is ready
-        
-    Returns:
-        Formatted glanceable card message string
     """
     lines = []
-    bot_display = format_bot_name(trading_bot or "scanner")
-    
-    # PEARL branded header (with account badge if multi-account)
-    acct_badge = f" [{account_label}]" if account_label else ""
-    lines.append(f"🐚 *PEARL*{acct_badge} - pearlalgo.io")
+
+    # Header
+    acct = account_label or "Tradovate Paper"
+    lines.append(f"🐚 *PEARL* — {acct}")
     lines.append(f"*{symbol}* • {time_str}")
-    
-    # Status line: Bot + Services
+
+    # Status dots — compact single line
     if not agent_running:
         agent_dot = EMOJI_ERROR
     elif agent_healthy is False:
@@ -1728,45 +1705,25 @@ def format_glanceable_card(
     else:
         agent_dot = EMOJI_OK
 
-    if gateway_running is True:
-        gw_dot = EMOJI_OK
-    elif gateway_running is False:
-        gw_dot = EMOJI_ERROR
-    else:
-        gw_dot = EMOJI_UNKNOWN
-    if data_stale is True:
-        data_dot = EMOJI_ERROR
-    elif data_stale is False:
-        data_dot = EMOJI_OK
-    else:
-        data_dot = EMOJI_UNKNOWN
+    gw_dot = EMOJI_OK if gateway_running is True else EMOJI_ERROR if gateway_running is False else EMOJI_UNKNOWN
+    data_dot = EMOJI_ERROR if data_stale is True else EMOJI_OK if data_stale is False else EMOJI_UNKNOWN
 
-    lines.append(f"{EMOJI_BOTS} {bot_display} | Agent {agent_dot} | Gateway {gw_dot} | Data {data_dot}")
-    
-    # Gates line
+    lines.append(f"\nAgent {agent_dot}  GW {gw_dot}  Data {data_dot}")
+
+    # Gates
     futures_dot = EMOJI_OK if futures_market_open else EMOJI_ERROR if futures_market_open is False else EMOJI_UNKNOWN
     session_dot = EMOJI_OK if strategy_session_open else EMOJI_ERROR if strategy_session_open is False else EMOJI_UNKNOWN
-    lines.append(f"Futures {futures_dot} | Session {session_dot}")
-    
-    # Active trades with P&L (if any)
+    lines.append(f"Market {futures_dot}  Session {session_dot}")
+
+    # Active trades with P&L
     if active_trades_count > 0:
         pnl_part = ""
         if daily_pnl is not None:
             pnl_icon = EMOJI_PROFIT if daily_pnl >= 0 else EMOJI_LOSS
             pnl_sign = "+" if daily_pnl >= 0 else ""
-            pnl_part = f" | {pnl_icon}{pnl_sign}${abs(daily_pnl):.2f}"
-        lines.append(f"{EMOJI_TARGET} *{active_trades_count} Active*{pnl_part}")
-    
-    # Footer: system state
-    footer = format_transparency_footer(
-        agent_uptime_seconds=agent_uptime_seconds,
-        gateway_ok=gateway_running,
-        data_age_seconds=data_age_seconds,
-        agent_running=agent_running,
-        data_stale=data_stale,
-    )
-    lines.append(f"`{footer}`")
-    
+            pnl_part = f"  |  {pnl_icon}{pnl_sign}${abs(daily_pnl):.2f}"
+        lines.append(f"\n{EMOJI_TARGET} *{active_trades_count} Active*{pnl_part}")
+
     return "\n".join(lines)
 
 

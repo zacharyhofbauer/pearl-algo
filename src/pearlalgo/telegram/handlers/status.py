@@ -1,7 +1,7 @@
 """
 Status handler: agent status, P&L, open positions.
 
-All data is fetched from the agent's API server via HTTP.
+Mirrors the web app AccountStrip + header badges.
 """
 
 from __future__ import annotations
@@ -40,9 +40,7 @@ async def handle_status(update: Any, context: Any) -> None:
                 data = await resp.json()
 
         msg = format_status_message(data)
-        agent_state = data.get("agent_state", "unknown")
-        keyboard = main_menu_keyboard(agent_state)
-
+        keyboard = back_to_menu_keyboard()
         await _reply(update, msg, reply_markup=keyboard)
 
     except Exception as e:
@@ -54,12 +52,14 @@ async def handle_menu(update: Any, context: Any) -> None:
     """Handle /menu or /start -- show the main menu."""
     msg = (
         "🐚 <b>PearlAlgo</b> — Tradovate Paper\n\n"
-        "📊 <b>Status</b> — Balance, P&amp;L, positions\n"
-        "📈 <b>Trades</b> — Recent trade history\n"
-        "💚 <b>Health</b> — System health &amp; connectivity\n"
-        "🩺 <b>Doctor</b> — Signal &amp; risk diagnostics"
+        "<b>Monitoring</b>\n"
+        "📊 Status — Balance, P&amp;L, positions\n"
+        "📈 Stats — Performance by period\n"
+        "📋 Trades — Recent exits\n\n"
+        "<b>Diagnostics</b>\n"
+        "💚 Health — System &amp; connectivity\n"
+        "🩺 Doctor — Risk metrics &amp; analytics\n"
+        "🧠 Signals — Rejections &amp; decisions"
     )
     keyboard = main_menu_keyboard()
     await _reply(update, msg, reply_markup=keyboard)
-
-

@@ -13,6 +13,10 @@ from pearlalgo.telegram.formatters.messages import (
     format_win_rate,
     format_position,
     format_status_message,
+    format_health_message,
+    format_doctor_message,
+    format_signals_message,
+    format_stats_message,
     format_trades_message,
     format_error_message,
     format_control_response,
@@ -74,7 +78,7 @@ class TestFormatPosition:
 
 
 class TestFormatStatusMessage:
-    """format_status_message builds full status HTML."""
+    """format_status_message mirrors the dashboard AccountStrip."""
 
     def test_minimal_data(self):
         data = {
@@ -88,7 +92,7 @@ class TestFormatStatusMessage:
         assert "Stopped" in msg
         assert "No open positions" in msg
 
-    def test_with_challenge_data(self):
+    def test_with_challenge_and_daily(self):
         data = {
             "running": True,
             "paused": False,
@@ -110,7 +114,128 @@ class TestFormatStatusMessage:
         msg = format_status_message(data)
         assert "52,856" in msg
         assert "+$2,856.70" in msg
-        assert "Open Positions" in msg
+        assert "Today" in msg
+        assert "Open" in msg
+
+
+class TestFormatHealthMessage:
+    """format_health_message shows system health."""
+
+    def test_healthy_system(self):
+        data = {
+            "running": True,
+            "paused": False,
+            "data_fresh": True,
+            "futures_market_open": True,
+            "last_updated": "2026-02-17T20:00:00Z",
+            "circuit_breaker": {"tripped": False},
+        }
+        msg = format_health_message(data)
+        assert "System Health" in msg
+        assert "Running" in msg
+        assert "Circuit Breaker" in msg
+        assert "OK" in msg
+
+    def test_unhealthy_system(self):
+        data = {
+            "running": False,
+            "data_fresh": False,
+            "futures_market_open": False,
+            "circuit_breaker": {"tripped": True, "reason": "max losses"},
+        }
+        msg = format_health_message(data)
+        assert "TRIPPED" in msg
+
+
+class TestFormatDoctorMessage:
+    """format_doctor_message shows risk metrics and analytics."""
+
+    def test_with_risk_metrics(self):
+        data = {
+            "risk_metrics": {
+                "sharpe_ratio": 2.5,
+                "sortino_ratio": 4.0,
+                "profit_factor": 1.5,
+                "expectancy": 15.0,
+                "max_drawdown": 2400,
+                "max_drawdown_pct": 4.8,
+            },
+        }
+        msg = format_doctor_message(data)
+        assert "Doctor" in msg
+        assert "Sharpe" in msg
+        assert "2.50" in msg
+        assert "PF" in msg
+
+    def test_with_direction_breakdown(self):
+        data = {
+            "analytics": {
+                "direction_breakdown": {
+                    "long": {"count": 120, "pnl": 500},
+                    "short": {"count": 114, "pnl": 2300},
+                }
+            }
+        }
+        msg = format_doctor_message(data)
+        assert "LONG" in msg
+        assert "SHORT" in msg
+
+
+class TestFormatSignalsMessage:
+    """format_signals_message shows signal rejections and last decision."""
+
+    def test_with_rejections(self):
+        data = {
+            "signal_rejections_24h": {
+                "total": 12,
+                "direction_gating": 5,
+                "ml_filter": 3,
+                "circuit_breaker": 2,
+                "session_filter": 1,
+                "max_positions": 1,
+            },
+        }
+        msg = format_signals_message(data)
+        assert "Rejections" in msg
+        assert "12" in msg
+        assert "Direction Gating" in msg
+
+    def test_with_last_decision(self):
+        data = {
+            "last_signal_decision": {
+                "action": "execute",
+                "signal_type": "sr_bounce",
+                "direction": "long",
+                "reason": "all checks passed",
+                "ml_probability": 0.72,
+                "timestamp": "2026-02-17T15:30:00Z",
+            },
+        }
+        msg = format_signals_message(data)
+        assert "EXECUTE" in msg
+        assert "sr_bounce" in msg
+        assert "72.0%" in msg
+
+
+class TestFormatStatsMessage:
+    """format_stats_message shows performance by period."""
+
+    def test_with_daily_and_challenge(self):
+        data = {
+            "daily_pnl": -645.91,
+            "daily_trades": 7,
+            "daily_wins": 3,
+            "daily_losses": 4,
+            "challenge": {"pnl": 2856.70, "trades": 234, "wins": 112, "win_rate": 47.9},
+            "performance": {
+                "24h": {"pnl": -645, "trades": 7, "win_rate": 43},
+                "72h": {"pnl": 1200, "trades": 45, "win_rate": 49},
+            },
+        }
+        msg = format_stats_message(data)
+        assert "Performance" in msg
+        assert "TODAY" in msg
+        assert "ALL TIME" in msg
 
 
 class TestFormatTradesMessage:
@@ -128,13 +253,29 @@ class TestFormatTradesMessage:
                 "pnl": 40.0,
                 "is_win": True,
                 "exit_reason": "take_profit",
+                "position_size": 5,
             },
         ]
         msg = format_trades_message(trades)
         assert "Recent Trades" in msg
         assert "LONG" in msg
         assert "+$40.00" in msg
-        assert "take_profit" in msg
+
+    def test_with_duration(self):
+        trades = [
+            {
+                "direction": "short",
+                "entry_price": 25000,
+                "exit_price": 24980,
+                "pnl": 200.0,
+                "is_win": True,
+                "exit_reason": "take_profit",
+                "position_size": 5,
+                "duration_seconds": 3600,
+            },
+        ]
+        msg = format_trades_message(trades)
+        assert "1h0m" in msg
 
 
 class TestFormatErrorMessage:

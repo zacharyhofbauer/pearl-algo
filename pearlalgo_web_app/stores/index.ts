@@ -20,6 +20,9 @@ export type {
   CircuitBreakerStatus,
   MLFilterPerformance,
   SessionContext,
+  TradovateAccount,
+  TradovateWorkingOrder,
+  TradovateOrderStats,
 } from './agentStore'
 
 // Export selectors
@@ -45,6 +48,7 @@ export {
   selectMLFilterPerformance,
   selectSessionContext,
   selectSignalActivity,
+  selectTradovateAccount,
   selectAccounts,
 } from './agentStore'
 

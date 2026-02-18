@@ -16,7 +16,7 @@ import {
   formatExitReason,
   computeDurationSeconds,
 } from '@/lib/formatters'
-import type { RiskMetrics } from '@/stores'
+import type { RiskMetrics, TradovateWorkingOrder, TradovateOrderStats } from '@/stores'
 
 export interface RecentTradeRow {
   signal_id?: string
@@ -82,6 +82,10 @@ interface TradeDockPanelProps {
   signalRejections?: SignalRejections | null
   /** Last signal decision made by the agent */
   lastSignalDecision?: LastSignalDecision | null
+  /** Tradovate working orders (SL, TP) */
+  workingOrders?: TradovateWorkingOrder[]
+  /** Tradovate order stats (filled, rejected, cancelled counts) */
+  orderStats?: TradovateOrderStats | null
 }
 
 type Tab = 'positions' | 'history' | 'stats' | 'signals'
@@ -105,6 +109,8 @@ function TradeDockPanel({
   riskMetrics,
   signalRejections,
   lastSignalDecision,
+  workingOrders,
+  orderStats,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -521,8 +527,31 @@ function TradeDockPanel({
 
             {/* ── Positions Tab ── */}
             {tab === 'positions' ? (
-              openCount === 0 ? (
+              openCount === 0 && (!workingOrders || workingOrders.length === 0) ? (
                 <div className="trade-dock-empty">No open positions</div>
+              ) : openCount === 0 ? (
+                <>
+                  <div className="trade-dock-empty">No open positions</div>
+                  {workingOrders && workingOrders.length > 0 && (
+                    <div className="trade-dock-working-orders">
+                      <div className="trade-dock-section-label">Working Orders</div>
+                      {workingOrders.map((o, i) => (
+                        <div key={o.id ?? i} className="working-order-row">
+                          <span className={`working-order-type ${(o.order_type || '').toLowerCase().replace(/\s/g, '-')}`}>
+                            {o.order_type || 'Order'}
+                          </span>
+                          <span className={`working-order-side ${(o.action || '').toLowerCase()}`}>
+                            {o.action || '—'}
+                          </span>
+                          <span className="working-order-qty">{o.qty ?? '—'}</span>
+                          <span className="working-order-price">
+                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   <div className="trade-dock-actions">
@@ -721,9 +750,45 @@ function TradeDockPanel({
                       {showAllOpen ? 'Show less' : `Show all (${openCount})`}
                     </button>
                   )}
+
+                  {/* Working Orders (SL/TP from Tradovate) */}
+                  {workingOrders && workingOrders.length > 0 && (
+                    <div className="trade-dock-working-orders">
+                      <div className="trade-dock-section-label">Working Orders</div>
+                      {workingOrders.map((o, i) => (
+                        <div key={o.id ?? i} className="working-order-row">
+                          <span className={`working-order-type ${(o.order_type || '').toLowerCase().replace(/\s/g, '-')}`}>
+                            {o.order_type || 'Order'}
+                          </span>
+                          <span className={`working-order-side ${(o.action || '').toLowerCase()}`}>
+                            {o.action || '—'}
+                          </span>
+                          <span className="working-order-qty">{o.qty ?? '—'}</span>
+                          <span className="working-order-price">
+                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               )
             ) : null}
+
+            {/* Order Stats (filled/rejected/cancelled) */}
+            {tab === 'positions' && orderStats && (orderStats.rejected > 0 || orderStats.cancelled > 0 || orderStats.filled > 0) && (
+              <div className="trade-dock-order-stats">
+                {orderStats.filled > 0 && (
+                  <span className="order-stat-pill filled">Filled {orderStats.filled}</span>
+                )}
+                {orderStats.cancelled > 0 && (
+                  <span className="order-stat-pill cancelled">Cancelled {orderStats.cancelled}</span>
+                )}
+                {orderStats.rejected > 0 && (
+                  <span className="order-stat-pill rejected">Rejected {orderStats.rejected}</span>
+                )}
+              </div>
+            )}
 
             {/* ── History Tab ── */}
             {tab === 'history' && (recentCount === 0 ? (

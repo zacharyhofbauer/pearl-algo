@@ -491,6 +491,42 @@ export interface AgentState {
   ml_filter_performance: MLFilterPerformance | null
   session_context: SessionContext | null
   signal_activity: SignalActivity | null
+  /** Tradovate live account data (balance, positions, orders, P&L) */
+  tradovate_account: TradovateAccount | null
+}
+
+export interface TradovateWorkingOrder {
+  id?: number
+  contract_id?: number
+  action?: string
+  order_type?: string
+  qty?: number
+  price?: number | null
+  stop_price?: number | null
+  status?: string
+}
+
+export interface TradovateOrderStats {
+  working: number
+  filled: number
+  cancelled: number
+  rejected: number
+}
+
+export interface TradovateAccount {
+  equity?: number
+  cash_balance?: number
+  open_pnl?: number
+  realized_pnl?: number
+  week_realized_pnl?: number
+  initial_margin?: number
+  maintenance_margin?: number
+  positions?: Array<{ contract_id?: number; net_pos?: number; net_price?: number; open_pnl?: number }>
+  position_count?: number
+  working_orders?: TradovateWorkingOrder[]
+  order_stats?: TradovateOrderStats
+  account?: string
+  env?: string
 }
 
 interface AgentStore {
@@ -548,6 +584,7 @@ const initialAgentState: AgentState = {
   ml_filter_performance: null,
   session_context: null,
   signal_activity: null,
+  tradovate_account: null,
 }
 
 export const useAgentStore = create<AgentStore>()(
@@ -622,4 +659,5 @@ export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.cir
 export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
 export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
 export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
+export const selectTradovateAccount = (state: AgentStore) => state.agentState?.tradovate_account
 export const selectAccounts = (state: AgentStore) => state.accounts

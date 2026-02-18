@@ -4,6 +4,14 @@ PearlAlgo Telegram Bot -- Main Router
 Thin UI layer that routes commands to the agent API via HTTP.
 No direct access to agent state files or strategy code.
 
+Commands mirror the web app dashboard panels:
+  /status   — AccountStrip (balance, P&L, positions)
+  /stats    — Stats tab (performance by period)
+  /trades   — History tab (recent exits)
+  /health   — System health (connectivity, data, execution)
+  /doctor   — Risk metrics + direction breakdown + ML
+  /signals  — Signal rejections + last decision
+
 Usage:
     python -m pearlalgo.telegram.main
 
@@ -26,10 +34,8 @@ from pearlalgo.telegram.utils import check_authorized
 
 logger = logging.getLogger(__name__)
 
-# Project root for .env loading
 project_root = Path(__file__).parent.parent.parent.parent
 
-# Load secrets
 try:
     from dotenv import load_dotenv
     secrets_path = Path.home() / ".config" / "pearlalgo" / "secrets.env"
@@ -59,16 +65,20 @@ def _register_handlers(app) -> None:
     from pearlalgo.telegram.handlers.config import handle_settings
     from pearlalgo.telegram.handlers.health import handle_health
     from pearlalgo.telegram.handlers.doctor import handle_doctor
+    from pearlalgo.telegram.handlers.signals import handle_signals
+    from pearlalgo.telegram.handlers.stats import handle_stats
 
     # Command handlers
     app.add_handler(CommandHandler("start", handle_menu))
     app.add_handler(CommandHandler("menu", handle_menu))
     app.add_handler(CommandHandler("status", handle_status))
+    app.add_handler(CommandHandler("stats", handle_stats))
     app.add_handler(CommandHandler("trades", handle_trades))
     app.add_handler(CommandHandler("performance", handle_performance))
-    app.add_handler(CommandHandler("settings", handle_settings))
     app.add_handler(CommandHandler("health", handle_health))
     app.add_handler(CommandHandler("doctor", handle_doctor))
+    app.add_handler(CommandHandler("signals", handle_signals))
+    app.add_handler(CommandHandler("settings", handle_settings))
     app.add_handler(CommandHandler("help", _handle_help))
 
     # Callback query handler for inline keyboard buttons
@@ -78,17 +88,18 @@ def _register_handlers(app) -> None:
 async def _handle_help(update, context) -> None:
     """Handle /help -- show available commands."""
     msg = (
-        "<b>PearlAlgo Commands</b>\n\n"
+        "<b>🐚 PearlAlgo Commands</b>\n\n"
         "<b>Monitoring</b>\n"
-        "/status — Balance, P&amp;L, positions, AI status\n"
-        "/trades — Recent trade history\n"
-        "/performance — Performance by period\n\n"
+        "/status — Balance, P&amp;L, positions\n"
+        "/stats — Performance by period\n"
+        "/trades — Recent trade history\n\n"
         "<b>Diagnostics</b>\n"
-        "/health — System health, connectivity, data quality\n"
-        "/doctor — Signal rejections, risk metrics, ML filter\n\n"
+        "/health — System health &amp; connectivity\n"
+        "/doctor — Risk metrics &amp; analytics\n"
+        "/signals — Signal rejections &amp; decisions\n\n"
         "<b>Controls</b>\n"
         "/settings — Current configuration\n"
-        "/menu — Main menu with buttons\n"
+        "/menu — Main menu\n"
         "/help — This message"
     )
     await update.message.reply_html(msg)
@@ -100,11 +111,10 @@ async def _handle_callback(update, context) -> None:
     if not query or not query.data:
         return
 
-    await query.answer()  # Acknowledge the callback
+    await query.answer()
 
     data = query.data
 
-    # Route callbacks
     from pearlalgo.telegram.handlers.status import handle_status, handle_menu
     from pearlalgo.telegram.handlers.trading import (
         handle_start_agent,
@@ -118,15 +128,19 @@ async def _handle_callback(update, context) -> None:
     from pearlalgo.telegram.handlers.config import handle_settings
     from pearlalgo.telegram.handlers.health import handle_health
     from pearlalgo.telegram.handlers.doctor import handle_doctor
+    from pearlalgo.telegram.handlers.signals import handle_signals
+    from pearlalgo.telegram.handlers.stats import handle_stats
 
     routes = {
         "cmd:menu": handle_menu,
         "cmd:status": handle_status,
+        "cmd:stats": handle_stats,
         "cmd:trades": handle_trades,
         "cmd:performance": handle_performance,
-        "cmd:settings": handle_settings,
         "cmd:health": handle_health,
         "cmd:doctor": handle_doctor,
+        "cmd:signals": handle_signals,
+        "cmd:settings": handle_settings,
         "cmd:start": handle_start_agent,
         "cmd:stop": handle_stop_agent,
         "cmd:kill_switch": handle_kill_switch_confirm,
@@ -167,7 +181,6 @@ def main() -> None:
 
     app = ApplicationBuilder().token(bot_token).build()
 
-    # Store config in bot_data for handlers to access
     app.bot_data["api_url"] = api_url
     app.bot_data["api_key"] = api_key
     app.bot_data["chat_id"] = chat_id

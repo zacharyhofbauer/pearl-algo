@@ -1,5 +1,11 @@
 """
 Inline keyboard builders for Telegram bot responses.
+
+Layout mirrors the web app dashboard panels:
+  Monitoring:  Status | Trades | Stats
+  Diagnostics: Health | Doctor | Signals
+  Controls:    Start/Stop | Settings
+  Emergency:   Kill Switch | Flatten All
 """
 
 from __future__ import annotations
@@ -16,14 +22,7 @@ except ImportError:
 
 
 def main_menu_keyboard(agent_state: str = "unknown") -> Optional["InlineKeyboardMarkup"]:
-    """Build the main menu inline keyboard.
-
-    Layout:
-      Row 1: Status | Trades          (monitoring)
-      Row 2: Health | Doctor           (diagnostics)
-      Row 3: Start/Stop | Settings     (controls)
-      Row 4: Kill Switch | Flatten All (emergency)
-    """
+    """Build the main menu inline keyboard."""
     if not TELEGRAM_AVAILABLE:
         return None
 
@@ -31,17 +30,19 @@ def main_menu_keyboard(agent_state: str = "unknown") -> Optional["InlineKeyboard
 
     row1 = [
         InlineKeyboardButton("📊 Status", callback_data="cmd:status"),
-        InlineKeyboardButton("📈 Trades", callback_data="cmd:trades"),
+        InlineKeyboardButton("📈 Stats", callback_data="cmd:stats"),
+        InlineKeyboardButton("📋 Trades", callback_data="cmd:trades"),
     ]
 
     row2 = [
         InlineKeyboardButton("💚 Health", callback_data="cmd:health"),
         InlineKeyboardButton("🩺 Doctor", callback_data="cmd:doctor"),
+        InlineKeyboardButton("🧠 Signals", callback_data="cmd:signals"),
     ]
 
     row3 = []
     if is_running:
-        row3.append(InlineKeyboardButton("⏹️ Stop", callback_data="cmd:stop"))
+        row3.append(InlineKeyboardButton("⏹ Stop", callback_data="cmd:stop"))
     else:
         row3.append(InlineKeyboardButton("▶️ Start", callback_data="cmd:start"))
     row3.append(InlineKeyboardButton("⚙️ Settings", callback_data="cmd:settings"))

@@ -784,7 +784,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         result: Dict[str, Any] = {}
 
-        # Parallelize all 3 REST calls (they're independent) for ~60% faster cycles
+        # Parallelize all 4 REST calls (they're independent) for faster cycles
         async def _fetch_cash():
             try:
                 return await self._client.get_cash_balance_snapshot()
@@ -806,8 +806,15 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 logger.warning(f"get_fills failed: {e}", exc_info=True)
                 return None
 
-        snap, tv_positions, raw_fills = await asyncio.gather(
-            _fetch_cash(), _fetch_positions(), _fetch_fills()
+        async def _fetch_orders():
+            try:
+                return await self._client.get_orders()
+            except Exception as e:
+                logger.warning(f"get_orders failed: {e}", exc_info=True)
+                return None
+
+        snap, tv_positions, raw_fills, raw_orders = await asyncio.gather(
+            _fetch_cash(), _fetch_positions(), _fetch_fills(), _fetch_orders()
         )
 
         # Process cash balance
@@ -856,6 +863,37 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             result["fills"] = fills
         else:
             result["fills"] = []
+
+        # Process orders
+        if raw_orders is not None:
+            working = []
+            order_stats = {"working": 0, "filled": 0, "cancelled": 0, "rejected": 0}
+            for o in raw_orders:
+                status = str(o.get("ordStatus", "")).lower()
+                if status == "working":
+                    order_stats["working"] += 1
+                    otype = o.get("orderType", "")
+                    working.append({
+                        "id": o.get("id"),
+                        "contract_id": o.get("contractId"),
+                        "action": o.get("action"),  # "Buy" or "Sell"
+                        "order_type": otype,
+                        "qty": o.get("qty", 0),
+                        "price": o.get("price"),
+                        "stop_price": o.get("stopPrice"),
+                        "status": "working",
+                    })
+                elif status == "filled":
+                    order_stats["filled"] += 1
+                elif status in ("cancelled", "canceled"):
+                    order_stats["cancelled"] += 1
+                elif status == "rejected":
+                    order_stats["rejected"] += 1
+            result["working_orders"] = working
+            result["order_stats"] = order_stats
+        else:
+            result["working_orders"] = []
+            result["order_stats"] = {}
 
         result["account"] = self._client.account_name
         result["env"] = self._tv_config.env

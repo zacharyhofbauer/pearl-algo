@@ -1226,7 +1226,7 @@ class MarketAgentTelegramNotifier:
             )
 
             # ------------------------------------------------------------------
-            # ML status (one-liner; match /start dashboard)
+            # ML status (compact one-liner)
             # ------------------------------------------------------------------
             try:
                 bandit = status.get("learning") or {}
@@ -1248,27 +1248,7 @@ class MarketAgentTelegramNotifier:
                     logger.debug(f"Non-critical: {e}")
                     ml_label = "?"
 
-                lift_progress = ""
-                try:
-                    ml_state = status.get("ml_filter") or {}
-                    lift = (ml_state or {}).get("lift") if isinstance(ml_state, dict) else {}
-                    lift = lift or {}
-                    scored = lift.get("scored_trades")
-                    min_trades = lift.get("min_trades")
-                    if scored is not None and min_trades:
-                        lift_progress = f" • Lift {int(scored)}/{int(min_trades)}"
-                        try:
-                            p = lift.get("pass_trades")
-                            f = lift.get("fail_trades")
-                            if p is not None and f is not None:
-                                lift_progress += f" ({int(p)}P/{int(f)}F)"
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    lift_progress = ""
-
-                message += f"\n🧠 ML: Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
+                message += f"\n🧠 Bandit {bandit_mode} · Ctx {ctx_mode} · ML {ml_label}"
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
@@ -1331,9 +1311,9 @@ class MarketAgentTelegramNotifier:
                     win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
                     streak_str = ""
                     if current_streak >= 3 and streak_type:
-                        streak_str = f" • {'🔥' if streak_type == 'win' else '❄️'}{current_streak}{'W' if streak_type == 'win' else 'L'}"
-                    message += "\n\n*24h:*"
-                    message += f"\n{pnl_emoji_str} {fmt_currency(daily_pnl, show_sign=True)} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                        streak_str = f" {'🔥' if streak_type == 'win' else '❄️'}{current_streak}{'W' if streak_type == 'win' else 'L'}"
+                    message += f"\n\n*Today:* {pnl_emoji_str} {fmt_currency(daily_pnl, show_sign=True)}"
+                    message += f"\n{daily_wins}W/{daily_losses}L · {win_rate:.0f}% WR{streak_str}"
 
                 # Rolling 72h
                 if perf_trades:
@@ -1373,8 +1353,7 @@ class MarketAgentTelegramNotifier:
                         losses_72h = int(len(trades_72h) - int(wins_72h or 0))
                         wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
                         pnl_emoji_72h = pnl_emoji(pnl_72h)
-                        message += "\n\n*72h:*"
-                        message += f"\n{pnl_emoji_72h} {fmt_currency(pnl_72h, show_sign=True)} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
+                        message += f"\n*72h:* {pnl_emoji_72h} {fmt_currency(pnl_72h, show_sign=True)} ({int(wins_72h)}W/{int(losses_72h)}L · {wr_72h:.0f}%)"
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
@@ -1409,98 +1388,69 @@ class MarketAgentTelegramNotifier:
                             total_trades = total_wins + total_losses
                             total_wr = (total_wins / total_trades * 100.0) if total_trades > 0 else 0.0
                             total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
-                            message += "\n\n*30d Performance:*"
-                            message += (
-                                f"\n{total_emoji} *Total:* {fmt_currency(total_pnl_all)} "
-                                f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
-                            )
+                            message += f"\n*30d:* {total_emoji} {fmt_currency(total_pnl_all)} ({total_wins}W/{total_losses}L · {total_wr:.0f}%)"
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
 
-                # Single canonical challenge block (avoid duplicate "current run" sections).
+                # Challenge balance (compact)
                 try:
-                    message += "\n\n" + ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
+                    summary = ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
+                    if summary and summary.strip():
+                        message += "\n\n" + summary
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
 
-                # Recent exits (compact; match /start dashboard style)
+                # Recent exits (compact)
                 try:
                     recent_exits = status.get("recent_exits", [])
                     if isinstance(recent_exits, list) and recent_exits:
-                        message += "\n\n*Recent exits:*"
-                        for t in recent_exits[:2]:
+                        message += "\n\n*Recent:*"
+                        for t in recent_exits[:3]:
                             try:
                                 pnl_val = float(t.get("pnl") or 0.0)
                             except Exception as e:
                                 logger.debug(f"Non-critical: {e}")
                                 pnl_val = 0.0
-                            pnl_emoji, pnl_str = format_pnl(pnl_val)
-                            dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
-                            sig_type = safe_label(str(t.get("type") or "unknown"))
-                            reason = safe_label(str(t.get("exit_reason") or "")).strip()
-                            line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
+                            pnl_e, pnl_str = format_pnl(pnl_val)
+                            dir_e, dir_label = format_signal_direction(t.get("direction", "long"))
+                            reason = safe_label(str(t.get("exit_reason") or "")).replace("_", " ").strip()
+                            message += f"\n{pnl_e} {pnl_str} · {dir_e} {dir_label}"
                             if reason:
-                                line += f" • {reason}"
-                            message += line
+                                message += f" · {reason}"
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
-            # Support footer (🩺 …) for debugging/sharing (best-effort).
+            # Compact dev footer
             try:
                 from importlib.metadata import version as get_version
-                from pearlalgo.utils.logging_config import get_run_id
 
                 ver = None
                 try:
                     ver = get_version("pearlalgo")
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    ver = "0.2.2"
-                run_id = None
-                try:
-                    run_id = get_run_id()
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    run_id = None
-
-                lvl_map = {
-                    "level1": "L1",
-                    "level2": "L2",
-                    "historical": "HIST",
-                    "historical_fallback": "HIST",
-                    "error": "ERR",
-                    "unknown": "?",
-                }
-                lvl_short = lvl_map.get(str(data_level).strip().lower(), "?")
+                except Exception:
+                    ver = "0.2.4"
 
                 def _fmt_dur(sec: float | None) -> str:
                     if sec is None:
                         return "?"
                     try:
                         s = float(sec)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
+                    except Exception:
                         return "?"
                     if s < 60:
                         return f"{int(s)}s"
                     if s < 3600:
                         return f"{int(s // 60)}m"
-                    hours = int(s // 3600)
-                    mins = int((s % 3600) // 60)
-                    return f"{hours}h{mins}m"
+                    return f"{int(s // 3600)}h{int((s % 3600) // 60)}m"
 
-                age_str = _fmt_dur(data_age_seconds)
-                thr_str = f"{float(data_stale_threshold_minutes):.0f}m"
-                cycle_str = _fmt_dur(last_cycle_seconds)
                 gw = "OK" if gateway_running is True else "OFF" if gateway_running is False else "?"
                 a = "ON" if agent_running else "OFF"
-                v = f" v{ver}" if ver else ""
-                rid = str(run_id or "?").strip()
-                stale_flag = "!" if is_data_stale else ""
-                support = f"`🩺 {market_label}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{cycle_str} | run:{rid}`"
-                message += "\n" + support
+                age = _fmt_dur(data_age_seconds)
+                cycle = _fmt_dur(last_cycle_seconds)
+                v = f"v{ver}" if ver else ""
+                message += f"\n`🩺 {symbol} {v} | A:{a} G:{gw} D:{age} C:{cycle}`"
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
             
