@@ -132,13 +132,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
     - pearlalgo_session_filter_enabled: Session filter flag
     - pearlalgo_session_allowed: Current session allowed
     
-    **Challenge Tracker:**
-    - pearlalgo_challenge_enabled: Challenge mode flag
-    - pearlalgo_challenge_balance_dollars: Current balance
-    - pearlalgo_challenge_pnl_dollars: Challenge P&L
-    - pearlalgo_challenge_progress_percent: Progress to target
-    - pearlalgo_challenge_drawdown_dollars: Current drawdown
-    
     **ML/Learning (shadow mode):**
     - pearlalgo_ml_filter_enabled: ML filter enabled
     - pearlalgo_ml_filter_mode: ML mode (0=off, 1=shadow, 2=live)
@@ -213,17 +206,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
     session_filter_enabled = _b(circuit_breaker.get("session_filter_enabled", True))
     session_allowed = _b(circuit_breaker.get("session_allowed", True))
     et_hour = _i(circuit_breaker.get("et_hour", 0)) if state_error == 0 else 0
-    
-    # === CHALLENGE TRACKER ===
-    challenge = state.get("challenge", {}) if state_error == 0 else {}
-    challenge_enabled = _b(challenge.get("enabled", False))
-    challenge_balance = _f(challenge.get("current_balance", 0.0))
-    challenge_pnl = _f(challenge.get("pnl", 0.0))
-    challenge_start = _f(challenge.get("start_balance", 50000.0))
-    challenge_target = _f(challenge.get("profit_target", 3000.0))
-    challenge_max_dd = _f(challenge.get("max_drawdown", 2000.0))
-    challenge_progress = (challenge_pnl / challenge_target * 100) if challenge_target > 0 else 0.0
-    challenge_drawdown = _f(challenge.get("current_drawdown", 0.0))
     
     # === ML/LEARNING ===
     ml_filter = state.get("ml_filter", {}) if state_error == 0 else {}
@@ -393,28 +375,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# HELP pearlalgo_current_et_hour Current hour in Eastern Time (0-23)",
         "# TYPE pearlalgo_current_et_hour gauge",
         f"pearlalgo_current_et_hour {et_hour}",
-        "",
-        
-        # === CHALLENGE TRACKER ===
-        "# HELP pearlalgo_challenge_enabled Challenge mode enabled (1=enabled, 0=disabled)",
-        "# TYPE pearlalgo_challenge_enabled gauge",
-        f"pearlalgo_challenge_enabled {challenge_enabled}",
-        "",
-        "# HELP pearlalgo_challenge_balance_dollars Current challenge balance",
-        "# TYPE pearlalgo_challenge_balance_dollars gauge",
-        f"pearlalgo_challenge_balance_dollars {challenge_balance:.2f}",
-        "",
-        "# HELP pearlalgo_challenge_pnl_dollars Challenge P&L from start",
-        "# TYPE pearlalgo_challenge_pnl_dollars gauge",
-        f"pearlalgo_challenge_pnl_dollars {challenge_pnl:.2f}",
-        "",
-        "# HELP pearlalgo_challenge_progress_percent Progress toward profit target (0-100+)",
-        "# TYPE pearlalgo_challenge_progress_percent gauge",
-        f"pearlalgo_challenge_progress_percent {challenge_progress:.1f}",
-        "",
-        "# HELP pearlalgo_challenge_drawdown_dollars Current drawdown from peak",
-        "# TYPE pearlalgo_challenge_drawdown_dollars gauge",
-        f"pearlalgo_challenge_drawdown_dollars {challenge_drawdown:.2f}",
         "",
         
         # === ML/LEARNING ===

@@ -145,27 +145,6 @@ class TestGenerateMetrics:
         assert "pearlalgo_session_allowed 0" in metrics
         assert "pearlalgo_current_et_hour 14" in metrics
 
-    def test_challenge_tracker_metrics(self):
-        """Challenge tracker metrics should be correctly exposed."""
-        state = {
-            "challenge": {
-                "enabled": True,
-                "current_balance": 51500.0,
-                "pnl": 1500.0,
-                "start_balance": 50000.0,
-                "profit_target": 3000.0,
-                "max_drawdown": 2000.0,
-                "current_drawdown": 200.0,
-            }
-        }
-        metrics = generate_metrics(state)
-        
-        assert "pearlalgo_challenge_enabled 1" in metrics
-        assert "pearlalgo_challenge_balance_dollars 51500.00" in metrics
-        assert "pearlalgo_challenge_pnl_dollars 1500.00" in metrics
-        assert "pearlalgo_challenge_progress_percent 50.0" in metrics
-        assert "pearlalgo_challenge_drawdown_dollars 200.00" in metrics
-
     def test_ml_learning_metrics(self):
         """ML/Learning metrics should be correctly exposed."""
         state = {

@@ -81,27 +81,10 @@ def main() -> int:
     trades, _ = load_trades(signals_file, start_utc)
     event_counts = load_events(events_file, start_utc)
 
-    challenge_state = None
-    challenge_history = None
-    try:
-        challenge_state_path = state_dir / "challenge_state.json"
-        if challenge_state_path.exists():
-            challenge_state = json.loads(challenge_state_path.read_text(encoding="utf-8"))
-    except Exception:
-        challenge_state = None
-    try:
-        challenge_history_path = state_dir / "challenge_history.json"
-        if challenge_history_path.exists():
-            challenge_history = json.loads(challenge_history_path.read_text(encoding="utf-8"))
-    except Exception:
-        challenge_history = None
-
     report = build_incident_report(
         trades=trades,
         start_utc=start_utc,
         event_counts=event_counts,
-        challenge_state=challenge_state,
-        challenge_history=challenge_history,
     )
 
     exports_dir = state_dir / "exports"

@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     from pearlalgo.learning.bandit_policy import BanditPolicy
     from pearlalgo.learning.contextual_bandit import ContextualBanditPolicy, ContextFeatures
-    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
 
 
 class VirtualPositionTracker:
@@ -52,7 +51,6 @@ class VirtualPositionTracker:
         trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
         bandit_policy: Optional["BanditPolicy"] = None,
         contextual_policy: Optional["ContextualBanditPolicy"] = None,
-        challenge_tracker: Optional["ChallengeTracker"] = None,
         execution_adapter: Optional[Any] = None,
     ):
         """
@@ -67,7 +65,6 @@ class VirtualPositionTracker:
             trading_circuit_breaker: Optional circuit breaker for risk management
             bandit_policy: Optional bandit policy for learning
             contextual_policy: Optional contextual bandit for context-aware learning
-            challenge_tracker: Optional challenge tracker for 50k challenge
             execution_adapter: Optional execution adapter for order management
         """
         self.state_manager = state_manager
@@ -80,7 +77,6 @@ class VirtualPositionTracker:
         self.trading_circuit_breaker = trading_circuit_breaker
         self.bandit_policy = bandit_policy
         self.contextual_policy = contextual_policy
-        self.challenge_tracker = challenge_tracker
         self.execution_adapter = execution_adapter
 
         # Streak tracking
@@ -419,18 +415,6 @@ class VirtualPositionTracker:
             except Exception as cb_err:
                 logger.debug(f"Could not record circuit breaker trade: {cb_err}")
 
-        # Challenge tracker
-        if self.challenge_tracker is not None:
-            try:
-                challenge_result = self.challenge_tracker.record_trade(
-                    pnl=pnl_value,
-                    is_win=is_win,
-                )
-                if challenge_result.get("triggered"):
-                    self._send_challenge_alert(challenge_result)
-            except Exception as challenge_err:
-                logger.debug(f"Could not record challenge trade: {challenge_err}")
-
         # Bandit policy
         if self.bandit_policy is not None:
             try:
@@ -473,41 +457,6 @@ class VirtualPositionTracker:
 
         # Streak tracking
         self._update_streak(is_win)
-
-    def _send_challenge_alert(self, challenge_result: Dict) -> None:
-        """Send Telegram alert for challenge pass/fail."""
-        from pearlalgo.market_agent.notification_queue import Priority
-
-        if not self.telegram_notifier.enabled:
-            return
-
-        try:
-            outcome = challenge_result.get("outcome", "")
-            attempt = challenge_result.get("attempt", {})
-            attempt_pnl = attempt.get("pnl", 0.0)
-            attempt_id = attempt.get("attempt_id", 0)
-
-            logger.info(
-                f"🏆 Challenge attempt #{attempt_id} ended: {outcome.upper()} | "
-                f"Final PnL: ${attempt_pnl:.2f}"
-            )
-
-            emoji = "🎉" if outcome == "pass" else "❌"
-            msg = (
-                f"{emoji} *50k Challenge: {outcome.upper()}*\n\n"
-                f"Attempt #{attempt_id} ended\n"
-                f"Final PnL: `${attempt_pnl:,.2f}`\n"
-                f"Trades: {attempt.get('trades', 0)} | "
-                f"WR: {attempt.get('win_rate', 0):.0f}%\n\n"
-                f"_New attempt starting..._"
-            )
-            asyncio.create_task(
-                self.notification_queue.enqueue_raw_message(
-                    msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH
-                )
-            )
-        except Exception as tg_err:
-            logger.debug(f"Could not queue challenge alert: {tg_err}")
 
     def _maybe_send_exit_notification(
         self,

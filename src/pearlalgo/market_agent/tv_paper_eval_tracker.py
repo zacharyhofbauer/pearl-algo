@@ -13,7 +13,6 @@ Rules enforced (per official Tradovate Paper Rapid 50K rules):
   E6  Min trading days:     At least 2 days with trades (delays pass)
 
 Design:
-  - Separate from the existing ChallengeTracker (IBKR Virtual account keeps its own).
   - Persists state to <state_dir>/challenge_state.json (same filename so the API
     server's _get_challenge_status() reads it transparently).
   - Tradovate Paper-specific fields are nested under "tv_paper" key so the UI can

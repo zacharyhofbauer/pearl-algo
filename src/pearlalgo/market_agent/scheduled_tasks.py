@@ -284,27 +284,6 @@ class ScheduledTasks:
                         f"\u2197\ufe0f Longs: {long_sign}${long_pnl:.0f} \u2022 \u2198\ufe0f Shorts: {short_sign}${short_pnl:.0f}"
                     )
 
-                if is_tv_paper:
-                    try:
-                        _reader = StateReader(self.state_manager.state_dir)
-                        ch_data = _reader.read_challenge_state()
-                        if ch_data:
-                            tv_paper_cfg = ch_data.get("tv_paper", {}) or ch_data.get("config", {}) or {}
-                            current = ch_data.get("current_attempt", {}) or {}
-                            profit_target = float(tv_paper_cfg.get("profit_target", 3000))
-                            cum_pnl = float(current.get("cumulative_pnl", 0))
-                            remaining = profit_target - cum_pnl
-                            hwm = float(current.get("equity_hwm", 0))
-                            drawdown_limit = float(tv_paper_cfg.get("max_drawdown", 2000))
-                            starting_bal = float(tv_paper_cfg.get("starting_balance", 50000))
-                            trail_floor = hwm - drawdown_limit if hwm > 0 else starting_bal - drawdown_limit
-                            msg_parts.append("")
-                            msg_parts.append(f"\U0001f3c6 *Challenge:* ${remaining:,.0f} to target")
-                            if hwm > 0:
-                                msg_parts.append(f"\U0001f4c9 *Trail Floor:* ${trail_floor:,.0f}")
-                    except Exception as ch_err:
-                        logger.debug(f"Could not add challenge context to daily summary: {ch_err}")
-
                 try:
                     briefing_config = self._service_config.get("ai_briefings", {})
                     if False:  # AI briefings removed (Phase 2D)

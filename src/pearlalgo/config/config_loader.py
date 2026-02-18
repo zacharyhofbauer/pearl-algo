@@ -336,14 +336,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "prior_beta": defaults.PRIOR_BETA,
         "decay_factor": defaults.DECAY_FACTOR,
     },
-    "challenge": {
-        "enabled": defaults.CHALLENGE_ENABLED,
-        "start_balance": defaults.CHALLENGE_START_BALANCE,
-        "max_drawdown": defaults.CHALLENGE_MAX_DRAWDOWN,
-        "profit_target": defaults.CHALLENGE_PROFIT_TARGET,
-        "auto_reset_on_pass": defaults.CHALLENGE_AUTO_RESET_ON_PASS,
-        "auto_reset_on_fail": defaults.CHALLENGE_AUTO_RESET_ON_FAIL,
-    },
 }
 
 

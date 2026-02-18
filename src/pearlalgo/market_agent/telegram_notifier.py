@@ -1357,23 +1357,8 @@ class MarketAgentTelegramNotifier:
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 
-            # Challenge + performance (best-effort; never block dashboard).
+            # Performance + recent exits (best-effort; never block dashboard).
             try:
-                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-                ct = ChallengeTracker(state_dir=self.state_dir)
-                try:
-                    ct.refresh()
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
-                # Get unrealized PNL from status if available
-                unrealized_pnl = status.get("active_trades_unrealized_pnl")
-                if unrealized_pnl is not None:
-                    try:
-                        unrealized_pnl = float(unrealized_pnl)
-                    except (ValueError, TypeError):
-                        unrealized_pnl = None
-
                 # 30d performance (from SQLite if available)
                 try:
                     from pearlalgo.learning.trade_database import TradeDatabase
@@ -1389,14 +1374,6 @@ class MarketAgentTelegramNotifier:
                             total_wr = (total_wins / total_trades * 100.0) if total_trades > 0 else 0.0
                             total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
                             message += f"\n*30d:* {total_emoji} {fmt_currency(total_pnl_all)} ({total_wins}W/{total_losses}L · {total_wr:.0f}%)"
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
-                # Challenge balance (compact)
-                try:
-                    summary = ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
-                    if summary and summary.strip():
-                        message += "\n\n" + summary
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
 

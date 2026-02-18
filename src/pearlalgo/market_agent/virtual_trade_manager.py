@@ -3,7 +3,7 @@ Virtual Trade Manager
 
 Manages virtual trade exit processing -- detects when TP/SL is touched on
 active virtual trades and records the outcome across all tracking systems
-(performance tracker, circuit breaker, challenge tracker, learning policies).
+(performance tracker, circuit breaker, learning policies).
 
 Extracted from service.py for better code organization and testability.
 """
@@ -46,7 +46,6 @@ class VirtualTradeManager:
         execution_adapter: Optional[Any] = None,
         bandit_policy: Optional[Any] = None,
         contextual_policy: Optional[Any] = None,
-        challenge_tracker: Optional[Any] = None,
         tv_paper_tracker: Optional[Any] = None,
         # Config values
         virtual_pnl_enabled: bool = True,
@@ -67,7 +66,6 @@ class VirtualTradeManager:
         self.execution_adapter = execution_adapter
         self.bandit_policy = bandit_policy
         self.contextual_policy = contextual_policy
-        self._challenge_tracker = challenge_tracker
         self._tv_paper_tracker = tv_paper_tracker
         self._audit_logger = audit_logger
 
@@ -347,41 +345,6 @@ class VirtualTradeManager:
                 )
             except Exception as shadow_err:
                 logger.debug(f"Could not record shadow outcome: {shadow_err}")
-
-        # --- Challenge tracker ---
-        if self._challenge_tracker is not None:
-            try:
-                challenge_result = self._challenge_tracker.record_trade(
-                    pnl=pnl_value, is_win=is_win,
-                )
-                if challenge_result.get("triggered"):
-                    outcome = challenge_result.get("outcome", "")
-                    attempt = challenge_result.get("attempt", {})
-                    logger.info(
-                        f"🏆 Challenge attempt #{attempt.get('attempt_id', 0)} ended: "
-                        f"{outcome.upper()} | Final PnL: ${attempt.get('pnl', 0):.2f}"
-                    )
-                    if self.telegram_notifier and self.telegram_notifier.enabled:
-                        try:
-                            emoji = "🎉" if outcome == "pass" else "❌"
-                            msg = (
-                                f"{emoji} *50k Challenge: {outcome.upper()}*\n\n"
-                                f"Attempt #{attempt.get('attempt_id', 0)} ended\n"
-                                f"Final PnL: `${attempt.get('pnl', 0):,.2f}`\n"
-                                f"Trades: {attempt.get('trades', 0)} | "
-                                f"WR: {attempt.get('win_rate', 0):.0f}%\n\n"
-                                f"_New attempt starting..._"
-                            )
-                            asyncio.create_task(
-                                self.notification_queue.enqueue_raw_message(
-                                    msg, parse_mode="Markdown", dedupe=False,
-                                    priority=Priority.HIGH, tier=NotificationTier.CRITICAL,
-                                )
-                            )
-                        except Exception as tg_err:
-                            logger.debug(f"Could not queue challenge alert: {tg_err}")
-            except Exception as challenge_err:
-                logger.debug(f"Could not record challenge trade: {challenge_err}")
 
         # --- Tradovate Paper tracker ---
         # DISABLED: Virtual trade P&L does NOT match actual Tradovate fills.

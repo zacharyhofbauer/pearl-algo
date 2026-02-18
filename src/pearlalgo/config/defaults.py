@@ -79,18 +79,6 @@ DECAY_FACTOR: float = 0.0
 
 
 # =============================================================================
-# CHALLENGE TRACKER DEFAULTS
-# =============================================================================
-
-CHALLENGE_ENABLED: bool = False
-CHALLENGE_START_BALANCE: float = 50000.0
-CHALLENGE_MAX_DRAWDOWN: float = 2000.0
-CHALLENGE_PROFIT_TARGET: float = 3000.0
-CHALLENGE_AUTO_RESET_ON_PASS: bool = True
-CHALLENGE_AUTO_RESET_ON_FAIL: bool = True
-
-
-# =============================================================================
 # SERVICE DEFAULTS
 # =============================================================================
 

@@ -884,60 +884,6 @@ class TelegramFormattersMixin:
 
         return f"Gateway: {gw} | Connection: {conn} | Data: {data}"
 
-    def _format_challenge_status(
-        self,
-        balance: float,
-        starting_balance: float,
-        profit_target: float,
-        max_drawdown: float,
-        trades: int = 0,
-        wins: int = 0,
-    ) -> str:
-        """
-        Format challenge status card.
-
-        Args:
-            balance: Current balance
-            starting_balance: Starting balance
-            profit_target: Profit target
-            max_drawdown: Maximum allowed drawdown
-            trades: Total trades taken
-            wins: Winning trades
-
-        Returns:
-            Formatted markdown string
-        """
-        lines = ["🏆 *Challenge Status*", ""]
-
-        # Balance and progress
-        pnl = balance - starting_balance
-        pnl_emoji_str = pnl_emoji(pnl)
-
-        lines.append(f"Balance: {fmt_currency(balance)}")
-        lines.append(f"P&L: {pnl_emoji_str} {fmt_currency(pnl, show_sign=True)}")
-        lines.append("")
-
-        # Targets
-        lines.append(f"🎯 Profit Target: +${profit_target:,.0f}")
-        lines.append(f"🛑 Max Drawdown: -${max_drawdown:,.0f}")
-        lines.append("")
-
-        # Progress
-        if pnl > 0:
-            progress = (pnl / profit_target) * 100
-            lines.append(f"Progress: {progress:.1f}% to target")
-        elif pnl < 0:
-            drawdown_used = (abs(pnl) / max_drawdown) * 100
-            lines.append(f"Drawdown: {drawdown_used:.1f}% used")
-
-        # Stats
-        if trades > 0:
-            win_rate = (wins / trades * 100) if trades > 0 else 0
-            lines.append("")
-            lines.append(f"Trades: {trades} | Win Rate: {win_rate:.0f}%")
-
-        return "\n".join(lines)
-
     def _format_onoff(self, value: bool) -> str:
         """Format a boolean as ON/OFF with emoji."""
         return "🟢 ON" if value else "🔴 OFF"

@@ -612,11 +612,11 @@ export default function DashboardPageInner() {
         panels={
           <>
             <AccountStrip
-              balance={agentState?.challenge?.current_balance ?? null}
-              totalPnl={agentState?.challenge?.pnl ?? null}
-              dailyPnl={agentState?.daily_pnl ?? null}
-              trades={agentState?.challenge?.trades ?? agentState?.daily_trades ?? null}
-              winRate={agentState?.challenge?.win_rate ?? null}
+              balance={null}
+              totalPnl={performanceSummary?.all?.pnl ?? null}
+              dailyPnl={performanceSummary?.td?.pnl ?? agentState?.daily_pnl ?? null}
+              trades={performanceSummary?.all?.trades ?? null}
+              winRate={performanceSummary?.all?.win_rate ?? null}
               equity={agentState?.tradovate_account?.equity ?? null}
               openPnl={agentState?.tradovate_account?.open_pnl ?? null}
             />

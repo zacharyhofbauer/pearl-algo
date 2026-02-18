@@ -358,48 +358,6 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 logger.warning(f"Critical path error: {e}", exc_info=True)
 
         # ==========================================================================
-        # 50K CHALLENGE TRACKER (Pass/Fail Rules)
-        # ==========================================================================
-        # Tracks account attempts with pass/fail thresholds.
-        # PnL shown in Telegram = current attempt only (not all-time).
-        self._challenge_tracker: Optional["ChallengeTracker"] = None
-        self._challenge_enabled = False
-        try:
-            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
-            
-            challenge_cfg = service_config.get("challenge", {}) or {}
-            self._challenge_enabled = bool(challenge_cfg.get("enabled", False))
-            # Skip ChallengeTracker for Tradovate Paper accounts — TvPaperEvalTracker handles
-            # challenge state for those. Running both causes them to overwrite the same
-            # challenge_state.json with incompatible formats.
-            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            is_tv_paper = tv_paper_stage in ("evaluation", "sim_funded", "live")
-            if self._challenge_enabled and not is_tv_paper:
-                cfg = ChallengeConfig(
-                    enabled=True,
-                    start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
-                    max_drawdown=float(challenge_cfg.get("max_drawdown", 2_000.0)),
-                    profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
-                    auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
-                    auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
-                )
-                self._challenge_tracker = ChallengeTracker(
-                    config=cfg,
-                    state_dir=self.state_manager.state_dir,
-                    trade_db=self._trade_db,
-                )
-                logger.info(
-                    f"50k Challenge enabled: balance=${cfg.start_balance:,.0f}, "
-                    f"target=+${cfg.profit_target:,.0f}, max_dd=-${cfg.max_drawdown:,.0f}"
-                )
-            elif is_tv_paper:
-                logger.info("ChallengeTracker skipped — Tradovate Paper account uses TvPaperEvalTracker")
-        except Exception as e:
-            logger.warning(f"Challenge tracker init failed (continuing without): {e}")
-            self._challenge_tracker = None
-            self._challenge_enabled = False
-
-        # ==========================================================================
         # Tradovate Paper EVALUATION TRACKER (Prop Firm Rules)
         # ==========================================================================
         self._tv_paper_tracker = None
@@ -572,7 +530,6 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
             execution_adapter=getattr(self, "execution_adapter", None),
             bandit_policy=getattr(self, "bandit_policy", None),
             contextual_policy=getattr(self, "contextual_policy", None),
-            challenge_tracker=getattr(self, "_challenge_tracker", None),
             tv_paper_tracker=getattr(self, "_tv_paper_tracker", None),
             virtual_pnl_enabled=getattr(self.config, "virtual_pnl_enabled", True),
             virtual_pnl_tiebreak=getattr(self.config, "virtual_pnl_tiebreak", "stop_loss"),

@@ -296,8 +296,6 @@ def build_incident_report(
     trades: List[IncidentTradeRecord],
     start_utc: datetime,
     event_counts: Dict[str, int],
-    challenge_state: Optional[Dict[str, Any]],
-    challenge_history: Optional[List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
     """Build a complete incident-report dict from analysed trade data."""
     total_pnl = sum(t.pnl for t in trades)
@@ -342,7 +340,5 @@ def build_incident_report(
             }
             for t in biggest_losses
         ],
-        "challenge_state": challenge_state,
-        "challenge_history": challenge_history[-5:] if challenge_history else None,
     }
     return report
