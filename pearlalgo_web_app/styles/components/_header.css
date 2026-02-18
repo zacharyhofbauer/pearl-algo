@@ -4,7 +4,7 @@
    COMBINED HEADER - Single Row (Timeframes + Badges)
    ============================================ */
 .header-combined {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 /* Single row: timeframes left, badges right */
@@ -12,14 +12,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: clamp(8px, 2vw, 12px) clamp(10px, 2vw, 16px);
-  background: linear-gradient(165deg, rgba(var(--bg-secondary-rgb), 0.95) 0%, rgba(var(--bg-elevated-rgb), 0.92) 100%);
-  backdrop-filter: blur(16px);
-  border-radius: 12px;
-  border: 1px solid rgba(var(--bg-border-rgb), 0.4);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  gap: 8px;
+  flex-wrap: nowrap;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
 }
 
 .header-combined .header-timeframe {
@@ -210,9 +208,17 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
-  flex: 1;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   min-width: 0;
+  justify-content: flex-end;
+}
+
+.header-badges::-webkit-scrollbar {
+  display: none;
 }
 
 .header-badges .badge {
@@ -452,20 +458,17 @@
   }
 
   .header-row-single {
-    padding: 6px 8px;
+    padding: 5px 8px;
     gap: 6px;
     border-radius: 8px;
-    flex-wrap: wrap;
   }
 
-  /* Timeframe: horizontal scroll, compact buttons */
   .header-timeframe {
     flex-shrink: 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    justify-content: flex-start;
   }
 
   .header-timeframe::-webkit-scrollbar {
@@ -476,13 +479,6 @@
     padding: 5px 8px;
     font-size: 11px;
     flex-shrink: 0;
-  }
-
-  /* Badges: wrap into second row, compact */
-  .header-badges {
-    flex-wrap: wrap;
-    gap: 3px;
-    justify-content: flex-end;
   }
 
   .header-badges .badge {
