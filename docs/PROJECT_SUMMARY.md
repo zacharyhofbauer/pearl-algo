@@ -1112,7 +1112,7 @@ tail -20 data/agent_state/NQ/signals.jsonl | jq
 **View Performance**:
 ```bash
 # Performance metrics are computed on-demand and exported to data/agent_state/<MARKET>/exports/
-# Use /performance command in Telegram, or:
+# Use /stats command in Telegram, or:
 ls -la data/agent_state/NQ/exports/
 ```
 

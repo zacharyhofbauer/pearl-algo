@@ -1,111 +1,128 @@
 # Telegram Integration Guide
 
-This guide documents the **Telegram Command Handler** (menu-driven control plane) for the PearlAlgo MNQ Agent.
+This guide documents the **Telegram Command Handler** for the PearlAlgo trading agent.
 
 ## What runs
 
-- **Command handler service**: `python -m pearlalgo.market_agent.telegram_command_handler`
-  - Renders the **main menu** and sub-menus via inline buttons.
-  - Reads **agent state** from `data/agent_state/<MARKET>/state.json` and signal history from `data/agent_state/<MARKET>/signals.jsonl`.
-  - Uses the project’s lifecycle scripts via `pearlalgo.utils.service_controller.ServiceController` for safe orchestration.
+- **Command handler service**: `python -m pearlalgo.telegram.main`
+  - Renders the **main menu** and command responses via inline buttons.
+  - Fetches **agent state** from the API server (`/api/state`).
+  - All commands are read-only except Start/Stop/Kill Switch/Flatten.
 
 ## Quick start
 
 ### Requirements
 
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set in `.env` (see `env.example`)
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set in `~/.config/pearlalgo/secrets.env` or `.env`
 - Bot created via [@BotFather](https://t.me/botfather)
 
 ### Start the command handler
 
 ```bash
-cd /path/to/PearlAlgoProject
-./scripts/telegram/start_command_handler.sh
+cd ~/PearlAlgoProject
+./pearl.sh telegram start
 ```
 
-For background mode:
-
-```bash
-./scripts/telegram/start_command_handler.sh --background
-```
-
-### (Optional) sync BotFather commands
+### Sync BotFather commands
 
 ```bash
 python3 scripts/telegram/set_bot_commands.py
 ```
 
-## Mini App: Live Chart inside Telegram
+## Commands
 
-To open the Live Main Chart **without leaving Telegram**, use a Telegram Mini App.
+The bot mirrors the web app dashboard at pearlalgo.io:
 
-Key points:
-- BotFather requires a **public HTTPS URL** (it will reject `localhost`)
-- Set the URL in BotFather, and also set `PEARL_MINI_APP_URL` so the dashboard shows a **📈 Live** button.
+### Monitoring
 
-See `docs/PEARL_WEB_APP.md` for deployment/tunnel options and CORS settings.
+| Command | Description | Dashboard Equivalent |
+|---------|-------------|---------------------|
+| `/status` | Balance, P&L, positions, AI headline | AccountStrip + header badges |
+| `/stats` | Performance by period (Today/24h/72h/30d/All Time) | Stats tab |
+| `/trades` | Recent trade history with direction, P&L, duration | History tab |
 
-## Supported commands
+### Diagnostics
 
-The command handler intentionally keeps slash commands minimal:
+| Command | Description | Dashboard Equivalent |
+|---------|-------------|---------------------|
+| `/health` | System health, connectivity, data quality, circuit breaker | Header badges + system panel |
+| `/doctor` | Risk metrics, direction breakdown, ML filter, shadow mode | Stats tab (risk + analytics) |
+| `/signals` | Signal rejections (24h), last signal decision | Signals tab |
 
-- `/start`: Show the main dashboard (menu) - **the only command**
+### Controls
 
-Everything else is accessed via the button menus (safer and easier to operate on mobile).
+| Command | Description |
+|---------|-------------|
+| `/settings` | Current configuration (symbol, timeframe, execution) |
+| `/menu` | Main menu with inline buttons |
+| `/help` | List all commands |
 
-> **Note:** Pearl AI chat was removed from Telegram. For AI assistance, use CLI/terminal with `/pearl`.
+### Emergency (via menu buttons)
 
-## UI policy (do not drift)
+- **Kill Switch** — Immediately stop agent + cancel all orders
+- **Flatten All** — Close all open positions at market
 
-- **One command only**: `/start` (dashboard).
-- **Menus for quick actions**: keep operations behind inline buttons (mobile-first + safer).
-- **AI via CLI**: For conversational commands, diagnostics, and help - use terminal with `/pearl`.
-- **BotFather command list**: should show only `/start`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+Both require confirmation before executing.
 
-## Status semantics (how to read the dashboard)
+## Menu layout
 
-The dashboard is intentionally compact. These indicators should **never contradict** each other:
+```
+📊 Status  │  📈 Stats   │  📋 Trades
+💚 Health  │  🩺 Doctor  │  🧠 Signals
+⏹ Stop / ▶️ Start     │  ⚙️ Settings
+🚨 Kill Switch         │  📋 Flatten All
+```
 
-- **Agent (dot)**: green when the market agent process is running (scanner/trading logic).
-- **Gateway (dot)**: green when the IBKR gateway process is running and the API port is listening.
-- **Health (dot)**: green when the agent is running and data/connection look healthy; grey when the agent is off.
-- **Footer (`Agent: … | Gateway: … | Data: …`)**:
-  - **Agent**: uptime since the agent’s `start_time`
-  - **Gateway**: service controller gateway status
-  - **Data**: age of the latest bar (freshness)
+## Push notifications
 
-If something looks off, use **🎛️ System** (services) and **🛡️ Health** (data/connection) to confirm, then restart the agent/gateway from **System**.
+The agent also sends automatic push notifications for:
 
-Tip: Use **🛡️ Health → 🩺 Doctor** for a one-screen diagnostic rollup (agent/gateway/data + key prefs).
+- **Trade entries/exits** — Direction, P&L, exit reason
+- **Status updates** — Periodic dashboard card with balance, P&L, recent exits
+- **Circuit breaker alerts** — When risk limits are hit
+- **Data quality alerts** — Stale data, connection issues
+- **Daily/weekly summaries** — Performance rollups
 
-## Menu map (operator-facing)
+Push notification format:
+```
+🐚 PEARL — Tradovate Paper
+MNQ • 06:30 PM ET
 
-The main dashboard has 4 sections:
+Agent 🟢  GW 🟢  Data 🟢
+Market 🔴  Session 🔴
+🧠 Bandit disabled · Ctx shadow · ML shadow
 
-- **📊 Activity**: trades, signals, P&L, history, performance metrics
-- **🎛️ System**: start/stop/restart agent, gateway controls
-- **🛡️ Health**: connectivity, data quality, diagnostics
-- **⚙️ Settings**: markets, alert preferences, bots
+Today: 🔴 -$645.91
+7W/4L · 43% WR
+30d: 🟢 +$2,856.70 (112W/122L · 48%)
 
-## Multi-market usage
+Recent:
+🟢 +$150.00 · 🔵 LONG · take profit
+🔴 -$89.50 · 🟣 SHORT · stop loss
 
-The command handler can control multiple market agents (NQ/ES/GC) from one UI:
-- Use **Markets** to select the active market
-- All reads/writes (state, reports, actions) are scoped to the selected market
+🩺 MNQ v0.2.4 | A:ON G:OK D:3s C:5s
+```
 
 ## Safety & authorization
 
 - The handler **only responds to the configured chat ID** (`TELEGRAM_CHAT_ID`). Other chats are blocked.
+- Dangerous actions (Kill Switch, Flatten) require confirmation.
 
 ## Troubleshooting
 
-- Restart handler:
-
 ```bash
-./scripts/telegram/restart_command_handler.sh --background
+# Check status
+./pearl.sh telegram status
+
+# Restart
+./pearl.sh telegram stop && ./pearl.sh telegram start
+
+# View logs
+tail -50 logs/telegram_handler.log
 ```
 
-## Architecture Summary
+## Architecture
 
-- **Telegram** → Notifications and dashboard (one-way alerts + interactive menu)
-- **CLI/Terminal** → AI assistance with `/pearl` command
+- **Telegram handlers** → fetch from Agent API (`/api/state`) via HTTP
+- **Push notifications** → sent by `MarketAgentTelegramNotifier` during agent runtime
+- **No direct file access** — handlers are API-only, no state file reads

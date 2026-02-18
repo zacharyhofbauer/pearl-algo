@@ -60,8 +60,9 @@ def escape_html(text: str) -> str:
 async def safe_send(
     send_fn,
     text: str,
-    parse_mode: str = "HTML",
     max_retries: int = 3,
+    *,
+    use_parse_mode: bool = True,
     **kwargs,
 ) -> Optional[object]:
     """Send a Telegram message with retry logic and message splitting.
@@ -71,17 +72,23 @@ async def safe_send(
     - Rate limit errors (429) with exponential backoff
     - Network errors with retry
     - MessageNotModified errors (silently ignored)
+
+    When *use_parse_mode* is True, ``parse_mode="HTML"`` is added to kwargs.
+    Set to False when calling functions that already set parse_mode (e.g. reply_html).
     """
     parts = split_message(text)
     last_msg = None
+
+    send_kwargs = dict(kwargs)
+    if use_parse_mode:
+        send_kwargs["parse_mode"] = "HTML"
 
     for part in parts:
         for attempt in range(max_retries):
             try:
                 last_msg = await send_fn(
                     text=part,
-                    parse_mode=parse_mode,
-                    **kwargs,
+                    **send_kwargs,
                 )
                 break  # Success
             except Exception as e:
@@ -126,6 +133,7 @@ async def reply_html(update: Any, text: str, **kwargs) -> None:
                             **kwargs,
                         )
         elif update.message:
-            await safe_send(update.message.reply_html, text, **kwargs)
+            # reply_html already sets parse_mode=HTML, so skip adding it again
+            await safe_send(update.message.reply_html, text, use_parse_mode=False, **kwargs)
     except Exception as e:
         logger.error(f"Reply failed: {e}")

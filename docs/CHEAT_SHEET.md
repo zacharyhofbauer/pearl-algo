@@ -395,7 +395,7 @@ tail -f logs/web_app.log           # Next.js
 | Signal gen | — | `strategy.analyze()` (aggressive `pearl_bot_auto` settings) |
 | Dashboard data | — | Tradovate API |
 | Execution | Archived (no agent running) | Tradovate paper (armed) |
-| Telegram label | `[IBKR VIRTUAL]` | `[TRADOVATE PAPER]` |
+| Telegram label | — (archived, no notifications) | `[TRADOVATE PAPER]` |
 
 **Rule:** Tradovate Paper is the single live execution account. IBKR Virtual is archived — IBKR Gateway still runs to provide market data. Use `--config config/accounts/tradovate_paper.yaml` to start the agent.
 

@@ -117,6 +117,24 @@ class ServiceLoopMixin:
                     await self._interruptible_sleep(self._scan_interval_paused)
                     continue
 
+                # Poll Tradovate account data early (before data fetch)
+                # so dashboard shows live broker values even when IBKR data is unavailable
+                _tv_polled = False
+                if self.execution_adapter is not None and hasattr(self.execution_adapter, "get_account_summary"):
+                    try:
+                        self._tradovate_account = await self.execution_adapter.get_account_summary()
+                        _tv_polled = True
+                    except Exception as e:
+                        logger.debug(f"Tradovate account poll (non-critical): {e}")
+
+                # Save state after Tradovate poll even if data fetch will fail.
+                # This ensures the dashboard shows live broker values during IBKR outages.
+                if _tv_polled:
+                    try:
+                        self._save_state(force=True)
+                    except Exception as e:
+                        logger.debug(f"Early state save (non-critical): {e}")
+
                 # Fetch latest data with error handling
                 try:
                     try:

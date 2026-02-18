@@ -774,7 +774,7 @@ When adjusting strategy or service parameters in live operation, follow this bou
    - Success metric (what will improvement look like?)
    - Rollback trigger (under what conditions will you revert?)
 3. **Observation period**: Run for at least 1-2 full trading sessions before evaluating.
-4. **Measure, don't assume**: Use `/performance`, `signals.jsonl`, or watchdog output to verify impact.
+4. **Measure, don't assume**: Use `/stats`, `/doctor`, `signals.jsonl`, or watchdog output to verify impact.
 
 ### Example Tuning Cycle
 
@@ -1002,7 +1002,7 @@ The following gaps have been addressed with explicit test coverage:
 3. **Command handler tests**
    - Async tests for `TelegramCommandHandler` that mock Telegram `Update` objects and verify:
      - `/status` returns correctly formatted status and buttons
-     - `/signals` and `/performance` read from state/performance files and render expected output
+     - `/stats`, `/health`, `/doctor`, `/signals` fetch from `/api/state` and render expected output
      - Unauthorized chat IDs are rejected.
 
 4. **Market hours / data quality edge cases**

@@ -133,10 +133,10 @@ accounts:
     display_name: "IBKR Virtual (Archived)"
     badge: "ARCHIVED"
     badge_color: "gray"
-    telegram_prefix: "[IBKR VIRTUAL]"
-    description: "Archived inception test account — $23,248 P&L over 15 days"
+    description: "Archived inception test account — $23,248 P&L over 15 days. View at pearlalgo.io/archive/ibkr"
     state_dir: "NQ"
     archived: true
+    # No Telegram notifications — archived account, viewable on web app only
 
   tv_paper:
     display_name: "Tradovate Paper"
