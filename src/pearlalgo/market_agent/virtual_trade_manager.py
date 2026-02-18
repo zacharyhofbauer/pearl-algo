@@ -84,6 +84,10 @@ class VirtualTradeManager:
         # Exit notification dedup — prevent duplicate Telegram messages for the same signal
         self._notified_exits: set = set()
 
+        # Dedup: track signal_ids already processed as exits to prevent
+        # duplicate exit records in JSONL before performance_tracker persists status.
+        self._processed_exits: set = set()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -149,6 +153,8 @@ class VirtualTradeManager:
                 sig_id = str(rec.get("signal_id") or "")
                 if not sig_id or sig_id in exited_this_cycle:
                     continue
+                if sig_id in self._processed_exits:
+                    continue
 
                 # Merge signal data from generated record if missing
                 if not rec.get("signal") and sig_id in _signal_data_map:
@@ -172,6 +178,10 @@ class VirtualTradeManager:
                     exit_bar_ts=exit_bar_ts,
                     df=df,
                 )
+                # Mark as processed to prevent duplicate exits across cycles
+                self._processed_exits.add(sig_id)
+                if len(self._processed_exits) > 1000:
+                    self._processed_exits = set(list(self._processed_exits)[-500:])
             except Exception as e:
                 logger.warning(f"Failed to process virtual trade exit: {e}")
                 continue

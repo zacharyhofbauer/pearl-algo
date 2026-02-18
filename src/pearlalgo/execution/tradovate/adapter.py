@@ -88,6 +88,10 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
 
+        # Rate limit backoff state
+        self._rate_limit_backoff: float = 0.0  # extra delay after 429
+        self._rate_limit_until: float = 0.0  # time.monotonic() cooldown deadline
+
         logger.info(
             f"TradovateExecutionAdapter initialized: "
             f"env={self._tv_config.env}, mode={config.mode.value}"
@@ -502,13 +506,23 @@ class TradovateExecutionAdapter(ExecutionAdapter):
     # ── Position queries ──────────────────────────────────────────────
 
     async def get_positions(self) -> List[Position]:
-        """Get current positions from Tradovate."""
+        """Get current positions from Tradovate.
+
+        Falls back to WebSocket ``_live_positions`` cache when REST returns
+        empty or fails with a 429 rate-limit error.
+        """
         if self.config.mode.value == "dry_run" or not self.is_connected():
             return []
 
+        positions: List[Position] = []
+        rest_failed_429 = False
         try:
+            # Respect rate-limit cooldown
+            if time.monotonic() < self._rate_limit_until:
+                rest_failed_429 = True
+                raise TradovateAPIError("Rate-limit cooldown active")
+
             tv_positions = await self._client.get_positions()
-            positions = []
             for pos in tv_positions:
                 net_pos = pos.get("netPos", 0)
                 if net_pos == 0:
@@ -518,10 +532,34 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     quantity=net_pos,
                     avg_price=float(pos.get("netPrice", 0)),
                 ))
-            return positions
+        except TradovateAPIError as e:
+            if "429" in str(e) or rest_failed_429:
+                # Exponential backoff: 30s, 60s, 120s, max 300s
+                self._rate_limit_backoff = min((self._rate_limit_backoff or 30) * 2, 300)
+                self._rate_limit_until = time.monotonic() + self._rate_limit_backoff
+                logger.warning(f"Tradovate 429 rate limit on get_positions, backoff={self._rate_limit_backoff:.0f}s")
+            else:
+                logger.error(f"Failed to get Tradovate positions: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to get Tradovate positions: {e}", exc_info=True)
-            return []
+
+        # Fallback: use WebSocket live position cache when REST returned empty
+        if not positions and self._live_positions:
+            logger.info(f"Using WebSocket _live_positions cache ({len(self._live_positions)} positions) as REST fallback")
+            for contract_id, lp in self._live_positions.items():
+                net_pos = lp.get("net_pos", 0)
+                if net_pos == 0:
+                    continue
+                positions.append(Position(
+                    symbol=str(contract_id),
+                    quantity=net_pos,
+                    avg_price=float(lp.get("net_price", 0)),
+                ))
+        elif positions:
+            # Successful REST call -- reset backoff
+            self._rate_limit_backoff = 0.0
+
+        return positions
 
     # ── WebSocket event handler ───────────────────────────────────────
 
@@ -648,8 +686,21 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         Called periodically when the WebSocket is disconnected and once
         immediately after a successful reconnection.
         """
+        # Skip if in rate-limit cooldown
+        if time.monotonic() < self._rate_limit_until:
+            logger.debug("Skipping REST order poll: rate-limit cooldown active")
+            return
+
         try:
             rest_orders = await self._client.get_orders()
+        except TradovateAPIError as e:
+            if "429" in str(e):
+                self._rate_limit_backoff = min((self._rate_limit_backoff or 30) * 2, 300)
+                self._rate_limit_until = time.monotonic() + self._rate_limit_backoff
+                logger.warning(f"Tradovate 429 on order poll, backoff={self._rate_limit_backoff:.0f}s")
+            else:
+                logger.error(f"REST order poll failed: {e}", exc_info=True)
+            return
         except Exception as e:
             logger.error(f"REST order poll failed: {e}", exc_info=True)
             return
@@ -705,12 +756,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     if not hasattr(self, '_reconnect_task') or self._reconnect_task is None or self._reconnect_task.done():
                         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
-                await asyncio.sleep(5)
+                # Base interval 30s + any rate-limit backoff
+                sleep_time = 30 + self._rate_limit_backoff
+                await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Reconciliation loop error: {e}", exc_info=True)
-                await asyncio.sleep(5)
+                await asyncio.sleep(30)
 
     async def _reconnect_loop(self) -> None:
         """Auto-reconnect with exponential backoff when disconnected.
@@ -827,9 +880,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             result["initial_margin"] = snap.get("initialMargin", 0.0)
             result["maintenance_margin"] = snap.get("maintenanceMargin", 0.0)
 
-        # Process positions
+        # Process positions (with _live_positions fallback for rate limiting)
+        positions = []
         if tv_positions is not None:
-            positions = []
             for pos in tv_positions:
                 net_pos = pos.get("netPos", 0)
                 if net_pos == 0:
@@ -840,11 +893,23 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     "net_price": pos.get("netPrice", 0.0),
                     "open_pnl": pos.get("openPnL", 0.0),
                 })
-            result["positions"] = positions
-            result["position_count"] = len(positions)
-        else:
-            result["positions"] = []
-            result["position_count"] = 0
+
+        # Fallback: when REST returned empty but WS cache has positions
+        if not positions and self._live_positions:
+            logger.info(f"get_account_summary: using _live_positions cache ({len(self._live_positions)} pos) as REST fallback")
+            for contract_id, lp in self._live_positions.items():
+                net_pos = lp.get("net_pos", 0)
+                if net_pos == 0:
+                    continue
+                positions.append({
+                    "contract_id": contract_id,
+                    "net_pos": net_pos,
+                    "net_price": lp.get("net_price", 0.0),
+                    "open_pnl": lp.get("open_pnl", 0.0),
+                })
+
+        result["positions"] = positions
+        result["position_count"] = len(positions)
 
         # Process fills
         if raw_fills is not None:
