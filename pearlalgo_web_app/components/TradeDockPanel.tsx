@@ -37,6 +37,7 @@ export interface PerformancePeriodSummary {
   wins: number
   losses: number
   win_rate: number
+  tradovate_equity?: number
 }
 
 export interface PerformanceSummary {

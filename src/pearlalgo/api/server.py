@@ -954,15 +954,26 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                 total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
                 equity = float(tv.get("equity", 0)) if tv else 0
                 start_balance = _get_start_balance(state_dir)
-                equity_pnl = equity - start_balance
                 total_trades = len(all_trades_raw)
+
+                # Commission estimation requires live equity as ground truth.
+                # When equity is 0 (adapter offline), skip commission deduction
+                # and use raw fill P&L to avoid wildly incorrect numbers.
                 commission_per_trade = 0.0
-                if total_trades > 0 and total_fill_pnl > equity_pnl:
-                    commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+                if equity > 0:
+                    equity_pnl = equity - start_balance
+                    if total_trades > 0 and total_fill_pnl > equity_pnl:
+                        commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
 
                 cpt = commission_per_trade
                 all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
-                all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
+
+                # Provide equity (live) or estimated equity (start_balance + fill P&L)
+                live_equity = equity_stats.get("tradovate_equity", 0)
+                if live_equity:
+                    all_fill_stats["tradovate_equity"] = live_equity
+                else:
+                    all_fill_stats["tradovate_equity"] = round(start_balance + total_fill_pnl, 2)
 
                 return {
                     "as_of": now.isoformat(),
@@ -1510,6 +1521,43 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
 
+    # Fallback for Tradovate Paper when adapter is offline: compute from fills
+    if _is_tv_paper_account(state_dir):
+        try:
+            tv, tv_fills = _get_tradovate_state(state_dir)
+            if tv_fills:
+                paired = _tradovate_fills_to_trades(tv_fills)
+                td_start = _get_trading_day_start()
+                today_trades = []
+                for t in paired:
+                    exit_ts = t.get("exit_time") or ""
+                    if exit_ts:
+                        try:
+                            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
+                            if exit_dt.tzinfo is None:
+                                exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                            if exit_dt >= td_start:
+                                today_trades.append(t)
+                        except Exception:
+                            pass
+                trades = len(today_trades)
+                wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
+                losses = trades - wins
+                daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in today_trades), 2)
+                start_balance = _get_start_balance(state_dir)
+                total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
+                return {
+                    "daily_pnl": daily_pnl,
+                    "daily_trades": trades,
+                    "daily_wins": wins,
+                    "daily_losses": losses,
+                    "tradovate_equity": round(start_balance + total_fill_pnl, 2),
+                    "tradovate_open_pnl": 0.0,
+                    "tradovate_positions": 0,
+                }
+        except Exception as e:
+            logger.warning(f"Non-critical Tradovate fills fallback: {e}")
+
     # Delegate to shared stats_computation module (single source of truth for
     # signals.jsonl parsing with built-in 5-second TTL cache).
     result = _shared_compute_daily_stats(state_dir)
@@ -1606,6 +1654,25 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
+
+    # Priority 2: Tradovate fills (TV Paper accounts without live equity)
+    # This avoids falling through to performance.json which may contain
+    # duplicated/corrupted virtual exit data.
+    try:
+        if _is_tv_paper_account(state_dir):
+            _, tv_fills = _get_tradovate_state(state_dir)
+            if tv_fills:
+                now_utc = datetime.now(timezone.utc)
+                prev_day_s, prev_day_e = _get_previous_trading_day_bounds()
+                fills_stats = {
+                    "yesterday": _tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e),
+                    "24h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=24)),
+                    "72h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=72)),
+                    "30d": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(days=30)),
+                }
+                return fills_stats
+    except Exception as e:
+        logger.debug(f"Tradovate fills fallback failed: {e}")
 
     if perf_data is None:
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
@@ -2911,20 +2978,25 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
 
         # Derive per-trade commission from equity vs fill P&L gap.
         # Tradovate fills don't include fees, but equity is the ground truth.
+        # When equity is 0 (adapter offline), skip commission deduction.
         all_trades_raw = _tradovate_fills_to_trades(fills)
         total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
         equity = float(tv.get("equity", 0)) if tv else 0
         start_balance = _get_start_balance(_state_dir)
-        equity_pnl = equity - start_balance
         total_trades = len(all_trades_raw)
-        # Commission per trade = (fill P&L - actual equity gain) / trades
         commission_per_trade = 0.0
-        if total_trades > 0 and total_fill_pnl > equity_pnl:
-            commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+        if equity > 0:
+            equity_pnl = equity - start_balance
+            if total_trades > 0 and total_fill_pnl > equity_pnl:
+                commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
 
         cpt = commission_per_trade  # shorthand
         all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
-        all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
+        live_equity = equity_stats.get("tradovate_equity", 0)
+        if live_equity:
+            all_fill_stats["tradovate_equity"] = live_equity
+        else:
+            all_fill_stats["tradovate_equity"] = round(start_balance + total_fill_pnl, 2)
 
         return {
             "as_of": now.isoformat(),

@@ -111,7 +111,13 @@ _TV_PAPER_ACCOUNT_TTL = 60.0  # seconds — account type rarely changes mid-sess
 
 
 def _detect_tv_paper_account(state_dir: Path) -> bool:
-    """Inner detection logic (uncached)."""
+    """Inner detection logic (uncached).
+
+    Detects Tradovate Paper in two ways:
+    1. Live: tradovate_account with equity key in state.json (adapter connected)
+    2. Offline: tradovate_fills.json exists with data (adapter disconnected but
+       historical fills are available for performance computation)
+    """
     try:
         data = read_state_for_dir(state_dir)
         if data:
@@ -126,6 +132,15 @@ def _detect_tv_paper_account(state_dir: Path) -> bool:
                 return True
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
+
+    # Fallback: detect from persistent fills file (execution adapter may be off)
+    try:
+        fills_file = state_dir / "tradovate_fills.json"
+        if fills_file.exists() and fills_file.stat().st_size > 10:
+            return True
+    except Exception:
+        pass
+
     return False
 
 

@@ -164,17 +164,27 @@ def tradovate_performance_summary(
     fills: List[Dict[str, Any]],
     state_dir: Path,
 ) -> Dict[str, Any]:
-    """Build overall performance summary from Tradovate data (equity-based)."""
-    start_balance = get_start_balance(state_dir)
+    """Build overall performance summary from Tradovate data.
 
-    equity = float(tv.get("equity", 0))
-    pnl = round(equity - start_balance, 2)
+    When live equity is available (adapter connected), P&L is equity-based.
+    When offline (equity=0), P&L is computed from raw fills and equity is
+    estimated as start_balance + fill_pnl.
+    """
+    start_balance = get_start_balance(state_dir)
 
     trades = _raw_fills_to_trades(fills)
     total = len(trades)
     wins = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
     losses = total - wins
     win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    equity = float(tv.get("equity", 0))
+    if equity > 0:
+        pnl = round(equity - start_balance, 2)
+    else:
+        fill_pnl = sum(t.get("pnl", 0) or 0 for t in trades)
+        pnl = round(fill_pnl, 2)
+        equity = round(start_balance + fill_pnl, 2)
 
     return {
         "pnl": pnl,

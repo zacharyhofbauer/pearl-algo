@@ -617,7 +617,7 @@ export default function DashboardPageInner() {
               dailyPnl={performanceSummary?.td?.pnl ?? agentState?.daily_pnl ?? null}
               trades={performanceSummary?.all?.trades ?? null}
               winRate={performanceSummary?.all?.win_rate ?? null}
-              equity={agentState?.tradovate_account?.equity ?? null}
+              equity={agentState?.tradovate_account?.equity ?? performanceSummary?.all?.tradovate_equity ?? null}
               openPnl={agentState?.tradovate_account?.open_pnl ?? null}
             />
             <ErrorBoundary panelName="Trades">

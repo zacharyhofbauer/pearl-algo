@@ -950,15 +950,22 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                 total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
                 equity = float(tv.get("equity", 0)) if tv else 0
                 start_balance = _get_start_balance(state_dir)
-                equity_pnl = equity - start_balance
                 total_trades = len(all_trades_raw)
+
                 commission_per_trade = 0.0
-                if total_trades > 0 and total_fill_pnl > equity_pnl:
-                    commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+                if equity > 0:
+                    equity_pnl = equity - start_balance
+                    if total_trades > 0 and total_fill_pnl > equity_pnl:
+                        commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
 
                 cpt = commission_per_trade
                 all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
-                all_fill_stats["tradovate_equity"] = equity_stats.get("tradovate_equity", 0)
+
+                live_equity = equity_stats.get("tradovate_equity", 0)
+                if live_equity:
+                    all_fill_stats["tradovate_equity"] = live_equity
+                else:
+                    all_fill_stats["tradovate_equity"] = round(start_balance + total_fill_pnl, 2)
 
                 return {
                     "as_of": now.isoformat(),
@@ -1505,6 +1512,43 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 }
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
+
+    # Fallback for Tradovate Paper when adapter is offline: compute from fills
+    if _is_tv_paper_account(state_dir):
+        try:
+            tv, tv_fills = _get_tradovate_state(state_dir)
+            if tv_fills:
+                paired = _tradovate_fills_to_trades(tv_fills)
+                td_start = _get_trading_day_start()
+                today_trades = []
+                for t in paired:
+                    exit_ts = t.get("exit_time") or ""
+                    if exit_ts:
+                        try:
+                            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
+                            if exit_dt.tzinfo is None:
+                                exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                            if exit_dt >= td_start:
+                                today_trades.append(t)
+                        except Exception:
+                            pass
+                trades = len(today_trades)
+                wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
+                losses = trades - wins
+                daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in today_trades), 2)
+                start_balance = _get_start_balance(state_dir)
+                total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
+                return {
+                    "daily_pnl": daily_pnl,
+                    "daily_trades": trades,
+                    "daily_wins": wins,
+                    "daily_losses": losses,
+                    "tradovate_equity": round(start_balance + total_fill_pnl, 2),
+                    "tradovate_open_pnl": 0.0,
+                    "tradovate_positions": 0,
+                }
+        except Exception as e:
+            logger.warning(f"Non-critical Tradovate fills fallback: {e}")
 
     # Delegate to shared stats_computation module (single source of truth for
     # signals.jsonl parsing with built-in 5-second TTL cache).
