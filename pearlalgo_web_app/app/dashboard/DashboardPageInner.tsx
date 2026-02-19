@@ -7,7 +7,6 @@ import AccountStrip from '@/components/AccountStrip'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
-import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
 import { useAIStatus } from '@/hooks/useAIStatus'
@@ -139,9 +138,6 @@ export default function DashboardPageInner() {
 
     return lines
   }, [positions])
-
-  // Viewport detection for ultrawide layout
-  const viewport = useViewportType()
 
   // WebSocket connection for real-time updates
   useWebSocket({

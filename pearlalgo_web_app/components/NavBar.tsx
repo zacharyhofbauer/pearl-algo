@@ -62,41 +62,43 @@ export default function NavBar() {
 
   return (
     <nav className="nav-bar" role="navigation" aria-label="Main">
-      <Link
-        href="/"
-        className={`nav-bar-brand ${isHome ? 'active' : ''}`}
-        aria-label="PEARL Home"
-        aria-current={isHome ? 'page' : undefined}
-      >
-        <Image src="/logo.png" alt="" width={24} height={24} className="nav-bar-logo" />
-        <span className="nav-bar-name">PEARL</span>
-      </Link>
-      <div className="nav-bar-links">
+      <div className="nav-bar-inner">
         <Link
-          href="/dashboard?account=tv_paper"
-          className={`nav-bar-link ${isDashboard ? 'active' : ''}`}
-          aria-current={isDashboard ? 'page' : undefined}
+          href="/"
+          className={`nav-bar-brand ${isHome ? 'active' : ''}`}
+          aria-label="PEARL Home"
+          aria-current={isHome ? 'page' : undefined}
         >
-          Dashboard
+          <Image src="/logo.png" alt="" width={24} height={24} className="nav-bar-logo" />
+          <span className="nav-bar-name">PEARL</span>
         </Link>
-        <Link
-          href="/archive/ibkr"
-          className={`nav-bar-link ${isArchive ? 'active' : ''}`}
-          aria-current={isArchive ? 'page' : undefined}
-        >
-          Archive
-        </Link>
-        {dashboardContext && (
-          <div className="nav-dashboard-context" aria-label="Dashboard status">
-            <span className="nav-context-symbol">{dashboardContext.symbol}</span>
-            <span
-              className={`nav-context-dot ${dashboardContext.statusDotClass}`}
-              role="status"
-              aria-label={dashboardContext.previewText}
-            />
-            <span className="nav-context-preview">{dashboardContext.previewText}</span>
-          </div>
-        )}
+        <div className="nav-bar-links">
+          <Link
+            href="/dashboard?account=tv_paper"
+            className={`nav-bar-link ${isDashboard ? 'active' : ''}`}
+            aria-current={isDashboard ? 'page' : undefined}
+          >
+            Dashboard
+          </Link>
+          <Link
+            href="/archive/ibkr"
+            className={`nav-bar-link ${isArchive ? 'active' : ''}`}
+            aria-current={isArchive ? 'page' : undefined}
+          >
+            Archive
+          </Link>
+          {dashboardContext && (
+            <div className="nav-dashboard-context" aria-label="Dashboard status">
+              <span className="nav-context-symbol">{dashboardContext.symbol}</span>
+              <span
+                className={`nav-context-dot ${dashboardContext.statusDotClass}`}
+                role="status"
+                aria-label={dashboardContext.previewText}
+              />
+              <span className="nav-context-preview">{dashboardContext.previewText}</span>
+            </div>
+          )}
+        </div>
       </div>
     </nav>
   )

@@ -59,7 +59,7 @@
 }
 
 .header-stats-row .stat-value {
-  font-family: 'SF Mono', 'Monaco', monospace;
+  font-family: var(--font-mono);
   font-size: clamp(14px, 3vw, 18px);
   font-weight: 700;
 }

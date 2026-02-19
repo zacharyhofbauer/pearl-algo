@@ -52,10 +52,12 @@ const DashboardLayout = React.memo(function DashboardLayout({
                 : 'Pull to refresh'}
           </div>
         </div>
-        <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
-          {header}
-          {chart}
-          {panels}
+        <div className="dashboard-outer">
+          <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
+            {header}
+            {chart}
+            {panels}
+          </div>
         </div>
       </main>
     </>

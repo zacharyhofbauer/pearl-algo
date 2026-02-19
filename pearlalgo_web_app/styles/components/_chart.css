@@ -182,7 +182,7 @@
 
 /* Price Section */
 .chart-info-bar .info-price .price-value {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -216,7 +216,7 @@
 }
 
 .chart-info-bar .countdown-time {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 600;
   color: var(--accent-cyan);
@@ -432,7 +432,7 @@
 
 .tooltip-value {
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 13px;
 }
@@ -440,7 +440,7 @@
 /* P&L Display - Prominent */
 .tooltip-pnl {
   text-align: center;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 18px;
   font-weight: 700;
   padding: 10px;
@@ -489,7 +489,7 @@
   text-align: center;
   padding: 4px 12px;
   background: rgba(255, 255, 255, 0.02);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Entry signals/reason display */
@@ -544,7 +544,7 @@
 }
 
 .tooltip-hold-duration .duration-value {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   color: var(--text-primary);
 }
 
@@ -569,7 +569,7 @@
 .grouped-time {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .tooltip-summary {
@@ -579,7 +579,7 @@
 }
 
 .tooltip-total-pnl {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 20px;
   font-weight: 700;
   text-align: center;
@@ -677,7 +677,7 @@
 }
 
 .trade-pnl {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: var(--font-size-xs);
   margin-left: auto;
@@ -1362,22 +1362,3 @@
   }
 }
 
-/* Ultrawide indicator panels */
-@media (min-width: 2200px) {
-  .indicator-panel {
-    border-radius: 4px;
-    margin-bottom: var(--space-2);
-  }
-
-  .indicator-header {
-    padding: var(--space-2) var(--space-4);
-  }
-
-  .indicator-name {
-    font-size: var(--font-size-md);
-  }
-
-  .indicator-value {
-    font-size: var(--font-size-md);
-  }
-}

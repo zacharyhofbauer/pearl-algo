@@ -7,11 +7,25 @@
 .nav-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
   padding: 0 var(--space-5);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   height: var(--nav-bar-height);
+}
+
+.nav-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .nav-bar-inner {
+    max-width: var(--content-max-width);
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 .nav-bar-brand {

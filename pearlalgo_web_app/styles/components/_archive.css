@@ -413,6 +413,22 @@
   overflow-x: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
+  position: relative;
+  scroll-behavior: smooth;
+}
+
+/* Scroll hint: subtle right-edge gradient on mobile when table can scroll */
+.archive-trade-table-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  pointer-events: none;
+  background: linear-gradient(to left, var(--bg-card), transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  opacity: 0.6;
 }
 
 .archive-trade-table {
@@ -433,6 +449,14 @@
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
   user-select: none;
+}
+
+.archive-trade-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-above-base);
+  background: var(--bg-card);
+  box-shadow: 0 1px 0 var(--border-color);
 }
 
 .archive-trade-table th.sortable { cursor: pointer; }
@@ -730,6 +754,12 @@
 
   .archive-table-filters {
     gap: var(--space-2);
+  }
+
+  .archive-trade-table tr.clickable td {
+    min-height: 44px;
+    padding-top: var(--space-4);
+    padding-bottom: var(--space-4);
   }
 }
 

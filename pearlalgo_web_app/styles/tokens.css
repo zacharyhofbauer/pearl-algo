@@ -58,6 +58,11 @@
 
   --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
 
+  /* Panel chrome (data-panel headers, Trading View–style consistency) */
+  --panel-title-font-size: var(--font-size-md);
+  --panel-title-font-weight: var(--font-weight-bold);
+  --panel-title-color: var(--text-primary);
+
   /* ============================================================================
    * Spacing Scale (4px base)
    * ============================================================================ */
@@ -75,6 +80,11 @@
   --spacing-md: 12px;
   --spacing-lg: 16px;
   --spacing-xl: 24px;
+
+  /* ============================================================================
+   * Layout
+   * ============================================================================ */
+  --content-max-width: 1400px;
 
   /* ============================================================================
    * Border Radius
@@ -198,7 +208,6 @@
  *   480px  — Small phone (compact layout, stacked elements)
  *   640px  — Large phone / small tablet (nav collapses, cards stack)
  *   768px  — Tablet (landing goes mobile, archive goes 2-col stats)
- *   1024px — Desktop (full layout)
+ *   1024px — Desktop (full layout; content max-width applies above this)
  *   1440px — Wide desktop (extra breathing room)
- *   2200px — Ultrawide (expanded chart, multi-column panels)
  */

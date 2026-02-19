@@ -179,13 +179,13 @@
 .trade-time {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .trade-prices {
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .trade-right {
@@ -198,7 +198,7 @@
 .trade-pnl {
   font-size: 13px;
   font-weight: 600;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .trade-pnl.positive {
@@ -332,7 +332,7 @@
 .trade-detail-value {
   font-size: var(--font-size-md);
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .trade-signal {
@@ -1058,17 +1058,4 @@
   .trade-dock-last {
     display: none;
   }
-}
-
-/* Ultrawide: reserve a compact dock height below chart */
-.ultrawide-below-chart {
-  flex-shrink: 0;
-}
-
-.ultrawide-below-chart .trade-dock-wrapper {
-  padding: 0;
-}
-
-.ultrawide-below-chart .trade-dock-content {
-  padding: var(--space-4);
 }

@@ -536,7 +536,7 @@
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .gating-label {
@@ -629,7 +629,7 @@
 .health-stat-value {
   font-size: var(--font-size-md);
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .health-stat-value.health-ok {
@@ -657,7 +657,7 @@
 .health-lag-value {
   font-size: var(--font-size-sm);
   font-weight: 600;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .health-velocity-reason {
@@ -765,7 +765,7 @@
 
 .health-detail-item .value-neutral {
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .health-detail-item.quiet-reason {
@@ -776,7 +776,7 @@
 .health-error-message {
   font-size: var(--font-size-xs);
   color: var(--accent-red);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
   padding: 4px 0;
   word-break: break-word;
 }
@@ -825,13 +825,13 @@
 
 .shadow-counter-text strong {
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .shadow-counter-rate {
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 
