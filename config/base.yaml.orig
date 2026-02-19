@@ -35,8 +35,8 @@ risk:
   max_drawdown: 0.1
   stop_loss_atr_multiplier: 4.0
   take_profit_risk_reward: 1.5
-  min_position_size: 1
-  max_position_size: 1
+  min_position_size: 5
+  max_position_size: 50
   signal_type_size_multipliers:
     sr_bounce: 0.25
   signal_type_max_contracts:
@@ -178,9 +178,9 @@ strategy:
   enabled_signals:
     - unified_strategy
   enable_dynamic_sizing: true
-  base_contracts: 1
-  high_conf_contracts: 1
-  max_conf_contracts: 1
+  base_contracts: 3
+  high_conf_contracts: 5
+  max_conf_contracts: 8
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
