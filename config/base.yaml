@@ -178,9 +178,9 @@ strategy:
   enabled_signals:
     - unified_strategy
   enable_dynamic_sizing: true
-  base_contracts: 3
-  high_conf_contracts: 5
-  max_conf_contracts: 8
+  base_contracts: 1
+  high_conf_contracts: 1
+  max_conf_contracts: 1
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
