@@ -756,14 +756,16 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     if not hasattr(self, '_reconnect_task') or self._reconnect_task is None or self._reconnect_task.done():
                         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
-                # Base interval 30s + any rate-limit backoff
-                sleep_time = 30 + self._rate_limit_backoff
+                # RESTORED: 5s reconciliation for fast exit detection
+                # Rate limit backoff is handled per-API-call, not here
+                # This keeps stop loss detection fast while being gentle on API
+                sleep_time = 5
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Reconciliation loop error: {e}", exc_info=True)
-                await asyncio.sleep(30)
+                await asyncio.sleep(5)
 
     async def _reconnect_loop(self) -> None:
         """Auto-reconnect with exponential backoff when disconnected.
