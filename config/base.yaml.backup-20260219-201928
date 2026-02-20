@@ -54,8 +54,8 @@ service:
   dashboard_chart_lookback_hours: 6
   enable_new_bar_gating: true
   adaptive_cadence_enabled: true
-  scan_interval_active_seconds: 15
-  scan_interval_idle_seconds: 60
+  scan_interval_active_seconds: 5
+  scan_interval_idle_seconds: 30
   scan_interval_market_closed_seconds: 300
   scan_interval_paused_seconds: 60
   scan_interval_velocity_seconds: 1.5
