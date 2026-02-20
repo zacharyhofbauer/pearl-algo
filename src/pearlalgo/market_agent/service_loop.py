@@ -504,14 +504,7 @@ class ServiceLoopMixin:
                             logger.debug(f"Non-critical: {e}")
                         if self._signal_follower_mode:
                             # Follower: use streamlined path (skips ML/bandit)
-                            _tv_equity = None
-                            if hasattr(self, '_tradovate_account') and self._tradovate_account:
-                                _tv_equity = self._tradovate_account.get("equity")
-                            await self._signal_handler.follower_execute(
-                                signal_obj,
-                                tv_paper_equity=_tv_equity,
-                                tv_paper_tracker=self._tv_paper_tracker if hasattr(self, '_tv_paper_tracker') else None,
-                            )
+                            await self._signal_handler.follower_execute(signal_obj)
                         else:
                             await self._signal_handler.process_signal(signal_obj, buffer_data=buffer_data)
                         self._sync_signal_handler_counters()

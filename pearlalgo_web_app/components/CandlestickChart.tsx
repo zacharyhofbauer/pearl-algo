@@ -53,6 +53,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const positionGuideSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const resizeHandlerRef = useRef<(() => void) | null>(null)
 
@@ -322,6 +323,17 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     atrUpperRef.current = atrUpper
     atrLowerRef.current = atrLower
 
+    // Position line guide series (added before candles so its price lines render
+    // behind candles/markers instead of on top of price action).
+    const positionGuideSeries = chart.addLineSeries({
+      color: 'rgba(0, 0, 0, 0)',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    positionGuideSeriesRef.current = positionGuideSeries
+
     // Candlestick series - bright green/red
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
@@ -517,6 +529,16 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     }))
     candleSeriesRef.current.setData(candleData)
 
+    // Keep the background guide series populated so its price lines render.
+    // (Lightweight Charts may not draw series price lines on an empty series.)
+    if (positionGuideSeriesRef.current) {
+      const guideData = data.map((d) => ({
+        time: d.time as Time,
+        value: d.close,
+      }))
+      positionGuideSeriesRef.current.setData(guideData)
+    }
+
     const volumeData = data.map((d) => ({
       time: d.time as Time,
       value: d.volume || 0,
@@ -669,14 +691,13 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   // Draw connection line between entry and exit when hovering
   // Update position lines (Entry, SL, TP)
   useEffect(() => {
-    if (!candleSeriesRef.current) return
+    if (!candleSeriesRef.current || !positionGuideSeriesRef.current) return
+    const guideSeries = positionGuideSeriesRef.current
 
     // Remove all existing position price lines first
     positionPriceLinesRef.current.forEach((priceLine) => {
       try {
-        if (candleSeriesRef.current) {
-          candleSeriesRef.current.removePriceLine(priceLine)
-        }
+        guideSeries.removePriceLine(priceLine)
       } catch {
         // Line may already be removed
       }
@@ -756,13 +777,15 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
     // Create price lines for each position
     positionLines.forEach((line, idx) => {
-      if (candleSeriesRef.current) {
+      if (guideSeries) {
         const requested = line.axisLabelVisible ?? true
         const axisVisible = requested && keepAxisLabels.has(idx)
-        const title = line.title || (line.kind ? line.kind.toUpperCase() : '')
+        // Hide text badges (ENTRY/SL/TP) on the right price scale while
+        // keeping numeric price labels visible.
+        const title = ''
         const lineWidth: 1 | 2 | 3 | 4 = line.lineWidth ?? (line.kind === 'entry' ? 2 : 1)
         const lineStyle = line.lineStyle ?? (line.kind === 'entry' ? 0 : 2)
-        const priceLine = candleSeriesRef.current.createPriceLine({
+        const priceLine = guideSeries.createPriceLine({
           price: line.price,
           color: line.color,
           lineWidth,
@@ -778,9 +801,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     return () => {
       positionPriceLinesRef.current.forEach((priceLine) => {
         try {
-          if (candleSeriesRef.current) {
-            candleSeriesRef.current.removePriceLine(priceLine)
-          }
+          guideSeries.removePriceLine(priceLine)
         } catch {
           // Line may already be removed
         }

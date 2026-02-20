@@ -18,7 +18,7 @@ account:
 
 # Challenge: Tradovate Paper 50K Rapid Evaluation
 challenge:
-  enabled: true
+  enabled: false
   stage: tv_paper_eval
   start_balance: 50000.0
   profit_target: 3000.0
@@ -60,7 +60,7 @@ circuit_breaker:
 # Trading circuit breaker overrides
 trading_circuit_breaker:
   mode: warn_only
-  enable_tv_paper_eval_gate: true
+  enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
   tv_paper_trading_start_hour_et: 18

@@ -240,7 +240,7 @@ class SignalHandler:
             logger.error(f"Error processing signal: {e}", exc_info=True)
             self.error_count += 1
 
-    async def follower_execute(self, signal: Dict, *, tv_paper_equity: Optional[float] = None, tv_paper_tracker: Optional[Any] = None) -> None:
+    async def follower_execute(self, signal: Dict) -> None:
         """Streamlined execution path for signal forwarding (Tradovate Paper follower).
 
         Skips ML filter, bandit policy, and contextual policy since these are
@@ -249,8 +249,6 @@ class SignalHandler:
 
         Args:
             signal: Signal dictionary from strategy or forwarded source
-            tv_paper_equity: Current Tradovate Paper equity for intraday breach check
-            tv_paper_tracker: TvPaperEvalTracker instance for drawdown check
         """
         try:
             # Circuit breaker check
@@ -259,18 +257,6 @@ class SignalHandler:
 
             # Position sizing: compute if not already set
             self._ensure_position_size(signal)
-
-            # Intraday breach check (Tradovate Paper drawdown floor)
-            if tv_paper_equity is not None and tv_paper_tracker is not None:
-                try:
-                    if tv_paper_tracker.check_intraday_breach(tv_paper_equity):
-                        logger.warning(
-                            f"Tradovate Paper intraday breach: equity=${tv_paper_equity:.2f}, "
-                            f"blocking execution for signal {signal.get('signal_id', '?')[:16]}"
-                        )
-                        return
-                except Exception as e:
-                    logger.warning(f"Intraday breach check failed (non-fatal): {e}")
 
             # Track signal generation
             signal_id = self.performance_tracker.track_signal_generated(signal)

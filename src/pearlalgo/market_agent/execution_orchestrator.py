@@ -220,11 +220,6 @@ class ExecutionOrchestrator:
                 if last_dates.get("weekend_auto_flat") != local_now.date():
                     return "weekend_auto_flat"
 
-        if tv_paper_enabled:
-            if local_now.time() >= time(16, 8) and local_now.time() < time(16, 11):
-                if last_dates.get("tv_paper_session_close") != local_now.date():
-                    return "tv_paper_session_close"
-
         return None
 
     # ------------------------------------------------------------------

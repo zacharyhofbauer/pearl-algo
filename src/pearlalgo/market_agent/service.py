@@ -358,46 +358,12 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 logger.warning(f"Critical path error: {e}", exc_info=True)
 
         # ==========================================================================
-        # Tradovate Paper EVALUATION TRACKER (Prop Firm Rules)
+        # Tradovate Paper evaluation tracking
         # ==========================================================================
+        # TradeSyncer is the source of truth for evaluation lifecycle. Keep the
+        # local tracker disabled to avoid duplicate/stale eval state and alerts.
         self._tv_paper_tracker = None
         self._tv_paper_enabled = False
-        try:
-            challenge_cfg = service_config.get("challenge", {}) or {}
-            tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-            if tv_paper_stage in ("evaluation", "sim_funded", "live"):
-                from pearlalgo.market_agent.tv_paper_eval_tracker import (
-                    TvPaperEvalTracker,
-                    TvPaperEvalConfig,
-                )
-                tv_paper_cfg = TvPaperEvalConfig(
-                    enabled=True,
-                    stage=tv_paper_stage,
-                    start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
-                    profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
-                    max_loss_distance=float(challenge_cfg.get("max_drawdown", 2_000.0)),
-                    max_contracts_mini=int(challenge_cfg.get("max_contracts_mini", 5)),
-                    max_contracts_micro=int(challenge_cfg.get("max_contracts_micro", 50)),
-                    consistency_pct=float(challenge_cfg.get("consistency_pct", 0.50)),
-                    min_trading_days=int(challenge_cfg.get("min_trading_days", 2)),
-                    t1_news_allowed=bool(challenge_cfg.get("t1_news_allowed", True)),
-                    auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
-                    auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
-                )
-                self._tv_paper_tracker = TvPaperEvalTracker(
-                    config=tv_paper_cfg,
-                    state_dir=self.state_manager.state_dir,
-                )
-                self._tv_paper_enabled = True
-                logger.info(
-                    f"Tradovate Paper Eval Tracker enabled: stage={tv_paper_cfg.stage}, "
-                    f"target=+${tv_paper_cfg.profit_target:,.0f}, "
-                    f"max_loss=-${tv_paper_cfg.max_loss_distance:,.0f}"
-                )
-        except Exception as e:
-            logger.warning(f"Tradovate Paper tracker init failed (continuing without): {e}")
-            self._tv_paper_tracker = None
-            self._tv_paper_enabled = False
 
         # Tradovate account cache (polled each cycle when execution adapter is Tradovate)
         self._tradovate_account: Dict[str, Any] = {}
@@ -2541,12 +2507,6 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 if self._auto_flat_last_dates.get("weekend_auto_flat") != local_now.date():
                     return "weekend_auto_flat"
 
-        # Tradovate Paper Evaluation: auto-flatten at 4:08 PM ET (2 min before 4:10 session close)
-        if self._tv_paper_enabled and self._tv_paper_tracker is not None:
-            if local_now.time() >= time(16, 8) and local_now.time() < time(16, 11):
-                if self._auto_flat_last_dates.get("tv_paper_session_close") != local_now.date():
-                    return "tv_paper_session_close"
-
         return None
 
     async def _close_all_virtual_trades(
@@ -2958,13 +2918,6 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                     except Exception as e:
                         logger.warning(f"Failed to record auto-flat date: {e}")
                         self._auto_flat_last_dates[reason] = now.date()
-
-                    # Tradovate Paper: update EOD high-water mark after session close flatten
-                    if reason == "tv_paper_session_close" and self._tv_paper_tracker is not None:
-                        try:
-                            self._tv_paper_tracker.update_eod_hwm()
-                        except Exception as e:
-                            logger.debug(f"Could not update Tradovate Paper EOD HWM: {e}")
 
     def mark_state_dirty(self) -> None:
         """Mark the service state as needing a save on the next cycle-end."""
