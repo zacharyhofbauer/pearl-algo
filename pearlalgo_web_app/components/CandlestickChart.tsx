@@ -11,6 +11,7 @@ interface PositionLine {
   color: string
   title: string
   kind?: 'entry' | 'sl' | 'tp'
+  lineWidth?: 1 | 2 | 3 | 4
   lineStyle?: number
   axisLabelVisible?: boolean
 }
@@ -758,13 +759,16 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       if (candleSeriesRef.current) {
         const requested = line.axisLabelVisible ?? true
         const axisVisible = requested && keepAxisLabels.has(idx)
+        const title = line.title || (line.kind ? line.kind.toUpperCase() : '')
+        const lineWidth: 1 | 2 | 3 | 4 = line.lineWidth ?? (line.kind === 'entry' ? 2 : 1)
+        const lineStyle = line.lineStyle ?? (line.kind === 'entry' ? 0 : 2)
         const priceLine = candleSeriesRef.current.createPriceLine({
           price: line.price,
           color: line.color,
-          lineWidth: 1,
-          lineStyle: line.lineStyle ?? 2, // dashed by default
+          lineWidth,
+          lineStyle,
           axisLabelVisible: axisVisible,
-          title: line.title || '',
+          title,
         })
         positionPriceLinesRef.current.push(priceLine)
       }
@@ -850,6 +854,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           <span className="leg"><span className="line ema9"></span>9</span>
           <span className="leg"><span className="line ema21"></span>21</span>
           <span className="leg"><span className="line vwap"></span>V</span>
+          <span className="leg-sep"></span>
+          <span className="leg"><span className="line entry"></span>E</span>
+          <span className="leg"><span className="line sl"></span>SL</span>
+          <span className="leg"><span className="line tp"></span>TP</span>
           <span className="leg-sep"></span>
           <span className="leg"><span className="mkr entry">▲●</span>In</span>
           <span className="leg"><span className="mkr win">●</span>W</span>

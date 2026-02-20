@@ -90,6 +90,8 @@ export interface PositionLine {
   title: string
   /** Optional semantic type used for label de-cluttering */
   kind?: 'entry' | 'sl' | 'tp'
+  /** Optional line width override */
+  lineWidth?: 1 | 2 | 3 | 4
   lineStyle?: number  // 0=solid, 1=dotted, 2=dashed
   axisLabelVisible?: boolean  // Show/hide price on axis
 }

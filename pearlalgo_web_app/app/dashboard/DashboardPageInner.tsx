@@ -116,10 +116,11 @@ export default function DashboardPageInner() {
       addLine({
         price: pos.entry_price,
         // Slightly lighter (less busy) but still readable
-        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.42)' : 'rgba(156, 39, 176, 0.42)',
-        title: '',
+        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
+        title: 'E',
         kind: 'entry',
-        lineStyle: 2, // dashed
+        lineWidth: 2,
+        lineStyle: 0, // solid
         axisLabelVisible: true,
       })
 
@@ -127,9 +128,10 @@ export default function DashboardPageInner() {
       if (pos.stop_loss) {
         addLine({
           price: pos.stop_loss,
-          color: 'rgba(244, 67, 54, 0.42)',
-          title: '',
+          color: 'rgba(244, 67, 54, 0.62)',
+          title: 'SL',
           kind: 'sl',
+          lineWidth: 2,
           lineStyle: 2, // dashed
           axisLabelVisible: true,
         })
@@ -139,9 +141,10 @@ export default function DashboardPageInner() {
       if (pos.take_profit) {
         addLine({
           price: pos.take_profit,
-          color: 'rgba(76, 175, 80, 0.42)',
-          title: '',
+          color: 'rgba(76, 175, 80, 0.62)',
+          title: 'TP',
           kind: 'tp',
+          lineWidth: 2,
           lineStyle: 2, // dashed
           axisLabelVisible: true,
         })
@@ -158,9 +161,10 @@ export default function DashboardPageInner() {
       const isStop = o?.stop_price != null || orderType.includes('stop')
       addLine({
         price: level,
-        color: isStop ? 'rgba(244, 67, 54, 0.42)' : 'rgba(76, 175, 80, 0.42)',
-        title: '',
+        color: isStop ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)',
+        title: isStop ? 'SL' : 'TP',
         kind: isStop ? 'sl' : 'tp',
+        lineWidth: 2,
         lineStyle: 2,
         axisLabelVisible: true,
       })

@@ -248,6 +248,9 @@
 .chart-info-bar .line.ema9 { background: var(--accent-cyan); }
 .chart-info-bar .line.ema21 { background: var(--accent-yellow); }
 .chart-info-bar .line.vwap { background: var(--accent-blue); }
+.chart-info-bar .line.entry { background: rgba(33, 150, 243, 0.8); height: 2px; }
+.chart-info-bar .line.sl { background: rgba(244, 67, 54, 0.85); height: 2px; }
+.chart-info-bar .line.tp { background: rgba(76, 175, 80, 0.85); height: 2px; }
 
 .chart-info-bar .mkr { font-size: 10px; }
 .chart-info-bar .mkr.entry { color: rgba(180, 180, 180, 0.9); }  /* Gray arrow */
