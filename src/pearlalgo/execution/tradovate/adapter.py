@@ -19,7 +19,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pearlalgo.execution.base import (
     ExecutionAdapter,
@@ -827,6 +827,260 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         }
         return base
 
+    @staticmethod
+    def _normalize_order_status(order: Dict[str, Any]) -> str:
+        """Return normalized lowercase order status."""
+        raw = (
+            order.get("ordStatus")
+            or order.get("orderStatus")
+            or order.get("status")
+            or ""
+        )
+        return str(raw).strip().lower()
+
+    @staticmethod
+    def _extract_order_qty(order: Dict[str, Any]) -> int:
+        """Extract best-effort remaining/working quantity from mixed payload keys."""
+        qty_raw = None
+        for key in ("remainingQty", "remainingQuantity", "orderQty", "qty", "quantity"):
+            val = order.get(key)
+            if val is not None:
+                qty_raw = val
+                break
+        try:
+            return int(float(qty_raw or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _normalize_working_order(order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Normalize a raw Tradovate order row into canonical working-order shape."""
+        if not isinstance(order, dict):
+            return None
+
+        status = TradovateExecutionAdapter._normalize_order_status(order)
+        # Treat a broad set of non-terminal states as "working".
+        working_states = {
+            "working", "open", "accepted", "pending", "held",
+            "submitted", "partiallyfilled", "partially_filled", "partial",
+        }
+        terminal_states = {
+            "filled", "cancelled", "canceled", "rejected", "expired",
+        }
+        if status in terminal_states:
+            return None
+        if status and status not in working_states:
+            return None
+
+        qty = TradovateExecutionAdapter._extract_order_qty(order)
+        order_type = str(
+            order.get("orderType")
+            or order.get("ordType")
+            or order.get("type")
+            or ""
+        ).strip()
+        price = (
+            order.get("price")
+            if order.get("price") is not None
+            else order.get("limitPrice")
+        )
+        stop_price = (
+            order.get("stopPrice")
+            if order.get("stopPrice") is not None
+            else order.get("triggerPrice")
+        )
+        oco_id = order.get("ocoId") or order.get("oco_id")
+        parent_id = order.get("parentId") or order.get("parent_id")
+        has_oco_link = oco_id is not None or parent_id is not None
+        has_price = price is not None or stop_price is not None
+        # Tradovate /order/list may return sparse working rows with only
+        # id/contract/action/ocoId (no price/type/qty). Keep these rows so
+        # protective classification can still reason about broker protection.
+        if qty <= 0 and not order_type and not has_price and not has_oco_link:
+            return None
+
+        return {
+            "id": order.get("id") or order.get("orderId"),
+            "contract_id": order.get("contractId") or order.get("contract_id"),
+            "action": order.get("action"),
+            "order_type": order_type,
+            "qty": qty,
+            "price": price,
+            "stop_price": stop_price,
+            "status": status or "working",
+            "oco_id": oco_id,
+            "parent_id": parent_id,
+        }
+
+    @staticmethod
+    def _is_protective_order(
+        working_order: Dict[str, Any], position_side_by_contract: Dict[str, str],
+    ) -> bool:
+        """
+        True when a working order looks like SL/TP protection for an open position.
+        """
+        contract_id = working_order.get("contract_id")
+        if contract_id is None:
+            return False
+        side = position_side_by_contract.get(str(contract_id))
+        if side is None:
+            return False
+
+        required_action = "sell" if side == "long" else "buy"
+        action = str(working_order.get("action") or "").strip().lower()
+        if action != required_action:
+            return False
+
+        order_type = str(working_order.get("order_type") or "").strip().lower()
+        # Typical protective legs are stop/limit family.
+        type_is_protective = any(tok in order_type for tok in ("stop", "limit", "trailing"))
+        has_price = working_order.get("price") is not None or working_order.get("stop_price") is not None
+        qty = int(working_order.get("qty") or 0)
+        if qty > 0 and has_price and type_is_protective:
+            return True
+
+        # Fallback for sparse Tradovate /order/list rows:
+        # treat working OCO-linked opposite-side orders as protective.
+        has_oco_link = working_order.get("oco_id") is not None or working_order.get("parent_id") is not None
+        status = str(working_order.get("status") or "").strip().lower()
+        return has_oco_link and status in {
+            "working", "open", "accepted", "pending", "held",
+            "submitted", "partiallyfilled", "partially_filled", "partial",
+        }
+
+    @staticmethod
+    def _protective_rejection_reason(
+        working_order: Dict[str, Any], position_side_by_contract: Dict[str, str],
+    ) -> str:
+        """Explain why a normalized working order is not classified as protective."""
+        contract_id = working_order.get("contract_id")
+        if contract_id is None:
+            return "missing_contract_id"
+        side = position_side_by_contract.get(str(contract_id))
+        if side is None:
+            return "no_open_position_for_contract"
+
+        required_action = "sell" if side == "long" else "buy"
+        action = str(working_order.get("action") or "").strip().lower()
+        if action != required_action:
+            return f"action_mismatch:{action or 'unknown'}!=protective_{required_action}"
+
+        qty = int(working_order.get("qty") or 0)
+        if qty <= 0:
+            has_oco_link = working_order.get("oco_id") is not None or working_order.get("parent_id") is not None
+            if has_oco_link:
+                return "accepted_sparse_oco_order"
+            return "non_positive_qty"
+
+        has_price = working_order.get("price") is not None or working_order.get("stop_price") is not None
+        if not has_price:
+            return "missing_price_fields"
+
+        order_type = str(working_order.get("order_type") or "").strip().lower()
+        if not any(tok in order_type for tok in ("stop", "limit", "trailing")):
+            has_oco_link = working_order.get("oco_id") is not None or working_order.get("parent_id") is not None
+            if has_oco_link:
+                return "accepted_sparse_oco_order"
+            return f"non_protective_order_type:{order_type or 'unknown'}"
+
+        return "unknown_non_protective"
+
+    @staticmethod
+    def build_working_orders(
+        raw_orders: Optional[List[Dict[str, Any]]],
+        positions: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, int], List[Dict[str, Any]]]:
+        """
+        Canonical working-order derivation with debug trace.
+
+        Returns:
+            - working protective orders only
+            - aggregate order stats
+            - debug classification rows for each raw order
+        """
+        working: List[Dict[str, Any]] = []
+        order_stats = {"working": 0, "filled": 0, "cancelled": 0, "rejected": 0}
+        debug_rows: List[Dict[str, Any]] = []
+
+        position_side_by_contract: Dict[str, str] = {}
+        position_qty_by_contract: Dict[str, int] = {}
+        for pos in positions or []:
+            try:
+                cid = str(pos.get("contract_id"))
+                np = float(pos.get("net_pos", 0) or 0)
+                if cid and np != 0:
+                    position_side_by_contract[cid] = "long" if np > 0 else "short"
+                    position_qty_by_contract[cid] = int(abs(np))
+            except (TypeError, ValueError):
+                continue
+
+        working_states = {
+            "working", "open", "accepted", "pending", "held",
+            "submitted", "partiallyfilled", "partially_filled", "partial",
+        }
+        terminal_filled = {"filled"}
+        terminal_cancelled = {"cancelled", "canceled", "expired"}
+        terminal_rejected = {"rejected"}
+
+        for order in raw_orders or []:
+            status = TradovateExecutionAdapter._normalize_order_status(order)
+            if status in working_states:
+                order_stats["working"] += 1
+            elif status in terminal_filled:
+                order_stats["filled"] += 1
+            elif status in terminal_cancelled:
+                order_stats["cancelled"] += 1
+            elif status in terminal_rejected:
+                order_stats["rejected"] += 1
+
+            normalized = TradovateExecutionAdapter._normalize_working_order(order)
+            accepted = False
+            reason = ""
+            if status not in working_states:
+                reason = f"status_not_working:{status or 'unknown'}"
+            elif normalized is None:
+                reason = "invalid_or_incomplete_working_order_payload"
+            else:
+                if int(normalized.get("qty") or 0) <= 0:
+                    cq = position_qty_by_contract.get(str(normalized.get("contract_id")))
+                    if cq and cq > 0:
+                        normalized = {**normalized, "qty": cq}
+                accepted = TradovateExecutionAdapter._is_protective_order(
+                    normalized, position_side_by_contract
+                )
+                if accepted:
+                    reason = "accepted_protective"
+                    working.append(normalized)
+                else:
+                    reason = TradovateExecutionAdapter._protective_rejection_reason(
+                        normalized, position_side_by_contract
+                    )
+
+            debug_rows.append(
+                {
+                    "order_id": order.get("id") or order.get("orderId"),
+                    "contract_id": order.get("contractId") or order.get("contract_id"),
+                    "status": status or "unknown",
+                    "accepted": accepted,
+                    "reason": reason,
+                    "raw": {
+                        "ordStatus": order.get("ordStatus"),
+                        "action": order.get("action"),
+                        "orderType": order.get("orderType"),
+                        "qty": order.get("qty"),
+                        "orderQty": order.get("orderQty"),
+                        "remainingQty": order.get("remainingQty"),
+                        "price": order.get("price"),
+                        "stopPrice": order.get("stopPrice"),
+                        "ocoId": order.get("ocoId"),
+                        "parentId": order.get("parentId"),
+                    },
+                    "normalized": normalized,
+                }
+            )
+
+        return working, order_stats, debug_rows
+
     async def get_account_summary(self) -> Dict[str, Any]:
         """
         Get live Tradovate account summary (balance, positions, P&L).
@@ -931,36 +1185,19 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         else:
             result["fills"] = []
 
-        # Process orders
+        # Process orders (canonical normalization + protective-order extraction)
         if raw_orders is not None:
-            working = []
-            order_stats = {"working": 0, "filled": 0, "cancelled": 0, "rejected": 0}
-            for o in raw_orders:
-                status = str(o.get("ordStatus", "")).lower()
-                if status == "working":
-                    order_stats["working"] += 1
-                    otype = o.get("orderType", "")
-                    working.append({
-                        "id": o.get("id"),
-                        "contract_id": o.get("contractId"),
-                        "action": o.get("action"),  # "Buy" or "Sell"
-                        "order_type": otype,
-                        "qty": o.get("qty", 0),
-                        "price": o.get("price"),
-                        "stop_price": o.get("stopPrice"),
-                        "status": "working",
-                    })
-                elif status == "filled":
-                    order_stats["filled"] += 1
-                elif status in ("cancelled", "canceled"):
-                    order_stats["cancelled"] += 1
-                elif status == "rejected":
-                    order_stats["rejected"] += 1
+            working, order_stats, working_debug = self.build_working_orders(raw_orders, positions)
             result["working_orders"] = working
             result["order_stats"] = order_stats
+            result["working_orders_raw_count"] = len(raw_orders)
+            # Keep debug bounded for state payload size while preserving diagnostics.
+            result["working_orders_debug"] = working_debug[:300]
         else:
             result["working_orders"] = []
             result["order_stats"] = {}
+            result["working_orders_raw_count"] = 0
+            result["working_orders_debug"] = []
 
         result["account"] = self._client.account_name
         result["env"] = self._tv_config.env

@@ -718,6 +718,20 @@ class SignalHandler:
 
         if should_execute and self.execution_adapter is not None:
             try:
+                guard_ok = await self._enforce_tradovate_protection_guard(signal)
+                if not guard_ok:
+                    execution_status = "skipped:unprotected_open_position_auto_disarm"
+                    signal.setdefault("_risk_warnings", []).append({
+                        "allowed": False,
+                        "reason": "unprotected_open_position",
+                        "severity": "critical",
+                        "details": {
+                            "message": "Open position detected with no working protective orders; execution auto-disarmed",
+                        },
+                    })
+                    signal["_execution_status"] = execution_status
+                    return
+
                 # Check preconditions
                 decision = self.execution_adapter.check_preconditions(signal)
 
@@ -758,6 +772,79 @@ class SignalHandler:
         signal["_execution_status"] = execution_status
         if execution_result:
             signal["_execution_order_id"] = execution_result.parent_order_id
+
+    async def _enforce_tradovate_protection_guard(self, signal: Dict) -> bool:
+        """
+        Hard safety brake: if Tradovate reports an open position with no working
+        protective orders, disarm execution and block new entries.
+
+        Returns:
+            True if execution may proceed, False if blocked by safety guard.
+        """
+        adapter = self.execution_adapter
+        if adapter is None or not hasattr(adapter, "get_account_summary"):
+            return True
+
+        try:
+            summary = await adapter.get_account_summary()
+            if not isinstance(summary, dict):
+                return True
+
+            positions = summary.get("positions") or []
+            open_positions = []
+            for p in positions:
+                try:
+                    if abs(float(p.get("net_pos", 0) or 0)) > 0:
+                        open_positions.append(p)
+                except (TypeError, ValueError):
+                    continue
+
+            if not open_positions:
+                return True
+
+            working_orders = summary.get("working_orders") or []
+            valid_working = []
+            for o in working_orders:
+                try:
+                    qty = float(o.get("qty", 0) or 0)
+                except (TypeError, ValueError):
+                    qty = 0.0
+                has_price = o.get("price") is not None or o.get("stop_price") is not None
+                has_type = bool(str(o.get("order_type", "") or "").strip())
+                if qty > 0 and (has_price or has_type):
+                    valid_working.append(o)
+
+            if valid_working:
+                return True
+
+            # Default behavior is monitor/warn-only to avoid deadlocking execution
+            # when broker telemetry briefly reports incomplete order details.
+            # Optional strict mode can be enabled by setting
+            # execution.enforce_protection_guard=true on adapter config.
+            enforce_guard = bool(
+                getattr(getattr(adapter, "config", None), "enforce_protection_guard", False)
+            )
+            if enforce_guard:
+                if hasattr(adapter, "disarm"):
+                    adapter.disarm()
+                logger.error(
+                    "🚨 AUTO-DISARM SAFETY BRAKE (STRICT): open Tradovate position with "
+                    "no valid working protective orders; blocking new entries | signal_id=%s",
+                    str(signal.get("signal_id", ""))[:16],
+                )
+                return False
+
+            logger.error(
+                "⚠️ PROTECTION GUARD WARNING: open Tradovate position with no valid "
+                "working protective orders; monitor-only mode allows entries | signal_id=%s",
+                str(signal.get("signal_id", ""))[:16],
+            )
+            return True
+
+        except Exception as e:
+            # Non-fatal: do not block execution solely due to telemetry failure.
+            logger.warning(f"Protective-order safety guard check failed (non-fatal): {e}")
+            return True
 
     async def _queue_entry_notification(
         self,

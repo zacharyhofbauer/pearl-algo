@@ -2144,6 +2144,9 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 logger.info("🔒 DISARM flag detected - disarming execution adapter")
                 self.execution_adapter.disarm()
                 disarm_file.unlink(missing_ok=True)
+                # Persist armed-state change immediately so dashboard/API reflect it.
+                self.mark_state_dirty()
+                self._save_state(force=True)
                 
                 # Notify via Telegram (through notification queue)
                 try:
@@ -2164,6 +2167,9 @@ class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLif
                 logger.info("🔫 ARM flag detected - arming execution adapter")
                 success = self.execution_adapter.arm()
                 arm_file.unlink(missing_ok=True)
+                # Persist armed-state change immediately so dashboard/API reflect it.
+                self.mark_state_dirty()
+                self._save_state(force=True)
                 
                 if success:
                     # Notify via Telegram (through notification queue)

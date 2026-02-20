@@ -154,6 +154,71 @@ def tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
     return positions
 
 
+def enrich_positions_with_signal_brackets(
+    positions: List[Dict[str, Any]],
+    signals: List[Dict[str, Any]],
+) -> None:
+    """
+    Mutate Tradovate positions in-place with SL/TP from active signal records.
+
+    signals.jsonl is append-only and "entered" rows often do not include the
+    nested ``signal`` payload. To reliably recover SL/TP, this function:
+    1) keeps only the latest record per signal_id,
+    2) backfills missing ``signal`` from the latest "generated" record, then
+    3) matches active signals to positions by direction + closest entry price.
+    """
+    if not positions or not signals:
+        return
+
+    signal_data_by_id: Dict[str, Dict[str, Any]] = {}
+    latest_by_id: Dict[str, Dict[str, Any]] = {}
+    for rec in signals:
+        if not isinstance(rec, dict):
+            continue
+        sid = str(rec.get("signal_id") or "")
+        if not sid:
+            continue
+        if rec.get("status") == "generated" and isinstance(rec.get("signal"), dict):
+            signal_data_by_id[sid] = rec["signal"]
+        latest_by_id[sid] = rec
+
+    active_signals: List[Dict[str, Any]] = []
+    for sid, rec in latest_by_id.items():
+        if rec.get("status") != "entered":
+            continue
+        sig = rec.get("signal")
+        if not isinstance(sig, dict):
+            sig = signal_data_by_id.get(sid)
+        if not isinstance(sig, dict):
+            continue
+        if sig.get("stop_loss") is None and sig.get("take_profit") is None:
+            continue
+        active_signals.append({**rec, "signal": sig})
+
+    if not active_signals:
+        return
+
+    for pos in positions:
+        direction = str(pos.get("direction") or "").lower()
+        if not direction:
+            continue
+        matching = [
+            s for s in active_signals
+            if str(s.get("signal", {}).get("direction") or "").lower() == direction
+        ]
+        if not matching:
+            continue
+        best = min(
+            matching,
+            key=lambda s: abs(float(s.get("entry_price", 0) or 0) - float(pos.get("entry_price", 0) or 0)),
+        )
+        sig = best.get("signal", {})
+        if sig.get("stop_loss") is not None:
+            pos["stop_loss"] = sig.get("stop_loss")
+        if sig.get("take_profit") is not None:
+            pos["take_profit"] = sig.get("take_profit")
+
+
 # ---------------------------------------------------------------------------
 # Performance helpers
 # ---------------------------------------------------------------------------

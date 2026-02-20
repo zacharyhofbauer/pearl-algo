@@ -50,6 +50,23 @@ export interface PerformanceSummary {
   all: PerformancePeriodSummary
 }
 
+export interface RecentSignalEvent {
+  signal_id: string
+  status: string
+  timestamp?: string | null
+  direction?: 'long' | 'short' | string | null
+  symbol?: string
+  entry_price?: number | null
+  stop_loss?: number | null
+  take_profit?: number | null
+  confidence?: number | null
+  reason?: string | null
+  exit_reason?: string | null
+  pnl?: number | null
+  signal_type?: string | null
+  duplicate?: boolean
+}
+
 interface TradeDockPanelProps {
   positions: Position[]
   recentTrades: RecentTradeRow[]
@@ -87,6 +104,8 @@ interface TradeDockPanelProps {
   workingOrders?: TradovateWorkingOrder[]
   /** Tradovate order stats (filled, rejected, cancelled counts) */
   orderStats?: TradovateOrderStats | null
+  /** Recent signal lifecycle events (generated/entered/exited/etc) */
+  recentSignals?: RecentSignalEvent[]
 }
 
 type Tab = 'positions' | 'history' | 'stats' | 'signals'
@@ -112,6 +131,7 @@ function TradeDockPanel({
   lastSignalDecision,
   workingOrders,
   orderStats,
+  recentSignals,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -161,6 +181,10 @@ function TradeDockPanel({
   const recentCount = recentRows.length
 
   const headerPosCount = typeof activeTradesCount === 'number' ? activeTradesCount : openCount
+  const totalOpenContracts = useMemo(
+    () => openRows.reduce((sum, p) => sum + Math.max(0, Number(p.position_size ?? 0)), 0),
+    [openRows]
+  )
 
   const headerStats = (
     <div className="trade-dock-header-stats" aria-label="Daily summary">
@@ -183,11 +207,59 @@ function TradeDockPanel({
         <span className="dock-stat-k">POS</span>
         <span className="dock-stat-v">{headerPosCount}</span>
       </div>
+      <div className="dock-stat pos">
+        <span className="dock-stat-k">QTY</span>
+        <span className="dock-stat-v">{totalOpenContracts}</span>
+      </div>
     </div>
   )
 
   const displayOpen = showAllOpen ? openRows : openRows.slice(0, openLimit)
   const displayRecent = showAllRecent ? recentRows : recentRows.slice(0, recentLimit)
+  const displayWorkingOrders = useMemo(() => workingOrders || [], [workingOrders])
+  const groupedWorkingOrders = useMemo(() => {
+    const groups = new Map<string, TradovateWorkingOrder[]>()
+    let fallbackIx = 0
+    for (const o of displayWorkingOrders) {
+      const id = Number(o.id || 0)
+      const oco = Number(o.oco_id || 0)
+      const parent = Number(o.parent_id || 0)
+      let key = ''
+      if (id > 0 && oco > 0) {
+        const lo = Math.min(id, oco)
+        const hi = Math.max(id, oco)
+        key = `oco:${lo}:${hi}`
+      } else if (oco > 0) {
+        key = `oco:${oco}:${o.contract_id || ''}:${(o.action || '').toLowerCase()}`
+      } else if (parent > 0) {
+        key = `parent:${parent}:${o.contract_id || ''}:${(o.action || '').toLowerCase()}`
+      } else {
+        key = `fallback:${o.contract_id || ''}:${(o.action || '').toLowerCase()}:${fallbackIx}`
+        fallbackIx += 1
+      }
+      const bucket = groups.get(key)
+      if (bucket) bucket.push(o)
+      else groups.set(key, [o])
+    }
+
+    return Array.from(groups.values()).map((bucket) => {
+      const first = bucket[0]
+      const orderType = (first.order_type || '').trim()
+      const hasOcoLink = !!(first.oco_id || first.parent_id)
+      const displayType = orderType || (hasOcoLink ? 'Protective OCO' : 'Order')
+      const qty = bucket.reduce((m, row) => Math.max(m, Number(row.qty || 0)), 0)
+      const priced = bucket.find((row) => row.stop_price != null || row.price != null)
+      return {
+        ...first,
+        order_type: displayType,
+        qty: qty > 0 ? qty : first.qty,
+        stop_price: priced?.stop_price ?? first.stop_price,
+        price: priced?.price ?? first.price,
+        _row_count: bucket.length,
+      }
+    })
+  }, [displayWorkingOrders])
+  const displayRecentSignals = (recentSignals || []).slice(0, 20)
 
   const hasSummaryData = !!directionBreakdown || !!statusBreakdown
 
@@ -300,15 +372,6 @@ function TradeDockPanel({
                 {label}{count !== undefined ? <span className="trade-dock-count">{count}</span> : null}
               </button>
             ))}
-
-            <div className="trade-dock-spacer" />
-
-            {currentPrice !== undefined && currentPrice !== null && (
-              <div className="trade-dock-last">
-                <span className="trade-dock-last-label">Last</span>
-                <span className="trade-dock-last-value">{formatPrice(currentPrice)}</span>
-              </div>
-            )}
           </div>
 
           <div className="trade-dock-content">
@@ -472,6 +535,53 @@ function TradeDockPanel({
             {/* ── Signals Tab ── */}
             {tab === 'signals' && (
               <div className="signals-tab-content">
+                {displayRecentSignals.length > 0 && (
+                  <div className="signals-section">
+                    <div className="signals-section-title">Recent Signal Activity</div>
+                    <div className="recent-trades-list trade-dock-list" aria-label="Recent signal activity">
+                      {displayRecentSignals.map((s, idx) => {
+                        const id = s.signal_id || `signal-${idx}`
+                        const status = String(s.status || 'unknown').toUpperCase()
+                        const direction = String(s.direction || '').toUpperCase()
+                        const reason = (s.reason || s.exit_reason || '').toString()
+                        const hasPnl = typeof s.pnl === 'number'
+                        return (
+                          <div key={`${id}-${idx}`} className="recent-trade">
+                            <div className="trade-left">
+                              <span className={`trade-direction-badge ${String(s.direction || '').toLowerCase() === 'short' ? 'short' : 'long'}`}>
+                                {direction || '—'}
+                              </span>
+                              <div className="trade-info">
+                                <span className="trade-time">
+                                  {(s.symbol || symbol || '—')} • {status} • {formatRelativeTime(s.timestamp || null)}
+                                </span>
+                                <span className="trade-prices">
+                                  {formatPrice(s.entry_price ?? null)}
+                                  {s.stop_loss != null || s.take_profit != null ? ` | SL ${formatPrice(s.stop_loss ?? null)} | TP ${formatPrice(s.take_profit ?? null)}` : ''}
+                                </span>
+                                {reason ? (
+                                  <span className="trade-time">
+                                    {reason.length > 120 ? `${reason.slice(0, 120)}...` : reason}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="trade-right">
+                              {hasPnl ? (
+                                <span className={`trade-pnl ${(s.pnl as number) >= 0 ? 'positive' : 'negative'}`}>
+                                  {formatPnL(s.pnl)}
+                                </span>
+                              ) : (
+                                <span className="trade-pnl">—</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {signalRejections && (
                   <div className="signals-section">
                     <div className="signals-section-title">Signal Rejections (24h)</div>
@@ -520,7 +630,7 @@ function TradeDockPanel({
                   </div>
                 )}
 
-                {!signalRejections && !lastSignalDecision && (
+                {!signalRejections && !lastSignalDecision && displayRecentSignals.length === 0 && (
                   <div className="trade-dock-empty">No signal data available</div>
                 )}
               </div>
@@ -528,25 +638,25 @@ function TradeDockPanel({
 
             {/* ── Positions Tab ── */}
             {tab === 'positions' ? (
-              openCount === 0 && (!workingOrders || workingOrders.length === 0) ? (
+              openCount === 0 && displayWorkingOrders.length === 0 ? (
                 <div className="trade-dock-empty">No open positions</div>
               ) : openCount === 0 ? (
                 <>
                   <div className="trade-dock-empty">No open positions</div>
-                  {workingOrders && workingOrders.length > 0 && (
+                  {groupedWorkingOrders.length > 0 && (
                     <div className="trade-dock-working-orders">
-                      <div className="trade-dock-section-label">Working Orders</div>
-                      {workingOrders.map((o, i) => (
+                      <div className="trade-dock-section-label">Working Orders ({groupedWorkingOrders.length})</div>
+                      {groupedWorkingOrders.map((o, i) => (
                         <div key={o.id ?? i} className="working-order-row">
                           <span className={`working-order-type ${(o.order_type || '').toLowerCase().replace(/\s/g, '-')}`}>
-                            {o.order_type || 'Order'}
+                            {o.order_type || 'Order'}{(o as unknown as { _row_count?: number })._row_count && (o as unknown as { _row_count?: number })._row_count! > 1 ? ` x${(o as unknown as { _row_count?: number })._row_count}` : ''}
                           </span>
                           <span className={`working-order-side ${(o.action || '').toLowerCase()}`}>
                             {o.action || '—'}
                           </span>
                           <span className="working-order-qty">{o.qty ?? '—'}</span>
                           <span className="working-order-price">
-                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : '—'}
+                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : (o.oco_id || o.parent_id) ? 'Broker working' : '—'}
                           </span>
                         </div>
                       ))}
@@ -607,6 +717,11 @@ function TradeDockPanel({
                   {closeResult && (
                     <div className={`trade-controls-result ${closeResult.type === 'ok' ? 'ok' : 'error'}`}>
                       {closeResult.message}
+                    </div>
+                  )}
+                  {openCount > 0 && displayWorkingOrders.length === 0 && (
+                    <div className="trade-controls-result error">
+                      Open position has no visible working protective orders (SL/TP). Verify protection in Tradovate.
                     </div>
                   )}
 
@@ -753,20 +868,20 @@ function TradeDockPanel({
                   )}
 
                   {/* Working Orders (SL/TP from Tradovate) */}
-                  {workingOrders && workingOrders.length > 0 && (
+                  {groupedWorkingOrders.length > 0 && (
                     <div className="trade-dock-working-orders">
-                      <div className="trade-dock-section-label">Working Orders</div>
-                      {workingOrders.map((o, i) => (
+                      <div className="trade-dock-section-label">Working Orders ({groupedWorkingOrders.length})</div>
+                      {groupedWorkingOrders.map((o, i) => (
                         <div key={o.id ?? i} className="working-order-row">
                           <span className={`working-order-type ${(o.order_type || '').toLowerCase().replace(/\s/g, '-')}`}>
-                            {o.order_type || 'Order'}
+                            {o.order_type || 'Order'}{(o as unknown as { _row_count?: number })._row_count && (o as unknown as { _row_count?: number })._row_count! > 1 ? ` x${(o as unknown as { _row_count?: number })._row_count}` : ''}
                           </span>
                           <span className={`working-order-side ${(o.action || '').toLowerCase()}`}>
                             {o.action || '—'}
                           </span>
                           <span className="working-order-qty">{o.qty ?? '—'}</span>
                           <span className="working-order-price">
-                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : '—'}
+                            {o.stop_price ? formatPrice(o.stop_price) : o.price ? formatPrice(o.price) : (o.oco_id || o.parent_id) ? 'Broker working' : '—'}
                           </span>
                         </div>
                       ))}

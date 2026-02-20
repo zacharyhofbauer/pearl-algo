@@ -122,6 +122,7 @@ from pearlalgo.api.tradovate_helpers import (
     get_tradovate_state as _get_tradovate_state_new,
     get_paired_tradovate_trades as _get_paired_tradovate_trades,
     tradovate_positions_for_api as _tradovate_positions_for_api_new,
+    enrich_positions_with_signal_brackets as _enrich_positions_with_signal_brackets,
     tradovate_performance_summary as _tradovate_performance_summary_new,
     tradovate_performance_for_period as _tradovate_performance_for_period_new,
 )
@@ -836,24 +837,8 @@ def _get_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
             # Enrich with TP/SL from virtual signals
             if positions:
                 try:
-                    signals = _get_signals(state_dir, max_lines=300)
-                    active_signals = [
-                        s for s in signals
-                        if s.get("status") == "entered" and s.get("signal", {}).get("stop_loss")
-                    ]
-                    for pos in positions:
-                        matching = [
-                            s for s in active_signals
-                            if (s.get("signal", {}).get("direction", "").lower() == pos["direction"])
-                        ]
-                        if matching:
-                            best = min(
-                                matching,
-                                key=lambda s: abs(float(s.get("entry_price", 0) or 0) - pos["entry_price"]),
-                            )
-                            sig = best.get("signal", {})
-                            pos["stop_loss"] = sig.get("stop_loss")
-                            pos["take_profit"] = sig.get("take_profit")
+                    signals = _get_signals(state_dir, max_lines=500)
+                    _enrich_positions_with_signal_brackets(positions, signals)
                 except Exception:
                     logger.debug("Failed to enrich positions with SL/TP from signals", exc_info=True)
                     pass
@@ -1887,6 +1872,65 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
         logger.debug(f"Non-critical: {e}")
 
     return exits[:limit]
+
+
+def _get_recent_signals(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
+    """Get recent signal lifecycle events from append-only signals.jsonl."""
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return []
+
+    try:
+        rows = _load_jsonl_file(signals_file, max_lines=min(max(limit * 8, 300), 4000))
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+        return []
+
+    signal_data_by_id: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sid = str(r.get("signal_id") or "")
+        if not sid:
+            continue
+        if r.get("status") == "generated" and isinstance(r.get("signal"), dict):
+            signal_data_by_id[sid] = r["signal"]
+
+    events: List[Dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sid = str(r.get("signal_id") or "")
+        if not sid:
+            continue
+
+        sig = r.get("signal")
+        if not isinstance(sig, dict):
+            sig = signal_data_by_id.get(sid) or {}
+
+        event_ts = r.get("timestamp") or r.get("entry_time") or r.get("exit_time")
+        status = str(r.get("status") or "unknown")
+        direction = str(sig.get("direction") or r.get("direction") or "").lower() or None
+
+        events.append({
+            "signal_id": sid,
+            "status": status,
+            "timestamp": event_ts,
+            "direction": direction,
+            "symbol": sig.get("symbol") or r.get("symbol") or "MNQ",
+            "entry_price": r.get("entry_price") if r.get("entry_price") is not None else sig.get("entry_price"),
+            "stop_loss": sig.get("stop_loss"),
+            "take_profit": sig.get("take_profit"),
+            "confidence": sig.get("confidence"),
+            "reason": sig.get("reason") or r.get("exit_reason") or "",
+            "exit_reason": r.get("exit_reason"),
+            "pnl": r.get("pnl"),
+            "signal_type": sig.get("type") or sig.get("signal_type") or r.get("signal_type"),
+            "duplicate": bool(r.get("duplicate", False)),
+        })
+
+    events.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+    return events[:limit]
 
 
 def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3031,6 +3075,16 @@ async def get_trades(
     return trades[-limit:]
 
 
+@app.get("/api/signals")
+async def get_signals(
+    limit: int = Query(default=50, ge=1, le=300, description="Max signal events to return"),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Get recent signal lifecycle events from signals.jsonl."""
+    _require_state_dir()
+    return _get_recent_signals(_state_dir, limit=limit)
+
+
 @app.get("/api/positions")
 async def get_positions(
     api_key: Optional[str] = Depends(verify_api_key),
@@ -3051,27 +3105,9 @@ async def get_positions(
         if positions:
             try:
                 signals_file = _state_dir / "signals.jsonl"
-                # Only read recent signals (enough to match positions, typically <50)
-                signals = _load_jsonl_file(signals_file, max_lines=100)
-                active_signals = [
-                    s for s in signals
-                    if s.get("status") == "entered" and s.get("signal", {}).get("stop_loss")
-                ]
-                # Match by direction — attach TP/SL from the closest-priced active signal
-                for pos in positions:
-                    matching = [
-                        s for s in active_signals
-                        if (s.get("signal", {}).get("direction", "").lower() == pos["direction"])
-                    ]
-                    if matching:
-                        # Pick the signal with entry price closest to the Tradovate position
-                        best = min(
-                            matching,
-                            key=lambda s: abs(float(s.get("entry_price", 0) or 0) - pos["entry_price"]),
-                        )
-                        sig = best.get("signal", {})
-                        pos["stop_loss"] = sig.get("stop_loss")
-                        pos["take_profit"] = sig.get("take_profit")
+                # Read enough append-only records to recover latest generated+entered pairs.
+                signals = _load_jsonl_file(signals_file, max_lines=500)
+                _enrich_positions_with_signal_brackets(positions, signals)
             except Exception as e:
                 logger.debug(f"Non-critical: could not enrich Tradovate Paper positions with TP/SL: {e}")
 

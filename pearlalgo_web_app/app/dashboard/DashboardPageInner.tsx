@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
 import AccountStrip from '@/components/AccountStrip'
-import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary } from '@/components/TradeDockPanel'
+import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary, type RecentSignalEvent } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
@@ -68,10 +68,12 @@ export default function DashboardPageInner() {
 
   // Badge tooltip state (which badge explanation is showing)
   const [badgeTip, setBadgeTip] = useState<string | null>(null)
+  const [isCompactHeader, setIsCompactHeader] = useState(false)
 
   // Local state for active positions (for chart price lines) - updated from HTTP + WebSocket
   const [positions, setPositions] = useState<Position[]>([])
   const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
+  const [recentSignals, setRecentSignals] = useState<RecentSignalEvent[]>([])
   const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
 
   // Dashboard data hook - handles HTTP fetching with in-flight guard
@@ -89,19 +91,29 @@ export default function DashboardPageInner() {
     if (dashboardData.recentTrades.length > 0 || recentTrades.length === 0) {
       setRecentTrades(dashboardData.recentTrades)
     }
+    if (dashboardData.recentSignals.length > 0 || recentSignals.length === 0) {
+      setRecentSignals(dashboardData.recentSignals)
+    }
     if (dashboardData.performanceSummary !== null) {
       setPerformanceSummary(dashboardData.performanceSummary)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally merge only from fetch, avoid overwriting with stale local state
-  }, [dashboardData.positions, dashboardData.recentTrades, dashboardData.performanceSummary])
+  }, [dashboardData.positions, dashboardData.recentTrades, dashboardData.recentSignals, dashboardData.performanceSummary])
 
   // Convert positions to price lines for chart visualization (more visible than live price)
   const positionLines = useMemo<PositionLine[]>(() => {
     const lines: PositionLine[] = []
+    const seenPrices = new Set<string>()
+    const addLine = (line: PositionLine) => {
+      const key = Number(line.price).toFixed(2)
+      if (seenPrices.has(key)) return
+      seenPrices.add(key)
+      lines.push(line)
+    }
 
     positions.forEach((pos) => {
       // Entry price line - blue/purple, more visible
-      lines.push({
+      addLine({
         price: pos.entry_price,
         // Slightly lighter (less busy) but still readable
         color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.42)' : 'rgba(156, 39, 176, 0.42)',
@@ -113,7 +125,7 @@ export default function DashboardPageInner() {
 
       // Stop loss line - red, more visible
       if (pos.stop_loss) {
-        lines.push({
+        addLine({
           price: pos.stop_loss,
           color: 'rgba(244, 67, 54, 0.42)',
           title: '',
@@ -125,7 +137,7 @@ export default function DashboardPageInner() {
 
       // Take profit line - green, more visible
       if (pos.take_profit) {
-        lines.push({
+        addLine({
           price: pos.take_profit,
           color: 'rgba(76, 175, 80, 0.42)',
           title: '',
@@ -136,8 +148,26 @@ export default function DashboardPageInner() {
       }
     })
 
+    // Fallback/augment from broker working orders so protective levels can still
+    // appear on chart when signal-derived TP/SL enrichment is delayed.
+    const workingOrders = agentState?.tradovate_account?.working_orders || []
+    workingOrders.forEach((o) => {
+      const level = o?.stop_price ?? o?.price
+      if (typeof level !== 'number' || !Number.isFinite(level) || level <= 0) return
+      const orderType = String(o?.order_type || '').toLowerCase()
+      const isStop = o?.stop_price != null || orderType.includes('stop')
+      addLine({
+        price: level,
+        color: isStop ? 'rgba(244, 67, 54, 0.42)' : 'rgba(76, 175, 80, 0.42)',
+        title: '',
+        kind: isStop ? 'sl' : 'tp',
+        lineStyle: 2,
+        axisLabelVisible: true,
+      })
+    })
+
     return lines
-  }, [positions])
+  }, [positions, agentState?.tradovate_account?.working_orders])
 
   // WebSocket connection for real-time updates
   useWebSocket({
@@ -200,6 +230,7 @@ export default function DashboardPageInner() {
     const update = () => {
       setBarSpacing(getBarSpacing())
       setBarCount(calculateBarCount())
+      setIsCompactHeader(window.innerWidth <= 480)
     }
     update()
     window.addEventListener('resize', update)
@@ -406,7 +437,9 @@ export default function DashboardPageInner() {
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'agent' ? null : 'agent') }}
               >
                 <span className="badge-dot"></span>
-                {agentState.running ? (agentState.paused ? 'PAUSED' : 'RUNNING') : 'STOPPED'}
+                {agentState.running
+                  ? (agentState.paused ? (isCompactHeader ? 'PAUSE' : 'PAUSED') : (isCompactHeader ? 'RUN' : 'RUNNING'))
+                  : (isCompactHeader ? 'STOP' : 'STOPPED')}
               </span>
             )}
             {agentState && (
@@ -423,7 +456,9 @@ export default function DashboardPageInner() {
                 className={`badge ai-badge ${aiStatus.aiMode}`}
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
               >
-                {aiStatus.aiMode.toUpperCase()}
+                {isCompactHeader && aiStatus.aiMode === 'shadow'
+                  ? 'SHDW'
+                  : aiStatus.aiMode.toUpperCase()}
                 {agentState?.shadow_counters && agentState.shadow_counters.would_block_total > 0 && (
                   <span className="badge-shadow-count">{agentState.shadow_counters.would_block_total}</span>
                 )}
@@ -434,7 +469,7 @@ export default function DashboardPageInner() {
                 className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
               >
-                {marketStatus.is_open ? 'OPEN' : 'CLOSED'}
+                {isCompactHeader ? (marketStatus.is_open ? 'OPN' : 'CLS') : (marketStatus.is_open ? 'OPEN' : 'CLOSED')}
               </span>
             )}
             {agentState && (
@@ -443,7 +478,7 @@ export default function DashboardPageInner() {
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
               >
                 <span className="badge-dot"></span>
-                Data
+                {isCompactHeader ? 'DATA' : 'Data'}
               </span>
             )}
             {agentState?.ml_filter_performance?.lift_ok && agentState.ml_filter_performance.win_rate_pass != null && (
@@ -636,6 +671,7 @@ export default function DashboardPageInner() {
                 riskMetrics={agentState?.risk_metrics || null}
                 signalRejections={agentState?.signal_rejections_24h || null}
                 lastSignalDecision={agentState?.last_signal_decision || null}
+                recentSignals={recentSignals}
                 workingOrders={agentState?.tradovate_account?.working_orders}
                 orderStats={agentState?.tradovate_account?.order_stats || null}
               />

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAgentStore, useChartStore, useUIStore } from '@/stores'
 import type { Timeframe, DataSource, Position } from '@/stores'
-import type { RecentTradeRow, PerformanceSummary } from '@/components/TradeDockPanel'
+import type { RecentTradeRow, PerformanceSummary, RecentSignalEvent } from '@/components/TradeDockPanel'
 import { apiFetch } from '@/lib/api'
 
 const REFRESH_INTERVAL = 10000 // 10 seconds (fallback when WebSocket disconnected)
@@ -22,6 +22,7 @@ interface UseDashboardDataOptions {
 interface UseDashboardDataReturn {
   positions: Position[]
   recentTrades: RecentTradeRow[]
+  recentSignals: RecentSignalEvent[]
   performanceSummary: PerformanceSummary | null
   handleTradeRefresh: () => void
   // Callbacks for WebSocket message handlers to update state
@@ -58,11 +59,13 @@ export function useDashboardData({
   // Local state for positions, trades, and performance summary
   const [positions, setPositions] = useState<Position[]>([])
   const [recentTrades, setRecentTrades] = useState<RecentTradeRow[]>([])
+  const [recentSignals, setRecentSignals] = useState<RecentSignalEvent[]>([])
   const [performanceSummary, setPerformanceSummary] = useState<PerformanceSummary | null>(null)
   
   // Use refs to preserve last-good state
   const lastGoodPositionsRef = useRef<Position[]>([])
   const lastGoodTradesRef = useRef<RecentTradeRow[]>([])
+  const lastGoodSignalsRef = useRef<RecentSignalEvent[]>([])
   const lastGoodPerformanceRef = useRef<PerformanceSummary | null>(null)
   
   const lastDataHashRef = useRef('')
@@ -106,6 +109,7 @@ export function useDashboardData({
         apiFetch(`/api/analytics`, fetchOptions).catch(() => null),
         apiFetch(`/api/positions`, fetchOptions).catch(() => null),
         apiFetch(`/api/trades?limit=50`, fetchOptions).catch(() => null),
+        apiFetch(`/api/signals?limit=80`, fetchOptions).catch(() => null),
         apiFetch(`/api/performance-summary`, fetchOptions).catch(() => null),
       ]
 
@@ -126,7 +130,7 @@ export function useDashboardData({
         return
       }
 
-      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes, tradesRes, perfSummaryRes] = results
+      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes, positionsRes, tradesRes, signalsRes, perfSummaryRes] = results
 
       // Handle 503 (data unavailable) - preserve last-good state, don't clear dashboard
       if (candlesRes?.status === 503) {
@@ -236,6 +240,24 @@ export function useDashboardData({
         }
       }
 
+      // Update recent signal events (preserve last-good on failure)
+      if (signalsRes?.ok) {
+        try {
+          const signalsData = await signalsRes.json()
+          const signalsArray = Array.isArray(signalsData) ? signalsData : []
+          setRecentSignals(signalsArray)
+          lastGoodSignalsRef.current = signalsArray
+        } catch {
+          if (lastGoodSignalsRef.current.length > 0) {
+            setRecentSignals(lastGoodSignalsRef.current)
+          }
+        }
+      } else {
+        if (lastGoodSignalsRef.current.length > 0) {
+          setRecentSignals(lastGoodSignalsRef.current)
+        }
+      }
+
       // Update performance summary (preserve last-good on failure)
       if (perfSummaryRes?.ok) {
         try {
@@ -317,6 +339,9 @@ export function useDashboardData({
     if (recentTrades.length > 0) {
       lastGoodTradesRef.current = recentTrades
     }
+    if (recentSignals.length > 0) {
+      lastGoodSignalsRef.current = recentSignals
+    }
     if (performanceSummary !== null) {
       lastGoodPerformanceRef.current = performanceSummary
     }
@@ -358,6 +383,7 @@ export function useDashboardData({
   return {
     positions,
     recentTrades,
+    recentSignals,
     performanceSummary,
     handleTradeRefresh,
     updatePositions,

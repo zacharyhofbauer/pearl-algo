@@ -504,6 +504,8 @@ export interface TradovateWorkingOrder {
   price?: number | null
   stop_price?: number | null
   status?: string
+  oco_id?: number
+  parent_id?: number
 }
 
 export interface TradovateOrderStats {

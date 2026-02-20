@@ -84,18 +84,18 @@
   justify-content: flex-start;
   gap: 3px;
   background: rgba(0, 0, 0, 0.35);
-  padding: 3px;
-  border-radius: 8px;
+  padding: 2px;
+  border-radius: 7px;
 }
 
 .header-timeframe .tf-btn {
-  padding: clamp(5px, 1vw, 7px) clamp(8px, 2vw, 12px);
-  font-size: clamp(11px, 2vw, 13px);
+  padding: clamp(4px, 0.9vw, 6px) clamp(7px, 1.8vw, 10px);
+  font-size: clamp(10px, 1.8vw, 12px);
   font-weight: 600;
   color: var(--text-secondary);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -458,8 +458,8 @@
   }
 
   .header-row-single {
-    padding: 5px 8px;
-    gap: 6px;
+    padding: 4px 7px;
+    gap: 5px;
     border-radius: 8px;
   }
 
@@ -476,21 +476,21 @@
   }
 
   .header-timeframe .tf-btn {
-    padding: 5px 8px;
-    font-size: 11px;
+    padding: 4px 7px;
+    font-size: 10px;
     flex-shrink: 0;
   }
 
   .header-badges .badge {
-    padding: 2px 6px;
-    font-size: 9px;
+    padding: 1px 5px;
+    font-size: 8px;
     gap: 2px;
     flex-shrink: 0;
   }
 
   .header-badges .badge-dot {
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
   }
 
   .header-status {
@@ -509,7 +509,7 @@
   }
 
   .status-indicator .status-text {
-    display: none;
+    display: inline;
   }
 
   /* Stats - compact */
@@ -538,7 +538,7 @@
 
   /* Hide legend from header on mobile */
   .header-legend {
-    display: none;
+    display: flex;
   }
 }
 
@@ -566,7 +566,7 @@
   }
 
   .header-stats-row .stat-item.positions {
-    display: none;
+    display: flex;
   }
 
   .header-timeframe {
@@ -574,13 +574,8 @@
   }
 
   .header-timeframe .tf-btn {
-    padding: 4px 6px;
-    font-size: 10px;
-  }
-
-  .header-badges .badge {
-    padding: 1px 4px;
-    font-size: 8px;
+    padding: 3px 5px;
+    font-size: 9px;
   }
 
   .header-badges .badge {
