@@ -45,10 +45,11 @@ execution:
     - MNQ
   ibkr_trading_client_id: 50
   ibkr_host: "127.0.0.1"
-  ibkr_port: 4002
+  ibkr_port: 4001
 
 # IBKR data provider override (avoid client ID clash)
 data:
+  # IMPORTANT: Uses IBKR for market data (better quality/latency). Tradovate only for execution.
   ibkr_data_client_id: 51
 
 # Circuit breaker: never pause for connection/data blips (IBKR data-only; execution is Tradovate)
@@ -85,3 +86,4 @@ auto_flat:
   friday_enabled: false
   weekend_enabled: false
   notify: false
+
