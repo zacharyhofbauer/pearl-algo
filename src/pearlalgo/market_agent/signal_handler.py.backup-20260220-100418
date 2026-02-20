@@ -211,7 +211,7 @@ class SignalHandler:
                     )
 
             # Virtual entry: enter immediately at the signal's entry price
-            entry_price = self._track_virtual_entry(signal, signal_id, preserve_full_signal=True)
+            entry_price = self._track_virtual_entry(signal, signal_id)
 
             # Audit: trade entered
             self._log_trade_entry(signal_id, signal, entry_price, "virtual")
@@ -407,23 +407,12 @@ class SignalHandler:
         if self.trading_circuit_breaker is None:
             return True
 
-        # Get active positions for clustering check.
-        # signals.jsonl is append-only, so derive active positions from the
-        # latest status per signal_id (not raw "entered" rows).
+        # Get active positions for clustering check
         active_positions = []
         try:
-            recent_signals = self.state_manager.get_recent_signals(limit=300)
-            latest_by_id: Dict[str, Dict[str, Any]] = {}
+            recent_signals = self.state_manager.get_recent_signals(limit=100)
             for rec in recent_signals:
-                if not isinstance(rec, dict):
-                    continue
-                sig_id = str(rec.get("signal_id") or "")
-                if not sig_id:
-                    continue
-                latest_by_id[sig_id] = rec
-
-            for rec in latest_by_id.values():
-                if rec.get("status") == "entered":
+                if isinstance(rec, dict) and rec.get("status") == "entered":
                     active_positions.append(rec)
         except Exception as e:
             ErrorHandler.log_and_continue(
@@ -560,7 +549,7 @@ class SignalHandler:
                 "ML prediction (non-fatal)", e, category="ml_filter",
             )
 
-    def _track_virtual_entry(self, signal: Dict, signal_id: str, preserve_full_signal: bool = False) -> float:
+    def _track_virtual_entry(self, signal: Dict, signal_id: str) -> float:
         """Track virtual entry for the signal. Returns entry price."""
         entry_price = 0.0
         try:
@@ -576,7 +565,6 @@ class SignalHandler:
                     signal_id=signal_id,
                     entry_price=entry_price,
                     entry_time=datetime.now(timezone.utc),
-                    signal_data=signal if preserve_full_signal else None,
                 )
         except Exception as e:
             logger.warning(f"Critical path error: {e}", exc_info=True)

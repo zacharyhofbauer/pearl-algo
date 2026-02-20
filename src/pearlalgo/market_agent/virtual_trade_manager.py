@@ -145,10 +145,22 @@ class VirtualTradeManager:
             logger.warning(f"Failed to compute bar arrays for trade exits: {e}")
             return
 
-        exited_this_cycle: set = set()
+        # signals.jsonl is append-only; only the latest status per signal_id
+        # should drive exit checks. Otherwise stale "entered" rows can be
+        # reprocessed after a later "exited" event already exists.
+        latest_by_id: Dict[str, Dict] = {}
         for rec in recent:
+            if not isinstance(rec, dict):
+                continue
+            sig_id = str(rec.get("signal_id") or "")
+            if not sig_id:
+                continue
+            latest_by_id[sig_id] = rec
+
+        exited_this_cycle: set = set()
+        for rec in latest_by_id.values():
             try:
-                if not isinstance(rec, dict) or rec.get("status") != "entered":
+                if rec.get("status") != "entered":
                     continue
                 sig_id = str(rec.get("signal_id") or "")
                 if not sig_id or sig_id in exited_this_cycle:

@@ -232,7 +232,7 @@ class PerformanceTracker:
         """
         self._update_signal_status(signal_id, "expired", {"reason": reason})
 
-    def track_entry(self, signal_id: str, entry_price: float, entry_time: Optional[datetime] = None, signal_data: Optional[Dict] = None) -> None:
+    def track_entry(self, signal_id: str, entry_price: float, entry_time: Optional[datetime] = None) -> None:
         """
         Track signal entry.
         
@@ -251,8 +251,8 @@ class PerformanceTracker:
                 "entry_price": entry_price,
                 "entry_time": entry_time.isoformat(),
             },
-            preserve_signal=signal_data,
         )
+
     def update_signal_prices(
         self,
         signal_id: str,
@@ -356,9 +356,6 @@ class PerformanceTracker:
         signal_record = self._get_signal_record(signal_id)
         if not signal_record:
             logger.warning(f"Signal {signal_id} not found for exit tracking")
-            return None
-        if str(signal_record.get("status") or "").lower() == "exited":
-            logger.debug(f"Skipping duplicate exit for {signal_id}: already exited")
             return None
 
         signal = signal_record.get("signal", {}) or {}
@@ -846,7 +843,7 @@ class PerformanceTracker:
 
         return None
 
-    def _update_signal_status(self, signal_id: str, status: str, data: Dict, preserve_signal: Optional[Dict] = None) -> None:
+    def _update_signal_status(self, signal_id: str, status: str, data: Dict) -> None:
         """
         Update signal status.
 
@@ -864,16 +861,13 @@ class PerformanceTracker:
             try:
                 # Fetch current record so the new event payload stays complete
                 # (downstream consumers like _get_signal_record expect the full record).
-                # Use preserved signal if provided (avoids race condition)
-                current_record: Optional[Dict] = preserve_signal
-                if current_record is None:
-                    try:
-                        current_record = self._trade_db.get_signal_event_by_id(signal_id)
-                    except Exception:
-                        pass  # OK — proceed with partial payload
+                current_record: Optional[Dict] = None
+                try:
+                    current_record = self._trade_db.get_signal_event_by_id(signal_id)
+                except Exception:
+                    pass  # OK — proceed with partial payload
 
-                # Copy to avoid mutating the original signal dict passed from callers.
-                event_payload = dict(current_record) if isinstance(current_record, dict) else {}
+                event_payload = current_record if isinstance(current_record, dict) else {}
                 event_payload["signal_id"] = signal_id
                 event_payload["status"] = status
                 event_payload.update(data or {})

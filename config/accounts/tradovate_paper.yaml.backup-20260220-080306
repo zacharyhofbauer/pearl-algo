@@ -23,7 +23,7 @@ challenge:
   start_balance: 50000.0
   profit_target: 3000.0
   max_drawdown: 2000.0
-  max_contracts_mini: 5
+  max_contracts_mini: 1
   max_contracts_micro: 1
   consistency_pct: 0.50
   min_trading_days: 2
@@ -61,7 +61,7 @@ circuit_breaker:
 trading_circuit_breaker:
   mode: warn_only
   enable_tv_paper_eval_gate: true
-  tv_paper_max_contracts_mini: 5
+  tv_paper_max_contracts_mini: 1
   tv_paper_max_contracts_micro: 1
   tv_paper_trading_start_hour_et: 18
   tv_paper_trading_end_hour_et: 16
