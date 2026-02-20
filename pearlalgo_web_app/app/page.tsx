@@ -1,6 +1,5 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useCountUp } from '@/hooks/useCountUp'
@@ -147,18 +146,6 @@ export default function LandingPage() {
 
   return (
     <main className="landing-page">
-      <div className="landing-hero">
-        <Image
-          src="/pearl-emoji.png"
-          alt="PEARL Algo"
-          width={64}
-          height={64}
-          className="landing-hero-icon"
-          priority
-        />
-        <h1>PEARL Algo</h1>
-        <p className="landing-subtitle">Trading Dashboard</p>
-      </div>
       {tvStats?.recentExits && tvStats.recentExits.length > 0 && (
         <div className="landing-ticker-wrap" aria-label="Recent trades">
           <div className="landing-ticker-track">

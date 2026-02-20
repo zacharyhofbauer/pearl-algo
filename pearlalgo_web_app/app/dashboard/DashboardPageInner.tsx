@@ -117,7 +117,7 @@ export default function DashboardPageInner() {
         price: pos.entry_price,
         // Slightly lighter (less busy) but still readable
         color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
-        title: 'E',
+        title: '',
         kind: 'entry',
         lineWidth: 2,
         lineStyle: 0, // solid
@@ -129,7 +129,7 @@ export default function DashboardPageInner() {
         addLine({
           price: pos.stop_loss,
           color: 'rgba(244, 67, 54, 0.62)',
-          title: 'SL',
+          title: '',
           kind: 'sl',
           lineWidth: 2,
           lineStyle: 2, // dashed
@@ -142,7 +142,7 @@ export default function DashboardPageInner() {
         addLine({
           price: pos.take_profit,
           color: 'rgba(76, 175, 80, 0.62)',
-          title: 'TP',
+          title: '',
           kind: 'tp',
           lineWidth: 2,
           lineStyle: 2, // dashed
@@ -162,7 +162,7 @@ export default function DashboardPageInner() {
       addLine({
         price: level,
         color: isStop ? 'rgba(244, 67, 54, 0.5)' : 'rgba(76, 175, 80, 0.5)',
-        title: isStop ? 'SL' : 'TP',
+        title: '',
         kind: isStop ? 'sl' : 'tp',
         lineWidth: 2,
         lineStyle: 2,
