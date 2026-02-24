@@ -37,7 +37,8 @@ execution:
   armed: true
   mode: paper
   adapter: tradovate
-  max_positions: 20
+  enforce_protection_guard: true
+  max_positions: 5  # CRITICAL: Reduced from 20 to match MFF limit
   max_orders_per_day: 500
   max_daily_loss: 1800.0
   cooldown_seconds: 30
@@ -59,7 +60,7 @@ circuit_breaker:
 
 # Trading circuit breaker overrides
 trading_circuit_breaker:
-  mode: warn_only
+  mode: enforce  # CRITICAL: Changed from warn_only to enforce
   enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
@@ -71,9 +72,15 @@ trading_circuit_breaker:
   max_consecutive_losses: 5
   max_session_drawdown: 1800.0
   max_daily_drawdown: 1800.0
-  max_concurrent_positions: 20
+  max_concurrent_positions: 5  # CRITICAL: Reduced from 20 to match MFF limit
   enable_session_filter: false
   enable_direction_gating: true
+  direction_gating_min_confidence: 0.65  # ADDED: Increased from default 0.70 -> 0.65 for better signal quality
+  enable_regime_avoidance: true  # ENABLED: Avoid choppy/volatile markets
+  blocked_regimes:
+    - ranging
+    - volatile
+  regime_avoidance_min_confidence: 0.70
 
 # Telegram notification tier
 telegram:
@@ -86,4 +93,3 @@ auto_flat:
   friday_enabled: false
   weekend_enabled: false
   notify: false
-
