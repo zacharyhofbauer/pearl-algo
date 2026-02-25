@@ -18,17 +18,6 @@ session:
   end_time: '15:45'
   timezone: 'America/New_York'
 
-telegram:
-  enabled: true
-  bot_token: ${TELEGRAM_BOT_TOKEN}
-  chat_id: ${TELEGRAM_CHAT_ID}
-  notification_tier: important
-
-telegram_ui:
-  compact_metrics_enabled: true
-  show_progress_bars: false
-  show_volume_metrics: true
-  compact_metric_width: 10
 
 risk:
   max_risk_per_trade: 0.015
