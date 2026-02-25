@@ -48,7 +48,6 @@ from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import configure_market_hours, get_market_hours
 from pearlalgo.market_agent.service_lifecycle import ServiceLifecycleMixin
 from pearlalgo.market_agent.service_loop import ServiceLoopMixin
-from pearlalgo.market_agent.service_notifications import ServiceNotificationsMixin
 from pearlalgo.market_agent.virtual_trade_manager import VirtualTradeManager
 from pearlalgo.utils.volume_pressure import (
     compute_volume_pressure_summary,
@@ -159,7 +158,7 @@ def get_trading_day_date() -> date:
     return get_trading_day_start().date()
 
 
-class MarketAgentService(ServiceNotificationsMixin, ServiceLoopMixin, ServiceLifecycleMixin):
+class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
     """
     24/7 service for NQ intraday trading strategy.
     

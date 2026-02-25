@@ -14,14 +14,6 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``compute_quiet_period_minutes()`` — time since last signal
 - ``generate_dashboard_chart()`` — chart capture + export
 
-**Not migrated (too coupled to service.py):**
-- ``_check_dashboard()`` — controls timing state (last_dashboard_chart_sent, etc.)
-  and calls _send_dashboard which depends on get_status() with 40+ service attributes
-- ``_send_dashboard()`` — builds status dict from get_status() and accesses
-  data_fetcher, config, and many service-level attributes for enrichment
-- ``get_status()`` — references nearly every subsystem in the service;
-  moving it would require passing the entire service as a dependency
-"""
 
 from __future__ import annotations
 

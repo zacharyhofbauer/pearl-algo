@@ -332,7 +332,6 @@ class ServiceLoopMixin:
                     await self._check_pearl_suggestions()
 
                     # Still emit dashboard even when quiet (observability)
-                    await self._check_dashboard(market_data, quiet_reason=quiet_reason)
                     self.cycle_count += 1
 
                     await self._sleep_until_next_cycle()
@@ -544,7 +543,6 @@ class ServiceLoopMixin:
                 # Check for proactive Pearl suggestions (agentic)
                 await self._check_pearl_suggestions()
 
-                await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
                 try:
                     self.state_manager.append_event(
                         "scan_finished",
