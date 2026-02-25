@@ -208,12 +208,6 @@ auto_flat:
   friday_time: '16:55'
   weekend_enabled: true
   timezone: 'America/New_York'
-telegram:
-  enabled: true
-  bot_token: ${TELEGRAM_BOT_TOKEN}
-  chat_id: ${TELEGRAM_CHAT_ID}
-  notification_tier: critical
-  notify: true
 
 learning:
   enabled: false
