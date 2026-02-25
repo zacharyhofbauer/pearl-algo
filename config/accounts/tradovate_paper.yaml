@@ -84,7 +84,7 @@ trading_circuit_breaker:
 
 # Telegram notification tier
 telegram:
-  notification_tier: important
+  notification_tier: silent
 
 # Auto-flat: disabled (Tradovate bracket orders handle exits)
 auto_flat:
@@ -93,3 +93,8 @@ auto_flat:
   friday_enabled: false
   weekend_enabled: false
   notify: false
+
+# Risk management: MFF compliance
+risk:
+  min_position_size: 1
+  max_position_size: 1  # CRITICAL: Each trade = 1 contract (MFF limit is 5 total)
