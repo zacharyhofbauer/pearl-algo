@@ -175,6 +175,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
     # ── Order placement ───────────────────────────────────────────────
 
     async def place_bracket(self, signal: Dict) -> ExecutionResult:
+        logger.info("DEBUG: place_bracket() CALLED for signal_id=%s" % signal.get("signal_id", "NO_ID"))
+        logger.info(f"🔍 DEBUG: place_bracket() CALLED with signal_id={signal.get('signal_id', 'NO_ID')}")
         """
         Place a bracket order via Tradovate's placeOSO endpoint.
 
