@@ -13,6 +13,7 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 - ``notify_error()`` — error notification via queue
 - ``compute_quiet_period_minutes()`` — time since last signal
 - ``generate_dashboard_chart()`` — chart capture + export
+"""
 
 
 from __future__ import annotations
