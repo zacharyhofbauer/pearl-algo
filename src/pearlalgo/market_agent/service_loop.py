@@ -601,7 +601,7 @@ class ServiceLoopMixin:
                 )
                 if _signal_this_cycle:
                     self.mark_state_dirty()
-                if self._state_dirty or self.cycle_count % self.state_save_interval == 0:
+                if self._state_dirty:
                     self._save_state(force=True)
 
                 self.cycle_count += 1
