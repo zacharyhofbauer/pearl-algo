@@ -12,4 +12,4 @@ Host pearl
 
 Add `IdentityFile ~/.ssh/id_ed25519` (or your key path) if you use a specific key for this server.
 
-Then in Cursor: **Remote-SSH: Connect to Host…** → choose **pearl** → open folder **/home/pearl/PearlAlgoProject**.
+Then in Cursor: **Remote-SSH: Connect to Host…** → choose **pearl** → open folder **/home/pearlalgo/PearlAlgoWorkspace**.

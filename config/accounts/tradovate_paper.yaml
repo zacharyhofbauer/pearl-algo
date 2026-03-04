@@ -60,7 +60,7 @@ circuit_breaker:
 
 # Trading circuit breaker overrides
 trading_circuit_breaker:
-  mode: enforce  # CRITICAL: Changed from warn_only to enforce
+  mode: disabled  # CRITICAL: Changed from warn_only to enforce
   enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
@@ -102,3 +102,12 @@ risk:
 # Service: Disable periodic dashboard updates
 service:
   dashboard_chart_enabled: false  # Disable periodic status summaries
+
+# CRITICAL: Disable local paper simulation
+# Circuit breaker should ONLY track real Tradovate trades
+virtual_pnl:
+  enabled: false
+
+# OVERRIDE: Completely disable circuit breaker (useless without real Tradovate integration)
+trading_circuit_breaker:
+  enabled: false

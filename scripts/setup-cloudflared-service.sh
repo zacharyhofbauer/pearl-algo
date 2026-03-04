@@ -15,7 +15,7 @@ fi
 
 SERVICE_NAME="cloudflared-pearlalgo"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-CONFIG_PATH="/home/pearl/.cloudflared/config.yml"
+CONFIG_PATH="/home/pearlalgo/.cloudflared/config.yml"
 CLOUDFLARED_BIN="/usr/local/bin/cloudflared"
 
 echo "========================================"
@@ -55,7 +55,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pearl
-ExecStart=/usr/local/bin/cloudflared --config /home/pearl/.cloudflared/config.yml tunnel run
+ExecStart=/usr/local/bin/cloudflared --config /home/pearlalgo/.cloudflared/config.yml tunnel run
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -4,15 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=pearl
-Group=pearl
-WorkingDirectory=/home/pearl/PearlAlgoProject
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace
 Environment="DISPLAY=:99"
-Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 # Start Xvfb in background (shell required for &), then wait for display
 ExecStartPre=/bin/sh -c '/usr/bin/Xvfb :99 -screen 0 1024x768x24 & sleep 2'
-ExecStart=/home/pearl/PearlAlgoProject/scripts/gateway/gateway.sh start
-ExecStop=/home/pearl/PearlAlgoProject/scripts/gateway/gateway.sh stop
+ExecStart=/home/pearlalgo/PearlAlgoWorkspace/scripts/gateway/gateway.sh start
+ExecStop=/home/pearlalgo/PearlAlgoWorkspace/scripts/gateway/gateway.sh stop
 TimeoutStartSec=120
 Restart=on-failure
 RestartSec=30

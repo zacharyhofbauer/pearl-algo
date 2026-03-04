@@ -5,14 +5,14 @@ Wants=pearlalgo-agent.service
 
 [Service]
 Type=simple
-User=pearl
-Group=pearl
-WorkingDirectory=/home/pearl/PearlAlgoProject
-Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace
+Environment="PATH=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PEARLALGO_API_URL=http://localhost:8001"
-EnvironmentFile=/home/pearl/PearlAlgoProject/.env
-EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.telegram.main
+EnvironmentFile=/home/pearlalgo/PearlAlgoWorkspace/.env
+EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
+ExecStart=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin/python -m pearlalgo.telegram.main
 Restart=always
 RestartSec=5
 

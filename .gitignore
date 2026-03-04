@@ -63,5 +63,10 @@ secrets.env
 # Auto-generated API spec
 openapi.json
 
+# Config backups and temp (local only)
+config/*.backup*
+config/*.tmp
+config/*.backup-*
+
 # Junk files created by MagicMock state_dir in tests
 <MagicMock*

@@ -5,13 +5,13 @@ Wants=ibkr-gateway.service
 
 [Service]
 Type=simple
-User=pearl
-Group=pearl
-WorkingDirectory=/home/pearl/PearlAlgoProject
-Environment="PATH=/home/pearl/PearlAlgoProject/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/home/pearl/PearlAlgoProject/.env
-EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-ExecStart=/home/pearl/PearlAlgoProject/.venv/bin/python -m pearlalgo.market_agent.main --config config/accounts/tradovate_paper.yaml --data-dir data/tradovate/paper
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace
+Environment="PATH=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearlalgo/PearlAlgoWorkspace/.env
+EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
+ExecStart=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin/python -m pearlalgo.market_agent.main --config config/accounts/tradovate_paper.yaml --data-dir data/tradovate/paper
 Restart=always
 RestartSec=10
 

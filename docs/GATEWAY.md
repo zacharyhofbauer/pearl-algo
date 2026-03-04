@@ -235,12 +235,12 @@ The repository includes systemd service files in `scripts/systemd/` for producti
 
 ### Path Customization
 
-The systemd services use hardcoded paths for the default installation at `/home/pearl/PearlAlgoProject`. If deploying to a different location:
+The systemd services use hardcoded paths for the default installation at `/home/pearlalgo/PearlAlgoWorkspace`. If deploying to a different location:
 
 1. **Edit the service files** before installation:
    ```bash
    # Replace all occurrences of the default path
-   sed -i 's|/home/pearl/PearlAlgoProject|/your/custom/path|g' scripts/systemd/*.service
+   sed -i 's|/home/pearlalgo/PearlAlgoWorkspace|/your/custom/path|g' scripts/systemd/*.service
    ```
 
 2. **Update `WorkingDirectory`** in each service file to match your installation.

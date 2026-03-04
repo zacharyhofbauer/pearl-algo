@@ -5,14 +5,14 @@ Wants=pearlalgo-api.service
 
 [Service]
 Type=simple
-User=pearl
-Group=pearl
-WorkingDirectory=/home/pearl/PearlAlgoProject/pearlalgo_web_app
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace/pearlalgo_web_app
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="NODE_ENV=production"
-EnvironmentFile=/home/pearl/PearlAlgoProject/.env
-EnvironmentFile=-/home/pearl/.config/pearlalgo/secrets.env
-EnvironmentFile=-/home/pearl/PearlAlgoProject/pearlalgo_web_app/.env.local
+EnvironmentFile=/home/pearlalgo/PearlAlgoWorkspace/.env
+EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
+EnvironmentFile=-/home/pearlalgo/PearlAlgoWorkspace/pearlalgo_web_app/.env.local
 ExecStart=/usr/bin/npm start -- -p 3001
 Restart=always
 RestartSec=5

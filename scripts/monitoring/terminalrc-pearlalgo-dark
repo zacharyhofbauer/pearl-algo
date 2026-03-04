@@ -1,0 +1,24 @@
+# PearlAlgo live-logs: dark theme + transparency for xfce4-terminal.
+# Applied by enable-terminal-transparency.sh so log windows are readable.
+# See: https://docs.xfce.org/apps/xfce4-terminal/
+
+[Configuration]
+FontName=Monospace 10
+MiscAlwaysShowTabs=FALSE
+MiscCycleTabs=TRUE
+MiscTabCloseButtons=TRUE
+MiscTabPosition=Top
+MiscTerminalSize=80x24
+ScrollingLines=10000
+ScrollingBar=right
+
+# Dark background, good contrast for logs
+ColorForeground=#e0e0e0
+ColorBackground=#1a1a2e
+ColorCursor=#e0e0e0
+ColorSelection=#2d2d44
+ColorPalette=#2d2d44;#e74c3c;#2ecc71;#f1c40f;#3498db;#9b59b6;#1abc9c;#ecf0f1;#7f8c8d;#c0392b;#27ae60;#f39c12;#2980b9;#8e44ad;#16a085;#bdc3c7
+
+# Transparency (0=transparent, 1=opaque). Slight transparency.
+BackgroundDarkness=0.85
+BackgroundMode=TERMINAL_BACKGROUND_TRANSPARENT
