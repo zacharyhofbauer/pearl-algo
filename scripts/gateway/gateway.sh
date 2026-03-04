@@ -298,7 +298,7 @@ cmd_start() {
   echo "✅ IB Gateway process is running"
 
   echo "Waiting for authentication and API to become available..."
-  for i in {1..12}; do
+  for i in {1..36}; do
     sleep 5
     if _api_listening; then
       echo "✅ API port ${API_PORT} is listening!"
@@ -315,10 +315,10 @@ cmd_start() {
       echo "  ./scripts/gateway/gateway.sh test-api"
       exit 0
     fi
-    echo "  Still waiting... ($i/12)"
+    echo "  Still waiting... ($i/36)"
   done
 
-  echo "⚠️  Port ${API_PORT} not listening after 60 seconds"
+  echo "⚠️  Port ${API_PORT} not listening after 180 seconds"
   echo ""
   echo "📱 If you're using IBKR mobile app for 2FA:"
   echo "   1. Check your mobile app for a login approval notification"
