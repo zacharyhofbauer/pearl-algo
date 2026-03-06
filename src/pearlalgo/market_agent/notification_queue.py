@@ -482,8 +482,8 @@ class NotificationQueue:
         self, config: Dict[str, Any], priority: Priority = Priority.NORMAL,
         tier: Optional[NotificationTier] = None,
     ) -> bool:
-        """Enqueue a startup notification (IMPORTANT tier)."""
-        return await self.enqueue("startup", {"config": config}, priority=priority, tier=tier or NotificationTier.IMPORTANT)
+        """Enqueue a startup notification (CRITICAL tier)."""
+        return await self.enqueue("startup", {"config": config}, priority=priority, tier=tier or NotificationTier.CRITICAL)
 
     async def enqueue_shutdown(
         self, summary: Dict[str, Any], priority: Priority = Priority.CRITICAL,

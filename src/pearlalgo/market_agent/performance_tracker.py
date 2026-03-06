@@ -361,7 +361,7 @@ class PerformanceTracker:
             logger.debug(f"Skipping duplicate exit for {signal_id}: already exited")
             return None
 
-        signal = signal_record.get("signal", {}) or {}
+        signal = signal_record.get("signal") or signal_record or {}
         entry_price = float(
             signal_record.get("entry_price")
             or signal.get("entry_price")
@@ -503,7 +503,7 @@ class PerformanceTracker:
                 # Extract optional context
                 regime_val = None
                 try:
-                    reg = signal.get("regime", {})
+                    reg = signal.get("market_regime") or signal.get("regime") or {}
                     if isinstance(reg, dict):
                         regime_val = reg.get("regime")
                     elif isinstance(reg, str):

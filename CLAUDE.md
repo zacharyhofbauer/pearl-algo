@@ -1,0 +1,70 @@
+# PearlAlgo - Claude Code Instructions
+
+**WARNING: This is a LIVE 24/7 automated futures trading system. Every code change can cause real financial loss.**
+
+## Architecture
+
+- **Market data:** IBKR gateway (data only, NOT used for execution)
+- **Order execution:** Tradovate (paper account = source of truth for trades)
+- **Notifications:** Telegram
+- **Entry point:** `pearl.sh` (master control), `python -m pearlalgo.market_agent.main`
+- **Config hierarchy:** `config/base.yaml` (defaults) + `config/accounts/tradovate_paper.yaml` (overrides)
+- **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
+
+## Critical Safety Rules
+
+**NEVER change these without explicit user approval:**
+
+| Setting | Required Value | Why |
+|---------|---------------|-----|
+| `execution.armed` | current value | Controls live order submission |
+| `execution.enabled` | current value | Master execution switch |
+| `execution.mode` | current value | Paper vs live |
+| `max_positions` | current value | Position limit |
+| `max_position_size_per_order` | 1 | Prop firm max per trade |
+| `max_position_size` | 1 | Must stay 1 contract |
+| `circuit_breaker.*` | current values | Drawdown protection |
+| `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
+| `ibkr.execution` | inactive | IBKR is data-only |
+
+## Config Rules
+
+- **YAML duplicate keys are SILENT** — last key wins, no error. Always check BOTH config files for duplicates before editing.
+- Override hierarchy: `tradovate_paper.yaml` values override `base.yaml` values.
+- Always validate YAML after editing: `python -c "import yaml; yaml.safe_load(open('config/base.yaml'))"`
+
+## Forbidden Actions
+
+1. Do NOT re-enable IBKR execution
+2. Do NOT increase contract sizes above 1
+3. Do NOT disable circuit breaker or drawdown limits
+4. Do NOT enable virtual PnL
+5. Do NOT change session filter settings without user approval
+6. Do NOT restart the trading service without user approval
+
+## Testing
+
+- Run `python -m pytest tests/ -x -q` before any changes
+- Validate YAML configs after editing
+- Check `logs/` for errors after changes
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/pearlalgo/market_agent/service.py` | Main service orchestrator |
+| `src/pearlalgo/market_agent/service_loop.py` | Core trading loop |
+| `src/pearlalgo/market_agent/performance_tracker.py` | Trade tracking + trades.db |
+| `src/pearlalgo/market_agent/signal_handler.py` | Signal processing |
+| `src/pearlalgo/execution/tradovate/adapter.py` | Order execution adapter |
+| `src/pearlalgo/execution/tradovate/client.py` | Tradovate API client |
+| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Signal generation (PineScript logic) |
+| `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
+| `config/base.yaml` | Base configuration |
+| `config/accounts/tradovate_paper.yaml` | Account-specific overrides |
+
+## Data Insights (from 922-trade analysis)
+
+- Overnight sessions (18:00-08:30 ET) historically lose money (-$4,477 net)
+- Short trades have poor win rate compared to longs
+- Session filter is intentionally OFF — user wants all hours open for OpenClaw agent decisions
