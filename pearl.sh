@@ -316,7 +316,12 @@ start_telegram() {
         return
     fi
     echo -e "${CYAN}▶ Starting Telegram Handler...${NC}"
-    ./scripts/telegram/restart_command_handler.sh --background
+    if systemctl is-enabled pearlalgo-telegram.service &>/dev/null 2>&1; then
+        sudo systemctl restart pearlalgo-telegram.service
+        echo "   Started via systemd"
+    else
+        ./scripts/telegram/restart_command_handler.sh --background
+    fi
     echo ""
 }
 
@@ -492,14 +497,19 @@ stop_agent() {
 
 stop_telegram() {
     echo -e "${CYAN}■ Stopping Telegram Handler...${NC}"
-    local pidfile="$SCRIPT_DIR/logs/telegram_handler.pid"
-    if [ -f "$pidfile" ]; then
-        local pid=$(cat "$pidfile")
-        kill "$pid" 2>/dev/null || true
-        rm -f "$pidfile"
-        echo "   Stopped PID $pid"
+    if systemctl is-active --quiet pearlalgo-telegram.service 2>/dev/null; then
+        sudo systemctl stop pearlalgo-telegram.service
+        echo "   Stopped via systemd"
     else
-        echo "   Not running"
+        local pidfile="$SCRIPT_DIR/logs/telegram_handler.pid"
+        if [ -f "$pidfile" ]; then
+            local pid=$(cat "$pidfile")
+            kill "$pid" 2>/dev/null || true
+            rm -f "$pidfile"
+            echo "   Stopped PID $pid"
+        else
+            echo "   Not running"
+        fi
     fi
     echo ""
 }

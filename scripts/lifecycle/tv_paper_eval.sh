@@ -54,6 +54,15 @@ cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/logs"
 mkdir -p "$STATE_DIR"
 
+# ---------------------------------------------------------------------------
+# Systemd-aware mode: if pearlalgo-agent.service exists, delegate to systemctl
+# to prevent duplicate processes (systemd has Restart=always)
+# ---------------------------------------------------------------------------
+SYSTEMD_MANAGED=false
+if systemctl is-enabled pearlalgo-agent.service &>/dev/null 2>&1; then
+    SYSTEMD_MANAGED=true
+fi
+
 # Load project .env first (base defaults)
 if [ -f "$PROJECT_DIR/.env" ]; then
     set -a
@@ -103,8 +112,35 @@ get_python() {
 }
 
 # ---------------------------------------------------------------------------
-# Commands
+# Commands (systemd-aware: prevents duplicate processes)
 # ---------------------------------------------------------------------------
+
+# When systemd manages the agent, delegate start/stop/restart to systemctl.
+# This is the ONLY safe way to avoid duplicates since systemd has Restart=always.
+if [ "$SYSTEMD_MANAGED" = true ] && [[ "$COMMAND" =~ ^(start|stop|restart)$ ]]; then
+    case "$COMMAND" in
+        start)
+            echo "Starting via systemd (pearlalgo-agent + pearlalgo-api)..."
+            sudo systemctl start pearlalgo-api.service pearlalgo-agent.service
+            sleep 3
+            systemctl is-active --quiet pearlalgo-agent.service && echo "Agent: running" || echo "Agent: FAILED"
+            systemctl is-active --quiet pearlalgo-api.service && echo "API: running" || echo "API: FAILED"
+            ;;
+        stop)
+            echo "Stopping via systemd (pearlalgo-agent + pearlalgo-api)..."
+            sudo systemctl stop pearlalgo-agent.service pearlalgo-api.service
+            echo "Tradovate Paper instance stopped"
+            ;;
+        restart)
+            echo "Restarting via systemd (pearlalgo-agent + pearlalgo-api)..."
+            sudo systemctl restart pearlalgo-api.service pearlalgo-agent.service
+            sleep 3
+            systemctl is-active --quiet pearlalgo-agent.service && echo "Agent: running" || echo "Agent: FAILED"
+            systemctl is-active --quiet pearlalgo-api.service && echo "API: running" || echo "API: FAILED"
+            ;;
+    esac
+    exit 0
+fi
 
 if [ "$COMMAND" = "status" ]; then
     AGENT_UP=false
@@ -190,19 +226,17 @@ do_stop() {
     # 2. Kill anything still holding our API port (catches manually started servers)
     kill_port_holders "$API_PORT"
 
-    # 3. Kill orphan agent processes for this state dir
+    # 3. Kill ALL orphan agent processes (only one agent per machine)
     local ORPHAN_PIDS=""
     ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
     for OPID in $ORPHAN_PIDS; do
-        local PROC_ENV=""
-        PROC_ENV=$(cat /proc/$OPID/environ 2>/dev/null | tr '\0' '\n' | grep "PEARLALGO_STATE_DIR" || true)
-        if echo "$PROC_ENV" | grep -q "TV_PAPER_EVAL" 2>/dev/null; then
-            echo "  Killing orphan Tradovate Paper agent (PID: $OPID)"
-            kill "$OPID" 2>/dev/null || true
-            sleep 1
+        echo "  Killing orphan agent (PID: $OPID)"
+        kill "$OPID" 2>/dev/null || true
+        sleep 2
+        if ps -p "$OPID" > /dev/null 2>&1; then
             kill -9 "$OPID" 2>/dev/null || true
-            STOPPED=true
         fi
+        STOPPED=true
     done
 
     echo "$STOPPED"
@@ -277,19 +311,29 @@ if ! "$PYTHON_CMD" -c "import pearlalgo" 2>/dev/null; then
     exit 1
 fi
 
-# Kill any stale processes before starting fresh
+# ── Single-instance enforcement: kill ALL agent processes before starting ──
+# Only one agent should ever run on this machine. Kill everything matching
+# pearlalgo.market_agent.main regardless of args (catches relative/absolute paths,
+# manual starts, orphans from crashed restarts, etc.)
+EXISTING_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
+if [ -n "$EXISTING_PIDS" ]; then
+    echo "  Stopping existing agent process(es): $EXISTING_PIDS"
+    kill $EXISTING_PIDS 2>/dev/null || true
+    sleep 3
+    # Force-kill any survivors
+    for EPID in $EXISTING_PIDS; do
+        if ps -p "$EPID" > /dev/null 2>&1; then
+            echo "  Force killing $EPID"
+            kill -9 "$EPID" 2>/dev/null || true
+        fi
+    done
+    sleep 1
+fi
+
+# Kill any stale processes on our API port
 kill_port_holders "$API_PORT"
 
-# Check for stale PID
-if [ -f "$PID_FILE" ]; then
-    PID=$(cat "$PID_FILE")
-    if ps -p "$PID" > /dev/null 2>&1; then
-        echo "Tradovate Paper agent already running (PID: $PID). Use 'restart' to replace."
-        exit 1
-    else
-        rm -f "$PID_FILE"
-    fi
-fi
+rm -f "$PID_FILE"
 rm -f "$API_PID_FILE"
 
 echo "Starting Tradovate Paper Instance"
