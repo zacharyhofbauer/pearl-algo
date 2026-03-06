@@ -18,7 +18,7 @@ import * as stores from '@/stores'
 // Mock apiFetch
 jest.mock('@/lib/api', () => ({
   apiFetch: jest.fn(),
-  getApiUrl: jest.fn(() => 'http://localhost:8000'),
+  getApiUrl: jest.fn(() => 'http://localhost:8001'),
 }))
 
 // Mock stores

@@ -33,7 +33,7 @@ cd /path/to/PearlAlgoProject
 **What happens:**
 - Starts Gateway headlessly (no GUI needed)
 - Authenticates automatically
-- API available on port 4002
+- API available on port 4001
 - Takes 30-60 seconds to fully start
 
 ## 🛑 Stop Gateway
@@ -57,7 +57,7 @@ cd /path/to/PearlAlgoProject
 
 **Shows:**
 - ✅/❌ Gateway process running
-- ✅/❌ API port 4002 listening
+- ✅/❌ API port 4001 listening
 - Latest log file location
 
 ## 📊 VNC Server Operations
@@ -107,7 +107,7 @@ ssh <user>@<server> "./scripts/gateway/gateway.sh tws-conflict"
 ssh <user>@<server> "tail -20 $PEARLALGO_IBKR_HOME/ibc/logs/ibc-*.txt | grep -i '2fa\\|authentication'"
 
 # Check if API port is ready
-ssh <user>@<server> "ss -tuln | grep 4002"
+ssh <user>@<server> "ss -tuln | grep 4001"
 ```
 
 #### Method 4: Direct command execution (via SSH; targets VNC display)
@@ -126,7 +126,7 @@ cd /path/to/PearlAlgoProject
 Then verify Gateway readiness from your main terminal:
 
 ```bash
-ss -tuln | grep 4002
+ss -tuln | grep 4001
 ```
 
 ## 🔧 Manual Gateway Login (VNC - Only if Headless Fails)
@@ -164,7 +164,7 @@ tail -f $PEARLALGO_IBKR_HOME/ibc/logs/gateway_*.log
 pgrep -f "java.*IBC.jar" && echo "✅ Running" || echo "❌ Not running"
 
 # API port listening?
-ss -tuln | grep 4002 && echo "✅ Port 4002 listening" || echo "❌ Not listening"
+ss -tuln | grep 4001 && echo "✅ Port 4001 listening" || echo "❌ Not listening"
 
 # VNC running?
 ss -tuln | grep 5901 && echo "✅ VNC running" || echo "❌ Not running"

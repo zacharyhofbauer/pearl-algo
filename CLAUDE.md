@@ -62,6 +62,8 @@
 | `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
 | `config/base.yaml` | Base configuration |
 | `config/accounts/tradovate_paper.yaml` | Account-specific overrides |
+| `pearlalgo_web_app/` | Next.js web dashboard (standalone mode, port 3001) |
+| `src/pearlalgo/api/server.py` | FastAPI API server (port 8001) |
 
 ## Data Insights (from 922-trade analysis)
 

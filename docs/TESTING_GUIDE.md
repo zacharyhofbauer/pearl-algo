@@ -680,12 +680,12 @@ config.get("foo", default_value)
 
 **Possible Causes:**
 1. IB Gateway not running
-2. Port 4002 not accessible
+2. Port 4001 not accessible
 3. Network issues
 
 **Solutions:**
 1. Start IB Gateway: `./scripts/gateway/gateway.sh start`
-2. Check port: `netstat -tlnp | grep 4002`
+2. Check port: `netstat -tlnp | grep 4001`
 3. Verify connection: `./scripts/gateway/gateway.sh status`
 
 ### Telegram Notifications Not Working

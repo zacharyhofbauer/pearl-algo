@@ -95,7 +95,7 @@ The MNQ Trading Agent is designed to:
          ↓                    ↓                    ↓
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │ IBKR Gateway │    │ State Files  │    │ Telegram API │
-│  (Port 4002) │    │ (JSON/JSONL) │    │   (Cloud)    │
+│  (Port 4001) │    │ (JSON/JSONL) │    │   (Cloud)    │
 └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
@@ -447,7 +447,7 @@ Periodic Updates:
 ### 3. Data Provider Flow
 
 ```
-IBKR Gateway (Port 4002)
+IBKR Gateway (Port 4001)
   ↓
 IBKR Executor (Thread-safe)
   ↓
@@ -506,7 +506,7 @@ Signal Count Incremented
 
 ### External Services
 
-- **IBKR Gateway**: Interactive Brokers Gateway (headless, port 4002)
+- **IBKR Gateway**: Interactive Brokers Gateway (headless, port 4001)
 - **Telegram Bot API**: Cloud-based messaging service
 
 ---
@@ -752,7 +752,7 @@ Create `.env` file in project root:
 ```bash
 # IBKR Connection
 IBKR_HOST=127.0.0.1
-IBKR_PORT=4002
+IBKR_PORT=4001
 IBKR_CLIENT_ID=10
 IBKR_DATA_CLIENT_ID=11
 

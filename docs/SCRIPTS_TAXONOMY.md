@@ -137,9 +137,9 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
 - Chart auto-builds if no production build exists
 
 **Components:**
-- `scripts/pearlalgo_web_app/api_server.py`
+- `src/pearlalgo/api/server.py`
   - **Role**: FastAPI server providing OHLCV data, agent state, indicators, and trades to the chart frontend.
-  - **Port**: 8000 (default)
+  - **Port**: 8001 (Tradovate Paper — the only active account)
   - **Endpoints**: `/api/candles`, `/api/indicators`, `/api/markers`, `/api/state`, `/api/trades`, `/api/analytics`, `/api/market-status`, `/ws`, `/health`
 - `pearlalgo_web_app/`
   - **Role**: Next.js 14 frontend with TypeScript, Zustand state management, and WebSocket real-time updates.

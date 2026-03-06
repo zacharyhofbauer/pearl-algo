@@ -264,7 +264,9 @@ Confidence scoring: base 0.5 + additive boosts from each confirming indicator. R
 
 ```bash
 cd pearlalgo_web_app && npm run dev   # Development
-cd pearlalgo_web_app && npm run build && npm start  # Production
+cd pearlalgo_web_app && NODE_OPTIONS="--max-old-space-size=4096" npm run build  # Build
+cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public  # Copy assets
+node .next/standalone/server.js  # Production (or use systemd: sudo systemctl restart pearlalgo-webapp)
 ```
 
 ### Testing
@@ -290,21 +292,15 @@ make ci        # All CI checks
 
 ---
 
-## Current State (as of Feb 18, 2026)
+## Current State (as of Mar 6, 2026)
 
 ### Branch: `master`
 
-### Uncommitted changes
+### Recent changes
 
-**`src/pearlalgo/market_agent/virtual_trade_manager.py`** (+14 lines) — Fixes a bug where "entered" records in the append-only JSONL may lack the `signal` key (which contains TP/SL levels). The fix:
-
-1. Builds a `signal_id → signal data` lookup map from "generated" records that DO have the signal key
-2. Merges missing signal data into "entered" records before exit processing
-3. Adds a warning log when `stop` or `target` are zero (indicating missing signal data)
-
-### Recent commit activity
-
-Recent work has focused on web app UI enhancements (landing page, dashboard, navbar, account strip, PWA support), Telegram integration improvements, and configuration refactoring for multi-account support (Tradovate Paper + IBKR Virtual).
+- **Web app production upgrade (Mar 6)**: Fixed default API port (8000→8001), added CSP/HSTS security headers, switched systemd service to standalone server.js, added Cloudflare tunnel `/ws` WebSocket route, rebuilt production bundle
+- **Bug fixes (Mar 6)**: Signal record lookup, regime key name, startup notification tier, duplicate process prevention
+- **Process management**: All services managed by systemd (`pearlalgo-agent`, `pearlalgo-api`, `pearlalgo-telegram`, `pearlalgo-webapp`, `cloudflared-pearlalgo`). IBKR gateway is NOT systemd-managed.
 
 ---
 

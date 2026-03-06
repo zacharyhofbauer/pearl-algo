@@ -384,7 +384,7 @@ class TestCandlesEndpoint:
 
     def test_candles_returns_503_when_no_data(self, client, _patch_globals):
         """When no provider and no cache exist, return 503."""
-        with patch.dict(_server_impl._candle_cache, {}, clear=True):
+        with patch.dict(_server_impl._candle_cache, {}, clear=True),              patch.object(_server_impl, "_load_candle_cache", return_value=None):
             resp = client.get("/api/candles?symbol=MNQ&timeframe=5m&bars=72")
         assert resp.status_code == 503
         body = resp.json()

@@ -57,7 +57,7 @@ from pearlalgo.utils.health_evaluator import HealthEvaluator, HealthStatus
 # ---------------------------------------------------------------------------
 # Configuration defaults
 # ---------------------------------------------------------------------------
-API_URL = os.getenv("PEARL_API_URL", "http://localhost:8000")
+API_URL = os.getenv("PEARL_API_URL", "http://localhost:8001")
 WEBAPP_URL = os.getenv("PEARL_WEBAPP_URL", "http://localhost:3001")
 STALE_THRESHOLD_MINUTES = 15
 

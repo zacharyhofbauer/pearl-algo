@@ -191,9 +191,9 @@ The Tradovate Paper agent uses dedicated IBKR client IDs for market data:
 
 | Service | Client ID | Gateway Port |
 |---------|-----------|--------------|
-| Tradovate Paper agent (trading) | 50 | 4002 |
-| Tradovate Paper agent (data) | 51 | 4002 |
-| Tradovate Paper chart API | 97 | 4002 |
+| Tradovate Paper agent (trading) | 50 | 4001 |
+| Tradovate Paper agent (data) | 51 | 4001 |
+| Tradovate Paper chart API | 97 | 4001 |
 
 > **Historical:** IBKR Virtual previously used client IDs 10/11/96. These are now free for reuse.
 

@@ -31,8 +31,8 @@ node --version  # v20.x.x
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌─────────────┐
 │  Next.js        │◄────►│  FastAPI Server  │◄─────┤ IBKR        │
-│  Frontend       │  WS  │  (Port 8000)     │      │ Gateway     │
-│  (Port 3001)    │      │                  │      │ (Port 4002) │
+│  Frontend       │  WS  │  (Port 8001)     │      │ Gateway     │
+│  (Port 3001)    │      │                  │      │ (Port 4001) │
 └─────────────────┘      └──────────────────┘      └─────────────┘
         │                         │
         ▼                         ▼
@@ -69,8 +69,8 @@ node --version  # v20.x.x
 
 ## Components
 
-### 1. FastAPI API Server (`scripts/pearlalgo_web_app/api_server.py`)
-- **Port**: 8000 (default)
+### 1. FastAPI API Server (`src/pearlalgo/api/server.py`)
+- **Port**: 8001 (Tradovate Paper — the only active account)
 - **IBKR Client ID**: 96 (configurable via `IB_CLIENT_ID_LIVE_CHART`)
 - **Auth**: Enabled by default (`PEARL_API_AUTH_ENABLED=true`). Set `PEARL_API_AUTH_ENABLED=false` to disable for local dev.
 - **Rate limiting**: Operator endpoints (`/api/kill-switch`, `/api/close-all-trades`, `/api/close-trade`) are rate-limited to 5 requests per 60 seconds.
@@ -280,7 +280,7 @@ See cloudflared tunnel setup documentation for details.
 |----------|---------|-------------|
 | `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL for Playwright screenshot capture |
 | `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL shown as "📈 Live" button |
-| `PEARL_API_PORT` | `8000` | API server port |
+| `PEARL_API_PORT` | `8001` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
 | `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | CORS origins for API (comma-separated) |
 | `PEARL_WEBAPP_AUTH_ENABLED` | `false` | Enable passcode-gated access to the Next.js dashboard |
@@ -313,7 +313,7 @@ npm run test:coverage # With coverage
 Ensure:
 1. Market Agent is running (`./pearl.sh status`)
 2. IBKR Gateway is connected (`./pearl.sh gateway status`)
-3. API server is running (check `http://localhost:8000/health`)
+3. API server is running (check `http://localhost:8001/health`)
 
 ### API returns "Missing API key"
 1. Set `PEARL_API_KEY` in your local secrets file (for example, $HOME/.config/pearlalgo/secrets.env)
@@ -322,10 +322,10 @@ Ensure:
 
 ### WebSocket not connecting
 1. Check API server logs for WebSocket errors
-2. Verify port 8000 is accessible
+2. Verify port 8001 is accessible
 3. Check browser console for connection errors
 
 ---
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-03-06
 **Maintainer**: PEARLalgo Development Team

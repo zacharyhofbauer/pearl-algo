@@ -33,7 +33,7 @@ function shouldAttachOperatorHeader(path: string): boolean {
  * Priority:
  * 1. NEXT_PUBLIC_API_URL environment variable
  * 2. ?api_port=XXXX URL parameter (for testing)
- * 3. Relative URLs on public domains, localhost:8000 for local dev
+ * 3. Relative URLs on public domains, localhost:8001 for local dev
  */
 export function getApiUrl(): string {
   // Check for environment variable override first
@@ -67,7 +67,7 @@ export function getApiUrl(): string {
     return `${protocol}//${hostname}:${apiPort}`
   }
 
-  // Default: relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
+  // Default: relative URLs on public domain (pearlalgo.io), localhost:8001 for local dev
   return isLocal ? 'http://localhost:8001' : ''
 }
 

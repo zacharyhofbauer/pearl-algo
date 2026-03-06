@@ -21,7 +21,7 @@
 ./scripts/lifecycle/tv_paper_eval.sh status
 
 # 4. View dashboard
-#    http://localhost:3000?api_port=8001
+#    http://localhost:3001?account=tv_paper
 
 # 5. Stop
 ./scripts/lifecycle/tv_paper_eval.sh stop
@@ -272,8 +272,8 @@ http://localhost:3001                        # Web app
 http://localhost:3001?account=tv_paper           # Tradovate Paper dashboard
 
 # Public
-https://pearlalgo.io                         # IBKR Virtual
-https://pearlalgo.io/?account=tv_paper           # Tradovate Paper
+https://pearlalgo.io                         # Landing page
+https://pearlalgo.io/?account=tv_paper           # Tradovate Paper dashboard
 ```
 
 Account selection is via URL parameter (`?account=tv_paper`). The landing page provides links to each account.
@@ -357,12 +357,12 @@ tail -f logs/web_app.log           # Next.js
 
 | Service | Client ID | Port |
 |---------|-----------|------|
-| IBKR Virtual agent (trading) | 10 | 4002 |
-| IBKR Virtual agent (data) | 11 | 4002 |
-| IBKR Virtual chart API | 96 | 4002 |
-| Tradovate Paper agent (trading) | 50 | 4002 |
-| Tradovate Paper agent (data) | 51 | 4002 |
-| Tradovate Paper chart API | 97 | 4002 |
+| IBKR Virtual agent (trading) | 10 | 4001 |
+| IBKR Virtual agent (data) | 11 | 4001 |
+| IBKR Virtual chart API | 96 | 4001 |
+| Tradovate Paper agent (trading) | 50 | 4001 |
+| Tradovate Paper agent (data) | 51 | 4001 |
+| Tradovate Paper chart API | 97 | 4001 |
 
 ### Key Code Files
 
@@ -424,7 +424,7 @@ Key `.env` variables:
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 IBKR_HOST=127.0.0.1
-IBKR_PORT=4002
+IBKR_PORT=4001
 IBKR_CLIENT_ID=10
 IBKR_DATA_CLIENT_ID=11
 IB_CLIENT_ID_LIVE_CHART=96

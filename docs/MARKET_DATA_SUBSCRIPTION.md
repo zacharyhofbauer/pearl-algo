@@ -39,13 +39,13 @@ From the repo root:
 You should see:
 
 - Gateway process **RUNNING**
-- API port **4002 LISTENING**
+- API port **4001 LISTENING**
 
 ### 3) Confirm you are using the intended port / client IDs
 
 Canonical defaults (see `docs/PROJECT_SUMMARY.md`):
 
-- `IBKR_PORT=4002`
+- `IBKR_PORT=4001`
 - `IBKR_CLIENT_ID=10`
 - `IBKR_DATA_CLIENT_ID=11`
 

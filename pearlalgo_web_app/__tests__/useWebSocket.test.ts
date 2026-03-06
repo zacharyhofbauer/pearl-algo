@@ -59,7 +59,7 @@ afterEach(() => {
 // -- useWebSocket hook --
 
 describe('useWebSocket hook', () => {
-  const TEST_URL = 'ws://localhost:8000/ws'
+  const TEST_URL = 'ws://localhost:8001/ws'
 
   describe('connection establishment', () => {
     it('should create a WebSocket connection with the given URL', () => {
@@ -503,7 +503,7 @@ describe('useWebSocket hook', () => {
     it('should correctly count multiple reconnect attempts without stale closure', () => {
       const { result } = renderHook(() =>
         useWebSocket({
-          url: 'ws://localhost:8000/ws',
+          url: 'ws://localhost:8001/ws',
           reconnect: true,
           reconnectInterval: 100,
           maxReconnectAttempts: 5,
@@ -543,7 +543,7 @@ describe('useWebSocket hook', () => {
     it('should stop reconnecting after maxReconnectAttempts', () => {
       const { result } = renderHook(() =>
         useWebSocket({
-          url: 'ws://localhost:8000/ws',
+          url: 'ws://localhost:8001/ws',
           reconnect: true,
           reconnectInterval: 50,
           maxReconnectAttempts: 2,
@@ -574,7 +574,7 @@ describe('useWebSocket hook', () => {
     it('should reset reconnectAttempts on manual reconnect()', () => {
       const { result } = renderHook(() =>
         useWebSocket({
-          url: 'ws://localhost:8000/ws',
+          url: 'ws://localhost:8001/ws',
           reconnect: true,
           reconnectInterval: 50,
           maxReconnectAttempts: 10,

@@ -9,7 +9,7 @@ Endpoints:
   GET /health - Health check
 
 Usage:
-  python scripts/pearlalgo_web_app/api_server.py --market NQ --port 8000
+  python -m pearlalgo.api.server --port 8001
 """
 
 from __future__ import annotations

@@ -127,7 +127,7 @@ Query the full event log with filters.
 
 ```bash
 curl -H "X-API-Key: $PEARL_API_KEY" \
-  "http://localhost:8000/api/audit/events?account=tv_paper&event_type=trade_entry&start=2026-02-01T00:00:00Z&limit=50"
+  "http://localhost:8001/api/audit/events?account=tv_paper&event_type=trade_entry&start=2026-02-01T00:00:00Z&limit=50"
 ```
 
 ### GET /api/audit/equity-history
