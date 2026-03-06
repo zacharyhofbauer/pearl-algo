@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # Import here to avoid circular imports during module load
     ib_host: str = "127.0.0.1"  # See config.defaults.IBKR_HOST
     # Default to IB Gateway paper port; TWS default is 7497.
-    ib_port: int = 4002  # See config.defaults.IBKR_PORT
+    ib_port: int = 4001  # See config.defaults.IBKR_PORT
     ib_client_id: int = 1  # See config.defaults.IBKR_CLIENT_ID
     # Optional separate client id for market data to avoid clashes with brokers/orders.
     ib_data_client_id: int | None = None
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
             if port_str:
                 kwargs["ib_port"] = int(port_str)
             elif "ib_port" not in kwargs:
-                kwargs["ib_port"] = 4002
+                kwargs["ib_port"] = 4001
 
         if "ib_client_id" not in kwargs:
             client_id_str = (

@@ -62,7 +62,7 @@ async def smoke_test():
     
     # Auto-detect port by probing which one is actually open.
     # This overrides .env if the configured port isn't reachable.
-    configured_port = os.getenv("IBKR_PORT") or os.getenv("PEARLALGO_IB_PORT") or "4002"
+    configured_port = os.getenv("IBKR_PORT") or os.getenv("PEARLALGO_IB_PORT") or "4001"
     if not _is_port_open("127.0.0.1", int(configured_port)):
         # Configured port not open - try common alternatives
         if _is_port_open("127.0.0.1", 4001):

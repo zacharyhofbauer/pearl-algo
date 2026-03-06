@@ -61,7 +61,7 @@ def mock_settings():
     """Lightweight mock of Settings (only the fields IBKRProvider reads)."""
     s = MagicMock()
     s.ib_host = "127.0.0.1"
-    s.ib_port = 4002
+    s.ib_port = 4001
     s.ib_data_client_id = 10
     s.ib_client_id = 1
     return s
@@ -77,7 +77,7 @@ def ibkr_provider(mock_settings, mock_executor):
         provider = IBKRProvider(
             settings=mock_settings,
             host="127.0.0.1",
-            port=4002,
+            port=4001,
             client_id=10,
         )
     return provider

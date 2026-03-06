@@ -32,7 +32,7 @@ from __future__ import annotations
 # =============================================================================
 
 IBKR_HOST: str = "127.0.0.1"
-IBKR_PORT: int = 4002
+IBKR_PORT: int = 4001
 IBKR_CLIENT_ID: int = 1
 IBKR_TRADING_CLIENT_ID: int = 20
 IBKR_LIVE_CHART_CLIENT_ID: int = 99

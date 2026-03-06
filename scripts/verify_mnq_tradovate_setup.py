@@ -90,7 +90,7 @@ def main() -> int:
     # 6. Optional: Gateway port (must match Gateway's actual API port)
     ibkr_port = exec_cfg.get("ibkr_port")
     if ibkr_port is None:
-        ibkr_port = int(os.getenv("IBKR_PORT", "4002"))
+        ibkr_port = int(os.getenv("IBKR_PORT", "4001"))
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

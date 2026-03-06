@@ -158,8 +158,8 @@ class ServiceController:
             Dictionary with gateway status information
         """
         is_running = self._is_gateway_running()
-        # Use IB_PORT from environment, default to 4002 (matches jts.ini RemotePortOrderRouting)
-        gateway_port = int(os.getenv("IB_PORT", "4002"))
+        # Use IB_PORT from environment, default to 4001 (matches .env and jts.ini)
+        gateway_port = int(os.getenv("IB_PORT", "4001"))
         port_listening = self._is_port_listening(gateway_port)
 
         status = "RUNNING" if is_running else "STOPPED"
@@ -530,9 +530,9 @@ class ServiceController:
             }
 
         # Fallback: port check
-        port_listening = self._is_port_listening(4002)
+        port_listening = self._is_port_listening(4001)
         return {
             "success": port_listening,
             "message": "🟢 API READY" if port_listening else "🔴 API NOT READY",
-            "details": "Checked TCP port 4002",
+            "details": "Checked TCP port 4001",
         }

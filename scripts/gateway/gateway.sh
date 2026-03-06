@@ -79,7 +79,7 @@ IBKR_HOME="${PEARLALGO_IBKR_HOME:-$IBKR_HOME_DEFAULT}"
 IBC_DIR=""
 IBC_LOG_DIR=""
 JTS_DIR=""
-API_PORT="${IBKR_PORT:-4002}"
+API_PORT="${IBKR_PORT:-4001}"
 
 
 _set_ibkr_paths() {
@@ -653,7 +653,7 @@ except ModuleNotFoundError:
     raise SystemExit(2)
 
 ib = IB()
-port = int(os.environ.get("API_PORT", "4002"))
+port = int(os.environ.get("API_PORT", "4001"))
 try:
     print(f"Python: {sys.executable}")
     print(f"Connecting to Gateway at 127.0.0.1:{port}...")

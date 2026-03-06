@@ -575,7 +575,7 @@ def _get_data_provider():
         provider = create_data_provider(
             "ibkr",
             host=os.getenv("IB_HOST", "127.0.0.1"),
-            port=int(os.getenv("IB_PORT", "4002")),
+            port=int(os.getenv("IB_PORT", "4001")),
             client_id=int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "88")),
         )
         _data_provider = provider
@@ -2355,7 +2355,7 @@ def _get_gateway_status_uncached() -> Dict[str, Any]:
     import socket
     import subprocess
 
-    gateway_port = int(os.getenv("IB_PORT", "4002"))
+    gateway_port = int(os.getenv("IB_PORT", "4001"))
     process_running = False
     port_listening = False
 
