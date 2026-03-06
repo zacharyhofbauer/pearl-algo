@@ -336,6 +336,7 @@ class PerformanceTracker:
         exit_price: float,
         exit_reason: str,
         exit_time: Optional[datetime] = None,
+        excursion_data: Optional[Dict] = None,
     ) -> Optional[Dict]:
         """
         Track signal exit and calculate P&L.
@@ -411,6 +412,9 @@ class PerformanceTracker:
         else:
             hold_duration = None
 
+        # Resolve excursion data (MFE/MAE)
+        _exc = excursion_data or {}
+
         performance = {
             "signal_id": signal_id,
             "signal_type": signal.get("type"),
@@ -422,6 +426,10 @@ class PerformanceTracker:
             "exit_reason": exit_reason,
             "hold_duration_minutes": hold_duration,
             "exit_time": exit_time.isoformat(),
+            "max_price": _exc.get("max_price"),
+            "min_price": _exc.get("min_price"),
+            "mfe_points": _exc.get("mfe_points"),
+            "mae_points": _exc.get("mae_points"),
         }
 
         # Update running aggregates incrementally (O(1) — no file scan).
@@ -614,6 +622,10 @@ class PerformanceTracker:
                         volatility_percentile=None,
                         volume_percentile=None,
                         features=features or None,
+                        max_price=_exc.get("max_price"),
+                        min_price=_exc.get("min_price"),
+                        mfe_points=_exc.get("mfe_points"),
+                        mae_points=_exc.get("mae_points"),
                     )
                 else:
                     # Blocking write (legacy/fallback)
@@ -637,6 +649,10 @@ class PerformanceTracker:
                         volatility_percentile=None,
                         volume_percentile=None,
                         features=features or None,
+                        max_price=_exc.get("max_price"),
+                        min_price=_exc.get("min_price"),
+                        mfe_points=_exc.get("mfe_points"),
+                        mae_points=_exc.get("mae_points"),
                     )
         except Exception as e:
             ErrorHandler.log_and_continue(

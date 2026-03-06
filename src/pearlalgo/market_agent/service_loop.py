@@ -528,6 +528,22 @@ class ServiceLoopMixin:
                             )
                         except Exception as e:
                             logger.debug(f"Non-critical: {e}")
+                        # Record regime snapshot for analysis
+                        try:
+                            regime_data = signal_obj.get('market_regime') or {}
+                            if isinstance(regime_data, dict) and regime_data.get('regime'):
+                                if getattr(self, '_async_writes_enabled', False) and getattr(self, '_async_sqlite_queue', None):
+                                    from pearlalgo.storage.async_sqlite_queue import WritePriority
+                                    self._async_sqlite_queue.enqueue(
+                                        'add_regime_snapshot',
+                                        priority=WritePriority.LOW,
+                                        regime=str(regime_data.get('regime', '')),
+                                        confidence=float(regime_data.get('confidence', 0)),
+                                        volatility_percentile=float(regime_data.get('volatility_percentile', 0)) if regime_data.get('volatility_percentile') else None,
+                                        trend_strength=float(regime_data.get('trend_strength', 0)) if regime_data.get('trend_strength') else None,
+                                    )
+                        except Exception:
+                            pass
                         if self._signal_follower_mode:
                             # Follower: use streamlined path (skips ML/bandit)
                             await self._signal_handler.follower_execute(signal_obj)
@@ -536,6 +552,12 @@ class ServiceLoopMixin:
                         self._sync_signal_handler_counters()
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
+
+                # Monitor open position: log unrealized P&L, distance to stop/TP, MFE/MAE
+                try:
+                    self._monitor_open_position(market_data)
+                except Exception as e:
+                    logger.debug(f"Position monitor (non-fatal): {e}")
 
                 # Virtual PnL lifecycle: exit signals when TP/SL is touched (no Telegram spam).
                 # This grades signal quality without auto-trading.
@@ -553,8 +575,12 @@ class ServiceLoopMixin:
                 # Send periodic dashboard (replaces status + heartbeat)
                 # Determine quiet reason (for observability) and capture diagnostics every cycle (for SQLite rollups).
                 quiet_reason = "Active" if signals else self._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                # Capture cycle diagnostics for SQLite observability
+                signal_diagnostics_raw = {
+                    "raw_signals": len(signals) if signals else 0,
+                    "actionable_signals": len(signals) if signals else 0,
+                }
                 signal_diagnostics = None
-                signal_diagnostics_raw = None
 
                 # Persist to instance variables for _save_state() (surfaced in /status)
                 self._last_quiet_reason = quiet_reason

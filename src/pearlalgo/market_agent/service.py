@@ -828,6 +828,118 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             signal, base_size=base_size, risk_settings=self._risk_settings
         )
 
+    def _monitor_open_position(self, market_data: Dict) -> None:
+        """Log real-time metrics for open positions: unrealized P&L, distance to stop/TP, MFE/MAE."""
+        if self.execution_adapter is None:
+            return
+
+        # Get broker positions from adapter cache OR virtual positions from signals
+        positions = getattr(self.execution_adapter, '_live_positions', {})
+        if not positions:
+            # Fallback: check virtual positions (signals.jsonl status=entered)
+            try:
+                active = self.virtual_trade_manager.position_tracker.get_active_virtual_trades(limit=5)
+                if active:
+                    # Synthesize a position-like dict from the active signal
+                    for sig_rec in active:
+                        sig = sig_rec.get('signal') or sig_rec or {}
+                        d = str(sig.get('direction') or 'long').lower()
+                        ep = float(sig.get('entry_price') or 0)
+                        if ep > 0:
+                            positions = {'virtual': {
+                                'net_pos': 1 if d == 'long' else -1,
+                                'net_price': ep,
+                            }}
+                            break
+            except Exception:
+                pass
+        if not positions:
+            # No open position — reset monitor state
+            if getattr(self, '_pos_monitor', None):
+                self._pos_monitor = None
+            return
+
+        # Get current price from market data
+        latest_bar = market_data.get('latest_bar') or {}
+        current_price = float(latest_bar.get('close') or latest_bar.get('last') or 0)
+        if current_price <= 0:
+            return
+
+        for _cid, pos_info in positions.items():
+            net_pos = pos_info.get('net_pos', 0)
+            if net_pos == 0:
+                continue
+
+            direction = 'long' if net_pos > 0 else 'short'
+            entry_price = float(pos_info.get('net_price', 0))
+            if entry_price <= 0:
+                continue
+
+            # Initialize or update monitor state
+            if not getattr(self, '_pos_monitor', None) or self._pos_monitor.get('entry_price') != entry_price:
+                self._pos_monitor = {
+                    'entry_price': entry_price,
+                    'direction': direction,
+                    'max_price': current_price,
+                    'min_price': current_price,
+                    'entry_time': datetime.now(timezone.utc),
+                    'log_counter': 0,
+                }
+
+            mon = self._pos_monitor
+            mon['max_price'] = max(mon['max_price'], current_price)
+            mon['min_price'] = min(mon['min_price'], current_price)
+
+            # Compute unrealized P&L
+            if direction == 'long':
+                unrealized_pnl = (current_price - entry_price) * 2.0 * abs(net_pos)  # MNQ /pt
+                mfe = mon['max_price'] - entry_price
+                mae = entry_price - mon['min_price']
+            else:
+                unrealized_pnl = (entry_price - current_price) * 2.0 * abs(net_pos)
+                mfe = entry_price - mon['min_price']
+                mae = mon['max_price'] - entry_price
+
+            # Find stop/TP from active signals via virtual trade manager
+            stop_price = 0.0
+            tp_price = 0.0
+            try:
+                active = self.virtual_trade_manager.position_tracker.get_active_virtual_trades(limit=5)
+                for sig_rec in (active or []):
+                    sig = sig_rec.get('signal') or sig_rec or {}
+                    if sig.get('direction', '').lower() == direction:
+                        stop_price = float(sig.get('stop_loss') or 0)
+                        tp_price = float(sig.get('take_profit') or 0)
+                        break
+            except Exception:
+                pass
+
+            hold_secs = (datetime.now(timezone.utc) - mon['entry_time']).total_seconds()
+            hold_min = hold_secs / 60.0
+
+            # Log every 4th cycle (~60s at 15s cadence) to avoid spam
+            mon['log_counter'] = mon.get('log_counter', 0) + 1
+            if mon['log_counter'] % 4 == 1:
+                dist_stop = ''
+                dist_tp = ''
+                if stop_price > 0:
+                    if direction == 'long':
+                        dist_stop = f" | dist_stop={current_price - stop_price:.2f}pts"
+                    else:
+                        dist_stop = f" | dist_stop={stop_price - current_price:.2f}pts"
+                if tp_price > 0:
+                    if direction == 'long':
+                        dist_tp = f" | dist_tp={tp_price - current_price:.2f}pts"
+                    else:
+                        dist_tp = f" | dist_tp={current_price - tp_price:.2f}pts"
+
+                logger.info(
+                    f"📊 POSITION: {direction.upper()} {abs(net_pos)}x @ {entry_price:.2f} | "
+                    f"now={current_price:.2f} | PnL=${unrealized_pnl:.2f} | "
+                    f"MFE={mfe:.2f}pts MAE={mae:.2f}pts | hold={hold_min:.1f}min"
+                    f"{dist_stop}{dist_tp}"
+                )
+
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """Delegate to VirtualTradeManager (extracted for testability)."""
         self.virtual_trade_manager.process_exits(market_data)

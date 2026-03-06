@@ -228,64 +228,42 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             active_broker_positions = [
                 p for p in broker_positions if p.get("net_pos", 0) != 0
             ]
-            max_net_positions = getattr(self.config, "max_positions", 1)
+            max_net_positions = getattr(self.config, "max_positions", 5)
 
-            # Block if at max broker positions
-            if len(active_broker_positions) >= max_net_positions:
-                existing_dir = "long" if active_broker_positions[0].get("net_pos", 0) > 0 else "short"
-                if existing_dir == direction:
+            # Compute total absolute position size across all contracts
+            total_abs_pos = sum(abs(p.get("net_pos", 0)) for p in active_broker_positions)
+
+            for pos in active_broker_positions:
+                net_pos = pos.get("net_pos", 0)
+                if net_pos == 0:
+                    continue
+                existing_dir = "long" if net_pos > 0 else "short"
+
+                # Block opposite-direction orders while in a position
+                if existing_dir != direction:
                     logger.info(
-                        f"Broker position guard: already at max ({max_net_positions}) "
-                        f"positions in {existing_dir} direction, skipping {signal_id}"
+                        f"Broker position guard: existing {existing_dir} position (net={net_pos}), "
+                        f"blocking {direction} order for {signal_id}"
                     )
                     return ExecutionResult(
                         success=False,
                         status=OrderStatus.REJECTED,
                         signal_id=signal_id,
-                        error_message=f"max_broker_positions ({max_net_positions}) reached",
+                        error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
                     )
 
-            # Close-and-reverse: flatten opposite positions before placing new bracket
-            for pos in active_broker_positions:
-                net_pos = pos.get("net_pos", 0)
-                existing_dir = "long" if net_pos > 0 else "short"
-                if existing_dir != direction:
-                    logger.info(
-                        f"Close-and-reverse: closing {existing_dir} position "
-                        f"to open {direction} for {signal_id}"
-                    )
-                    try:
-                        # Cancel existing bracket orders first
-                        for oid in list(self._open_orders.keys()):
-                            try:
-                                await self._client.cancel_order(int(oid))
-                            except Exception:
-                                pass
-                        self._open_orders.clear()
-
-                        # Close the opposite position with a market order
-                        close_action = "Sell" if net_pos > 0 else "Buy"
-                        close_qty = abs(net_pos)
-                        await self._client.place_order(
-                            symbol=self._contract_symbol,
-                            action=close_action,
-                            order_qty=close_qty,
-                            order_type="Market",
-                        )
-                        logger.info(
-                            f"Close-and-reverse: {close_action} {close_qty} to flatten "
-                            f"{existing_dir}, now placing {direction} bracket"
-                        )
-                        # Brief pause for fill propagation
-                        await asyncio.sleep(0.5)
-                    except Exception as rev_e:
-                        logger.error(f"Close-and-reverse failed: {rev_e}", exc_info=True)
-                        return ExecutionResult(
-                            success=False,
-                            status=OrderStatus.ERROR,
-                            signal_id=signal_id,
-                            error_message=f"close_and_reverse_failed: {rev_e}",
-                        )
+            # Block if total contracts >= max (uses abs(net_pos), not len())
+            if total_abs_pos >= max_net_positions:
+                logger.info(
+                    f"Broker position guard: total position size {total_abs_pos} >= max {max_net_positions}, "
+                    f"blocking {signal_id}"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"max_position_size ({total_abs_pos}/{max_net_positions}) reached",
+                )
         except Exception as e:
             logger.warning(f"Broker position guard check failed (non-fatal): {e}")
 

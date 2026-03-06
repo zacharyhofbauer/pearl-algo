@@ -213,8 +213,25 @@ class TradeDatabase:
                 )
             """)
             
+            # MFE/MAE columns (safe migration for existing DBs)
+            for col, col_type in [
+                ("max_price", "REAL"),
+                ("min_price", "REAL"),
+                ("mfe_points", "REAL"),
+                ("mae_points", "REAL"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass  # Column already exists
+
             # Indices for common queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_signal_type ON trades(signal_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_direction ON trades(direction)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_exit_reason ON trades(exit_reason)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_mfe_points ON trades(mfe_points)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_mae_points ON trades(mae_points)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_hold_duration ON trades(hold_duration_minutes)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_regime ON trades(regime)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_entry_time ON trades(entry_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_is_win ON trades(is_win)")
@@ -751,10 +768,14 @@ class TradeDatabase:
         volatility_percentile: Optional[float] = None,
         volume_percentile: Optional[float] = None,
         features: Optional[Dict[str, float]] = None,
+        max_price: Optional[float] = None,
+        min_price: Optional[float] = None,
+        mfe_points: Optional[float] = None,
+        mae_points: Optional[float] = None,
     ) -> None:
         """
         Add a completed trade to the database.
-        
+
         Args:
             trade_id: Unique trade identifier
             signal_id: Signal that generated this trade
@@ -775,12 +796,16 @@ class TradeDatabase:
             volatility_percentile: Volatility at entry
             volume_percentile: Volume at entry
             features: Feature dictionary at signal time
+            max_price: Highest price during hold period
+            min_price: Lowest price during hold period
+            mfe_points: Max favorable excursion in points
+            mae_points: Max adverse excursion in points
         """
         features_json = json.dumps(features) if features else None
-        
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 INSERT OR REPLACE INTO trades (
                     trade_id, signal_id, signal_type, direction,
@@ -788,8 +813,9 @@ class TradeDatabase:
                     pnl, is_win, exit_reason,
                     entry_time, exit_time, hold_duration_minutes,
                     regime, context_key, volatility_percentile, volume_percentile,
-                    features_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    features_json, created_at,
+                    max_price, min_price, mfe_points, mae_points
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 trade_id, signal_id, signal_type, direction,
                 entry_price, exit_price, stop_loss, take_profit,
@@ -797,6 +823,7 @@ class TradeDatabase:
                 entry_time, exit_time, hold_duration_minutes,
                 regime, context_key, volatility_percentile, volume_percentile,
                 features_json, datetime.now(timezone.utc).isoformat(),
+                max_price, min_price, mfe_points, mae_points,
             ))
             
             # Add features to features table for analysis (bulk insert)
@@ -1203,8 +1230,229 @@ class TradeDatabase:
                 }
             )
         return out
+    # ==================================================================
+    # Advanced Analysis Methods (for agent consumption)
+    # ==================================================================
 
+    def get_excursion_analysis(self, *, days: Optional[int] = None, direction: Optional[str] = None) -> Dict[str, Any]:
+        """MFE/MAE analysis for evaluating stop/TP placement."""
+        where_clauses = ["mfe_points IS NOT NULL"]
+        params: list = []
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            where_clauses.append("exit_time >= ?")
+            params.append(cutoff)
+        if direction:
+            where_clauses.append("direction = ?")
+            params.append(direction)
+        where = " AND ".join(where_clauses)
 
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
+            # Overall MFE/MAE stats
+            cursor.execute(f"""
+                SELECT
+                    COUNT(*) as total,
+                    AVG(mfe_points) as avg_mfe,
+                    AVG(mae_points) as avg_mae,
+                    MAX(mfe_points) as max_mfe,
+                    MAX(mae_points) as max_mae,
+                    AVG(CASE WHEN is_win=1 THEN mfe_points END) as avg_mfe_winners,
+                    AVG(CASE WHEN is_win=0 THEN mfe_points END) as avg_mfe_losers,
+                    AVG(CASE WHEN is_win=1 THEN mae_points END) as avg_mae_winners,
+                    AVG(CASE WHEN is_win=0 THEN mae_points END) as avg_mae_losers,
+                    AVG(max_price) as avg_max_price,
+                    AVG(min_price) as avg_min_price
+                FROM trades WHERE {where}
+            """, params)
+            row = cursor.fetchone()
+
+            # Losers that had enough MFE to be winners (TP too far)
+            cursor.execute(f"""
+                SELECT COUNT(*) as count, AVG(mfe_points) as avg_mfe, AVG(pnl) as avg_pnl
+                FROM trades
+                WHERE {where} AND is_win=0 AND mfe_points > mae_points
+            """, params)
+            losers_with_mfe = cursor.fetchone()
+
+            # Winners MFE utilization (how much of MFE did TP capture)
+            cursor.execute(f"""
+                SELECT
+                    AVG(CASE WHEN direction='long'
+                        THEN (exit_price - entry_price) / NULLIF(mfe_points, 0)
+                        ELSE (entry_price - exit_price) / NULLIF(mfe_points, 0)
+                    END) as avg_tp_efficiency
+                FROM trades
+                WHERE {where} AND is_win=1 AND mfe_points > 0
+            """, params)
+            tp_eff = cursor.fetchone()
+
+            # By exit_reason breakdown
+            cursor.execute(f"""
+                SELECT exit_reason,
+                    COUNT(*) as count,
+                    AVG(mfe_points) as avg_mfe,
+                    AVG(mae_points) as avg_mae,
+                    AVG(pnl) as avg_pnl,
+                    SUM(pnl) as total_pnl
+                FROM trades WHERE {where}
+                GROUP BY exit_reason
+            """, params)
+            by_exit_reason = {r["exit_reason"]: dict(r) for r in cursor.fetchall()}
+
+        return {
+            "total_trades_with_excursion": row["total"] if row else 0,
+            "avg_mfe": round(row["avg_mfe"] or 0, 2) if row else 0,
+            "avg_mae": round(row["avg_mae"] or 0, 2) if row else 0,
+            "max_mfe": round(row["max_mfe"] or 0, 2) if row else 0,
+            "max_mae": round(row["max_mae"] or 0, 2) if row else 0,
+            "avg_mfe_winners": round(row["avg_mfe_winners"] or 0, 2) if row else 0,
+            "avg_mfe_losers": round(row["avg_mfe_losers"] or 0, 2) if row else 0,
+            "avg_mae_winners": round(row["avg_mae_winners"] or 0, 2) if row else 0,
+            "avg_mae_losers": round(row["avg_mae_losers"] or 0, 2) if row else 0,
+            "losers_with_positive_mfe": {
+                "count": losers_with_mfe["count"] if losers_with_mfe else 0,
+                "avg_mfe": round(losers_with_mfe["avg_mfe"] or 0, 2) if losers_with_mfe else 0,
+                "insight": "Trades that went in your favor but still lost — TP may be too far or stop too tight",
+            },
+            "tp_efficiency": round(tp_eff["avg_tp_efficiency"] or 0, 3) if tp_eff else 0,
+            "by_exit_reason": by_exit_reason,
+        }
+
+    def get_performance_by_direction(self, *, days: Optional[int] = None) -> Dict[str, Dict]:
+        """Performance breakdown by direction (long vs short)."""
+        where = "1=1"
+        params: list = []
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            where = "exit_time >= ?"
+            params.append(cutoff)
+
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT direction,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_win=1 THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN is_win=0 THEN 1 ELSE 0 END) as losses,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    AVG(mfe_points) as avg_mfe,
+                    AVG(mae_points) as avg_mae,
+                    AVG(hold_duration_minutes) as avg_hold_min,
+                    MAX(pnl) as best_trade,
+                    MIN(pnl) as worst_trade
+                FROM trades WHERE {where}
+                GROUP BY direction
+            """, params)
+            result = {}
+            for row in cursor.fetchall():
+                total = row["total"]
+                wins = row["wins"]
+                result[row["direction"]] = {
+                    "total": total,
+                    "wins": wins,
+                    "losses": row["losses"],
+                    "win_rate": round(wins / total, 4) if total > 0 else 0,
+                    "total_pnl": round(row["total_pnl"] or 0, 2),
+                    "avg_pnl": round(row["avg_pnl"] or 0, 2),
+                    "avg_mfe": round(row["avg_mfe"] or 0, 2) if row["avg_mfe"] else None,
+                    "avg_mae": round(row["avg_mae"] or 0, 2) if row["avg_mae"] else None,
+                    "avg_hold_min": round(row["avg_hold_min"] or 0, 1) if row["avg_hold_min"] else None,
+                    "best_trade": round(row["best_trade"] or 0, 2),
+                    "worst_trade": round(row["worst_trade"] or 0, 2),
+                }
+        return result
+
+    def get_comprehensive_analysis(self, *, days: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Single method for agents to get complete trade analysis.
+        Returns everything needed to evaluate and improve the strategy.
+        """
+        where = "1=1"
+        params: list = []
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            where = "exit_time >= ?"
+            params.append(cutoff)
+
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Overall summary
+            cursor.execute(f"""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_win=1 THEN 1 ELSE 0 END) as wins,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    MAX(pnl) as best_trade,
+                    MIN(pnl) as worst_trade,
+                    AVG(hold_duration_minutes) as avg_hold_min,
+                    AVG(mfe_points) as avg_mfe,
+                    AVG(mae_points) as avg_mae,
+                    SUM(CASE WHEN exit_reason='stop_loss' THEN 1 ELSE 0 END) as stop_losses,
+                    SUM(CASE WHEN exit_reason='take_profit' THEN 1 ELSE 0 END) as take_profits,
+                    MIN(entry_time) as first_trade,
+                    MAX(exit_time) as last_trade
+                FROM trades WHERE {where}
+            """, params)
+            summary = dict(cursor.fetchone())
+            total = summary["total"] or 0
+            wins = summary["wins"] or 0
+            summary["losses"] = total - wins
+            summary["win_rate"] = round(wins / total, 4) if total > 0 else 0
+
+            # Running equity curve (cumulative PnL)
+            cursor.execute(f"""
+                SELECT exit_time, pnl,
+                    SUM(pnl) OVER (ORDER BY exit_time) as cumulative_pnl
+                FROM trades WHERE {where}
+                ORDER BY exit_time
+            """, params)
+            equity = []
+            max_equity = 0
+            max_drawdown = 0
+            for row in cursor.fetchall():
+                cum = row["cumulative_pnl"] or 0
+                max_equity = max(max_equity, cum)
+                dd = max_equity - cum
+                max_drawdown = max(max_drawdown, dd)
+                equity.append({"time": row["exit_time"], "pnl": row["pnl"], "cumulative": round(cum, 2)})
+
+            # Streak analysis
+            cursor.execute(f"""
+                SELECT is_win FROM trades WHERE {where} ORDER BY exit_time
+            """, params)
+            wins_list = [r["is_win"] for r in cursor.fetchall()]
+            max_win_streak = max_lose_streak = cur_streak = 0
+            last_win = None
+            for w in wins_list:
+                if w == last_win:
+                    cur_streak += 1
+                else:
+                    cur_streak = 1
+                    last_win = w
+                if w:
+                    max_win_streak = max(max_win_streak, cur_streak)
+                else:
+                    max_lose_streak = max(max_lose_streak, cur_streak)
+
+        return {
+            "summary": {k: round(v, 2) if isinstance(v, float) else v for k, v in summary.items()},
+            "max_drawdown": round(max_drawdown, 2),
+            "max_equity_peak": round(max_equity, 2),
+            "max_win_streak": max_win_streak,
+            "max_lose_streak": max_lose_streak,
+            "by_direction": self.get_performance_by_direction(days=days),
+            "by_signal_type": self.get_performance_by_signal_type(days=days),
+            "excursion": self.get_excursion_analysis(days=days),
+            "equity_curve_len": len(equity),
+            "equity_last_10": equity[-10:] if equity else [],
+        }
 
 

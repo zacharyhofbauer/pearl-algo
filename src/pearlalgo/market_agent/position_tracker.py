@@ -352,10 +352,37 @@ class VirtualPositionTracker:
                     except Exception:
                         pass
 
+                    # Compute MFE/MAE from bars between entry and exit
+                    excursion_data = {}
+                    try:
+                        hold_mask = after_entry_mask.copy()
+                        hold_mask[first_exit_idx + 1:] = False  # only bars up to exit
+                        hold_highs = bar_highs[hold_mask]
+                        hold_lows = bar_lows[hold_mask]
+                        if len(hold_highs) > 0 and len(hold_lows) > 0:
+                            max_price = float(hold_highs.max())
+                            min_price = float(hold_lows.min())
+                            entry_px = float(sig.get("entry_price") or exit_price)
+                            if direction == "long":
+                                mfe_pts = max_price - entry_px
+                                mae_pts = entry_px - min_price
+                            else:
+                                mfe_pts = entry_px - min_price
+                                mae_pts = max_price - entry_px
+                            excursion_data = {
+                                "max_price": max_price,
+                                "min_price": min_price,
+                                "mfe_points": round(mfe_pts, 4),
+                                "mae_points": round(mae_pts, 4),
+                            }
+                    except Exception:
+                        pass
+
                     logger.info(
                         f"🔍 VIRTUAL EXIT: signal_id={sig_id} | direction={direction.upper()} | "
                         f"entry={sig.get('entry_price', 'N/A')} | exit={exit_price:.2f} | "
                         f"reason={exit_reason} | stop={stop:.2f} | target={target:.2f}"
+                        f" | MFE={excursion_data.get('mfe_points', '?')} MAE={excursion_data.get('mae_points', '?')}"
                     )
 
                     perf = self.performance_tracker.track_exit(
@@ -363,6 +390,7 @@ class VirtualPositionTracker:
                         exit_price=float(exit_price),
                         exit_reason=str(exit_reason),
                         exit_time=exit_bar_ts,
+                        excursion_data=excursion_data or None,
                     )
                     exited_this_cycle.add(sig_id)
 
