@@ -78,7 +78,7 @@ def simulate_with_limit(signals, max_concurrent):
     }
 
 def main():
-    signals_file = Path('/home/pearlalgoalgo/PearlAlgoWorkspace/data/tradovate/paper/signals.jsonl')
+    signals_file = Path('/home/pearlalgo/PearlAlgoWorkspace/data/tradovate/paper/signals.jsonl')
     
     if not signals_file.exists():
         print(f"Error: {signals_file} not found")

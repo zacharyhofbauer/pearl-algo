@@ -72,7 +72,7 @@ _DEFAULT_TIERS: Dict[str, NotificationTier] = {
     "shutdown": NotificationTier.CRITICAL,
     "circuit_breaker": NotificationTier.CRITICAL,
     "risk_warning": NotificationTier.CRITICAL,
-    "startup": NotificationTier.IMPORTANT,
+    "startup": NotificationTier.CRITICAL,
     "status": NotificationTier.IMPORTANT,
     "dashboard": NotificationTier.IMPORTANT,
     "message": NotificationTier.IMPORTANT,

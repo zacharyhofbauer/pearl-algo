@@ -80,6 +80,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         # Live position cache updated from WebSocket events
         self._live_positions: Dict[str, Dict[str, Any]] = {}
+        self._live_positions_updated_at: float = 0.0  # time.monotonic()
+        self._POSITION_CACHE_TTL: float = 120.0  # 2 minutes — stale after this
 
         # Path for immediate fill persistence (set by service)
         self._fills_file: Optional[Path] = None
@@ -175,8 +177,6 @@ class TradovateExecutionAdapter(ExecutionAdapter):
     # ── Order placement ───────────────────────────────────────────────
 
     async def place_bracket(self, signal: Dict) -> ExecutionResult:
-        logger.info("DEBUG: place_bracket() CALLED for signal_id=%s" % signal.get("signal_id", "NO_ID"))
-        logger.info(f"🔍 DEBUG: place_bracket() CALLED with signal_id={signal.get('signal_id', 'NO_ID')}")
         """
         Place a bracket order via Tradovate's placeOSO endpoint.
 
@@ -202,6 +202,16 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         direction = signal.get("direction", "long")
         try:
             # Use cached live positions from WS events, or fall back to REST
+            # Discard stale cache when WS is disconnected for too long
+            cache_age = time.monotonic() - self._live_positions_updated_at
+            if cache_age > self._POSITION_CACHE_TTL:
+                if self._live_positions:
+                    logger.info(
+                        f"Position cache stale ({cache_age:.0f}s old), clearing "
+                        f"{len(self._live_positions)} cached positions"
+                    )
+                    self._live_positions.clear()
+
             broker_positions = list(self._live_positions.values())
             if not broker_positions and self.is_connected():
                 try:
@@ -304,6 +314,17 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         stop_loss = float(signal.get("stop_loss", 0))
         take_profit = float(signal.get("take_profit", 0))
         position_size = int(signal.get("position_size", 1))
+
+        # HARD CAP: Never exceed max_positions_per_order (default 1 contract)
+        # This is the last line of defense — even if all upstream sizing is wrong,
+        # the adapter will never send more than this to the broker.
+        max_per_order = getattr(self.config, "max_position_size_per_order", 1)
+        if position_size > max_per_order:
+            logger.warning(
+                f"HARD CAP: position_size={position_size} exceeds max_per_order={max_per_order} "
+                f"for signal {signal_id}; clamping to {max_per_order}"
+            )
+            position_size = max_per_order
 
         # Guard: position size must be positive
         if position_size <= 0:
@@ -678,6 +699,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     }
                 else:
                     self._live_positions.pop(contract_id, None)
+                self._live_positions_updated_at = time.monotonic()
 
     # ── REST order reconciliation ─────────────────────────────────────
 
@@ -745,6 +767,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         Background task that polls order status via REST when the WebSocket
         feed is disconnected, ensuring no order updates are missed.
         """
+        if not hasattr(self, '_reconnect_task'):
+            self._reconnect_task = None
+        if not hasattr(self, '_reconnect_gave_up'):
+            self._reconnect_gave_up = False
+
         while self._connected:
             try:
                 if not self._client.ws_connected and self._open_orders:
@@ -755,8 +782,15 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
                 # If REST auth also failed, attempt reconnection
                 if not self._connected or not self._client.is_authenticated:
-                    if not hasattr(self, '_reconnect_task') or self._reconnect_task is None or self._reconnect_task.done():
+                    reconnect_running = (
+                        self._reconnect_task is not None
+                        and not self._reconnect_task.done()
+                    )
+                    if not reconnect_running and not self._reconnect_gave_up:
                         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+                else:
+                    # Connection restored — reset gave_up flag
+                    self._reconnect_gave_up = False
 
                 # RESTORED: 5s reconciliation for fast exit detection
                 # Rate limit backoff is handled per-API-call, not here
@@ -803,6 +837,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             except Exception as e:
                 logger.warning(f"Reconnect attempt {attempt} failed: {e}")
 
+        self._reconnect_gave_up = True
         logger.critical(
             f"Tradovate reconnection FAILED after {max_attempts} attempts — "
             f"manual restart required"

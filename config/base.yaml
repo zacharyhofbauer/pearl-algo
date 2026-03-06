@@ -211,7 +211,7 @@ auto_flat:
 
 learning:
   enabled: false
-  mode: enforce
+  mode: shadow
   feature_engineer_enabled: true
   features:
     short_window: 5
@@ -236,7 +236,7 @@ learning:
   decay_factor: 0.0
   contextual:
     enabled: true
-    mode: enforce
+    mode: shadow
     explore_rate: 0.1
     min_samples_per_context: 5
     decision_threshold: 0.3
@@ -244,7 +244,7 @@ learning:
 
 ml_filter:
   enabled: true
-  mode: enforce
+  mode: shadow
   require_lift_to_block: true
   lift_lookback_trades: 200
   lift_min_trades: 50

@@ -211,17 +211,11 @@ class ServiceLifecycleMixin:
             try:
                 await asyncio.wait_for(
                     self.telegram_notifier.send_shutdown_notification(summary),
-                    timeout=10.0  # Increased timeout to give more time
+                    timeout=10.0
                 )
                 logger.info("Shutdown notification sent to Telegram")
             except asyncio.TimeoutError:
                 logger.error("Timeout sending shutdown notification - Telegram may be slow or unreachable")
-                # Try one more time without timeout as last resort
-                try:
-                    await self.telegram_notifier.send_shutdown_notification(summary)
-                    logger.info("Shutdown notification sent on retry")
-                except Exception as retry_e:
-                    logger.error(f"Failed to send shutdown notification on retry: {retry_e}")
         except Exception as e:
             logger.error(f"Error sending shutdown notification: {e}", exc_info=True)
 

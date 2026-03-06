@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import fcntl
 import os
 import sys
 from pathlib import Path
@@ -116,8 +117,28 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+_lock_file = None  # module-level so GC doesn't close it
+
+
 async def main():
     """Main entry point."""
+    # ── Singleton guard: only one agent process at a time ──────────
+    global _lock_file
+    lock_path = Path("/tmp/pearlalgo-agent.lock")
+    fd = os.open(str(lock_path), os.O_WRONLY | os.O_CREAT, 0o644)
+    _lock_file = os.fdopen(fd, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file.truncate(0)
+        _lock_file.write(str(os.getpid()))
+        _lock_file.flush()
+    except BlockingIOError:
+        print(
+            f"FATAL: Another agent is already running (lock held by PID in {lock_path}). Exiting.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     setup_logging(level="INFO")
     run_id = set_run_id()
 

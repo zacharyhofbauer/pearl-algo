@@ -39,6 +39,7 @@ execution:
   adapter: tradovate
   enforce_protection_guard: true
   max_positions: 5  # CRITICAL: Reduced from 20 to match MFF limit
+  max_position_size_per_order: 1  # HARD CAP: never send more than 1 contract per order
   max_orders_per_day: 500
   max_daily_loss: 1800.0
   cooldown_seconds: 30
@@ -60,7 +61,8 @@ circuit_breaker:
 
 # Trading circuit breaker overrides
 trading_circuit_breaker:
-  mode: disabled  # CRITICAL: Changed from warn_only to enforce
+  enabled: true
+  mode: enforce
   enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
@@ -72,11 +74,11 @@ trading_circuit_breaker:
   max_consecutive_losses: 5
   max_session_drawdown: 1800.0
   max_daily_drawdown: 1800.0
-  max_concurrent_positions: 5  # CRITICAL: Reduced from 20 to match MFF limit
+  max_concurrent_positions: 5
   enable_session_filter: false
   enable_direction_gating: true
-  direction_gating_min_confidence: 0.65  # ADDED: Increased from default 0.70 -> 0.65 for better signal quality
-  enable_regime_avoidance: true  # ENABLED: Avoid choppy/volatile markets
+  direction_gating_min_confidence: 0.65
+  enable_regime_avoidance: true
   blocked_regimes:
     - ranging
     - volatile
@@ -108,6 +110,3 @@ service:
 virtual_pnl:
   enabled: false
 
-# OVERRIDE: Completely disable circuit breaker (useless without real Tradovate integration)
-trading_circuit_breaker:
-  enabled: false

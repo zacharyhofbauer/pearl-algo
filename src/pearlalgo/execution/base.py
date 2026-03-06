@@ -61,6 +61,7 @@ class ExecutionConfig:
     max_orders_per_day: int = defaults.MAX_ORDERS_PER_DAY
     max_daily_loss: float = defaults.MAX_DAILY_LOSS
     cooldown_seconds: int = defaults.COOLDOWN_SECONDS
+    max_position_size_per_order: int = 1  # HARD CAP: never send more than this to broker
     
     # Symbol whitelist (empty = all symbols allowed)
     symbol_whitelist: List[str] = field(default_factory=lambda: defaults.DEFAULT_SYMBOL_WHITELIST.copy())
@@ -109,6 +110,7 @@ class ExecutionConfig:
             max_orders_per_day=max_orders_per_day,
             max_daily_loss=max_daily_loss,
             cooldown_seconds=cooldown_seconds,
+            max_position_size_per_order=int(config.get("max_position_size_per_order", 1)),
             symbol_whitelist=list(config.get("symbol_whitelist", defaults.DEFAULT_SYMBOL_WHITELIST)),
             ibkr_trading_client_id=int(config.get("ibkr_trading_client_id", defaults.IBKR_TRADING_CLIENT_ID)),
             ibkr_host=str(config.get("ibkr_host", defaults.IBKR_HOST)),

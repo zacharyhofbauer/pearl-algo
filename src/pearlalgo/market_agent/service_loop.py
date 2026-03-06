@@ -337,6 +337,30 @@ class ServiceLoopMixin:
                     await self._sleep_until_next_cycle()
                     continue
 
+                # ── Stale data guard ───────────────────────────────────────
+                # If the latest bar is older than the stale threshold, do NOT
+                # generate signals.  This prevents phantom trades when the
+                # IBKR gateway is down and only cached/historical data remains.
+                _stale_guard_skip = False
+                if not market_data["df"].empty:
+                    _df_ts_col = market_data["df"].get("timestamp")
+                    if _df_ts_col is not None and not _df_ts_col.empty:
+                        _latest_ts = _df_ts_col.max()
+                        if isinstance(_latest_ts, pd.Timestamp):
+                            _latest_ts = _latest_ts.to_pydatetime()
+                        if _latest_ts is not None:
+                            if _latest_ts.tzinfo is None:
+                                _latest_ts = _latest_ts.replace(tzinfo=timezone.utc)
+                            _age_s = (datetime.now(timezone.utc) - _latest_ts).total_seconds()
+                            _stale_limit = self.stale_data_threshold_minutes * 60
+                            if _age_s > _stale_limit:
+                                _stale_guard_skip = True
+                                logger.warning(
+                                    f"Stale data guard: latest bar is {_age_s / 60:.1f}m old "
+                                    f"(threshold {self.stale_data_threshold_minutes}m) — "
+                                    f"skipping signal generation"
+                                )
+
                 # New-bar gating: skip heavy analysis if df hasn't advanced (performance optimization).
                 # When enabled, we only run strategy.analyze() when a new bar arrives.
                 # This is high leverage for configs like 5m bars + 30s scan interval.
@@ -375,9 +399,12 @@ class ServiceLoopMixin:
                 except Exception as e:
                     logger.warning(f"Critical path error: {e}", exc_info=True)
 
-                # Generate signals (or skip if no new bar)
+                # Generate signals (or skip if no new bar / stale data)
                 signals = []
-                if skip_analysis:
+                if _stale_guard_skip:
+                    # Data is stale — gateway likely down. Do NOT generate signals.
+                    pass
+                elif skip_analysis:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
