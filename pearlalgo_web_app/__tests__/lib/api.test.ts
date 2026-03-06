@@ -29,7 +29,7 @@ describe('API utility', () => {
       delete global.window
 
       const url = getApiUrl()
-      expect(url).toBe('http://localhost:8000')
+      expect(url).toBe('http://localhost:8001')
 
       // @ts-ignore - restore window
       global.window = originalWindow

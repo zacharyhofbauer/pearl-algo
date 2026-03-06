@@ -225,7 +225,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
  */
 export function getWebSocketUrl(): string {
   if (typeof window === 'undefined') {
-    return 'ws://localhost:8000/ws'
+    return 'ws://localhost:8001/ws'
   }
 
   const hostname = window.location.hostname
@@ -256,7 +256,7 @@ export function getWebSocketUrl(): string {
     return `${protocol}//${hostname}:${apiPort}/ws`
   } else if (isLocal) {
     // Local development
-    return 'ws://localhost:8000/ws'
+    return 'ws://localhost:8001/ws'
   } else {
     // Production - use secure WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

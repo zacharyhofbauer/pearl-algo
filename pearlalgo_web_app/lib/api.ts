@@ -40,7 +40,7 @@ export function getApiUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL
   if (envUrl) return envUrl
 
-  if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
+  if (typeof window === 'undefined') return 'http://localhost:8001' // SSR fallback
   const hostname = window.location.hostname
 
   // Check URL params for account switching
@@ -68,7 +68,7 @@ export function getApiUrl(): string {
   }
 
   // Default: relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
-  return isLocal ? 'http://localhost:8000' : ''
+  return isLocal ? 'http://localhost:8001' : ''
 }
 
 /**

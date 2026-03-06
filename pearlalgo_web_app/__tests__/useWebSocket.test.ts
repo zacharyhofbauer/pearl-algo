@@ -604,9 +604,9 @@ describe('getWebSocketUrl', () => {
     window.history.pushState({}, '', '/')
   })
 
-  it('should return ws://localhost:8000/ws for local development', () => {
+  it('should return ws://localhost:8001/ws for local development', () => {
     // jsdom default: hostname=localhost, protocol=http:
-    expect(getWebSocketUrl()).toBe('ws://localhost:8000/ws')
+    expect(getWebSocketUrl()).toBe('ws://localhost:8001/ws')
   })
 
   it('should use custom api_port from URL params on localhost', () => {
@@ -630,7 +630,7 @@ describe('getWebSocketUrl', () => {
       // Re-import to pick up the undefined-window branch
       jest.resetModules()
       const { getWebSocketUrl: getUrlSSR } = require('@/hooks/useWebSocket')
-      expect(getUrlSSR()).toBe('ws://localhost:8000/ws')
+      expect(getUrlSSR()).toBe('ws://localhost:8001/ws')
     } finally {
       ;(globalThis as any).window = origWindow
     }
