@@ -76,9 +76,9 @@ trading_circuit_breaker:
   max_daily_drawdown: 1800.0
   max_concurrent_positions: 5
   enable_session_filter: false
-  enable_direction_gating: true
+  enable_direction_gating: false
   direction_gating_min_confidence: 0.65
-  enable_regime_avoidance: true
+  enable_regime_avoidance: false
   blocked_regimes:
     - ranging
     - volatile

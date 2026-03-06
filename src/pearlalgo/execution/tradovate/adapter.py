@@ -245,21 +245,47 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         error_message=f"max_broker_positions ({max_net_positions}) reached",
                     )
 
-            # Block opposite-direction orders while in a position
+            # Close-and-reverse: flatten opposite positions before placing new bracket
             for pos in active_broker_positions:
                 net_pos = pos.get("net_pos", 0)
                 existing_dir = "long" if net_pos > 0 else "short"
                 if existing_dir != direction:
                     logger.info(
-                        f"Broker position guard: existing {existing_dir} position, "
-                        f"blocking {direction} order for {signal_id}"
+                        f"Close-and-reverse: closing {existing_dir} position "
+                        f"to open {direction} for {signal_id}"
                     )
-                    return ExecutionResult(
-                        success=False,
-                        status=OrderStatus.REJECTED,
-                        signal_id=signal_id,
-                        error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
-                    )
+                    try:
+                        # Cancel existing bracket orders first
+                        for oid in list(self._open_orders.keys()):
+                            try:
+                                await self._client.cancel_order(int(oid))
+                            except Exception:
+                                pass
+                        self._open_orders.clear()
+
+                        # Close the opposite position with a market order
+                        close_action = "Sell" if net_pos > 0 else "Buy"
+                        close_qty = abs(net_pos)
+                        await self._client.place_order(
+                            symbol=self._contract_symbol,
+                            action=close_action,
+                            order_qty=close_qty,
+                            order_type="Market",
+                        )
+                        logger.info(
+                            f"Close-and-reverse: {close_action} {close_qty} to flatten "
+                            f"{existing_dir}, now placing {direction} bracket"
+                        )
+                        # Brief pause for fill propagation
+                        await asyncio.sleep(0.5)
+                    except Exception as rev_e:
+                        logger.error(f"Close-and-reverse failed: {rev_e}", exc_info=True)
+                        return ExecutionResult(
+                            success=False,
+                            status=OrderStatus.ERROR,
+                            signal_id=signal_id,
+                            error_message=f"close_and_reverse_failed: {rev_e}",
+                        )
         except Exception as e:
             logger.warning(f"Broker position guard check failed (non-fatal): {e}")
 
