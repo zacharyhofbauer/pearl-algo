@@ -542,8 +542,8 @@ class ServiceLoopMixin:
                                         volatility_percentile=float(regime_data.get('volatility_percentile', 0)) if regime_data.get('volatility_percentile') else None,
                                         trend_strength=float(regime_data.get('trend_strength', 0)) if regime_data.get('trend_strength') else None,
                                     )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Regime snapshot failed: {e}")
                         if self._signal_follower_mode:
                             # Follower: use streamlined path (skips ML/bandit)
                             await self._signal_handler.follower_execute(signal_obj)
@@ -555,7 +555,7 @@ class ServiceLoopMixin:
 
                 # Monitor open position: log unrealized P&L, distance to stop/TP, MFE/MAE
                 try:
-                    self._monitor_open_position(market_data)
+                    await self._monitor_open_position(market_data)
                 except Exception as e:
                     logger.debug(f"Position monitor (non-fatal): {e}")
 

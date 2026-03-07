@@ -638,7 +638,7 @@ class TestAdapterPlaceBracketLive:
             "entry_price": 18000.0,
             "stop_loss": 17990.0,
             "take_profit": 18020.0,
-            "position_size": 2,
+            "position_size": 1,
         }
         result = await adapter.place_bracket(signal)
 
@@ -649,7 +649,7 @@ class TestAdapterPlaceBracketLive:
         adapter._client.place_oso.assert_awaited_once()
         call_kwargs = adapter._client.place_oso.call_args
         assert call_kwargs.kwargs["action"] == "Buy"
-        assert call_kwargs.kwargs["order_qty"] == 2
+        assert call_kwargs.kwargs["order_qty"] == 1
 
     @pytest.mark.asyncio
     async def test_place_bracket_short_maps_to_sell(self):

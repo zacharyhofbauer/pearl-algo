@@ -435,6 +435,38 @@ class TradovateClient:
         url = f"{self.config.rest_url}/order/placeoso"
         return await self._post(url, body)
 
+    async def modify_order(
+        self,
+        order_id: int,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        order_qty: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        POST /order/modifyorder -- modify a working order in-place.
+
+        Preserves OCO linkage when modifying a bracket leg's stop price.
+
+        Args:
+            order_id: The order to modify
+            price: New limit price (for Limit orders)
+            stop_price: New stop price (for Stop orders)
+            order_qty: New quantity (optional)
+        """
+        body: Dict[str, Any] = {
+            "orderId": order_id,
+            "isAutomated": True,
+        }
+        if price is not None:
+            body["price"] = price
+        if stop_price is not None:
+            body["stopPrice"] = stop_price
+        if order_qty is not None:
+            body["orderQty"] = order_qty
+
+        url = f"{self.config.rest_url}/order/modifyorder"
+        return await self._post(url, body)
+
     async def cancel_order(self, order_id: int) -> Dict[str, Any]:
         """POST /order/cancelorder -- cancel a specific order."""
         url = f"{self.config.rest_url}/order/cancelorder"

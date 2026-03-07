@@ -637,6 +637,19 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             else:
                 logger.info("Execution adapter disabled (execution.enabled=false)")
         
+        # Trailing stop manager (initialized if configured and execution adapter available)
+        self._trailing_stop_manager = None
+        if self.execution_adapter is not None:
+            try:
+                from pearlalgo.execution.tradovate.trailing_stop import TrailingStopManager
+                self._trailing_stop_manager = TrailingStopManager(service_config)
+                if self._trailing_stop_manager.enabled:
+                    logger.info("Trailing stop manager: ENABLED")
+                else:
+                    logger.info("Trailing stop manager: initialized but disabled")
+            except Exception as e:
+                logger.debug(f"Trailing stop manager not available: {e}")
+
         # Track last trading day for daily counter reset
         self._last_trading_day: Optional[date] = None
         
@@ -828,8 +841,9 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             signal, base_size=base_size, risk_settings=self._risk_settings
         )
 
-    def _monitor_open_position(self, market_data: Dict) -> None:
-        """Log real-time metrics for open positions: unrealized P&L, distance to stop/TP, MFE/MAE."""
+    async def _monitor_open_position(self, market_data: Dict) -> None:
+        """Log real-time metrics for open positions: unrealized P&L, distance to stop/TP, MFE/MAE.
+        Also triggers trailing stop updates when enabled."""
         if self.execution_adapter is None:
             return
 
@@ -885,6 +899,16 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     'entry_time': datetime.now(timezone.utc),
                     'log_counter': 0,
                 }
+                # Register with trailing stop manager for new positions
+                if self._trailing_stop_manager and self._trailing_stop_manager.enabled:
+                    stop_px = self._find_initial_stop_price(direction)
+                    if stop_px > 0:
+                        self._trailing_stop_manager.register_position(
+                            position_id=str(_cid),
+                            entry_price=entry_price,
+                            direction=direction,
+                            initial_stop=stop_px,
+                        )
 
             mon = self._pos_monitor
             mon['max_price'] = max(mon['max_price'], current_price)
@@ -914,6 +938,27 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             except Exception:
                 pass
 
+            # Trailing stop check
+            if self._trailing_stop_manager and self._trailing_stop_manager.enabled:
+                try:
+                    current_atr = self._get_current_atr(market_data)
+                    if current_atr > 0:
+                        new_stop = self._trailing_stop_manager.check_and_update(
+                            position_id=str(_cid),
+                            current_price=current_price,
+                            current_atr=current_atr,
+                        )
+                        if new_stop is not None:
+                            stop_order_id = await self._find_stop_order_id(direction)
+                            if stop_order_id:
+                                success = await self.execution_adapter.modify_stop_order(
+                                    stop_order_id, new_stop
+                                )
+                                if success:
+                                    logger.info(f"Trailing stop moved to {new_stop:.2f}")
+                except Exception as e:
+                    logger.warning(f"Trailing stop update failed: {e}")
+
             hold_secs = (datetime.now(timezone.utc) - mon['entry_time']).total_seconds()
             hold_min = hold_secs / 60.0
 
@@ -933,12 +978,59 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     else:
                         dist_tp = f" | dist_tp={current_price - tp_price:.2f}pts"
 
+                trail_info = ''
+                if self._trailing_stop_manager:
+                    ts = self._trailing_stop_manager.get_state(str(_cid))
+                    if ts and ts.get('current_phase'):
+                        trail_info = f" | trail={ts['current_phase']}"
+
                 logger.info(
                     f"📊 POSITION: {direction.upper()} {abs(net_pos)}x @ {entry_price:.2f} | "
                     f"now={current_price:.2f} | PnL=${unrealized_pnl:.2f} | "
                     f"MFE={mfe:.2f}pts MAE={mae:.2f}pts | hold={hold_min:.1f}min"
-                    f"{dist_stop}{dist_tp}"
+                    f"{dist_stop}{dist_tp}{trail_info}"
                 )
+
+    def _find_initial_stop_price(self, direction: str) -> float:
+        """Find the initial stop price from active virtual trades."""
+        try:
+            active = self.virtual_trade_manager.position_tracker.get_active_virtual_trades(limit=5)
+            for sig_rec in (active or []):
+                sig = sig_rec.get('signal') or sig_rec or {}
+                if sig.get('direction', '').lower() == direction:
+                    return float(sig.get('stop_loss') or 0)
+        except Exception:
+            pass
+        return 0.0
+
+    def _get_current_atr(self, market_data: Dict) -> float:
+        """Compute current ATR from the bar buffer."""
+        try:
+            df = market_data.get('df')
+            if df is None or len(df) < 14:
+                return 0.0
+            tr = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - df["close"].shift(1)).abs(),
+                (df["low"] - df["close"].shift(1)).abs(),
+            ], axis=1).max(axis=1)
+            return float(tr.iloc[-14:].mean())
+        except Exception:
+            return 0.0
+
+    async def _find_stop_order_id(self, direction: str) -> Optional[int]:
+        """Find the working stop order ID for the current position."""
+        try:
+            orders = await self.execution_adapter._client.get_orders()
+            stop_action = "Sell" if direction == "long" else "Buy"
+            for order in orders:
+                if (order.get("orderType") == "Stop"
+                        and order.get("action") == stop_action
+                        and order.get("ordStatus") in ("Working", "Accepted")):
+                    return int(order["id"])
+        except Exception as e:
+            logger.debug(f"Could not find stop order: {e}")
+        return None
 
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """Delegate to VirtualTradeManager (extracted for testability)."""

@@ -216,7 +216,6 @@ class TestDatabaseInitialization:
         assert "regime_history" in tables
         assert "signal_events" in tables
         assert "cycle_diagnostics" in tables
-        assert "challenge_attempts" in tables
 
         conn.close()
 
@@ -441,9 +440,11 @@ class TestPerformanceAnalytics:
 
     def test_get_performance_by_signal_type_with_days_filter(self, db, sample_trade_data):
         """Test performance filtered by days."""
-        # Use recent dates (relative to current date 2026-01-29)
-        sample_trade_data["entry_time"] = "2026-01-20T10:00:00Z"
-        sample_trade_data["exit_time"] = "2026-01-20T11:30:00Z"
+        # Use recent dates (relative to current date)
+        from datetime import datetime, timedelta, timezone
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        sample_trade_data["entry_time"] = recent.strftime("%Y-%m-%dT10:00:00Z")
+        sample_trade_data["exit_time"] = recent.strftime("%Y-%m-%dT11:30:00Z")
         db.add_trade(**sample_trade_data)
 
         # Add old trade (outside 30-day window)
@@ -900,4 +901,3 @@ class TestEdgeCases:
         assert db.get_performance_by_hour() == {}
         assert db.get_recent_signal_events() == []
         assert db.get_signal_event_counts() == {}
-        assert db.get_challenge_attempts() == []

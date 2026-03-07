@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import time
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
@@ -77,6 +78,7 @@ def _make_adapter(mode: str = "paper", armed: bool = True) -> TradovateExecution
     adapter._connected = True
     adapter._contract_symbol = "MNQZ5"
     adapter._contract_id = 999
+    adapter._live_positions_updated_at = time.monotonic()
     return adapter
 
 
@@ -171,7 +173,7 @@ class TestPositionGuardMax:
 
         assert result.success is False
         assert result.status == OrderStatus.REJECTED
-        assert "max_broker_positions" in result.error_message
+        assert "max_position_size" in result.error_message
 
 
 # ===========================================================================
@@ -325,35 +327,13 @@ class TestFollowerExecuteSkipsMLAndBandit:
         assert call_args.kwargs.get("policy_decision") is None or call_args[0][1] is None
 
     @pytest.mark.asyncio
-    async def test_follower_execute_checks_intraday_breach(self):
-        """follower_execute blocks when intraday breach is detected."""
+    async def test_follower_execute_no_intraday_breach_check(self):
+        """follower_execute does not accept or check intraday breach (moved to service loop)."""
         from pearlalgo.market_agent.signal_handler import SignalHandler
+        import inspect
 
-        handler = object.__new__(SignalHandler)
-        handler.signal_count = 0
-        handler.error_count = 0
-        handler.last_signal_generated_at = None
-        handler.last_signal_id_prefix = None
-
-        handler._check_circuit_breaker = MagicMock(return_value=True)
-        handler._execute_signal = AsyncMock()
-        handler._track_virtual_entry = MagicMock(return_value=18000.0)
-        handler._queue_entry_notification = AsyncMock()
-        handler.performance_tracker = MagicMock()
-        handler.performance_tracker.track_signal_generated = MagicMock(return_value="sig_002")
-        handler._audit_logger = None
-
-        # Tracker that always says "breached"
-        mock_tracker = MagicMock()
-        mock_tracker.check_intraday_breach = MagicMock(return_value=True)
-
-        signal = _long_signal()
-
-        await handler.follower_execute(
-            signal,
-            tv_paper_equity=47_000.0,
-            tv_paper_tracker=mock_tracker,
-        )
-
-        # _execute_signal should NOT have been called (breach blocks it)
-        handler._execute_signal.assert_not_awaited()
+        # Verify follower_execute no longer accepts tv_paper_equity / tv_paper_tracker
+        sig = inspect.signature(SignalHandler.follower_execute)
+        param_names = list(sig.parameters.keys())
+        assert "tv_paper_equity" not in param_names, "tv_paper_equity should not be a param"
+        assert "tv_paper_tracker" not in param_names, "tv_paper_tracker should not be a param"

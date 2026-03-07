@@ -308,7 +308,7 @@ class VirtualTradeManager:
             if len(hold_highs) > 0 and len(hold_lows) > 0:
                 max_price = float(hold_highs.max())
                 min_price = float(hold_lows.min())
-                entry_px = float(sig.get("entry_price") or exit_price)
+                entry_px = float(rec.get("entry_price") or sig.get("entry_price") or exit_price)
                 if direction == "long":
                     mfe_pts = max_price - entry_px
                     mae_pts = entry_px - min_price
@@ -321,8 +321,8 @@ class VirtualTradeManager:
                     "mfe_points": round(mfe_pts, 4),
                     "mae_points": round(mae_pts, 4),
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"MFE/MAE computation failed for {sig_id}: {e}")
 
         logger.info(
             f"🔍 VIRTUAL EXIT: signal_id={sig_id} | direction={direction.upper()} | "

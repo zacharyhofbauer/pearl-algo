@@ -133,7 +133,8 @@ def _get_key_levels_cache_key(df: pd.DataFrame) -> str:
         last_closes = df["close"].iloc[-5:].tolist() if len(df) >= 5 else df["close"].tolist()
         data_hash = hash(tuple(round(c, 2) for c in last_closes))
         return f"{date_str}_{len(df)}_{data_hash}"
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Cache key generation failed: {e}")
         return ""
 
 
@@ -974,7 +975,7 @@ def check_trading_session(dt: datetime, config: Dict) -> bool:
             # Same-day: in session if start <= current <= end
             return start_time <= current_time <= end_time
     except Exception:
-        return True  # Default to allow trading if timezone conversion fails
+        return False  # Default to block trading if timezone conversion fails
 
 
 # ============================================================================

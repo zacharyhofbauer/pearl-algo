@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -78,6 +79,7 @@ def _make_adapter(mode: str = "paper", armed: bool = True, **config_kw) -> Trado
     adapter._connected = True
     adapter._contract_symbol = "MNQZ5"
     adapter._contract_id = 999
+    adapter._live_positions_updated_at = time.monotonic()
     return adapter
 
 
@@ -224,7 +226,7 @@ class TestBrokerPositionGuardMax:
 
         assert result.success is False
         assert result.status == OrderStatus.REJECTED
-        assert "max_broker_positions" in result.error_message
+        assert "max_position_size" in result.error_message
 
     @pytest.mark.asyncio
     async def test_same_direction_with_room_allowed(self):

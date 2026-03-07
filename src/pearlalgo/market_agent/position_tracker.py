@@ -140,7 +140,8 @@ class VirtualPositionTracker:
         """Return active virtual trades (signals.jsonl status=entered)."""
         try:
             recent_signals = self.state_manager.get_recent_signals(limit=limit)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to get recent signals for active trades: {e}")
             return []
         active: List[Dict] = []
         for rec in recent_signals:
@@ -247,7 +248,8 @@ class VirtualPositionTracker:
 
         try:
             recent = self.state_manager.get_recent_signals(limit=300)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to get recent signals for exit check: {e}")
             return
 
         # Precompute bar arrays
@@ -261,7 +263,8 @@ class VirtualPositionTracker:
 
             bar_highs = df["high"].fillna(df.get("close", 0)).astype(float).values
             bar_lows = df["low"].fillna(df.get("close", 0)).astype(float).values
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to precompute bar arrays for exit check: {e}")
             return
 
         exited_this_cycle: set = set()
@@ -349,8 +352,8 @@ class VirtualPositionTracker:
                         exit_bar_ts = pd.Timestamp(exit_bar_ts_raw).to_pydatetime()
                         if exit_bar_ts and exit_bar_ts.tzinfo is None:
                             exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to parse exit bar timestamp for {sig_id}: {e}")
 
                     # Compute MFE/MAE from bars between entry and exit
                     excursion_data = {}
@@ -362,7 +365,7 @@ class VirtualPositionTracker:
                         if len(hold_highs) > 0 and len(hold_lows) > 0:
                             max_price = float(hold_highs.max())
                             min_price = float(hold_lows.min())
-                            entry_px = float(sig.get("entry_price") or exit_price)
+                            entry_px = float(rec.get("entry_price") or sig.get("entry_price") or exit_price)
                             if direction == "long":
                                 mfe_pts = max_price - entry_px
                                 mae_pts = entry_px - min_price
@@ -375,8 +378,8 @@ class VirtualPositionTracker:
                                 "mfe_points": round(mfe_pts, 4),
                                 "mae_points": round(mae_pts, 4),
                             }
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"MFE/MAE computation failed for {sig_id}: {e}")
 
                     logger.info(
                         f"🔍 VIRTUAL EXIT: signal_id={sig_id} | direction={direction.upper()} | "

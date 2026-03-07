@@ -483,6 +483,27 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 error_message=str(e),
             )
 
+    async def modify_stop_order(self, order_id: int, new_stop_price: float) -> bool:
+        """
+        Modify a working stop order's price in-place.
+
+        Preserves OCO bracket linkage. Returns True if successful.
+        """
+        if not self._connected:
+            logger.warning("Cannot modify stop order: not connected")
+            return False
+
+        try:
+            result = await self._client.modify_order(
+                order_id=order_id,
+                stop_price=new_stop_price,
+            )
+            logger.info(f"Stop order {order_id} modified to {new_stop_price:.2f}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to modify stop order {order_id}: {e}")
+            return False
+
     async def cancel_all(self) -> List[ExecutionResult]:
         """Cancel all open orders (kill switch)."""
         logger.warning("TRADOVATE KILL SWITCH: Cancelling all orders")
