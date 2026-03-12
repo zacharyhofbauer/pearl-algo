@@ -1181,6 +1181,10 @@ async def startup_event():
         _state_dir = _resolve_state_dir(_market)
 
     _init_auth()
+    # Sync auth state to server_core so routes importing from there see the keys
+    import pearlalgo.api.server_core as _sc
+    _sc._api_keys = _api_keys
+    _sc._auth_enabled = _auth_enabled
     _init_accounts_config()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 

@@ -139,7 +139,8 @@ async def main():
         )
         sys.exit(1)
 
-    setup_logging(level="INFO")
+    log_file = project_root / "logs" / "agent_TV_PAPER.log"
+    setup_logging(level="INFO", log_file=log_file)
     run_id = set_run_id()
 
     try:

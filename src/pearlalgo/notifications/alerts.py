@@ -246,23 +246,10 @@ class TelegramAlerts:
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         reasoning: Optional[str] = None,
-        option_symbol: Optional[str] = None,
-        strike: Optional[float] = None,
-        expiration: Optional[str] = None,
-        option_type: Optional[str] = None,
-        underlying_price: Optional[float] = None,
-        delta: Optional[float] = None,
-        gamma: Optional[float] = None,
-        theta: Optional[float] = None,
-        dte: Optional[int] = None,
     ) -> None:
         side_emoji = "🟢" if side.lower() == "long" else "🔴"
         side_text = side.upper()
-        is_options = option_symbol is not None or option_type is not None
-        if is_options:
-            message = f"{side_emoji} *NEW OPTIONS SIGNAL*\n*{symbol} {side_text}*\n\n"
-        else:
-            message = f"{side_emoji} *NEW SIGNAL*\n*{symbol} {side_text}*\n\n"
+        message = f"{side_emoji} *NEW SIGNAL*\n*{symbol} {side_text}*\n\n"
         entry = entry_price if entry_price else price
         if entry:
             stop_pct_str = ""
@@ -293,20 +280,6 @@ class TelegramAlerts:
         message += f"\n*Strategy:* {strategy}\n"
         if reasoning:
             message += f"\n*Reason:*\n{reasoning[:117] + '...' if len(reasoning) > 120 else reasoning}\n"
-        if is_options:
-            if option_symbol:
-                message += f"\nContract: `{option_symbol}`\n"
-            if option_type:
-                em = "📞" if option_type.lower() == "call" else "📉"
-                message += f"Type: {em} {option_type.upper()}\n"
-            if strike:
-                message += f"Strike: {fmt_currency(strike)}\n"
-            if expiration:
-                message += f"Expiry: {expiration}\n"
-            if dte is not None:
-                message += f"DTE: {dte} days\n"
-            if delta is not None:
-                message += f"Delta: {delta:.3f}\n"
         await self.send_message(message)
 
     async def notify_signal_logged(

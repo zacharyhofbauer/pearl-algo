@@ -174,7 +174,7 @@ class TestBrokerPositionGuardOpposite:
 
     @pytest.mark.asyncio
     async def test_long_blocked_when_short_position_exists(self):
-        adapter = _make_adapter()
+        adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         # Simulate existing short position from WS cache
         adapter._live_positions["999"] = {
             "contract_id": "999",
@@ -190,7 +190,7 @@ class TestBrokerPositionGuardOpposite:
 
     @pytest.mark.asyncio
     async def test_short_blocked_when_long_position_exists(self):
-        adapter = _make_adapter()
+        adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         adapter._live_positions["999"] = {
             "contract_id": "999",
             "net_pos": 2,
@@ -252,7 +252,7 @@ class TestBrokerPositionGuardMax:
     @pytest.mark.asyncio
     async def test_position_guard_falls_back_to_rest(self):
         """When _live_positions is empty, REST get_positions is used."""
-        adapter = _make_adapter()
+        adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         adapter._live_positions = {}  # Empty WS cache
         adapter._client.get_positions = AsyncMock(return_value=[
             {"netPos": -2, "contractId": 999}

@@ -239,18 +239,40 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     continue
                 existing_dir = "long" if net_pos > 0 else "short"
 
-                # Block opposite-direction orders while in a position
+                # Handle opposite-direction signal
                 if existing_dir != direction:
-                    logger.info(
-                        f"Broker position guard: existing {existing_dir} position (net={net_pos}), "
-                        f"blocking {direction} order for {signal_id}"
-                    )
-                    return ExecutionResult(
-                        success=False,
-                        status=OrderStatus.REJECTED,
-                        signal_id=signal_id,
-                        error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
-                    )
+                    if self.config.allow_reversal_on_opposite_signal:
+                        logger.warning(
+                            f"🔄 REVERSAL: Opposite signal detected — existing {existing_dir} position, "
+                            f"flattening before placing {direction} order (signal={signal_id})"
+                        )
+                        # Flatten all positions before placing the opposite-direction order
+                        flatten_results = await self.flatten_all_positions()
+                        if not flatten_results or not flatten_results[0].success:
+                            logger.error(f"Reversal flatten failed for {signal_id}, aborting new order")
+                            return ExecutionResult(
+                                success=False,
+                                status=OrderStatus.ERROR,
+                                signal_id=signal_id,
+                                error_message="reversal_flatten_failed",
+                            )
+                        logger.info(f"✅ Reversal flatten complete, proceeding with {direction} order")
+                        # Clear position cache after flatten
+                        self._live_positions.clear()
+                        self._live_positions_updated_at = 0.0
+                        # Continue to place the new order below
+                    else:
+                        # Original blocking behavior when reversal is disabled
+                        logger.info(
+                            f"Broker position guard: existing {existing_dir} position (net={net_pos}), "
+                            f"blocking {direction} order for {signal_id}"
+                        )
+                        return ExecutionResult(
+                            success=False,
+                            status=OrderStatus.REJECTED,
+                            signal_id=signal_id,
+                            error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
+                        )
 
             # Block if total contracts >= max (uses abs(net_pos), not len())
             if total_abs_pos >= max_net_positions:
@@ -553,24 +575,30 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
     # ── Position queries ──────────────────────────────────────────────
 
-    async def get_positions(self) -> List[Position]:
+    async def get_positions(self, force_rest: bool = False) -> List[Position]:
         """Get current positions from Tradovate.
 
         Falls back to WebSocket ``_live_positions`` cache when REST returns
         empty or fails with a 429 rate-limit error.
+
+        Args:
+            force_rest: If True, always call REST API and update _live_positions
+                        cache with the result (used for periodic sync).
         """
         if self.config.mode.value == "dry_run" or not self.is_connected():
             return []
 
         positions: List[Position] = []
         rest_failed_429 = False
+        rest_succeeded = False
         try:
-            # Respect rate-limit cooldown
-            if time.monotonic() < self._rate_limit_until:
+            # Respect rate-limit cooldown (skip if force_rest)
+            if not force_rest and time.monotonic() < self._rate_limit_until:
                 rest_failed_429 = True
                 raise TradovateAPIError("Rate-limit cooldown active")
 
             tv_positions = await self._client.get_positions()
+            rest_succeeded = True
             for pos in tv_positions:
                 net_pos = pos.get("netPos", 0)
                 if net_pos == 0:
@@ -580,6 +608,38 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     quantity=net_pos,
                     avg_price=float(pos.get("netPrice", 0)),
                 ))
+
+            # ── CRITICAL: Sync _live_positions from REST API ──
+            # This ensures the agent always knows the REAL position state
+            # from Tradovate, not just what WebSocket events reported.
+            if rest_succeeded:
+                new_live = {}
+                for pos in tv_positions:
+                    cid = str(pos.get("contractId", ""))
+                    np = pos.get("netPos", 0)
+                    if np != 0:
+                        new_live[cid] = {
+                            "contract_id": cid,
+                            "net_pos": np,
+                            "net_price": pos.get("netPrice", 0),
+                            "open_pnl": pos.get("openPnL", 0),
+                            "timestamp": pos.get("timestamp"),
+                        }
+                # Detect position drift
+                old_keys = set(self._live_positions.keys())
+                new_keys = set(new_live.keys())
+                if old_keys != new_keys or any(
+                    self._live_positions.get(k, {}).get("net_pos") != new_live[k].get("net_pos")
+                    for k in new_keys
+                ):
+                    logger.warning(
+                        f"🔄 POSITION SYNC: REST API corrected _live_positions. "
+                        f"Old: {dict((k, v.get('net_pos')) for k, v in self._live_positions.items())} "
+                        f"New: {dict((k, v.get('net_pos')) for k, v in new_live.items())}"
+                    )
+                self._live_positions = new_live
+                self._live_positions_updated_at = time.monotonic()
+
         except TradovateAPIError as e:
             if "429" in str(e) or rest_failed_429:
                 # Exponential backoff: 30s, 60s, 120s, max 300s
@@ -709,9 +769,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             elif entity_type == "position":
                 contract_id = str(entity.get("contractId", ""))
                 net_pos = entity.get("netPos", 0)
+                # oTE = unrealized P&L in Tradovate's API
+                ote = entity.get("oTE", entity.get("openPnL", 0))
                 logger.debug(
                     f"Tradovate position update: contract={contract_id}, "
-                    f"netPos={net_pos}"
+                    f"netPos={net_pos}, oTE=${ote}"
                 )
                 # Update live position cache for faster reporting
                 if net_pos != 0:
@@ -719,14 +781,43 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         "contract_id": contract_id,
                         "net_pos": net_pos,
                         "net_price": entity.get("netPrice", 0),
-                        "open_pnl": entity.get("openPnL", 0),
+                        "open_pnl": ote,  # Store oTE as open_pnl
+                        "ote": ote,  # Also store as ote for clarity
                         "timestamp": entity.get("timestamp"),
+                        "ws_updated_at": time.time(),  # Track when WS updated this
                     }
                 else:
                     self._live_positions.pop(contract_id, None)
                 self._live_positions_updated_at = time.monotonic()
 
-    # ── REST order reconciliation ─────────────────────────────────────
+    def get_live_positions_with_pnl(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get live positions from WebSocket cache with real-time P&L.
+        
+        Returns:
+            Dict mapping contract_id to position data including:
+            - contract_id: Contract ID
+            - net_pos: Net position (positive = long, negative = short)
+            - net_price: Average entry price
+            - ote: Unrealized P&L (oTE field from Tradovate)
+            - open_pnl: Same as ote (for compatibility)
+            - timestamp: Last update timestamp from Tradovate
+            - ws_updated_at: Unix timestamp when WebSocket received this
+            - cache_age_seconds: How old this data is
+        """
+        import time
+        result = {}
+        current_time = time.time()
+        
+        for contract_id, pos_data in self._live_positions.items():
+            pos_copy = pos_data.copy()
+            ws_time = pos_copy.get("ws_updated_at", 0)
+            pos_copy["cache_age_seconds"] = current_time - ws_time if ws_time > 0 else None
+            result[contract_id] = pos_copy
+            
+        return result
+
+        # ── REST order reconciliation ─────────────────────────────────────
 
     async def _poll_order_status(self) -> None:
         """

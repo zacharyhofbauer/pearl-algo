@@ -810,6 +810,11 @@ class SignalHandler:
             enforce_guard = bool(
                 getattr(getattr(adapter, "config", None), "enforce_protection_guard", False)
             )
+            logger.warning(
+                f"🔍 PROTECTION GUARD DEBUG: adapter.config exists={adapter.config is not None}, "
+                f"enforce_guard={enforce_guard}, "
+                f"config.enforce_protection_guard={getattr(adapter.config, 'enforce_protection_guard', 'MISSING')}"
+            )
             if enforce_guard:
                 if hasattr(adapter, "disarm"):
                     adapter.disarm()

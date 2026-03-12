@@ -43,6 +43,7 @@ from pearlalgo.market_agent.trading_circuit_breaker import (
 )
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceScheduler
+from pearlalgo.execution.advanced_exit_manager import AdvancedExitManager
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import configure_market_hours, get_market_hours
@@ -847,6 +848,21 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         if self.execution_adapter is None:
             return
 
+        # ── Periodic REST API position sync (every 30s) ──
+        # CRITICAL: WebSocket _live_positions cache can drift from reality.
+        # This ensures the agent always knows the REAL position state from Tradovate.
+        _now = __import__('time').monotonic()
+        _sync_interval = getattr(self, '_position_sync_interval', 30)
+        _last_sync = getattr(self, '_last_position_sync_time', 0)
+        if _now - _last_sync >= _sync_interval:
+            self._last_position_sync_time = _now
+            try:
+                await self.execution_adapter.get_positions(force_rest=True)
+            except Exception as _sync_err:
+                __import__('logging').getLogger(__name__).debug(
+                    f"Position sync failed (non-fatal): {_sync_err}"
+                )
+
         # Get broker positions from adapter cache OR virtual positions from signals
         positions = getattr(self.execution_adapter, '_live_positions', {})
         if not positions:
@@ -901,7 +917,12 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 }
                 # Register with trailing stop manager for new positions
                 if self._trailing_stop_manager and self._trailing_stop_manager.enabled:
-                    stop_px = self._find_initial_stop_price(direction)
+                    # Try broker stop orders first, then virtual trades, then ATR-based default
+                    current_atr = self._get_current_atr(market_data)
+                    stop_px = await self._find_initial_stop_from_broker(direction, entry_price, current_atr)
+                    if stop_px == 0:
+                        # Fallback to virtual trade stop if broker query failed
+                        stop_px = self._find_initial_stop_price(direction)
                     if stop_px > 0:
                         self._trailing_stop_manager.register_position(
                             position_id=str(_cid),
@@ -909,6 +930,9 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                             direction=direction,
                             initial_stop=stop_px,
                         )
+                        logger.info(f"✅ Registered position {_cid} with trailing stop manager: entry=${entry_price:.2f}, stop=${stop_px:.2f}")
+                    else:
+                        logger.warning(f"⚠️ Could not find stop price for position {_cid}, trailing stop not registered")
 
             mon = self._pos_monitor
             mon['max_price'] = max(mon['max_price'], current_price)
@@ -959,6 +983,48 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 except Exception as e:
                     logger.warning(f"Trailing stop update failed: {e}")
 
+            # === Advanced Exit Manager ===
+            if not hasattr(self, '_adv_exit_mgr'):
+                adv_cfg = self.config.get('advanced_exits', {})
+                if adv_cfg:
+                    self._adv_exit_mgr = AdvancedExitManager(adv_cfg)
+                    logger.info("🎯 Advanced Exit Manager initialized")
+                else:
+                    self._adv_exit_mgr = None
+            
+            if self._adv_exit_mgr:
+                pos_data = {
+                    'direction': direction,
+                    'entry_price': entry_price,
+                    'current_price': current_price,
+                    'unrealized_pnl': unrealized_pnl,
+                    'mfe_dollars': mfe * 2.0,
+                    'mae_dollars': mae * 2.0,
+                    'qty': abs(net_pos)
+                }
+                entry_time_dt = mon.get('entry_time', datetime.now(timezone.utc))
+                should_exit, reason = self._adv_exit_mgr.should_exit(pos_data, current_price, entry_time_dt)
+                
+                if should_exit:
+                    logger.info(f"🚪 ADVANCED EXIT: {reason}")
+                    try:
+                        results = await self.execution_adapter.flatten_all_positions()
+                        if results and results[0].success:
+                            logger.info("✅ Position closed via advanced exit")
+                            if self.notifier:
+                                await self.notifier.send(
+                                    f"🚪 ADVANCED EXIT\n"
+                                    f"{direction.upper()} @ {entry_price:.2f}\n"
+                                    f"Exit: {current_price:.2f}\n"
+                                    f"P&L: ${unrealized_pnl:.2f}\n"
+                                    f"{reason}",
+                                    tier=NotificationTier.CRITICAL
+                                )
+                            return
+                    except Exception as e:
+                        logger.error(f"❌ Advanced exit failed: {e}")
+            # === End Advanced Exit ===
+            
             hold_secs = (datetime.now(timezone.utc) - mon['entry_time']).total_seconds()
             hold_min = hold_secs / 60.0
 
@@ -1002,6 +1068,55 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         except Exception:
             pass
         return 0.0
+    async def _find_initial_stop_from_broker(self, direction: str, entry_price: float, current_atr: float = 0) -> float:
+        """
+        Find initial stop price from actual broker stop orders.
+        
+        Priority:
+        1. Actual working stop order from Tradovate
+        2. Reasonable default based on ATR (entry ± 2*ATR)
+        3. Fixed percentage (2% from entry)
+        
+        Args:
+            direction: 'long' or 'short'
+            entry_price: Position entry price
+            current_atr: Current ATR value (if available)
+            
+        Returns:
+            Stop price, or 0.0 if unable to determine
+        """
+        # Try to find actual working stop order
+        try:
+            orders = await self.execution_adapter._client.get_orders()
+            stop_action = "Sell" if direction == "long" else "Buy"
+            for order in orders:
+                if (order.get("orderType") == "Stop"
+                        and order.get("action") == stop_action
+                        and order.get("ordStatus") in ("Working", "Accepted")):
+                    stop_price = float(order.get("stopPrice", 0))
+                    if stop_price > 0:
+                        logger.info(f"Found broker stop order for {direction}: ${stop_price:.2f}")
+                        return stop_price
+        except Exception as e:
+            logger.debug(f"Could not query broker stop orders: {e}")
+        
+        # Fallback 1: Use ATR-based default
+        if current_atr > 0:
+            if direction == "long":
+                stop_price = entry_price - (2.0 * current_atr)
+            else:
+                stop_price = entry_price + (2.0 * current_atr)
+            logger.info(f"Using ATR-based default stop for {direction}: ${stop_price:.2f} (2*ATR=${current_atr*2:.2f})")
+            return stop_price
+        
+        # Fallback 2: Fixed 2% from entry
+        if direction == "long":
+            stop_price = entry_price * 0.98
+        else:
+            stop_price = entry_price * 1.02
+        logger.info(f"Using 2% default stop for {direction}: ${stop_price:.2f}")
+        return stop_price
+
 
     def _get_current_atr(self, market_data: Dict) -> float:
         """Compute current ATR from the bar buffer."""

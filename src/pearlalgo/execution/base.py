@@ -63,6 +63,10 @@ class ExecutionConfig:
     cooldown_seconds: int = defaults.COOLDOWN_SECONDS
     max_position_size_per_order: int = 1  # HARD CAP: never send more than this to broker
     
+    # Reversal behavior: flatten existing position when opposite signal arrives
+    allow_reversal_on_opposite_signal: bool = True  # If True, opposite signal closes existing position
+    enforce_protection_guard: bool = False  # If True, block entries when positions lack protective orders
+    
     # Symbol whitelist (empty = all symbols allowed)
     symbol_whitelist: List[str] = field(default_factory=lambda: defaults.DEFAULT_SYMBOL_WHITELIST.copy())
     
@@ -102,6 +106,10 @@ class ExecutionConfig:
             logger.warning(f"Invalid cooldown_seconds={cooldown_seconds}, using default {defaults.COOLDOWN_SECONDS}")
             cooldown_seconds = defaults.COOLDOWN_SECONDS
 
+        # Debug logging
+        enforce_guard_val = bool(config.get("enforce_protection_guard", False))
+        logger.warning(f"🔍 ExecutionConfig.from_dict: enforce_protection_guard in config={('enforce_protection_guard' in config)}, value={config.get('enforce_protection_guard', 'NOT_FOUND')}, parsed={enforce_guard_val}")
+        
         return cls(
             enabled=bool(config.get("enabled", defaults.EXECUTION_ENABLED)),
             armed=bool(config.get("armed", defaults.EXECUTION_ARMED)),
@@ -112,6 +120,8 @@ class ExecutionConfig:
             cooldown_seconds=cooldown_seconds,
             max_position_size_per_order=int(config.get("max_position_size_per_order", 1)),
             symbol_whitelist=list(config.get("symbol_whitelist", defaults.DEFAULT_SYMBOL_WHITELIST)),
+            allow_reversal_on_opposite_signal=bool(config.get("allow_reversal_on_opposite_signal", False)),
+            enforce_protection_guard=enforce_guard_val,
             ibkr_trading_client_id=int(config.get("ibkr_trading_client_id", defaults.IBKR_TRADING_CLIENT_ID)),
             ibkr_host=str(config.get("ibkr_host", defaults.IBKR_HOST)),
             ibkr_port=int(config.get("ibkr_port", defaults.IBKR_PORT)),
@@ -128,6 +138,8 @@ class ExecutionConfig:
             "max_daily_loss": self.max_daily_loss,
             "cooldown_seconds": self.cooldown_seconds,
             "symbol_whitelist": self.symbol_whitelist,
+            "allow_reversal_on_opposite_signal": self.allow_reversal_on_opposite_signal,
+            "enforce_protection_guard": self.enforce_protection_guard,
             "ibkr_trading_client_id": self.ibkr_trading_client_id,
             "ibkr_host": self.ibkr_host,
             "ibkr_port": self.ibkr_port,

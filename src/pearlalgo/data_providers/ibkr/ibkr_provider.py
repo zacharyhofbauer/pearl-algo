@@ -204,7 +204,7 @@ class IBKRProvider(DataProvider):
         Get current price for an underlying symbol.
         
         Args:
-            symbol: Underlying symbol (e.g., 'SPY', 'QQQ')
+            symbol: Underlying symbol (e.g., 'MNQ', 'MES')
             
         Returns:
             Current price as float

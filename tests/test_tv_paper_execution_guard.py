@@ -62,13 +62,14 @@ def _make_mock_client():
     return client
 
 
-def _make_adapter(mode: str = "paper", armed: bool = True) -> TradovateExecutionAdapter:
+def _make_adapter(mode: str = "paper", armed: bool = True, **config_kw) -> TradovateExecutionAdapter:
     """Create a connected, armed adapter with mocked client."""
     exec_config = ExecutionConfig(
         enabled=True,
         armed=armed,
         mode=ExecutionMode(mode),
         symbol_whitelist=["MNQ"],
+        **config_kw,
     )
     tv_config = TradovateConfig(
         username="test", password="test", cid=1, sec="sec", env="demo",
@@ -122,7 +123,7 @@ class TestPositionGuardOpposite:
 
     @pytest.mark.asyncio
     async def test_long_blocked_by_short_position(self):
-        adapter = _make_adapter()
+        adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         adapter._live_positions["999"] = {
             "contract_id": "999",
             "net_pos": -1,
@@ -137,7 +138,7 @@ class TestPositionGuardOpposite:
 
     @pytest.mark.asyncio
     async def test_short_blocked_by_long_position(self):
-        adapter = _make_adapter()
+        adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         adapter._live_positions["999"] = {
             "contract_id": "999",
             "net_pos": 2,
