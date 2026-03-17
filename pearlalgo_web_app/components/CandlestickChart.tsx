@@ -34,15 +34,45 @@ interface TooltipState {
   groupedMarkers: MarkerData[] | null  // All markers at this time
 }
 
-// Session times in UTC hours (futures trade almost 24h)
-// Overnight/Asian: 23:00 - 08:00 UTC (6pm-3am ET)
-// London: 08:00 - 13:00 UTC (3am-8am ET)  
-// NY RTH: 14:30 - 21:00 UTC (9:30am-4pm ET)
-const getSessionColor = (hour: number): string => {
-  if (hour >= 23 || hour < 8) return 'rgba(30, 60, 114, 0.15)' // Overnight - blue tint
-  if (hour >= 8 && hour < 14) return 'rgba(60, 40, 20, 0.15)' // London - brown tint
-  if (hour >= 14 && hour < 21) return 'rgba(40, 70, 40, 0.15)' // NY RTH - green tint
-  return 'transparent'
+// ─── Pivot helpers (used for TBT trendlines + S/D zones) ────────────────────
+
+/** Returns pivot highs: bars whose high strictly dominates `lookback` neighbors on both sides. */
+function calcPivotHighs(candles: CandleData[], lookback = 3): Array<{ time: number; price: number }> {
+  const results: Array<{ time: number; price: number }> = []
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const h = candles[i].high
+    let isPivot = true
+    for (let j = i - lookback; j <= i + lookback; j++) {
+      if (j !== i && candles[j].high >= h) { isPivot = false; break }
+    }
+    if (isPivot) results.push({ time: candles[i].time, price: h })
+  }
+  return results
+}
+
+/** Returns pivot lows: bars whose low strictly dominates `lookback` neighbors on both sides. */
+function calcPivotLows(candles: CandleData[], lookback = 3): Array<{ time: number; price: number }> {
+  const results: Array<{ time: number; price: number }> = []
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const l = candles[i].low
+    let isPivot = true
+    for (let j = i - lookback; j <= i + lookback; j++) {
+      if (j !== i && candles[j].low <= l) { isPivot = false; break }
+    }
+    if (isPivot) results.push({ time: candles[i].time, price: l })
+  }
+  return results
+}
+
+/** Projects a line through two points to `toTime`. */
+function extendToTime(
+  p1: { time: number; price: number },
+  p2: { time: number; price: number },
+  toTime: number,
+): number {
+  if (p2.time === p1.time) return p2.price
+  const slope = (p2.price - p1.price) / (p2.time - p1.time)
+  return p2.price + slope * (toTime - p2.time)
 }
 
 function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
@@ -65,6 +95,13 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   // ATR Bands series refs
   const atrUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
   const atrLowerRef = useRef<ISeriesApi<'Line'> | null>(null)
+
+  // TBT trendline series refs
+  const tbtResistanceRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const tbtSupportRef    = useRef<ISeriesApi<'Line'> | null>(null)
+
+  // S/D zone boundary line series (12 total: 3 supply + 3 demand, upper + lower edge each)
+  const sdZoneSeriesRef = useRef<ISeriesApi<'Line'>[]>([])
 
   // Position price lines refs (for cleanup)
   const positionPriceLinesRef = useRef<IPriceLine[]>([])
@@ -322,6 +359,49 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
     atrUpperRef.current = atrUpper
     atrLowerRef.current = atrLower
+
+    // ─── TBT Trendlines ────────────────────────────────────────────────────────
+    // Resistance: connects last two pivot highs, extended to current bar (red dashed)
+    const tbtResistance = chart.addLineSeries({
+      color: 'rgba(239,83,80,0.7)',
+      lineWidth: 1,
+      lineStyle: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
+    })
+    tbtResistanceRef.current = tbtResistance
+
+    // Support: connects last two pivot lows, extended to current bar (green dashed)
+    const tbtSupport = chart.addLineSeries({
+      color: 'rgba(38,166,154,0.7)',
+      lineWidth: 1,
+      lineStyle: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
+    })
+    tbtSupportRef.current = tbtSupport
+
+    // ─── S/D Zone Boundaries ───────────────────────────────────────────────────
+    // 12 series total: indices 0-5 = supply (0-2 upper edges, 3-5 lower edges)
+    //                  indices 6-11 = demand (6-8 upper edges, 9-11 lower edges)
+    const newSdSeries: ISeriesApi<'Line'>[] = []
+    for (let i = 0; i < 12; i++) {
+      const isSupply = i < 6
+      newSdSeries.push(chart.addLineSeries({
+        color: isSupply ? 'rgba(239,83,80,0.4)' : 'rgba(38,166,154,0.4)',
+        lineWidth: 1,
+        lineStyle: 0,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => null,
+      }))
+    }
+    sdZoneSeriesRef.current = newSdSeries
 
     // Position line guide series (added before candles so its price lines render
     // behind candles/markers instead of on top of price action).
@@ -809,6 +889,94 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       positionPriceLinesRef.current = []
     }
   }, [positionLines])
+
+  // ─── TBT Trendlines ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const resistance = tbtResistanceRef.current
+    const support    = tbtSupportRef.current
+    if (!resistance || !support || data.length < 10) return
+
+    const lastTime = data[data.length - 1].time
+
+    const pivotHighs = calcPivotHighs(data, 3)
+    if (pivotHighs.length >= 2) {
+      const p1 = pivotHighs[pivotHighs.length - 2]
+      const p2 = pivotHighs[pivotHighs.length - 1]
+      resistance.setData([
+        { time: p1.time as Time, value: p1.price },
+        { time: p2.time as Time, value: p2.price },
+        { time: lastTime as Time, value: extendToTime(p1, p2, lastTime) },
+      ])
+    } else {
+      resistance.setData([])
+    }
+
+    const pivotLows = calcPivotLows(data, 3)
+    if (pivotLows.length >= 2) {
+      const p1 = pivotLows[pivotLows.length - 2]
+      const p2 = pivotLows[pivotLows.length - 1]
+      support.setData([
+        { time: p1.time as Time, value: p1.price },
+        { time: p2.time as Time, value: p2.price },
+        { time: lastTime as Time, value: extendToTime(p1, p2, lastTime) },
+      ])
+    } else {
+      support.setData([])
+    }
+  }, [data])
+
+  // ─── S/D Zone Boundaries ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const series = sdZoneSeriesRef.current
+    if (!series.length || data.length < 10) return
+
+    const currentPrice = data[data.length - 1].close
+    const firstTime    = data[0].time as Time
+    const lastTime     = data[data.length - 1].time as Time
+    const ZONE_BAND    = 0.002 // ±0.2% band around each pivot level
+
+    // Nearest 3 supply zones above price (pivot highs)
+    const supplyPivots = calcPivotHighs(data, 3)
+      .filter(p => p.price > currentPrice)
+      .slice(-3)
+
+    // Nearest 3 demand zones below price (pivot lows)
+    const demandPivots = calcPivotLows(data, 3)
+      .filter(p => p.price < currentPrice)
+      .slice(-3)
+
+    // Supply zones → series[0..2] upper edges, series[3..5] lower edges
+    for (let i = 0; i < 3; i++) {
+      const upper = series[i]
+      const lower = series[i + 3]
+      const pivot = supplyPivots[i]
+      if (pivot) {
+        const top    = pivot.price * (1 + ZONE_BAND)
+        const bottom = pivot.price * (1 - ZONE_BAND)
+        upper.setData([{ time: firstTime, value: top    }, { time: lastTime, value: top    }])
+        lower.setData([{ time: firstTime, value: bottom }, { time: lastTime, value: bottom }])
+      } else {
+        upper.setData([])
+        lower.setData([])
+      }
+    }
+
+    // Demand zones → series[6..8] upper edges, series[9..11] lower edges
+    for (let i = 0; i < 3; i++) {
+      const upper = series[i + 6]
+      const lower = series[i + 9]
+      const pivot = demandPivots[i]
+      if (pivot) {
+        const top    = pivot.price * (1 + ZONE_BAND)
+        const bottom = pivot.price * (1 - ZONE_BAND)
+        upper.setData([{ time: firstTime, value: top    }, { time: lastTime, value: top    }])
+        lower.setData([{ time: firstTime, value: bottom }, { time: lastTime, value: bottom }])
+      } else {
+        upper.setData([])
+        lower.setData([])
+      }
+    }
+  }, [data])
 
   // Format price
   const formatPrice = (price?: number) => {

@@ -42,6 +42,8 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: '/tv_paper/:path*', destination: 'http://127.0.0.1:8001/:path*' },
+      { source: '/api/:path*', destination: 'http://127.0.0.1:8001/api/:path*' },
+      { source: '/ws', destination: 'http://127.0.0.1:8001/ws' },
     ]
   },
 
