@@ -79,6 +79,10 @@ auto_flat:
 risk:
   min_position_size: 1
   max_position_size: 1
+session:
+  start_time: "18:00"
+  end_time: "15:45"
+  timezone: "America/New_York"
 service:
   dashboard_chart_enabled: false
 trailing_stop:
@@ -110,3 +114,32 @@ advanced_exits:
   stop_optimization:
     enabled: true
     mae_percentile: 75
+pearl_bot_auto:
+  min_confidence: 0.62
+  min_confidence_long: 0.72
+  ema_fast: 9
+  ema_slow: 21
+  allow_vwap_cross_entries: false
+  allow_vwap_retest_entries: false
+  allow_trend_momentum_entries: false
+  allow_trend_breakout_entries: false
+  volume_ma_length: 20
+  sr_length: 130
+  sr_atr_mult: 0.5
+  tbt_period: 10
+  tbt_trend_type: wicks
+  sd_threshold_pct: 10.0
+  sd_resolution: 50
+  vwap_std_dev: 1.0
+
+# Strategy params at top level (required by pearl_bot_auto.py indicator functions)
+volume_ma_length: 20
+sr_length: 130
+sr_atr_mult: 0.5
+tbt_period: 10
+tbt_trend_type: wicks
+sd_threshold_pct: 10.0
+sd_resolution: 50
+vwap_std_dev: 1.0
+min_confidence: 0.62
+min_confidence_long: 0.72

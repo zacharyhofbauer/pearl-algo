@@ -543,7 +543,22 @@ class MarketAgentTelegramNotifier:
                     message += f"\n❌ Order failed: {reason}"
                 elif exec_status.startswith("skipped"):
                     reason = exec_status.replace("skipped:", "", 1)
-                    message += f"\n⏭ Order skipped: {reason}"
+                    # Parse cooldown_active:source:Xs_remaining -> human readable
+                    if "cooldown_active" in reason:
+                        parts = reason.split(":")
+                        remaining = next((p for p in parts if "remaining" in p), "")
+                        secs = remaining.replace("s_remaining", "").strip()
+                        message += f"\n⏳ Cooldown active — next entry in {secs}s"
+                    elif "max_positions" in reason:
+                        message += f"\n📊 Max positions reached — skipped"
+                    elif "session_filter" in reason:
+                        message += f"\n🕐 Outside trading session — skipped"
+                    elif "circuit_breaker" in reason:
+                        message += f"\n🚫 Circuit breaker active — skipped"
+                    else:
+                        # Clean up underscores for display
+                        clean = reason.replace("_", " ").replace(":", " | ").title()
+                        message += f"\n⏭ Skipped: {clean}"
                 elif exec_status.startswith("error"):
                     reason = exec_status.replace("error:", "", 1)
                     message += f"\n⚠️ Exec error: {reason}"
@@ -616,10 +631,13 @@ class MarketAgentTelegramNotifier:
                 hold_mins = int(hold_duration_minutes % 60)
                 hold_str = f" | {hold_hours}h{hold_mins}m" if hold_hours > 0 else f" | {hold_mins}m"
 
-            exit_icons = {"stop_loss": "SL", "take_profit": "TP", "manual": "Manual", "expired": "Expired", "trailing_stop": "Trail"}
+            exit_icons = {"stop_loss": "🛑 SL", "take_profit": "🎯 TP", "manual": "✋ Manual", "expired": "⏰ Expired", "trailing_stop": "🔒 Trail"}
             reason_short = exit_icons.get(exit_reason.lower(), exit_reason_display)
-            message += f"{fmt_currency(entry_price)} -> {fmt_currency(exit_price)}{hold_str} | {reason_short}"
-            
+            price_move = exit_price - entry_price if signal.get("direction") == "long" else entry_price - exit_price
+            pts_str = f"+{price_move:.1f}pts" if price_move >= 0 else f"{price_move:.1f}pts"
+            message += f"{fmt_currency(entry_price)} → {fmt_currency(exit_price)} ({pts_str}){hold_str}\n"
+            message += f"{reason_short}"
+
             # Send message - no inline buttons, all actions accessible via /start menu
             # Exit notifications are high-signal; never dedupe.
             success = await self.telegram.send_message(message, dedupe=False)
@@ -1860,10 +1878,22 @@ class MarketAgentTelegramNotifier:
                 await self.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
                 return True
 
-            msg = f"🚀 *{market} Agent Started{acct_tag}* • {time_str}\n"
-            msg += f"{fut_dot} Futures {ses_dot} Session\n\n"
-            msg += "Use /start for full dashboard"
+            # Count restarts in last hour to detect crash loops
+            restart_file = data_dir / ".telegram_restart_count.json"
+            with file_lock(started_lock):
+                rdata = load_json_file(restart_file)
+                restarts = [t for t in rdata.get("times", []) if now_ts - t < 3600]
+                restarts.append(now_ts)
+                atomic_write_json(restart_file, {"times": restarts[-20:]})
+            restart_count = len(restarts)
 
+            msg = f"🚀 *{market} Agent Started{acct_tag}* • {time_str}\n"
+            msg += f"{fut_dot} Futures {ses_dot} Session\n"
+            if restart_count > 3:
+                msg += f"⚠️ *{restart_count} restarts in last hour!*\n"
+            elif restart_count > 1:
+                msg += f"🔄 Restart #{restart_count} this hour\n"
+            msg += "\nUse /start for full dashboard"
             await self.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
             return True
         except Exception as e:

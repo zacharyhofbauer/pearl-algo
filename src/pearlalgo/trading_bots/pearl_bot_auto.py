@@ -67,7 +67,7 @@ CONFIG = ConfigView({
     # These are critical reversal/breakout zones
     "key_level_proximity_pct": 0.15,  # Within 0.15% = "near" a level
     "key_level_breakout_pct": 0.05,   # Price crossed level by this % = breakout
-    "key_level_bounce_confidence": 0.12,  # Confidence boost for bounce signals
+    "key_level_bounce_confidence": 0.15,  # Confidence boost for bounce/rejection signals
     "key_level_breakout_confidence": 0.10,  # Confidence boost for breakout signals
     "key_level_rejection_penalty": 0.08,  # Confidence penalty for entering into resistance/support
     
@@ -907,13 +907,33 @@ def check_key_level_signals(
             # Touched resistance zone
             if current_close < current_high and current_close < prev_close:
                 # Rejecting from resistance - bearish reversal signal
+                # Boost if wick rejection (high significantly above close = clear rejection)
+                wick_size = _safe_div(current_high - current_close, current_close)
+                rejection_boost = bounce_conf * 1.25 if wick_size > 0.001 else bounce_conf
                 level_info["level_interaction"] = f"bounce_resistance:{nearest_resistance_name}"
-                return "bounce_resistance_short", bounce_conf, level_info
+                return "bounce_resistance_short", rejection_boost, level_info
             elif current_close > prev_close:
                 # Breaking up through resistance - bullish continuation
                 if _safe_div(current_close - prev_close, current_close) > breakout_pct:
                     level_info["level_interaction"] = f"breakout_resistance:{nearest_resistance_name}"
                     return "breakout_resistance_long", breakout_conf, level_info
+
+    # =========================================================================
+    # FAILED RETEST DETECTION (Zach's highest conviction short setup)
+    # Price breaks below a key level, retests from below, fails to reclaim = SHORT
+    # =========================================================================
+    if nearest_resistance is not None and len(df) >= 5:
+        # Check if current resistance was recently support (broken level)
+        # Pattern: prev bars were ABOVE this level, then broke below, now retesting
+        recent_closes = df["close"].iloc[-5:-1].values
+        prev_above = any(c > nearest_resistance for c in recent_closes[:2])  # was above in last 2-4 bars
+        recent_below = all(c < nearest_resistance for c in recent_closes[2:])  # then broke below
+        current_retest = _safe_div(abs(current_close - nearest_resistance), current_close) <= proximity_pct
+        
+        if prev_above and recent_below and current_retest and current_close < prev_close:
+            # Failed retest confirmed - price came back to broken level and rejected
+            level_info["level_interaction"] = f"failed_retest:{nearest_resistance_name}"
+            return "bounce_resistance_short", bounce_conf * 1.3, level_info  # 30% extra confidence
 
     # =========================================================================
     # CAUTION SIGNALS (Reduce confidence when entering into levels)
@@ -1057,10 +1077,10 @@ def detect_vwap_cross(df: pd.DataFrame, *, vwap_series: Optional[pd.Series] = No
 
 def check_volume_confirmation(df: pd.DataFrame, config: Dict) -> bool:
     """Check volume confirmation - from Volume.pine"""
-    if len(df) < config["volume_ma_length"]:
+    if len(df) < config.get("volume_ma_length", 20):
         return False
     
-    vol_ma = calculate_volume_ma(df, config["volume_ma_length"])
+    vol_ma = calculate_volume_ma(df, config.get("volume_ma_length", 20))
     current_vol = df["volume"].iloc[-1]
     avg_vol = vol_ma.iloc[-1]
     
@@ -1074,7 +1094,7 @@ def check_sr_signals(df: pd.DataFrame, config: Dict) -> Tuple[Optional[str], flo
     Returns: (signal_type, confidence)
     """
     resistance, support, buy_power, sell_power = calculate_sr_power_channel(
-        df, config["sr_length"], config["sr_atr_mult"]
+        df, config.get("sr_length", 130), config.get("sr_atr_mult", 0.5)
     )
     
     if resistance == 0 or support == 0:
@@ -1084,22 +1104,22 @@ def check_sr_signals(df: pd.DataFrame, config: Dict) -> Tuple[Optional[str], flo
     
     # Breakout above resistance
     if close > resistance:
-        confidence = min(buy_power / config["sr_length"], 1.0)
+        confidence = min(buy_power / config.get("sr_length", 130), 1.0)
         return "sr_breakout_long", confidence
     
     # Breakout below support
     if close < support:
-        confidence = min(sell_power / config["sr_length"], 1.0)
+        confidence = min(sell_power / config.get("sr_length", 130), 1.0)
         return "sr_breakout_short", confidence
     
     # Pullback to support in uptrend
     if support < close < (support + resistance) / 2 and buy_power > sell_power:
-        confidence = min(buy_power / config["sr_length"] * 0.8, 1.0)
+        confidence = min(buy_power / config.get("sr_length", 130) * 0.8, 1.0)
         return "sr_pullback_long", confidence
     
     # Pullback to resistance in downtrend
     if (support + resistance) / 2 < close < resistance and sell_power > buy_power:
-        confidence = min(sell_power / config["sr_length"] * 0.8, 1.0)
+        confidence = min(sell_power / config.get("sr_length", 130) * 0.8, 1.0)
         return "sr_pullback_short", confidence
     
     return None, 0.0
@@ -1112,7 +1132,7 @@ def check_tbt_signals(df: pd.DataFrame, config: Dict) -> Tuple[Optional[str], fl
     Returns: (signal_type, confidence)
     """
     res_slope, res_start, sup_slope, sup_start = calculate_tbt_trendlines(
-        df, config["tbt_period"], config["tbt_trend_type"]
+        df, config.get("tbt_period", 10), config.get("tbt_trend_type", "wicks")
     )
     
     if res_slope is None or sup_slope is None:
@@ -1140,7 +1160,7 @@ def check_supply_demand_signals(df: pd.DataFrame, config: Dict) -> Tuple[Optiona
     Returns: (signal_type, confidence)
     """
     supply_level, supply_avg, demand_level, demand_avg = calculate_supply_demand_zones(
-        df, config["sd_threshold_pct"], config["sd_resolution"]
+        df, config.get("sd_threshold_pct", 10.0), config.get("sd_resolution", 50)
     )
     
     if supply_level is None or demand_level is None:
@@ -1217,6 +1237,7 @@ class StrategyParams(_BaseModel):
 
     # -- Signal thresholds -----------------------------------------------
     min_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
+    min_confidence_long: float = _Field(default=0.72, ge=0.0, le=1.0)
     min_risk_reward: float = _Field(default=1.3, ge=0.5)
 
     # -- Key levels (SpacemanBTC) ----------------------------------------
@@ -1770,7 +1791,8 @@ def generate_signals(
                     confidence -= 0.07
                     active_indicators.append("PWH_CAUTION")
         
-        if confidence >= config["min_confidence"]:
+        _min_conf_long = config.get("min_confidence_long", config.get("min_confidence", 0.55))
+        if confidence >= _min_conf_long:
             entry_price = close
             # Use dynamic regime-adaptive parameters
             sl_mult = dynamic_sl_mult

@@ -274,6 +274,24 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                             error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
                         )
 
+            # Block if same-direction position already exists (no pyramiding — 1 trade at a time)
+            for pos in active_broker_positions:
+                net_pos = pos.get("net_pos", 0)
+                if net_pos == 0:
+                    continue
+                existing_dir = "long" if net_pos > 0 else "short"
+                if existing_dir == direction:
+                    logger.info(
+                        f"Broker position guard: same-direction {existing_dir} position already open (net={net_pos}), "
+                        f"blocking {direction} order for {signal_id} (no pyramiding)"
+                    )
+                    return ExecutionResult(
+                        success=False,
+                        status=OrderStatus.REJECTED,
+                        signal_id=signal_id,
+                        error_message=f"same_direction_blocked: {existing_dir} position already open",
+                    )
+
             # Block if total contracts >= max (uses abs(net_pos), not len())
             if total_abs_pos >= max_net_positions:
                 logger.info(

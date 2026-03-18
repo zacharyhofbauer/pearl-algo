@@ -199,7 +199,7 @@ class GetLatestBarTask(Task):
                         expiration_date = datetime.strptime(expiration_str, "%Y%m%d")
                         days_until_expiration = (expiration_date - datetime.now()).days
                         
-                        if days_until_expiration <= 3:
+                        if days_until_expiration <= 0:
                             logger.warning(
                                 f"⚠️  Front month contract expires in {days_until_expiration} days ({expiration_str})!\n"
                                 f"   This may cause live data issues. Trying next month contract instead..."

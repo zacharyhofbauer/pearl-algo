@@ -630,6 +630,8 @@ export default function DashboardPageInner() {
               timeframe={timeframe}
               onChartReady={setMainChartApi}
               positionLines={positionLines}
+              positions={positions}
+              srPower={undefined}
             />
           </ErrorBoundary>
         )}

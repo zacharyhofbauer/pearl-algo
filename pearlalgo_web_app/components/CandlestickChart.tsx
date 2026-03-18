@@ -16,6 +16,13 @@ interface PositionLine {
   axisLabelVisible?: boolean
 }
 
+interface ActivePosition {
+  direction: 'long' | 'short'
+  entry_price: number
+  position_size?: number
+  open_pnl?: number
+}
+
 interface ChartProps {
   data: CandleData[]
   indicators?: Indicators
@@ -24,6 +31,8 @@ interface ChartProps {
   timeframe?: string
   onChartReady?: (chart: IChartApi | null) => void
   positionLines?: PositionLine[]  // Entry, SL, TP lines for active positions
+  positions?: ActivePosition[]    // Active positions for overlay box
+  srPower?: { buyPower?: number; sellPower?: number }  // S&R power labels
 }
 
 interface TooltipState {
@@ -75,7 +84,115 @@ function extendToTime(
   return p2.price + slope * (toTime - p2.time)
 }
 
-function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines }: ChartProps) {
+// ── helpers ──────────────────────────────────────────────────────────────────
+// Convert UTC timestamp → ET hour (handles DST via Intl)
+function utcToETHour(unixSec: number): number {
+  const d = new Date(unixSec * 1000)
+  const etStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })
+  return parseInt(etStr, 10) % 24
+}
+
+function utcToETMinutes(unixSec: number): number {
+  const d = new Date(unixSec * 1000)
+  const parts = d.toLocaleString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).split(':')
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)
+}
+
+// Session classification (ET minutes)
+function getSessionColorET(etMinutes: number): string | null {
+  // Pre-market: 4:00–9:30 (240–570)
+  if (etMinutes >= 240 && etMinutes < 570) return 'rgba(255, 152, 0, 0.05)'
+  // Regular hours: 9:30–16:15 (570–975)
+  if (etMinutes >= 570 && etMinutes < 975) return 'rgba(33, 150, 243, 0.05)'
+  // Overnight: 18:00–4:00 (1080–1440 and 0–240)
+  if (etMinutes >= 1080 || etMinutes < 240) return 'rgba(156, 39, 176, 0.04)'
+  return null
+}
+
+// Calculate supply/demand zones from candle data (swing highs/lows over last 20 bars, ±0.3% zone)
+function calcZones(candles: CandleData[], currentPrice: number): Array<{
+  top: number; bottom: number; kind: 'supply' | 'demand' | 'overlap'
+}> {
+  if (candles.length < 5) return []
+  const recent = candles.slice(-20)
+  const highs: number[] = []
+  const lows: number[] = []
+
+  // Identify swing highs and lows
+  for (let i = 1; i < recent.length - 1; i++) {
+    const prev = recent[i - 1]
+    const cur = recent[i]
+    const next = recent[i + 1]
+    if (cur.high >= prev.high && cur.high >= next.high) highs.push(cur.high)
+    if (cur.low <= prev.low && cur.low <= next.low) lows.push(cur.low)
+  }
+
+  const zones: Array<{ top: number; bottom: number; kind: 'supply' | 'demand' | 'overlap' }> = []
+  const PCT = 0.003
+
+  // Deduplicate nearby highs (within 0.5% of each other)
+  const dedupedHighs: number[] = []
+  for (const h of highs) {
+    if (!dedupedHighs.some(x => Math.abs(x - h) / h < 0.005)) dedupedHighs.push(h)
+  }
+  const dedupedLows: number[] = []
+  for (const l of lows) {
+    if (!dedupedLows.some(x => Math.abs(x - l) / l < 0.005)) dedupedLows.push(l)
+  }
+
+  for (const h of dedupedHighs) {
+    const top = h * (1 + PCT)
+    const bottom = h * (1 - PCT)
+    const kind = h > currentPrice ? 'supply' : 'demand'
+    zones.push({ top, bottom, kind })
+  }
+
+  // Check for overlaps
+  const result: typeof zones = []
+  for (const z of zones) {
+    const overlap = result.find(r => r.top >= z.bottom && r.bottom <= z.top)
+    if (overlap) {
+      overlap.kind = 'overlap'
+    } else {
+      result.push(z)
+    }
+  }
+
+  return result
+}
+
+// Calculate pivot trendlines from last 30 bars
+function calcTrendlines(candles: CandleData[]): {
+  resistance: [number, number][]  // [time, price] pairs
+  support: [number, number][]
+} {
+  const recent = candles.slice(-30)
+  const pivotHighs: [number, number][] = []
+  const pivotLows: [number, number][] = []
+
+  for (let i = 2; i < recent.length - 2; i++) {
+    const c = recent[i]
+    if (
+      c.high > recent[i-1].high && c.high > recent[i-2].high &&
+      c.high > recent[i+1].high && c.high > recent[i+2].high
+    ) {
+      pivotHighs.push([c.time, c.high])
+    }
+    if (
+      c.low < recent[i-1].low && c.low < recent[i-2].low &&
+      c.low < recent[i+1].low && c.low < recent[i+2].low
+    ) {
+      pivotLows.push([c.time, c.low])
+    }
+  }
+
+  return {
+    resistance: pivotHighs.slice(-3),
+    support: pivotLows.slice(-3),
+  }
+}
+
+function CandlestickChart({ data, indicators, markers, barSpacing = 10, timeframe = '5m', onChartReady, positionLines, positions, srPower }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -86,6 +203,8 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const positionGuideSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   const resizeHandlerRef = useRef<(() => void) | null>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const overlayRafRef = useRef<number | null>(null)
 
   // Bollinger Bands series refs
   const bbUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
@@ -228,6 +347,209 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       } as MarkerData & { _isGrouped?: boolean; _groupCount?: number; _entriesCount?: number; _exitsCount?: number; _wins?: number; _losses?: number }
     })
   }, [markers])
+
+  // ── Overlay canvas drawing ────────────────────────────────────────────────
+  const drawOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    if (!canvas || !chart || !series || !data?.length) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const W = canvas.width
+    const H = canvas.height
+    ctx.clearRect(0, 0, W, H)
+
+    const timeScale = chart.timeScale()
+    const priceToY = (price: number) => series.priceToCoordinate(price) ?? -9999
+    const timeToX = (t: number) => timeScale.timeToCoordinate(t as Time) ?? -9999
+
+    // ── 2. Session background shading ──────────────────────────────────────
+    // We iterate visible candles and draw vertical bands per-candle to colour session
+    const tfSec = (() => {
+      switch (timeframe) {
+        case '1m': return 60
+        case '5m': return 300
+        case '15m': return 900
+        case '1h': return 3600
+        default: return 300
+      }
+    })()
+
+    // Estimate candle width in pixels
+    const barWidth = barSpacing * 0.8 // approximate
+
+    for (const candle of data) {
+      const etMin = utcToETMinutes(candle.time)
+      const sessionColor = getSessionColorET(etMin)
+      if (!sessionColor) continue
+
+      const x = timeToX(candle.time)
+      if (x < -50 || x > W + 50) continue  // out of view
+
+      ctx.fillStyle = sessionColor
+      ctx.fillRect(x - barWidth / 2 - 1, 0, barWidth + 2, H)
+    }
+
+    // ── 1. Supply & Demand Zone Boxes ─────────────────────────────────────
+    const currentPrice = data[data.length - 1]?.close ?? 0
+    const zones = calcZones(data, currentPrice)
+
+    for (const zone of zones) {
+      const yTop = priceToY(zone.top)
+      const yBot = priceToY(zone.bottom)
+      if (yTop > H || yBot < 0) continue  // out of view
+
+      let color: string
+      switch (zone.kind) {
+        case 'supply':  color = 'rgba(255, 80, 80, 0.15)'; break
+        case 'demand':  color = 'rgba(76, 175, 80, 0.15)'; break
+        case 'overlap': color = 'rgba(160, 82, 45, 0.18)'; break
+      }
+
+      const rectY = Math.min(yTop, yBot)
+      const rectH = Math.abs(yBot - yTop)
+      ctx.fillStyle = color
+      ctx.fillRect(0, rectY, W, rectH)
+
+      // Border line
+      const borderColor = zone.kind === 'supply' ? 'rgba(255,80,80,0.4)'
+        : zone.kind === 'demand' ? 'rgba(76,175,80,0.4)'
+        : 'rgba(160,82,45,0.4)'
+      ctx.strokeStyle = borderColor
+      ctx.lineWidth = 1
+      ctx.setLineDash([])
+      ctx.beginPath()
+      ctx.moveTo(0, rectY)
+      ctx.lineTo(W, rectY)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(0, rectY + rectH)
+      ctx.lineTo(W, rectY + rectH)
+      ctx.stroke()
+
+      // Label
+      const labelText = zone.kind === 'supply' ? 'Supply' : zone.kind === 'demand' ? 'Demand' : 'Overlap'
+      ctx.font = '10px monospace'
+      ctx.fillStyle = borderColor.replace('0.4', '0.8')
+      ctx.fillText(labelText, 4, rectY + 10)
+    }
+
+    // ── 5. TBT Trendlines ──────────────────────────────────────────────────
+    const trendlines = calcTrendlines(data)
+
+    const drawTrendline = (points: [number, number][], color: string) => {
+      if (points.length < 2) return
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1
+      ctx.setLineDash([4, 3])
+      ctx.beginPath()
+      let moved = false
+      for (const [t, p] of points) {
+        const x = timeToX(t)
+        const y = priceToY(p)
+        if (!moved) { ctx.moveTo(x, y); moved = true }
+        else ctx.lineTo(x, y)
+      }
+      // Extend line to right edge
+      if (points.length >= 2) {
+        const [t1, p1] = points[points.length - 2]
+        const [t2, p2] = points[points.length - 1]
+        const x1 = timeToX(t1), x2 = timeToX(t2)
+        const y1 = priceToY(p1), y2 = priceToY(p2)
+        if (x2 > x1) {
+          const slope = (y2 - y1) / (x2 - x1)
+          const extX = W + 40
+          const extY = y2 + slope * (extX - x2)
+          ctx.lineTo(extX, extY)
+        }
+      }
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+
+    drawTrendline(trendlines.resistance, 'rgba(255, 100, 100, 0.6)')
+    drawTrendline(trendlines.support, 'rgba(100, 220, 100, 0.6)')
+
+    // ── 3. S&R Power Floating Labels ──────────────────────────────────────
+    if (srPower) {
+      ctx.font = 'bold 11px monospace'
+      let labelY = 22
+      if (srPower.sellPower !== undefined) {
+        ctx.fillStyle = 'rgba(255, 120, 80, 0.9)'
+        ctx.fillText(`Sell Power: ${srPower.sellPower}`, 8, labelY)
+        labelY += 16
+      }
+      if (srPower.buyPower !== undefined) {
+        ctx.fillStyle = 'rgba(100, 220, 100, 0.9)'
+        ctx.fillText(`Buy Power: ${srPower.buyPower}`, 8, labelY)
+      }
+    }
+
+    // ── 4. Active Position Box on Price Axis ──────────────────────────────
+    if (positions && positions.length > 0) {
+      for (const pos of positions) {
+        const y = priceToY(pos.entry_price)
+        if (y < 0 || y > H) continue
+
+        const isLong = pos.direction === 'long'
+        const bgColor = isLong ? 'rgba(76, 175, 80, 0.85)' : 'rgba(244, 67, 54, 0.85)'
+        const pnlStr = pos.open_pnl !== undefined
+          ? `${pos.open_pnl >= 0 ? '+' : ''}$${pos.open_pnl.toFixed(2)}`
+          : ''
+        const label = `${isLong ? '+' : '-'}${pos.position_size} | ${pnlStr}`
+
+        // Draw box on right side (last ~80px, after price scale starts)
+        const boxX = W - 78
+        const boxW = 74
+        const boxH = 18
+        const boxY = y - boxH / 2
+
+        ctx.fillStyle = bgColor
+        ctx.beginPath()
+        if (ctx.roundRect) {
+          ctx.roundRect(boxX, boxY, boxW, boxH, 3)
+        } else {
+          ctx.rect(boxX, boxY, boxW, boxH)
+        }
+        ctx.fill()
+
+        // Connecting line to price axis
+        ctx.strokeStyle = bgColor
+        ctx.lineWidth = 1
+        ctx.setLineDash([2, 2])
+        ctx.beginPath()
+        ctx.moveTo(0, y)
+        ctx.lineTo(boxX, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        // Label text
+        ctx.font = 'bold 10px monospace'
+        ctx.fillStyle = '#ffffff'
+        ctx.fillText(label, boxX + 4, boxY + 12)
+      }
+    }
+  }, [data, positions, srPower, barSpacing, timeframe])
+
+  // Re-draw overlay on every animation frame (keeps it in sync with chart pan/zoom)
+  useEffect(() => {
+    let running = true
+
+    const loop = () => {
+      if (!running) return
+      drawOverlay()
+      overlayRafRef.current = requestAnimationFrame(loop)
+    }
+    overlayRafRef.current = requestAnimationFrame(loop)
+
+    return () => {
+      running = false
+      if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current)
+    }
+  }, [drawOverlay])
 
   // Initialize chart
   useEffect(() => {
@@ -463,6 +785,19 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     ema21SeriesRef.current = ema21Series
     vwapSeriesRef.current = vwapSeries
 
+    // Create overlay canvas
+    const container = containerRef.current
+    const overlayCanvas = document.createElement('canvas')
+    overlayCanvas.style.position = 'absolute'
+    overlayCanvas.style.top = '0'
+    overlayCanvas.style.left = '0'
+    overlayCanvas.style.pointerEvents = 'none'
+    overlayCanvas.style.zIndex = '2'
+    overlayCanvas.width = container.clientWidth
+    overlayCanvas.height = container.clientHeight || 600
+    container.appendChild(overlayCanvas)
+    overlayCanvasRef.current = overlayCanvas
+
     // Notify parent that chart is ready
     onChartReady?.(chart)
 
@@ -474,10 +809,13 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     // Handle resize - store in ref to ensure proper cleanup
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight || 600,
-        })
+        const w = containerRef.current.clientWidth
+        const h = containerRef.current.clientHeight || 600
+        chartRef.current.applyOptions({ width: w, height: h })
+        if (overlayCanvasRef.current) {
+          overlayCanvasRef.current.width = w
+          overlayCanvasRef.current.height = h
+        }
       }
     }
     resizeHandlerRef.current = handleResize
@@ -489,6 +827,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         resizeHandlerRef.current = null
       }
       onChartReady?.(null)
+      if (overlayCanvasRef.current) {
+        overlayCanvasRef.current.remove()
+        overlayCanvasRef.current = null
+      }
       chart.remove()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

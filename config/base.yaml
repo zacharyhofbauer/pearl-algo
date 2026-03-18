@@ -31,7 +31,7 @@ service:
   dashboard_chart_interval: 3600
   dashboard_chart_timeframe: 5m
   dashboard_chart_lookback_hours: 6
-  enable_new_bar_gating: true
+  enable_new_bar_gating: false
   adaptive_cadence_enabled: true
   scan_interval_active_seconds: 15
   scan_interval_idle_seconds: 60
@@ -216,7 +216,7 @@ ml_filter:
   mode: shadow
   require_lift_to_block: true
   lift_lookback_trades: 200
-  lift_min_trades: 50
+  lift_min_trades: 5
   lift_min_winrate_delta: 0.05
   model_path: models/signal_filter_v1.joblib
   model_version: v1.0.0
