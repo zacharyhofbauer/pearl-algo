@@ -304,6 +304,8 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}, "
                 f"direction_gating={self.trading_circuit_breaker.config.enable_direction_gating}"
             )
+            # Hydrate daily P&L from DB so restart does not reset the daily loss counter
+            self.trading_circuit_breaker.hydrate_daily_pnl()
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -1910,10 +1912,17 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             logger.error(f"Error queuing error notification: {e}")
 
     def _check_daily_reset(self) -> None:
-        """Reset execution daily counters at start of new trading day.
-
-        Delegated to ExecutionOrchestrator.check_daily_reset().
-        """
+        """Reset execution counters and circuit breaker at 6pm ET trading-day boundary."""
+        from pearlalgo.market_agent.stats_computation import get_trading_day_start
+        from datetime import date as _date
+        today = get_trading_day_start().date()
+        if not hasattr(self, "_cb_last_trading_day"):
+            self._cb_last_trading_day = today
+        if self._cb_last_trading_day != today:
+            self._cb_last_trading_day = today
+            if self.trading_circuit_breaker is not None:
+                self.trading_circuit_breaker.reset_daily()
+                logger.info(f"Trading circuit breaker daily reset for {today} (6pm ET)")
         self.execution_orchestrator.check_daily_reset()
 
     async def _check_execution_health(self) -> None:

@@ -245,9 +245,11 @@ class ScheduledTasks:
                         trades = perf_data.get("trades", []) or []
                     else:
                         trades = []
+                    from pearlalgo.market_agent.stats_computation import get_trading_day_start as _gtds
+                    _td_start_iso = _gtds().isoformat()
                     today_trades = [
                         t for t in trades
-                        if t.get("exit_time", "")[:10] == today_str
+                        if (t.get("entry_time") or t.get("exit_time") or "") >= _td_start_iso
                     ]
 
             if not today_trades:
@@ -325,58 +327,25 @@ class ScheduledTasks:
             logger.debug(f"Could not send daily summary: {e}")
 
     def _get_tradovate_today_trades(self, today_str: str) -> list:
-        """Reconstruct today's closed trades from Tradovate fills (FIFO matching)."""
+        """Return today's closed trades using the 6pm ET trading-day boundary.
+
+        Uses get_paired_tradovate_trades (same source as /api/trades) so P&L
+        numbers always match what Tradovate shows.  Filters by entry_time >=
+        get_trading_day_start() so overnight trades (entered after 6pm ET) are
+        correctly attributed to the current trading day — matching Tradovate's
+        own calendar grouping.
+        """
         try:
-            fills_file = self.state_manager.state_dir / "tradovate_fills.json"
-            if not fills_file.exists():
-                return []
-            fills = json.loads(fills_file.read_text(encoding="utf-8"))
-            if not isinstance(fills, list) or not fills:
-                return []
+            from pearlalgo.api.tradovate_helpers import get_paired_tradovate_trades
+            from pearlalgo.market_agent.stats_computation import get_trading_day_start
 
-            open_queue: list = []
-            trades: list = []
-            point_value = 2.0
+            trading_day_start_utc = get_trading_day_start()
+            start_iso = trading_day_start_utc.isoformat()
 
-            for f in fills:
-                action = str(f.get("action") or f.get("Action") or "").lower()
-                price = float(f.get("price") or f.get("Price") or 0)
-                qty = int(f.get("qty") or f.get("Qty") or 0)
-                ts = str(f.get("timestamp") or f.get("Timestamp") or "")
-                if not action or not price or not qty:
-                    continue
-
-                remaining = qty
-                while remaining > 0 and open_queue:
-                    oq_action, oq_price, oq_qty, oq_ts = open_queue[0]
-                    if oq_action == action:
-                        break
-                    match_qty = min(remaining, oq_qty)
-                    if oq_action == "buy":
-                        pnl = (price - oq_price) * match_qty * point_value
-                        direction = "long"
-                    else:
-                        pnl = (oq_price - price) * match_qty * point_value
-                        direction = "short"
-                    trades.append({
-                        "pnl": round(pnl, 2),
-                        "is_win": pnl > 0,
-                        "direction": direction,
-                        "type": "tradovate_fill",
-                        "exit_time": ts,
-                    })
-                    remaining -= match_qty
-                    if oq_qty > match_qty:
-                        open_queue[0] = (oq_action, oq_price, oq_qty - match_qty, oq_ts)
-                    else:
-                        open_queue.pop(0)
-
-                if remaining > 0:
-                    open_queue.append((action, price, remaining, ts))
-
-            return [t for t in trades if t.get("exit_time", "")[:10] == today_str]
+            trades = get_paired_tradovate_trades(self.state_manager.state_dir)
+            return [t for t in trades if (t.get("entry_time") or "") >= start_iso]
         except Exception as e:
-            logger.debug(f"Could not reconstruct Tradovate trades for daily summary: {e}")
+            logger.debug(f"Could not get Tradovate today trades: {e}")
             return []
 
     # ------------------------------------------------------------------

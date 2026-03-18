@@ -1,0 +1,35 @@
+{
+  "id": "pearl-algo-web-app",
+  "name": "PEARL Algo",
+  "short_name": "PEARL",
+  "description": "Algorithmic trading dashboard — live charts, trade analytics, and performance tracking",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "orientation": "any",
+  "categories": ["finance", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Open Tradovate Paper dashboard",
+      "url": "/dashboard?account=tv_paper",
+      "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Archive",
+      "short_name": "Archive",
+      "description": "Explore IBKR Virtual archive",
+      "url": "/archive/ibkr",
+      "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    }
+  ],
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/apple-icon-v4.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/apple-icon-v4.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "/apple-icon-180-v4.png", "sizes": "180x180", "type": "image/png", "purpose": "any"}
+  ]
+}

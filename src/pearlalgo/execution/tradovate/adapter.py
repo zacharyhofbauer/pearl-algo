@@ -81,7 +81,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Live position cache updated from WebSocket events
         self._live_positions: Dict[str, Dict[str, Any]] = {}
         self._live_positions_updated_at: float = 0.0  # time.monotonic()
-        self._POSITION_CACHE_TTL: float = 120.0  # 2 minutes — stale after this
+        self._POSITION_CACHE_TTL: float = 5.0  # 2 minutes — stale after this
 
         # Path for immediate fill persistence (set by service)
         self._fills_file: Optional[Path] = None

@@ -404,7 +404,65 @@ class TradingCircuitBreaker:
         self._daily_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         self.reset_session()
         logger.info("Trading circuit breaker daily reset")
-    
+
+    def hydrate_daily_pnl(self, state_dir: Optional[str] = None) -> None:
+        """Load today's realized P&L from paired Tradovate fills on startup.
+
+        Uses get_paired_tradovate_trades (same source as /api/trades and the
+        dashboard) so the circuit breaker sees the same P&L as everything else.
+        Uses the 6pm ET trading-day boundary so overnight trades are attributed
+        to the correct trading day — matching Tradovate's own daily grouping.
+
+        Prevents the daily drawdown limit from resetting to $0 after an agent
+        restart mid-trading-day (nightly SIGTERM / crash).
+        """
+        try:
+            from pathlib import Path
+            from pearlalgo.market_agent.stats_computation import get_trading_day_start
+            from pearlalgo.api.tradovate_helpers import get_paired_tradovate_trades
+
+            if state_dir is None:
+                here = Path(__file__).resolve()
+                workspace = here.parents[3]
+                state_dir = str(workspace / "data" / "tradovate" / "paper")
+
+            state_path = Path(state_dir)
+            if not state_path.exists():
+                logger.warning(f"hydrate_daily_pnl: state_dir not found at {state_dir}, skipping")
+                return
+
+            trading_day_start_utc = get_trading_day_start()
+            start_iso = trading_day_start_utc.isoformat()
+
+            trades = get_paired_tradovate_trades(state_path)
+            today_trades = [t for t in trades if (t.get("entry_time") or "") >= start_iso]
+            realized_pnl = sum(t.get("pnl", 0.0) for t in today_trades)
+
+            self._daily_pnl = realized_pnl
+            logger.info(
+                "Circuit breaker hydrated daily_pnl=$%.2f from %d paired fills "
+                "(trading day started %s)" % (realized_pnl, len(today_trades), start_iso)
+            )
+
+            if self._daily_pnl <= -self.config.max_daily_drawdown:
+                now = datetime.now(timezone.utc)
+                from pearlalgo.utils.market_hours import ET
+                now_et = now.astimezone(ET)
+                if now_et.hour < 18:
+                    next_reset_et = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+                else:
+                    next_reset_et = (now_et + timedelta(days=1)).replace(
+                        hour=18, minute=0, second=0, microsecond=0)
+                remaining = max(60, (next_reset_et.astimezone(timezone.utc) - now).total_seconds() / 60)
+                self._activate_cooldown("daily_drawdown_on_startup", int(remaining))
+                logger.warning(
+                    "Circuit breaker startup: daily limit already hit "
+                    "(daily_pnl=$%.2f, limit=$%.2f). Cooldown %.0fmin." % (
+                        self._daily_pnl, self.config.max_daily_drawdown, remaining)
+                )
+        except Exception as e:
+            logger.error("hydrate_daily_pnl failed (non-fatal): %s" % e, exc_info=True)
+
     def force_cooldown(self, reason: str, minutes: int) -> None:
         """Force a cooldown period."""
         self._cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)

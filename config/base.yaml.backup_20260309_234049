@@ -1,0 +1,270 @@
+# ==========================================================================
+# PearlAlgo Base Configuration
+# ==========================================================================
+# Shared settings across all accounts. Account-specific overrides go in
+# config/accounts/<account>.yaml.
+#
+# Usage: python -m pearlalgo.market_agent.main \
+#          --config config/accounts/tradovate_paper.yaml \
+#          --data-dir data/tradovate/paper
+# ==========================================================================
+
+symbol: MNQ
+timeframe: 1m
+scan_interval: 30
+
+session:
+  start_time: '18:00'
+  end_time: '15:45'
+  timezone: 'America/New_York'
+telegram:
+  enabled: true
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+  notification_tier: critical
+
+
+risk:
+  max_risk_per_trade: 0.015
+  max_drawdown: 0.1
+  stop_loss_atr_multiplier: 4.0
+  take_profit_risk_reward: 1.5
+  min_position_size: 1
+  max_position_size: 50
+  signal_type_size_multipliers:
+    sr_bounce: 0.25
+  signal_type_max_contracts:
+    sr_bounce: 2
+
+service:
+  status_update_interval: 3600
+  heartbeat_interval: 86400
+  state_save_interval: 10
+  connection_failure_alert_interval: 600
+  data_quality_alert_interval: 300
+  dashboard_chart_enabled: true
+  dashboard_chart_interval: 3600
+  dashboard_chart_timeframe: 5m
+  dashboard_chart_lookback_hours: 6
+  enable_new_bar_gating: true
+  adaptive_cadence_enabled: true
+  scan_interval_active_seconds: 15
+  scan_interval_idle_seconds: 60
+  scan_interval_market_closed_seconds: 300
+  scan_interval_paused_seconds: 60
+  scan_interval_velocity_seconds: 1.5
+  velocity_mode_enabled: true
+  velocity_atr_expansion_threshold: 1.2
+  velocity_volume_spike_threshold: 2.0
+
+circuit_breaker:
+  max_consecutive_errors: 10
+  max_connection_failures: 10
+  max_data_fetch_errors: 5
+  pause_on_connection_failures: true   # false = never pause for data/connection blips (e.g. Tradovate data-only)
+
+trading_circuit_breaker:
+  enabled: true
+  mode: warn_only
+  max_consecutive_losses: 5
+  max_session_drawdown: 500.0
+  max_daily_drawdown: 1000.0
+  max_concurrent_positions: 5
+  enable_session_filter: true
+  allowed_sessions:
+    - overnight
+    - premarket
+    - morning
+    - midday
+    - afternoon
+    - close
+  enable_direction_gating: true
+  direction_gating_min_confidence: 0.70
+  enable_regime_avoidance: false
+  blocked_regimes:
+    - ranging
+    - volatile
+  regime_avoidance_min_confidence: 0.70
+  enable_trigger_filters: false
+  ema_cross_require_volume: true
+  low_regime_require_volume: true
+  enable_ml_chop_shield: false
+  ml_min_scored_trades: 50
+  ml_min_winrate_delta: 0.15
+  ml_chop_shield_regimes:
+    - ranging
+    - volatile
+
+data:
+  buffer_size: 300
+  buffer_size_5m: 300
+  buffer_size_15m: 100
+  historical_hours: 5
+  multitimeframe_5m_hours: 25
+  multitimeframe_15m_hours: 25
+  performance_history_limit: 1000
+  stale_data_threshold_minutes: 10
+  connection_timeout_minutes: 30
+  enable_base_cache: true
+  base_refresh_seconds: 60
+  enable_mtf_cache: true
+  mtf_refresh_seconds_5m: 300
+  mtf_refresh_seconds_15m: 900
+
+storage:
+  sqlite_enabled: true
+  async_writes_enabled: true
+  async_queue_max_size: 1000
+  async_queue_priority_trades: true
+
+signals:
+  duplicate_window_seconds: 120
+  # min_confidence is set via pearl_bot_auto (flattened to top-level strategy config)
+  min_risk_reward: 1.3
+  duplicate_price_threshold_pct: 0.5
+  volatility_threshold: 0.0001
+  avoid_lunch_lull: false
+  skip_overnight: false
+  quality_score:
+    enabled: true
+    threshold: 0.35
+    factors:
+      confidence_weight: 0.3
+      risk_reward_weight: 0.25
+      regime_alignment_weight: 0.2
+      volume_profile_weight: 0.15
+      mtf_alignment_weight: 0.1
+  prioritize_ny_session: false
+  min_volume: 10
+  explore:
+    enabled: false
+    min_confidence: 0.75
+    min_risk_reward: 2.0
+    include_quality_rejects: false
+    bypass_regime_filters: false
+  max_stop_points: 45.0
+  adaptive_volatility_filter:
+    enabled: false
+    expansion_requirement: 2.0
+    median_atr_threshold: 0.0003
+  regime_filters:
+    unified_strategy:
+      allowed_regimes:
+        - ranging
+        - trending_bullish
+        - trending_bearish
+
+# Strategy-specific overrides for trading_bots/pearl_bot_auto.py
+# Restored from config/markets/nq.yaml (the profitable IBKR Virtual config)
+# These keys are flattened into the top-level config dict for generate_signals().
+pearl_bot_auto:
+  ema_fast: 5
+  ema_slow: 13
+  min_confidence: 0.40
+  allow_vwap_cross_entries: true
+  allow_vwap_retest_entries: true
+  allow_trend_momentum_entries: true
+  trend_momentum_atr_mult: 0.5
+  allow_trend_breakout_entries: true
+  trend_breakout_lookback_bars: 5
+
+strategy:
+  enabled_signals:
+    - unified_strategy
+  enable_dynamic_sizing: true
+  base_contracts: 1
+  high_conf_contracts: 1
+  max_conf_contracts: 1
+  high_conf_threshold: 0.8
+  max_conf_threshold: 0.9
+  winning_signal_types:
+    - unified_strategy
+  signal_type_size_multipliers:
+    unified_strategy: 1.0
+  use_scalp_presets: false
+  scalp_target_points: 20.0
+  scalp_stop_points: 12.0
+  session_position_scaling:
+    enabled: true
+    london_multiplier: 0.8
+    tokyo_multiplier: 0.7
+    ny_multiplier: 1.5
+
+performance:
+  max_records: 1000
+  default_lookback_days: 7
+
+virtual_pnl:
+  enabled: true
+  intrabar_tiebreak: take_profit
+  notify_entry: true
+  notify_exit: true
+
+auto_flat:
+  enabled: false
+  daily_enabled: true
+  daily_time: '15:55'
+  friday_enabled: true
+  friday_time: '16:55'
+  weekend_enabled: true
+  timezone: 'America/New_York'
+
+learning:
+  enabled: false
+  mode: shadow
+  feature_engineer_enabled: true
+  features:
+    short_window: 5
+    medium_window: 20
+    long_window: 50
+    compute_price_action: true
+    compute_volume_profile: true
+    compute_microstructure: true
+    compute_time_features: true
+    compute_sequential: true
+    compute_cross_timeframe: true
+    normalize_features: true
+    clip_outliers: true
+    outlier_std: 3.0
+  min_samples_per_type: 10
+  explore_rate: 0.1
+  decision_threshold: 0.3
+  max_size_multiplier: 1.5
+  min_size_multiplier: 0.5
+  prior_alpha: 2.0
+  prior_beta: 2.0
+  decay_factor: 0.0
+  contextual:
+    enabled: true
+    mode: shadow
+    explore_rate: 0.1
+    min_samples_per_context: 5
+    decision_threshold: 0.3
+    fallback_to_global: true
+
+ml_filter:
+  enabled: true
+  mode: shadow
+  require_lift_to_block: true
+  lift_lookback_trades: 200
+  lift_min_trades: 50
+  lift_min_winrate_delta: 0.05
+  model_path: models/signal_filter_v1.joblib
+  model_version: v1.0.0
+  min_probability: 0.55
+  shadow_threshold: 0.80
+  high_probability: 0.7
+  adjust_sizing: false
+  size_multiplier_min: 1.0
+  size_multiplier_max: 1.0
+  training_max_samples: 2000
+  min_training_samples: 30
+  retrain_interval_days: 7
+  n_estimators: 100
+  max_depth: 6
+  learning_rate: 0.1
+  calibrate_probabilities: true
+
+audit:
+  retention_days: 90
+  snapshot_retention_days: 365

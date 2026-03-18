@@ -1,0 +1,217 @@
+/* NavBar - Shared top navigation across all pages */
+
+:root {
+  --nav-bar-height: 44px;
+}
+
+.nav-bar {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-5);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  height: var(--nav-bar-height);
+}
+
+.nav-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .nav-bar-inner {
+    max-width: var(--content-max-width);
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+.nav-bar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+  color: var(--text-primary);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-md);
+  flex-shrink: 0;
+  transition: opacity var(--duration-fast) var(--ease-default);
+}
+
+.nav-bar-brand:hover {
+  opacity: 0.85;
+}
+
+.nav-bar-brand.active {
+  color: var(--accent-cyan);
+}
+
+.nav-bar-logo {
+  flex-shrink: 0;
+}
+
+.nav-bar-name {
+  letter-spacing: 0.3px;
+}
+
+.nav-bar-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.nav-bar-link {
+  text-decoration: none;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
+}
+
+.nav-bar-link:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-bar-link.active {
+  color: var(--accent-cyan);
+}
+
+/* Dashboard context (symbol, status dot, AI preview) — only on /dashboard */
+.nav-dashboard-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: var(--space-3);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+}
+
+.nav-context-symbol {
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent-cyan);
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(var(--accent-cyan-rgb), 0.12);
+  flex-shrink: 0;
+}
+
+.nav-context-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.nav-context-dot.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
+
+.nav-context-dot.live {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+  animation: nav-pulse-live 2s infinite ease-in-out;
+}
+
+.nav-context-dot.shadow {
+  background: var(--accent-yellow);
+  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+}
+
+.nav-context-dot.market-closed {
+  background: var(--accent-red);
+  box-shadow: 0 0 4px var(--accent-red);
+}
+
+@keyframes nav-pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.nav-context-preview {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .nav-bar {
+    padding: 0 var(--space-4);
+    gap: var(--space-3);
+    height: 40px;
+  }
+
+  .nav-bar-brand {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nav-bar-links {
+    gap: 0;
+  }
+
+  .nav-bar-link {
+    padding: 5px 7px;
+    font-size: 11px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    -webkit-tap-highlight-color: rgba(0, 212, 255, 0.15);
+  }
+
+  .nav-context-preview {
+    max-width: 92px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav-bar-inner {
+    gap: var(--space-2);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-dashboard-context {
+    gap: 6px;
+    padding-left: var(--space-2);
+  }
+
+  .nav-context-symbol {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .nav-context-preview {
+    max-width: 72px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .nav-context-preview {
+    max-width: 80px;
+  }
+}
+
+@media (max-width: 360px) {
+  .nav-context-preview {
+    max-width: 64px;
+  }
+}

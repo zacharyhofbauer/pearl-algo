@@ -1,0 +1,1133 @@
+/* Responsive - Mobile, Tablet, Desktop breakpoints */
+
+/* ============================================
+   DATA PANELS - Mobile Responsive Styles
+   ============================================ */
+
+/* Tablet - single column */
+@media (max-width: 900px) {
+  .data-panels-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Mobile - optimized compact layout */
+@media (max-width: 640px) {
+  .data-panels {
+    padding: 4px;
+  }
+
+  .data-panels-grid {
+    gap: 8px;
+  }
+
+  .post-trades-advanced-sub {
+    display: none;
+  }
+
+  /* Panel base styles */
+  .data-panel {
+    border-radius: 10px;
+  }
+
+  .data-panel-header {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .data-panel-title {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
+  .data-panel-icon {
+    font-size: 14px;
+  }
+
+  .data-panel-icon-img {
+    width: 16px;
+    height: 16px;
+  }
+
+  .data-panel-badge {
+    font-size: 8px;
+    padding: 2px 5px;
+  }
+
+  .data-panel-content {
+    padding: 10px;
+  }
+
+  /* ===================
+     PERFORMANCE PANEL
+     =================== */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 8px;
+    text-align: center;
+  }
+
+  .stat-card .stat-label {
+    font-size: 8px;
+  }
+
+  .stat-card .stat-value {
+    font-size: clamp(11px, 2.5vw, 13px);
+  }
+
+  /* ===================
+     CHALLENGE PANEL
+     =================== */
+  .challenge-progress .progress-bar {
+    height: 6px;
+    border-radius: 3px;
+  }
+
+  .challenge-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .challenge-stat {
+    text-align: center;
+    padding: 6px;
+  }
+
+  .challenge-stat .label {
+    font-size: 8px;
+  }
+
+  .challenge-stat .value {
+    font-size: clamp(10px, 2.2vw, 12px);
+  }
+
+  /* ===================
+     RISK METRICS PANEL
+     =================== */
+  .risk-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .risk-item {
+    padding: 8px;
+  }
+
+  .risk-item .risk-label {
+    font-size: 9px;
+  }
+
+  .risk-item .risk-value {
+    font-size: clamp(11px, 2.5vw, 13px);
+  }
+
+  /* ===================
+     MARKET REGIME PANEL
+     =================== */
+  .regime-display {
+    padding: clamp(8px, 2vw, 10px);
+  }
+
+  .regime-name {
+    font-size: clamp(12px, 2.5vw, 14px);
+  }
+
+  .regime-confidence {
+    font-size: 11px;
+  }
+
+  .regime-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  /* ===================
+     ACTIVE POSITIONS PANEL
+     =================== */
+  .positions-list {
+    gap: 8px;
+  }
+
+  .position-card {
+    padding: clamp(8px, 2vw, 10px);
+  }
+
+  .position-header {
+    font-size: clamp(10px, 2.2vw, 12px);
+  }
+
+  .position-pnl {
+    font-size: clamp(12px, 2.5vw, 14px);
+  }
+
+  /* ===================
+     RECENT TRADES PANEL
+     =================== */
+  .recent-trades-list {
+    gap: 6px;
+  }
+
+  .recent-trade {
+    padding: 8px;
+    border-radius: 6px;
+  }
+
+  .trade-direction {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .trade-pnl {
+    font-size: clamp(11px, 2.5vw, 13px);
+  }
+
+  .trade-time {
+    font-size: 9px;
+  }
+
+  /* ===================
+     EQUITY CURVE PANEL
+     =================== */
+  .equity-curve-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .equity-stat {
+    text-align: center;
+  }
+
+  .equity-stat-label {
+    font-size: 8px;
+  }
+
+  .equity-stat-value {
+    font-size: clamp(10px, 2.2vw, 12px);
+  }
+
+  /* ===================
+     SIGNAL DECISIONS PANEL
+     =================== */
+  .signal-rejection {
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .rejection-reason {
+    font-size: 10px;
+  }
+
+  /* ===================
+     CONFIG PANEL
+     =================== */
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .config-item {
+    padding: 6px;
+    font-size: 10px;
+  }
+
+  /* ===================
+     SYSTEM HEALTH PANEL
+     =================== */
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .health-item {
+    padding: 8px;
+  }
+
+  .health-label {
+    font-size: 9px;
+  }
+
+  .health-value {
+    font-size: 12px;
+  }
+
+  /* ===================
+     P&L CALENDAR
+     =================== */
+  .pnl-calendar {
+    font-size: 10px;
+  }
+
+  .calendar-day {
+    padding: 4px 2px;
+    min-width: 32px;
+  }
+
+  .calendar-day .day-pnl {
+    font-size: 9px;
+  }
+
+  /* ===================
+     ANALYTICS PANEL
+     =================== */
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .analytics-stat {
+    padding: 8px;
+    text-align: center;
+  }
+
+  .analytics-label {
+    font-size: 8px;
+  }
+
+  .analytics-value {
+    font-size: clamp(11px, 2.5vw, 13px);
+  }
+
+  /* ===================
+     MARKET PRESSURE PANEL
+     =================== */
+  .pressure-bar {
+    height: 10px;
+    border-radius: 5px;
+  }
+
+  .pressure-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 400px) {
+  .data-panels {
+    padding: 2px;
+  }
+
+  .data-panels-grid {
+    gap: 6px;
+  }
+
+  .data-panel-header {
+    padding: 6px 8px;
+  }
+
+  .data-panel-title {
+    font-size: 10px;
+  }
+
+  .data-panel-content {
+    padding: 8px;
+  }
+
+  /* Stats grids - 2 columns */
+  .stats-grid,
+  .challenge-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Equity stats - 2 columns */
+  .equity-curve-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .equity-stat:last-child {
+    grid-column: span 2;
+    justify-self: center;
+  }
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS FOR NEW PANELS
+   ============================================ */
+
+@media (max-width: 768px) {
+  .pressure-stats {
+    flex-wrap: wrap;
+  }
+
+  .health-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .last-signal-details {
+    gap: var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .pressure-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .regime-direction {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .rejections-breakdown {
+    font-size: var(--font-size-xs);
+  }
+
+  .challenge-header-right {
+    align-items: flex-start;
+  }
+}
+
+/* ============================================
+   Responsive adjustments for analytics
+   ============================================ */
+
+@media (max-width: 480px) {
+  .hour-item {
+    flex-wrap: wrap;
+  }
+
+  .hour-stats {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+
+  .trade-stats-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trade-stats-values {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* ============================================
+   COMPREHENSIVE RESPONSIVE STYLES
+   ============================================ */
+
+/* Large Desktop / Ultrawide optimizations */
+@media (min-width: 1440px) {
+  .calendar-heatmap {
+    gap: 3px;
+  }
+
+  .calendar-cell {
+    min-height: 40px;
+  }
+
+  .streak-dot-enhanced {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+/* Desktop */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .calendar-cell {
+    min-height: 36px;
+  }
+}
+
+/* Tablet (768px - 1023px) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Header adjustments */
+  .header-badges {
+    gap: var(--space-2);
+  }
+
+  .agent-mode-badge,
+  .regime-header-badge {
+    padding: var(--space-1) var(--space-2);
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  /* Calendar heatmap */
+  .calendar-cell {
+    min-height: 30px;
+  }
+
+  .calendar-cell-date {
+    font-size: 8px;
+  }
+
+  .calendar-cell-pnl {
+    font-size: 7px;
+  }
+
+  .calendar-summary {
+    padding: var(--space-3);
+  }
+
+  .calendar-stat-label {
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  .calendar-stat-value {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Streak display */
+  .streak-display-enhanced {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .streak-dot-enhanced {
+    width: 8px;
+    height: 8px;
+  }
+
+  .streak-count {
+    font-size: var(--font-size-lg);
+  }
+
+  /* Rejection trend */
+  .rejection-trend-bar {
+    height: 10px;
+  }
+
+  .rejection-legend-item {
+    gap: var(--space-1);
+  }
+
+  .rejection-legend-label {
+    font-size: 9px;
+  }
+}
+
+/* Small Tablet / Large Phone (481px - 767px) */
+@media (min-width: 481px) and (max-width: 767px) {
+  /* Header - stack elements */
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .header-main {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .header-title-group {
+    justify-content: center;
+  }
+
+  .header-badges {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .header-status-group {
+    justify-content: center;
+  }
+
+  .stale-data-banner {
+    font-size: var(--font-size-xs);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  /* Calendar heatmap - smaller cells */
+  .calendar-heatmap {
+    gap: 2px;
+  }
+
+  .calendar-cell {
+    min-height: 28px;
+    border-radius: 3px;
+  }
+
+  .calendar-cell-date {
+    font-size: 8px;
+  }
+
+  .calendar-cell-pnl {
+    font-size: 6px; /* Show tiny P&L text on smaller screens */
+  }
+
+  .calendar-summary {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .calendar-stat {
+    min-width: 70px;
+  }
+
+  /* Streak display */
+  .streak-display-enhanced {
+    padding: var(--space-3);
+  }
+
+  .streak-dots-row {
+    gap: 3px;
+  }
+
+  .streak-dot-enhanced {
+    width: 8px;
+    height: 8px;
+  }
+
+  .streak-count {
+    font-size: var(--font-size-lg);
+  }
+
+  /* Rejection trend */
+  .rejection-trend-legend {
+    justify-content: center;
+  }
+
+  .rejection-bar-label {
+    min-width: 80px;
+    font-size: 9px;
+  }
+
+  .rejection-bar-value {
+    min-width: 50px;
+    font-size: var(--font-size-xs);
+  }
+
+  /* Analytics tabs */
+  .analytics-tabs {
+    gap: 2px;
+  }
+
+  .analytics-tab {
+    padding: 5px 6px;
+    font-size: var(--font-size-xs);
+  }
+
+  /* Performance tabs */
+  .perf-tabs {
+    gap: 2px;
+  }
+
+  .perf-tab {
+    padding: 5px 6px;
+    font-size: var(--font-size-xs);
+  }
+}
+
+/* Mobile (up to 480px) */
+@media (max-width: 480px) {
+  /* Header - full mobile optimization */
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .header h1 {
+    font-size: var(--font-size-md);
+    justify-content: center;
+  }
+
+  .header .page-name {
+    font-size: clamp(9px, 2vw, 10px);
+  }
+
+  .header-badges {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .agent-mode-badge,
+  .regime-header-badge {
+    padding: 2px 4px;
+    font-size: 8px;
+    letter-spacing: 0.3px;
+  }
+
+  .agent-mode-badge .pulse-dot {
+    width: 4px;
+    height: 4px;
+  }
+
+  .market-status-badge {
+    font-size: clamp(8px, 1.8vw, 9px);
+    padding: 2px 6px;
+  }
+
+  .market-status-dot {
+    width: 5px;
+    height: 5px;
+  }
+
+  .stale-data-banner {
+    font-size: clamp(8px, 1.8vw, 9px);
+    padding: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
+  .stale-data-banner .stale-icon {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Data panels */
+  .data-panel {
+    border-radius: 6px;
+  }
+
+  .data-panel-header {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .data-panel-title {
+    font-size: var(--font-size-sm);
+    letter-spacing: 0.5px;
+  }
+
+  .data-panel-content {
+    padding: var(--space-3) !important;
+  }
+
+  /* Calendar heatmap - compact mobile view */
+  .analytics-calendar {
+    gap: var(--space-3);
+  }
+
+  .calendar-summary {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    padding: var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .calendar-stat {
+    min-width: 60px;
+  }
+
+  .calendar-stat-label {
+    font-size: 8px;
+  }
+
+  .calendar-stat-value {
+    font-size: var(--font-size-sm);
+  }
+
+  .calendar-day-labels {
+    gap: 1px;
+  }
+
+  .calendar-day-label {
+    font-size: 8px;
+  }
+
+  .calendar-heatmap {
+    gap: 2px;
+  }
+
+  .calendar-cell {
+    min-height: 24px;
+    border-radius: 2px;
+  }
+
+  .calendar-cell-date {
+    font-size: 7px;
+  }
+
+  .calendar-cell-pnl {
+    font-size: 5px; /* Tiny but visible */
+  }
+
+  .calendar-legend {
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+  }
+
+  .calendar-legend-label {
+    font-size: 8px;
+  }
+
+  .calendar-legend-gradient {
+    width: 60px;
+    height: 8px;
+  }
+
+  /* Streak display - compact */
+  .streak-display-enhanced {
+    padding: var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .streak-header {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .streak-label {
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  .streak-badge {
+    font-size: 8px;
+    padding: 1px 4px;
+  }
+
+  .streak-indicator-enhanced {
+    gap: var(--space-3);
+  }
+
+  .streak-dots-row {
+    gap: 3px;
+  }
+
+  .streak-dot-enhanced {
+    width: 7px;
+    height: 7px;
+  }
+
+  .streak-count {
+    font-size: var(--font-size-lg);
+  }
+
+  .streak-count .streak-type {
+    font-size: var(--font-size-xs);
+  }
+
+  .streak-message {
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  /* Rejection trend - compact */
+  .rejection-trend-bar {
+    height: 10px;
+    border-radius: 5px;
+    margin-bottom: var(--space-2);
+  }
+
+  .rejection-trend-legend {
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .rejection-legend-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .rejection-legend-label {
+    font-size: 8px;
+  }
+
+  .rejection-bar-chart {
+    gap: 4px;
+  }
+
+  .rejection-bar-item {
+    gap: var(--space-2);
+  }
+
+  .rejection-bar-label {
+    min-width: 70px;
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  .rejection-bar-track {
+    height: 6px;
+  }
+
+  .rejection-bar-value {
+    min-width: 45px;
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  /* Grid utilities mobile */
+  .grid.grid-cols-2 {
+    gap: var(--space-3);
+  }
+
+  /* Stat display mobile */
+  .stat-display-label {
+    font-size: clamp(8px, 1.8vw, 9px);
+  }
+
+  .stat-display-value {
+    font-size: var(--font-size-md);
+  }
+
+  /* Analytics tabs mobile - scrollable with fade */
+  .analytics-tabs {
+    gap: 2px;
+    padding: 2px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+  }
+
+  .analytics-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .analytics-tab {
+    padding: 4px 5px;
+    font-size: clamp(8px, 1.8vw, 9px);
+    font-weight: 500;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* Performance tabs mobile - scrollable with fade */
+  .perf-tabs {
+    gap: 2px;
+    padding: 2px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+  }
+
+  .perf-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .perf-tab {
+    padding: 4px 6px;
+    font-size: clamp(8px, 1.8vw, 9px);
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* Session/Duration bars mobile */
+  .session-bar-header,
+  .duration-bar-header {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .session-bar-name,
+  .duration-bar-name {
+    font-size: var(--font-size-xs);
+  }
+
+  .session-bar-pnl,
+  .duration-bar-pnl {
+    font-size: var(--font-size-sm);
+  }
+
+  .session-bar-track,
+  .duration-bar-track {
+    height: 6px;
+  }
+
+  .session-bar-stats,
+  .duration-bar-stats {
+    font-size: 8px;
+  }
+
+  /* Hours section mobile */
+  .hours-section-header {
+    font-size: var(--font-size-xs);
+  }
+
+  .hour-item {
+    font-size: var(--font-size-xs);
+    gap: var(--space-2);
+  }
+
+  .hour-stats {
+    font-size: 7px;
+    gap: 2px;
+  }
+
+  /* Active positions panel */
+  .active-positions-empty {
+    padding: var(--space-3);
+  }
+
+  .recent-activity-section {
+    padding-top: var(--space-3);
+    margin-top: var(--space-3);
+  }
+
+  /* Session stats row - scrollable with fade */
+  .session-stats-row {
+    gap: var(--space-3);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, black 0%, black 92%, transparent 100%);
+  }
+
+  .session-stats-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .session-stats-row > * {
+    flex-shrink: 0;
+    min-width: max-content;
+  }
+
+  /* Recent trades mobile */
+  .trade-item {
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* Extra small mobile (up to 360px) */
+@media (max-width: 360px) {
+  .dashboard {
+    padding: 4px;
+  }
+
+  .header {
+    padding: var(--space-2);
+  }
+
+  .header h1 {
+    font-size: var(--font-size-sm);
+  }
+
+  .header .symbol {
+    font-size: var(--font-size-sm);
+  }
+
+  .timeframe-selector button {
+    padding: 4px 6px;
+    font-size: 9px;
+  }
+
+  .data-panel-header {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .data-panel-title {
+    font-size: var(--font-size-xs);
+  }
+
+  .data-panel-icon {
+    font-size: var(--font-size-sm);
+  }
+
+  .calendar-cell {
+    min-height: 20px;
+  }
+
+  .calendar-cell-date {
+    font-size: 6px;
+  }
+
+  .streak-dot-enhanced {
+    width: 6px;
+    height: 6px;
+  }
+
+  .analytics-tab,
+  .perf-tab {
+    font-size: 8px;
+    padding: 3px 4px;
+  }
+}
+
+/* Landscape phone orientation */
+@media (max-height: 500px) and (orientation: landscape) {
+  .dashboard {
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .chart-wrapper {
+    min-height: 200px;
+  }
+
+  .header {
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .data-panel-content {
+    padding: var(--space-3) !important;
+  }
+
+  .calendar-cell {
+    min-height: 22px;
+  }
+
+  .streak-display-enhanced {
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* Print styles */
+@media print {
+  .dashboard {
+    background: white;
+  }
+
+  .header,
+  .data-panel {
+    border: 1px solid #ccc;
+  }
+
+  .data-panel-title,
+  .stat-display-label {
+    color: #333;
+  }
+
+  .stat-display-value,
+  .text-primary {
+    color: #000;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  :root {
+    --text-primary: #ffffff;
+    --text-secondary: #d0d0d0;
+    --text-tertiary: #a0a0a0;
+    --border-color: #444;
+  }
+
+  .data-panel {
+    border-width: 2px;
+  }
+
+  .stat-display-label {
+    font-weight: 600;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .streak-dot-enhanced,
+  .pulse-dot,
+  .ws-status-dot {
+    animation: none;
+  }
+}

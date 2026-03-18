@@ -26,7 +26,7 @@ execution:
   max_positions: 5
   max_position_size_per_order: 1
   max_orders_per_day: 500
-  max_daily_loss: 1800.0
+  max_daily_loss: 1150.0
   cooldown_seconds: 30
   allow_reversal_on_opposite_signal: true
   symbol_whitelist:
@@ -52,7 +52,7 @@ trading_circuit_breaker:
   tv_paper_enable_news_blackout: true
   max_consecutive_losses: 5
   max_session_drawdown: 1800.0
-  max_daily_drawdown: 1800.0
+  max_daily_drawdown: 1150.0
   max_concurrent_positions: 5
   enable_session_filter: false
   allowed_sessions:
