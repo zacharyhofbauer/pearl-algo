@@ -96,6 +96,10 @@ class MarketAgentDataFetcher:
         # Store last market data for status updates
         self._last_market_data: Optional[Dict] = None
 
+        # Staleness guard tracking
+        self._last_successful_bar_ts: Optional[datetime] = None
+        self._stale_bar_restart_triggered: bool = False
+
         logger.info(
             f"MarketAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
             f"base_cache_enabled={self._enable_base_cache}, mtf_cache_enabled={self._enable_mtf_cache}"
@@ -210,6 +214,21 @@ class MarketAgentDataFetcher:
                     )
                 # Always update buffer with valid data (freshness is for alerting, not blocking)
                 self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
+
+                # Track last successful bar advancement
+                # IMPORTANT: Only advance _last_successful_bar_ts when timestamp actually increases.
+                # IBKR silently returns frozen/stale data without errors — if we update the
+                # "last successful" pointer to a frozen timestamp, the staleness guard never fires.
+                # Fix: compare new_ts against prior value and only advance when strictly newer.
+                if "timestamp" in df.columns:
+                    new_ts = df["timestamp"].max()
+                    if isinstance(new_ts, pd.Timestamp):
+                        new_ts_utc = new_ts.to_pydatetime().replace(tzinfo=timezone.utc)
+                        if self._last_successful_bar_ts is None or new_ts_utc > self._last_successful_bar_ts:
+                            # Timestamp advanced — genuine new data
+                            self._last_successful_bar_ts = new_ts_utc
+                            self._stale_bar_restart_triggered = False  # reset on real advancement
+                            logger.debug(f"Bar timestamp advanced to {new_ts_utc} — data is live")
                 
                 # Log data freshness at INFO level for observability
                 if "timestamp" in df.columns:
@@ -236,6 +255,33 @@ class MarketAgentDataFetcher:
                 # No historical data, but we'll still try real-time Level 1
                 logger.info("Buffer: 0 bars (historical data unavailable, will try Level 1 real-time data)")
 
+            # Staleness guard: if bars have not advanced in >5 min during market hours,
+            # clear the base historical cache (so IBKR gets a fresh request) and trigger soft-restart.
+            # NOTE: bar_age is computed from _last_successful_bar_ts which only advances when the
+            # timestamp genuinely increases -- so this guard fires even if IBKR silently returns
+            # frozen bars every 60s without errors.
+            if self._last_successful_bar_ts is not None:
+                bar_age_minutes = (datetime.now(timezone.utc) - self._last_successful_bar_ts).total_seconds() / 60
+                now_utc = datetime.now(timezone.utc)
+                is_weekday = now_utc.weekday() < 5
+                is_market_hours = 13 <= now_utc.hour <= 22
+                if bar_age_minutes > 5 and is_weekday and is_market_hours and not self._stale_bar_restart_triggered:
+                    logger.warning(
+                        f"Bar buffer stale for {bar_age_minutes:.1f} minutes during market hours -- "
+                        f"clearing base historical cache and triggering soft-restart"
+                    )
+                    # Force-evict base historical cache so next cycle sends a fresh IBKR request.
+                    # IBKR silently returns cached/frozen data when the same endDateTime is reused;
+                    # clearing the cache ensures the new request picks up a fresh endDateTime=now.
+                    self._base_last_refresh = None
+                    self._base_historical_cache = None
+                    self._stale_bar_restart_triggered = True  # prevent restart loop
+                    import subprocess
+                    subprocess.Popen(
+                        ["bash", "-c", "sleep 5 && cd /home/pearlalgo/pearl-algo-workspace && ./pearlalgo.sh soft-restart"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
             # Fetch latest bar if method available
             latest_bar = None
             data_source = "unknown"

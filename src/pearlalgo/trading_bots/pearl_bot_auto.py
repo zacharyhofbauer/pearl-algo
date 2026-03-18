@@ -1238,6 +1238,7 @@ class StrategyParams(_BaseModel):
     # -- Signal thresholds -----------------------------------------------
     min_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
     min_confidence_long: float = _Field(default=0.72, ge=0.0, le=1.0)
+    min_confidence_short: float = _Field(default=0.60, ge=0.0, le=1.0)
     min_risk_reward: float = _Field(default=1.3, ge=0.5)
 
     # -- Key levels (SpacemanBTC) ----------------------------------------
@@ -1453,12 +1454,20 @@ def _apply_filters(
         }
         sig["market_regime"] = regime.to_dict()
 
-        if adjusted_conf >= params.min_confidence:
+        direction = sig.get("direction", "")
+        if direction == "short":
+            min_conf = params.min_confidence_short
+        elif direction == "long":
+            min_conf = params.min_confidence_long
+        else:
+            min_conf = params.min_confidence
+
+        if adjusted_conf >= min_conf:
             filtered.append(sig)
         else:
             logger.debug(
-                "Signal dropped after regime adjustment: conf %.3f < %.3f",
-                adjusted_conf, params.min_confidence,
+                "Signal dropped after regime adjustment: %s conf %.3f < %.3f",
+                direction, adjusted_conf, min_conf,
             )
     return filtered
 
@@ -1944,7 +1953,8 @@ def generate_signals(
                     confidence -= 0.07
                     active_indicators.append("PWL_CAUTION")
         
-        if confidence >= config["min_confidence"]:
+        _min_conf_short = config.get("min_confidence_short", 0.78)
+        if confidence >= _min_conf_short:
             entry_price = close
             # Use dynamic regime-adaptive parameters
             sl_mult = dynamic_sl_mult
@@ -2012,18 +2022,27 @@ def generate_signals(
     # Signals that passed the initial min_confidence check may have been reduced
     # below the threshold by the regime multiplier. Filter them out now.
     # ==========================================================================
-    min_conf = config.get("min_confidence", 0.55)
+    min_conf_generic = config.get("min_confidence", 0.55)
+    min_conf_long = config.get("min_confidence_long", min_conf_generic)
+    min_conf_short = config.get("min_confidence_short", min_conf_generic)
     pre_filter_count = len(signal_candidates)
-    signal_candidates = [
-        s for s in signal_candidates 
-        if s.get("confidence", 0) >= min_conf
-    ]
+
+    def _passes_conf(s):
+        d = s.get("direction", "")
+        c = s.get("confidence", 0)
+        if d == "short":
+            return c >= min_conf_short
+        elif d == "long":
+            return c >= min_conf_long
+        return c >= min_conf_generic
+
+    signal_candidates = [s for s in signal_candidates if _passes_conf(s)]
     
     if len(signal_candidates) < pre_filter_count:
         filtered_count = pre_filter_count - len(signal_candidates)
         logger.debug(
             f"Post-regime confidence filter removed {filtered_count} signal(s) "
-            f"that fell below {min_conf:.0%} after regime adjustment"
+            f"that fell below confidence threshold after regime adjustment"
         )
     
     return signal_candidates

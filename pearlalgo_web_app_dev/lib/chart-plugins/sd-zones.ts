@@ -31,8 +31,8 @@ class SDZonesRenderer implements ISeriesPrimitivePaneRenderer {
       const ctx: CanvasRenderingContext2D = scope.context
       const pr   = scope.horizontalPixelRatio
       const prY  = scope.verticalPixelRatio
-      const maxX = scope.bitmapSize.width
-      const maxY = scope.bitmapSize.height
+      const W    = scope.bitmapSize.width
+      const H    = scope.bitmapSize.height
 
       for (const z of this._zones) {
         const x1raw = this._toX(z.startTime)
@@ -42,40 +42,81 @@ class SDZonesRenderer implements ISeriesPrimitivePaneRenderer {
 
         if (y1raw === null || y2raw === null) continue
 
-        const x1 = Math.max(0,    Math.round(x1raw * pr))
-        const x2 = Math.min(maxX, Math.round(x2raw * pr))
-        const y1 = Math.max(0,    Math.round(y1raw * prY))
-        const y2 = Math.min(maxY, Math.round(y2raw * prY))
+        // x: clamp to canvas, allow full width
+        const x1 = Math.max(0, Math.round(x1raw * pr))
+        const x2 = Math.min(W, Math.round(x2raw * pr))
+        if (x2 <= x1) continue
 
-        if (x2 <= x1 || y2 <= y1) continue
+        // y: clamp but allow partial visibility
+        const yTop    = Math.min(y1raw, y2raw)
+        const yBottom = Math.max(y1raw, y2raw)
+        const y1 = Math.max(0, Math.round(yTop    * prY))
+        const y2 = Math.min(H, Math.round(yBottom * prY))
 
-        // Fill — subtle semi-transparent
-        ctx.fillStyle = z.kind === 'supply'
-          ? 'rgba(239,83,80,0.08)'
-          : 'rgba(38,166,154,0.08)'
-        ctx.fillRect(x1, y1, x2 - x1, y2 - y1)
+        // Draw even if partially off screen — only skip if fully invisible
+        if (y2 <= y1 && y1 >= H) continue
+        if (y2 <= y1 && y2 <= 0) continue
 
-        // Borders — thin, consistent
-        const strongEdge = z.kind === 'supply' ? y1 : y2  // top for supply, bottom for demand
-        const weakEdge   = z.kind === 'supply' ? y2 : y1
+        const h = Math.max(1, y2 - y1)
+        const w = x2 - x1
 
-        // Strong edge: 1px solid
-        ctx.lineWidth = Math.round(1 * pr)
-        ctx.strokeStyle = z.kind === 'supply'
-          ? 'rgba(239,83,80,0.55)' : 'rgba(38,166,154,0.55)'
-        ctx.setLineDash([])
-        ctx.beginPath()
-        ctx.moveTo(x1, strongEdge); ctx.lineTo(x2, strongEdge)
-        ctx.stroke()
-
-        // Weak edge: 1px dashed, very subtle
-        ctx.strokeStyle = z.kind === 'supply'
-          ? 'rgba(239,83,80,0.25)' : 'rgba(38,166,154,0.25)'
-        ctx.setLineDash([4 * pr, 4 * pr])
-        ctx.beginPath()
-        ctx.moveTo(x1, weakEdge); ctx.lineTo(x2, weakEdge)
-        ctx.stroke()
-        ctx.setLineDash([])
+        if (z.kind === 'demand') {
+          // Demand: orange/brown fill — prominent like LuxAlgo
+          ctx.fillStyle = 'rgba(180,83,9,0.30)'
+          ctx.fillRect(x1, y1, w, h)
+          // Top border — thick orange
+          ctx.strokeStyle = 'rgba(255,140,0,1.0)'
+          ctx.lineWidth = Math.round(3 * pr)
+          ctx.setLineDash([])
+          ctx.beginPath()
+          ctx.moveTo(x1, y1 + Math.round(1.5 * prY))
+          ctx.lineTo(x2, y1 + Math.round(1.5 * prY))
+          ctx.stroke()
+          // Bottom border — thinner
+          ctx.strokeStyle = 'rgba(255,140,0,0.5)'
+          ctx.lineWidth = Math.round(1 * pr)
+          ctx.beginPath()
+          ctx.moveTo(x1, y2 - Math.round(0.5 * prY))
+          ctx.lineTo(x2, y2 - Math.round(0.5 * prY))
+          ctx.stroke()
+          // Mid dashed line
+          const mid = Math.round((y1 + y2) / 2)
+          ctx.strokeStyle = 'rgba(255,140,0,0.35)'
+          ctx.setLineDash([6 * pr, 4 * pr])
+          ctx.beginPath()
+          ctx.moveTo(x1, mid)
+          ctx.lineTo(x2, mid)
+          ctx.stroke()
+          ctx.setLineDash([])
+        } else {
+          // Supply: red fill
+          ctx.fillStyle = 'rgba(239,83,80,0.22)'
+          ctx.fillRect(x1, y1, w, h)
+          // Bottom border — thick red
+          ctx.strokeStyle = 'rgba(239,83,80,1.0)'
+          ctx.lineWidth = Math.round(3 * pr)
+          ctx.setLineDash([])
+          ctx.beginPath()
+          ctx.moveTo(x1, y2 - Math.round(1.5 * prY))
+          ctx.lineTo(x2, y2 - Math.round(1.5 * prY))
+          ctx.stroke()
+          // Top border — thinner
+          ctx.strokeStyle = 'rgba(239,83,80,0.5)'
+          ctx.lineWidth = Math.round(1 * pr)
+          ctx.beginPath()
+          ctx.moveTo(x1, y1 + Math.round(0.5 * prY))
+          ctx.lineTo(x2, y1 + Math.round(0.5 * prY))
+          ctx.stroke()
+          // Mid dashed line
+          const mid = Math.round((y1 + y2) / 2)
+          ctx.strokeStyle = 'rgba(239,83,80,0.35)'
+          ctx.setLineDash([6 * pr, 4 * pr])
+          ctx.beginPath()
+          ctx.moveTo(x1, mid)
+          ctx.lineTo(x2, mid)
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
       }
     })
   }
@@ -135,7 +176,9 @@ function atr(candles: Candle[], period = 14): number {
   return slice.length > 0 ? sum / slice.length : 0
 }
 
-const MAX_ZONES = 2
+const MAX_SUPPLY = 1
+const MAX_DEMAND = 1
+const MIN_ZONE_HEIGHT = 8
 
 export class SDZones implements ISeriesPrimitive<Time> {
   _chart:     any
@@ -169,8 +212,7 @@ export class SDZones implements ISeriesPrimitive<Time> {
     const endTime   = raw[raw.length - 1].time
     const startTime = raw[0].time
 
-    // Zone height = ATR(14) simple avg(high-low)
-    const zh = atr(raw)
+    const zh = Math.min(Math.max(atr(raw) * 0.4, MIN_ZONE_HEIGHT), 20)
     if (zh <= 0) { this._zones = []; this._requestUpdate?.(); return }
 
     const barInterval = raw.length >= 2 ? raw[raw.length - 1].time - raw[raw.length - 2].time : 300
@@ -179,9 +221,9 @@ export class SDZones implements ISeriesPrimitive<Time> {
     const supply = pivotHighs(raw, 7)
       .filter(p => p.price > current)
       .sort((a, b) => Math.abs(a.price - current) - Math.abs(b.price - current))
-      .slice(0, MAX_ZONES)
+      .slice(0, MAX_SUPPLY)
       .map(p => ({
-        topPrice: p.price + zh * 0.15,
+        topPrice:    p.price + zh * 0.15,
         bottomPrice: p.price - zh * 0.85,
         startTime,
         endTime: zoneEndTime,
@@ -191,9 +233,9 @@ export class SDZones implements ISeriesPrimitive<Time> {
     const demand = pivotLows(raw, 7)
       .filter(p => p.price < current)
       .sort((a, b) => Math.abs(a.price - current) - Math.abs(b.price - current))
-      .slice(0, MAX_ZONES)
+      .slice(0, MAX_DEMAND)
       .map(p => ({
-        topPrice: p.price + zh * 0.85,
+        topPrice:    p.price + zh * 0.85,
         bottomPrice: p.price - zh * 0.15,
         startTime,
         endTime: zoneEndTime,

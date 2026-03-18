@@ -24,7 +24,7 @@ execution:
   adapter: tradovate
   enforce_protection_guard: true
   max_positions: 5
-  max_position_size_per_order: 1
+  max_position_size_per_order: 3
   max_orders_per_day: 500
   max_daily_loss: 1150.0
   cooldown_seconds: 30
@@ -78,7 +78,7 @@ auto_flat:
   notify: false
 risk:
   min_position_size: 1
-  max_position_size: 1
+  max_position_size: 3
 session:
   start_time: "18:00"
   end_time: "15:45"
@@ -117,6 +117,7 @@ advanced_exits:
 pearl_bot_auto:
   min_confidence: 0.62
   min_confidence_long: 0.72
+  min_confidence_short: 0.78
   ema_fast: 9
   ema_slow: 21
   allow_vwap_cross_entries: false
@@ -143,3 +144,4 @@ sd_resolution: 50
 vwap_std_dev: 1.0
 min_confidence: 0.62
 min_confidence_long: 0.72
+min_confidence_short: 0.78

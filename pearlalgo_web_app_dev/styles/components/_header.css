@@ -4,20 +4,24 @@
    COMBINED HEADER - Single Row (Timeframes + Badges)
    ============================================ */
 .header-combined {
-  margin-bottom: 4px;
+  margin: 0;
+  padding: 4px 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #2a2e39;
+  background: #131722;
 }
 
-/* Single row: timeframes left, badges right */
+/* Single row: timeframes left, badges right — flat toolbar like TradingView */
 .header-row-single {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: nowrap;
-  padding: 6px 12px;
-  background: var(--bg-card);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  padding: 2px 4px;
+  background: transparent;
+  border-radius: 0;
+  border: none;
 }
 
 .header-combined .header-timeframe {
@@ -458,9 +462,9 @@
   }
 
   .header-row-single {
-    padding: 4px 7px;
-    gap: 5px;
-    border-radius: 8px;
+    padding: 2px 4px;
+    gap: 4px;
+    border-radius: 0;
   }
 
   .header-timeframe {
@@ -797,6 +801,11 @@
 
 .main-content {
   overscroll-behavior-y: contain;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* Pull-to-refresh */

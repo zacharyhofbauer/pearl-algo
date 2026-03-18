@@ -1,0 +1,347 @@
+/* ============================================================================
+ * TradingView Polish — spacing, padding, section refinements
+ * ============================================================================ */
+
+/* ────────────────────────────────────────────────────────────────────────────
+   1. NAVBAR — match TV top toolbar: 36px, compact
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-layout .nav-bar {
+  padding: 0 12px !important;
+  height: 36px;
+  border-bottom: 1px solid #1e222d;
+  background: #131722 !important;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   2. TOOLBAR (header-combined) — match TV: 32px, tight
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-layout .header-combined {
+  padding: 0 12px !important;
+  border-bottom: 1px solid #1e222d;
+  background: #131722 !important;
+}
+
+.tv-layout .header-row-single {
+  padding: 4px 0 !important;
+}
+
+.tv-layout .header-badges {
+  gap: 5px;
+}
+
+.tv-layout .header-badges .badge {
+  padding: 3px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   3. CHART — clean info bar, hide redundant legend
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-layout .chart-info-bar {
+  padding: 6px 12px !important;
+  gap: 14px;
+}
+
+/* Hide chart legend on desktop — badges in toolbar are enough */
+.tv-layout .chart-info-bar .info-legend {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .tv-layout .chart-info-bar .info-legend {
+    display: flex;
+    margin-right: 50px;
+  }
+}
+
+.tv-layout .chart-info-bar .info-price .price-value {
+  font-size: 16px;
+}
+
+.tv-layout .chart-container {
+  background: #131722;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   4. ACCOUNT STRIP
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-layout .account-strip {
+  padding: 8px 12px !important;
+  gap: 16px;
+  border-top: 1px solid #1e222d;
+  background: #12121a !important;
+}
+
+.tv-layout .account-strip-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.tv-layout .account-strip-value {
+  font-size: 13px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   5. TRADES PANEL — flat, consistent padding
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-panel-area .data-panel {
+  border: none !important;
+  border-radius: 0 !important;
+  background: #0a0a0f !important;
+  box-shadow: none !important;
+  content-visibility: visible;
+}
+
+.tv-panel-area .data-panel-header {
+  padding: 6px 12px !important;
+  background: transparent !important;
+  border-bottom: 1px solid #1e222d;
+  min-height: 32px;
+}
+
+.tv-panel-area .data-panel-title {
+  font-size: 12px !important;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
+.tv-panel-area .data-panel-header-right {
+  gap: 8px;
+}
+
+.tv-panel-area .trade-dock-wrapper {
+  padding: 0 !important;
+}
+
+.tv-panel-area .trade-dock {
+  max-height: none !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+
+.tv-panel-area .trade-dock-tabs {
+  padding: 4px 12px !important;
+  gap: 2px;
+  border-bottom: 1px solid #1e222d;
+  background: transparent !important;
+}
+
+.tv-panel-area .trade-dock-tab {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.tv-panel-area .trade-dock-content {
+  padding: 8px 12px !important;
+}
+
+.tv-panel-area .trade-dock-header-stats {
+  padding: 0 !important;
+  gap: 8px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   6. RESPONSIVE
+   ──────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .tv-layout .nav-bar { padding: 0 10px !important; }
+  .tv-layout .header-combined { padding: 0 10px !important; }
+  .tv-layout .chart-info-bar { padding: 6px 10px !important; }
+  .tv-layout .account-strip { padding: 6px 10px !important; gap: 10px; }
+  .tv-panel-area .data-panel-header { padding: 6px 10px !important; }
+  .tv-panel-area .trade-dock-tabs { padding: 4px 10px !important; }
+  .tv-panel-area .trade-dock-content { padding: 8px 10px !important; }
+
+  .tv-layout .header-badges .badge { padding: 2px 6px; font-size: 9px; }
+  .tv-layout .account-strip-value { font-size: 12px; }
+}
+
+@media (max-width: 480px) {
+  .tv-layout .nav-bar { padding: 0 8px !important; height: 34px; }
+  .tv-layout .header-combined { padding: 0 8px !important; }
+  .tv-layout .header-row-single { padding: 3px 0 !important; }
+  .tv-layout .chart-info-bar { padding: 4px 8px !important; }
+  .tv-layout .account-strip { padding: 4px 8px !important; gap: 6px; }
+  .tv-panel-area .data-panel-header { padding: 4px 8px !important; }
+  .tv-panel-area .trade-dock-tabs { padding: 4px 8px !important; }
+  .tv-panel-area .trade-dock-content { padding: 6px 8px !important; }
+
+  .tv-layout .account-strip-label { font-size: 8px; }
+  .tv-layout .account-strip-value { font-size: 11px; }
+  .tv-panel-area .trade-dock-tab { padding: 4px 8px; font-size: 11px; }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   7. GLOBAL
+   ──────────────────────────────────────────────────────────────────────────── */
+.account-strip-value, .dock-stat-v, .trade-pnl, .tooltip-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-layout .header-badges .badge, .tv-panel-area .trade-dock-tab {
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   8. SIDEBAR ICONS
+   ──────────────────────────────────────────────────────────────────────────── */
+.tv-sidebar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  color: #d1d4dc;
+  opacity: 0.5;
+  cursor: default;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  padding: 0;
+}
+
+.tv-sidebar-icon:hover {
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tv-sidebar-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   9. HEADER ACTIONS (Indicators, Fullscreen, Screenshot)
+   ──────────────────────────────────────────────────────────────────────────── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  margin-right: auto;
+}
+
+.header-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #787b86;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+
+.header-action-btn:hover {
+  color: #d1d4dc;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.header-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Indicators dropdown */
+.indicators-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  padding: 6px 0;
+  min-width: 160px;
+  z-index: var(--z-overlay);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.indicator-toggle-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #d1d4dc;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.indicator-toggle-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.indicator-toggle-item .indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2a2e39;
+  transition: background 0.15s ease;
+}
+
+.indicator-toggle-item .indicator-dot.active {
+  background: var(--accent-cyan);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   10. ACCOUNT DATA IN PANEL HEADER
+   ──────────────────────────────────────────────────────────────────────────── */
+.panel-account-data {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-account-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.panel-account-label {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.panel-account-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.panel-account-value.positive { color: var(--accent-green); }
+.panel-account-value.negative { color: var(--accent-red); }
+
+.panel-account-sep {
+  color: var(--text-muted);
+  opacity: 0.3;
+}
+
+@media (max-width: 768px) {
+  .panel-account-data { gap: 8px; font-size: 10px; }
+  .panel-account-label { font-size: 8px; }
+  .header-actions { gap: 1px; margin-left: 4px; }
+}
+
+@media (max-width: 480px) {
+  .panel-account-data { gap: 4px; font-size: 9px; }
+  .panel-account-item:nth-child(n+4) { display: none; }
+  .panel-account-sep:nth-child(n+5) { display: none; }
+}

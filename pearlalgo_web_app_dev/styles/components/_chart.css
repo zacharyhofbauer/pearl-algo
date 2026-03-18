@@ -47,7 +47,7 @@
 .chart-actions-buttons {
   display: flex;
   gap: 2px;
-  background: rgba(10, 10, 15, 0.85);
+  background: rgba(19, 23, 34, 0.88);
   padding: 3px;
   border-radius: 4px;
   border: 1px solid var(--border-color);
@@ -55,7 +55,7 @@
 
 /* Freshness indicator in chart header */
 .chart-actions .freshness-floating {
-  background: rgba(10, 10, 15, 0.9);
+  background: rgba(19, 23, 34, 0.92);
   backdrop-filter: blur(8px);
 }
 
@@ -145,16 +145,18 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
-/* Chart container */
+/* Chart container — full bleed, borderless like TradingView */
 .chart-container {
   flex: 1;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  background: #131722;
+  border-radius: 0;
+  border: none;
   overflow: hidden;
-  position: relative; /* Needed for absolute positioning of chart-actions */
+  position: relative;
 }
 
 /* =====================================================
@@ -162,7 +164,7 @@
    Single bar: Price | Countdown | Legend
    ===================================================== */
 
-/* Live Price & Candle Countdown Overlay */
+/* Live Price & Candle Countdown Overlay — transparent like TradingView OHLC bar */
 .chart-info-bar {
   position: absolute;
   top: 0;
@@ -172,10 +174,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: linear-gradient(180deg, rgba(10, 10, 15, 0.92) 0%, rgba(10, 10, 15, 0.85) 100%);
-  backdrop-filter: blur(8px);
-  padding: 6px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  padding: 4px 8px;
   pointer-events: none;
   font-size: 12px;
 }
@@ -358,7 +358,7 @@
 
 /* Marker Tooltip - Clean Design */
 .marker-tooltip {
-  background: rgba(10, 10, 15, 0.95);
+  background: rgba(19, 23, 34, 0.96);
   border-radius: 10px;
   padding: 0;
   min-width: 180px;
@@ -699,6 +699,71 @@
   color: var(--text-secondary);
   text-transform: uppercase;
   opacity: 0.7;
+}
+
+/* =====================================================
+   OHLC DATA BAR
+   ===================================================== */
+
+.chart-ohlc-bar {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  z-index: var(--z-overlay-low);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: transparent;
+}
+
+.chart-ohlc-bar.ohlc-up { color: var(--accent-green); }
+.chart-ohlc-bar.ohlc-down { color: var(--accent-red); }
+
+.chart-ohlc-bar .ohlc-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.chart-ohlc-bar .ohlc-label:first-child {
+  margin-left: 0;
+}
+
+.chart-ohlc-bar .ohlc-value {
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.chart-ohlc-bar .ohlc-change {
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.chart-ohlc-bar .ohlc-volume {
+  margin-left: 6px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+@media (max-width: 640px) {
+  .chart-ohlc-bar {
+    top: 20px;
+    font-size: 9px;
+    padding: 2px 6px;
+    gap: 2px;
+  }
+  .chart-ohlc-bar .ohlc-label { font-size: 8px; margin-left: 2px; }
+  .chart-ohlc-bar .ohlc-change { margin-left: 3px; }
+  .chart-ohlc-bar .ohlc-volume { display: none; }
+}
+
+@media (max-width: 400px) {
+  .chart-ohlc-bar { top: 18px; font-size: 8px; }
 }
 
 /* =====================================================

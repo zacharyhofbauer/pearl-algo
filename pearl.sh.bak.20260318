@@ -311,10 +311,18 @@ start_agent() {
 }
 
 start_telegram() {
-    # DISABLED 2026-03-18: OpenClaw gateway on Mac owns the Telegram bot token.
-    # Starting Telegram from px-core will conflict with the gateway. Do not re-enable.
-    echo -e "${YELLOW}⏭ Telegram disabled — OpenClaw Mac gateway owns the bot token${NC}"
-    return
+    if [ "$NO_TELEGRAM" = true ]; then
+        echo -e "${YELLOW}⏭ Skipping Telegram (--no-telegram)${NC}"
+        return
+    fi
+    echo -e "${CYAN}▶ Starting Telegram Handler...${NC}"
+    if systemctl is-enabled pearlalgo-telegram.service &>/dev/null 2>&1; then
+        sudo systemctl restart pearlalgo-telegram.service
+        echo "   Started via systemd"
+    else
+        ./scripts/telegram/restart_command_handler.sh --background
+    fi
+    echo ""
 }
 
 start_chart() {
@@ -488,10 +496,22 @@ stop_agent() {
 }
 
 stop_telegram() {
-    # DISABLED 2026-03-18: OpenClaw gateway on Mac owns the Telegram bot token.
-    # Do not stop Telegram from px-core. Managed by Mac OpenClaw gateway.
-    echo -e "${YELLOW}Telegram stop skipped -- managed by OpenClaw Mac gateway${NC}"
-    return
+    echo -e "${CYAN}■ Stopping Telegram Handler...${NC}"
+    if systemctl is-active --quiet pearlalgo-telegram.service 2>/dev/null; then
+        sudo systemctl stop pearlalgo-telegram.service
+        echo "   Stopped via systemd"
+    else
+        local pidfile="$SCRIPT_DIR/logs/telegram_handler.pid"
+        if [ -f "$pidfile" ]; then
+            local pid=$(cat "$pidfile")
+            kill "$pid" 2>/dev/null || true
+            rm -f "$pidfile"
+            echo "   Stopped PID $pid"
+        else
+            echo "   Not running"
+        fi
+    fi
+    echo ""
 }
 
 stop_chart() {
@@ -569,56 +589,6 @@ restart_all() {
     stop_all
     sleep 3
     start_all
-}
-
-# ============================================================================
-# Agent-Only Restart (no gateway restart, no 2FA needed)
-# ============================================================================
-
-restart_services_only() {
-    # Restart ALL services except IBKR gateway -- no 2FA needed
-    # Restarts: agent, api, webapp
-    # Use this for: code changes, config updates, agent issues, bar staleness
-    # Use ./pearl.sh restart ONLY when gateway itself is down (triggers 2FA)
-    echo ""
-    echo -e "${BOLD}Restarting Services (no gateway, no 2FA)...${NC}"
-    echo ""
-
-    # Stop cleanly - kill stale processes
-    echo -e "${CYAN}Stopping all non-gateway services...${NC}"
-    sudo systemctl stop pearlalgo-agent pearlalgo-api pearlalgo-webapp pearlalgo-webapp-dev 2>/dev/null || true
-    pkill -f "pearlalgo.market_agent.main" 2>/dev/null || true
-    pkill -f "pearlalgo_web_app/api_server" 2>/dev/null || true
-    sleep 3
-
-    # Start in order
-    echo -e "${CYAN}Starting agent...${NC}"
-    sudo systemctl start pearlalgo-agent
-    sleep 4
-
-    echo -e "${CYAN}Starting API...${NC}"
-    sudo systemctl start pearlalgo-api
-    sleep 3
-
-    echo -e "${CYAN}Starting webapp...${NC}"
-    sudo systemctl start pearlalgo-webapp
-    sleep 2
-
-    # Status
-    echo ""
-    all_ok=true
-    for svc in pearlalgo-agent pearlalgo-api pearlalgo-webapp; do
-        if sudo systemctl is-active $svc &>/dev/null; then
-            echo -e "   ${GREEN}OK: $svc${NC}"
-        else
-            echo -e "   ${RED}FAILED: $svc${NC}"
-            all_ok=false
-        fi
-    done
-    echo ""
-    $all_ok && echo -e "${GREEN}Services restarted -- gateway untouched, no 2FA${NC}" || echo -e "${RED}Some services failed${NC}"
-    echo ""
-    show_quick_status
 }
 
 # ============================================================================
@@ -870,11 +840,8 @@ case "$COMMAND" in
     stop)
         stop_all
         ;;
-    hard-restart)
+    restart)
         restart_all
-        ;;
-    soft-restart)
-        restart_services_only
         ;;
     status)
         show_status

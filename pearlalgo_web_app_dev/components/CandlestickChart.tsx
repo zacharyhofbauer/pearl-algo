@@ -50,7 +50,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const positionGuideSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const resizeHandlerRef = useRef<(() => void) | null>(null)
 
   // Bollinger Bands series refs
   const bbUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
@@ -86,6 +85,12 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
   // Track the active signal for highlighting
   const [activeSignalId, setActiveSignalId] = useState<string | null>(null)
+
+  // OHLC crosshair state — shows hovered candle data (latest when idle)
+  const [ohlcData, setOhlcData] = useState<{
+    open: number; high: number; low: number; close: number; volume?: number
+    change: number; changePct: number; isUp: boolean
+  } | null>(null)
 
   // Candle countdown timer
   const [candleCountdown, setCandleCountdown] = useState<string>('')
@@ -201,27 +206,25 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     if (!containerRef.current) return
 
     const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight || 600,
+      autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0a0a0f' },
-        textColor: '#8a94a6',
+        background: { type: ColorType.Solid, color: '#131722' },
+        textColor: '#d1d4dc',
       },
       grid: {
-        vertLines: { color: 'rgba(30,34,45,0.40)' },
-        horzLines: { color: 'rgba(30,34,45,0.40)' },
+        vertLines: { color: 'rgba(42,46,57,0.5)' },
+        horzLines: { color: 'rgba(42,46,57,0.5)' },
       },
       rightPriceScale: {
-        borderColor: '#2a2a3a',
-        // Reduce unused bottom space; volume is handled by its own scale margins below
+        borderColor: '#2a2e39',
         scaleMargins: { top: 0.08, bottom: 0.12 },
       },
       timeScale: {
         visible: true,
-        borderColor: '#2a2a3a',
+        borderColor: '#2a2e39',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 15,  // More space between candles and price labels
+        rightOffset: 15,
         barSpacing: barSpacing,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
@@ -236,13 +239,13 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           color: '#758696',
           width: 1,
           style: 3,
-          labelBackgroundColor: '#2a2a3a',
+          labelBackgroundColor: '#363a45',
         },
         horzLine: {
           color: '#758696',
           width: 1,
           style: 3,
-          labelBackgroundColor: '#2a2a3a',
+          labelBackgroundColor: '#363a45',
         },
       },
     })
@@ -265,13 +268,12 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       crosshairMarkerVisible: false,
     })
 
-    // VWAP line (blue, solid)
+    // VWAP line
     const vwapSeries = chart.addLineSeries({
-      color: '#2962ff',
-      lineWidth: 2,
+      color: 'rgba(100,181,246,0.85)',
+      lineWidth: 1,
       lineStyle: 0,
-      // Don't let VWAP (or any outlier points) blow out the chart's vertical scaling.
-      // The candlestick series should drive autoscale; VWAP will still render when within range.
+      title: 'VWAP',
       autoscaleInfoProvider: () => null,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -338,19 +340,19 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
     positionGuideSeriesRef.current = positionGuideSeries
 
-    // Candlestick series - bright green/red
+    // Candlestick series - TradingView standard teal/red
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#00e676',
-      downColor: '#ff5252',
+      upColor: '#26a69a',
+      downColor: '#ef5350',
       borderVisible: false,
-      wickUpColor: '#00e676',
-      wickDownColor: '#ff5252',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
       priceFormat: { type: 'price', precision: 2, minMove: 0.25 },
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: 'rgba(255, 215, 0, 0.35)',  // Gold/yellow - subtle, less visible than position lines
-      priceLineStyle: 2,  // Dashed
+      priceLineColor: 'rgba(41, 98, 255, 0.5)',
+      priceLineStyle: 2,
     })
 
     // Volume series
@@ -404,28 +406,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     // Notify parent that chart is ready
     onChartReady?.(chart)
 
-    // Clean up any existing resize handler before adding new one
-    if (resizeHandlerRef.current) {
-      window.removeEventListener('resize', resizeHandlerRef.current)
-    }
-
-    // Handle resize - store in ref to ensure proper cleanup
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight || 600,
-        })
-      }
-    }
-    resizeHandlerRef.current = handleResize
-    window.addEventListener('resize', handleResize)
+    // autoSize: true handles resize automatically via ResizeObserver
 
     return () => {
-      if (resizeHandlerRef.current) {
-        window.removeEventListener('resize', resizeHandlerRef.current)
-        resizeHandlerRef.current = null
-      }
       // Detach plugins before removing chart
       try { candleSeries.detachPrimitive(tradeZonesPlugin) } catch {}
       try { candleSeries.detachPrimitive(sessionPlugin) } catch {}
@@ -539,6 +522,42 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     }
   }, [markersByTime, candlesByTime])
 
+  // Subscribe to crosshair move for OHLC data bar
+  useEffect(() => {
+    if (!chartRef.current || !candleSeriesRef.current) return
+    const chart = chartRef.current
+
+    const handleOhlcCrosshair = (param: any) => {
+      const series = candleSeriesRef.current
+      if (!series) return
+
+      if (!param.time || !param.seriesData) {
+        // No crosshair — show latest candle
+        setOhlcData(null)
+        return
+      }
+
+      const candleValue = param.seriesData.get(series)
+      if (!candleValue || candleValue.open === undefined) {
+        setOhlcData(null)
+        return
+      }
+
+      const { open, high, low, close } = candleValue
+      const change = close - open
+      const changePct = open !== 0 ? (change / open) * 100 : 0
+      // Try to get volume from the volume series
+      const volSeries = volumeSeriesRef.current
+      const volData = volSeries ? param.seriesData.get(volSeries) : null
+      const volume = volData?.value ?? undefined
+
+      setOhlcData({ open, high, low, close, volume, change, changePct, isUp: close >= open })
+    }
+
+    chart.subscribeCrosshairMove(handleOhlcCrosshair)
+    return () => { chart.unsubscribeCrosshairMove(handleOhlcCrosshair) }
+  }, [])
+
   // Track previous data length to detect major changes (like timeframe switch)
   const prevDataLength = useRef(0)
 
@@ -569,7 +588,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const volumeData = data.map((d) => ({
       time: d.time as Time,
       value: d.volume || 0,
-      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+      color: d.close >= d.open ? 'rgba(38,166,154,0.35)' : 'rgba(239,83,80,0.35)',
     }))
     volumeSeriesRef.current.setData(volumeData)
 
@@ -606,9 +625,34 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       const ema21Data = indicators.ema21.map((d) => ({ time: d.time as Time, value: d.value }))
       ema21SeriesRef.current.setData(ema21Data)
     }
-    if (vwapSeriesRef.current && indicators.vwap?.length) {
-      const vwapData = indicators.vwap.map((d) => ({ time: d.time as Time, value: d.value }))
-      vwapSeriesRef.current.setData(vwapData)
+    if (vwapSeriesRef.current) {
+      if (indicators.vwap?.length) {
+        const vwapData = indicators.vwap.map((d) => ({ time: d.time as Time, value: d.value }))
+        vwapSeriesRef.current.setData(vwapData)
+      } else if (data?.length) {
+        // Compute VWAP from candles: cumsum(tp*v)/cumsum(v), reset at 18:00 ET
+        const toET = (unix: number) => unix - 4 * 3600
+        const vwapData: Array<{ time: Time; value: number }> = []
+        let cumTPV = 0, cumVol = 0
+        let lastSessionDay = -1
+        for (const c of data) {
+          const et = toET(c.time as number)
+          const hourET = Math.floor((et % 86400) / 3600)
+          const dayET = Math.floor(et / 86400)
+          // Reset at 18:00 ET (new futures session)
+          if (hourET >= 18 && dayET !== lastSessionDay) {
+            cumTPV = 0; cumVol = 0; lastSessionDay = dayET
+          }
+          const vol = (c as any).volume ?? 1
+          const tp = (c.high + c.low + c.close) / 3
+          cumTPV += tp * vol
+          cumVol += vol
+          if (cumVol > 0) {
+            vwapData.push({ time: c.time as Time, value: cumTPV / cumVol })
+          }
+        }
+        vwapSeriesRef.current.setData(vwapData)
+      }
     }
 
     // Update Bollinger Bands
@@ -854,7 +898,8 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     tradeZonesRef.current.setZones(zones)
   }, [positionLines])
 
-  // ── SpacemanBTC Key Levels ──────────────────────────────────────────────────
+  // ── SpacemanBTC Key Levels (colors match PineScript V13.1 defaults) ─────────
+  // Daily: #08bcd4, Monday: white, Weekly: #fffcbc, Monthly: #08d48c
   const keyLevelLinesRef = useRef<import('lightweight-charts').IPriceLine[]>([])
   useEffect(() => {
     const series = candleSeriesRef.current
@@ -870,30 +915,65 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     let dailyOpen: number | null = null
     let weeklyOpen: number | null = null
     let prevDayHigh = -Infinity, prevDayLow = Infinity
+    let mondayHigh = -Infinity, mondayLow = Infinity
+    let foundMonday = false
 
     for (const c of data) {
       const t = toET(c.time as number)
       const dayStart = t - (t % 86400)
       const hour = Math.floor((t % 86400) / 3600)
       const min  = Math.floor((t % 3600) / 60)
-      const dayOfWeek = new Date((c.time as number) * 1000).getUTCDay()
+      const d = new Date((c.time as number) * 1000)
+      const dayOfWeek = d.getUTCDay()
 
-      if (dayStart === todayETMidnight && hour === 9 && min === 30 && dailyOpen === null)
+      // Daily open = first bar >= 18:00 ET (futures session start)
+      if (dayStart === todayETMidnight && hour >= 18 && dailyOpen === null)
         dailyOpen = c.open
-      if (dayOfWeek === 1 && hour === 9 && min === 30 && weeklyOpen === null)
-        weeklyOpen = c.open
+      // Also catch overnight: if today's session started yesterday at 18:00
       const prevMidnight = todayETMidnight - 86400
+      if (dayStart === prevMidnight && hour >= 18 && dailyOpen === null)
+        dailyOpen = c.open
+      // Weekly open (Sunday 18:00 ET = futures week start)
+      if (dayOfWeek === 0 && hour >= 18)
+        weeklyOpen = c.open
+      // Previous day session range (18:00 prev-prev to 16:59 prev)
       if (dayStart === prevMidnight && hour >= 9 && (hour < 16 || (hour === 16 && min <= 15))) {
         if (c.high > prevDayHigh) prevDayHigh = c.high
         if (c.low  < prevDayLow)  prevDayLow  = c.low
       }
+      // Monday range — most recent Monday's full day
+      if (dayOfWeek === 1) {
+        foundMonday = true
+        if (c.high > mondayHigh) mondayHigh = c.high
+        if (c.low  < mondayLow)  mondayLow  = c.low
+      }
     }
 
+    // SpacemanBTC exact colors from PineScript defaults
+    const DAILY_COLOR   = '#08bcd4'   // cyan
+    const MONDAY_COLOR  = 'rgba(255,255,255,0.70)'  // white
+    const WEEKLY_COLOR  = '#fffcbc'   // pale yellow
+    const _MONTHLY_COLOR = '#08d48c'   // green (used when API provides monthly levels)
+
     const levels: Array<{ price: number; title: string; color: string }> = []
-    if (dailyOpen)               levels.push({ price: dailyOpen,  title: 'D Open', color: 'rgba(255,235,59,0.45)' })
-    if (weeklyOpen)              levels.push({ price: weeklyOpen, title: 'W Open', color: 'rgba(255,152,0,0.45)'  })
-    if (prevDayHigh > -Infinity) levels.push({ price: prevDayHigh, title: 'PDH',  color: 'rgba(76,175,80,0.40)'  })
-    if (prevDayLow  <  Infinity) levels.push({ price: prevDayLow,  title: 'PDL',  color: 'rgba(244,67,54,0.40)'  })
+
+    // Daily levels
+    if (dailyOpen)               levels.push({ price: dailyOpen,  title: 'D Open',  color: DAILY_COLOR })
+    if (prevDayHigh > -Infinity) levels.push({ price: prevDayHigh, title: 'PDH', color: DAILY_COLOR })
+    if (prevDayLow  <  Infinity) levels.push({ price: prevDayLow,  title: 'PDL', color: DAILY_COLOR })
+    if (prevDayHigh > -Infinity && prevDayLow < Infinity) {
+      levels.push({ price: (prevDayHigh + prevDayLow) / 2, title: 'PDM', color: DAILY_COLOR })
+    }
+
+    // Monday range
+    if (foundMonday && mondayHigh > -Infinity) {
+      levels.push({ price: mondayHigh, title: 'MDAY-H', color: MONDAY_COLOR })
+      levels.push({ price: mondayLow,  title: 'MDAY-L', color: MONDAY_COLOR })
+      levels.push({ price: (mondayHigh + mondayLow) / 2, title: 'MDAY-M', color: MONDAY_COLOR })
+    }
+
+    // Weekly open
+    if (weeklyOpen) levels.push({ price: weeklyOpen, title: 'W Open', color: WEEKLY_COLOR })
 
     for (const lv of levels) {
       try {
@@ -916,22 +996,25 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const current = data[data.length - 1].close
     const LB = 3
     let sells = 0, buys = 0
+    const atrApprox = data.slice(-20).reduce((s: number, c: any) => s + ((c.high || 0) - (c.low || 0)), 0) / 20
+    const scanWindow = Math.max(atrApprox * 3, 30)
     for (let i = LB; i < data.length - LB; i++) {
       const h = data[i].high, l = data[i].low
       let isH = true, isL = true
       for (let j = i - LB; j <= i + LB; j++) {
         if (j !== i) { if (data[j].high >= h) isH = false; if (data[j].low <= l) isL = false }
       }
-      if (isH && h > current && h < current * 1.015) sells++
-      if (isL && l < current && l > current * 0.985) buys++
+      if (isH && h > current && h < current + scanWindow) sells++
+      if (isL && l < current && l > current - scanWindow) buys++
     }
     // Scale relative to total pivots found — avoids always-100 issue
     const totalPivots = Math.max(sells + buys, 1)
     const sp = Math.round((sells / totalPivots) * 100)
     const bp = Math.round((buys  / totalPivots) * 100)
+    // ChartPrime S&R Power colors: fuchsia for sell (top), lime for buy (bottom)
     el.innerHTML =
-      '<div style="color:rgba(239,83,80,0.60);font-size:10px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.6);margin-bottom:2px">Sell Power: ' + sp + '</div>' +
-      '<div style="color:rgba(38,166,154,0.60);font-size:10px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.6)">Buy Power: ' + bp + '</div>'
+      '<div style="color:rgba(255,0,255,0.75);font-size:11px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 3px rgba(0,0,0,0.7);margin-bottom:3px">Sell Power: ' + sp + '</div>' +
+      '<div style="color:rgba(0,255,0,0.75);font-size:11px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 3px rgba(0,0,0,0.7)">Buy Power: ' + bp + '</div>'
   }, [data])
 
   // Format price
@@ -957,10 +1040,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
   const pairedMarker = tooltip.marker ? findPairedMarker(tooltip.marker) : null
 
-  // Responsive min-height based on viewport
-  const minHeight = typeof window !== 'undefined'
-    ? Math.max(260, window.innerHeight * 0.42)
-    : 500
+  // Chart fills all available space via CSS flex layout
 
   // Get current price and change
   const currentCandle = data[data.length - 1]
@@ -976,7 +1056,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     <div
       ref={containerRef}
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
-      style={{ width: '100%', height: '100%', minHeight, position: 'relative' }}>
+      style={{ width: '100%', height: '100%', position: 'relative' }}>
       {/* S&R Power badges */}
       <div
         ref={srPowerRef}
@@ -1013,6 +1093,30 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           <span className="leg"><span className="mkr loss">●</span>L</span>
         </div>
       </div>
+
+      {/* OHLC Data Bar — crosshair or latest candle */}
+      {currentCandle && (() => {
+        const d = ohlcData ?? {
+          open: currentCandle.open, high: currentCandle.high,
+          low: currentCandle.low, close: currentCandle.close,
+          volume: (currentCandle as any).volume,
+          change: currentCandle.close - currentCandle.open,
+          changePct: currentCandle.open !== 0 ? ((currentCandle.close - currentCandle.open) / currentCandle.open) * 100 : 0,
+          isUp: currentCandle.close >= currentCandle.open,
+        }
+        const colorClass = d.isUp ? 'ohlc-up' : 'ohlc-down'
+        const sign = d.change >= 0 ? '+' : ''
+        return (
+          <div className={`chart-ohlc-bar ${colorClass}`}>
+            <span className="ohlc-label">O</span><span className="ohlc-value">{d.open.toFixed(2)}</span>
+            <span className="ohlc-label">H</span><span className="ohlc-value">{d.high.toFixed(2)}</span>
+            <span className="ohlc-label">L</span><span className="ohlc-value">{d.low.toFixed(2)}</span>
+            <span className="ohlc-label">C</span><span className="ohlc-value">{d.close.toFixed(2)}</span>
+            <span className="ohlc-change">{sign}{d.change.toFixed(2)} ({sign}{d.changePct.toFixed(2)}%)</span>
+            {d.volume != null && <span className="ohlc-volume">Vol {Math.round(d.volume).toLocaleString()}</span>}
+          </div>
+        )
+      })()}
 
       {/* Marker Tooltip - Single Trade */}
       {tooltip.visible && tooltip.marker && !tooltip.groupedMarkers && (

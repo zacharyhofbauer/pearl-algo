@@ -7,29 +7,55 @@ import {
   Time,
 } from 'lightweight-charts'
 
-interface BarPoint { x: number; color: string }
+/**
+ * Trading Sessions — box-per-session rendering matching TradingView indicator.
+ *
+ * Colors from PineScript (85% transparent = 0.15 alpha):
+ *   Tokyo:    #2962FF @ 85  →  rgba(41,98,255,0.15)
+ *   London:   #FF9800 @ 85  →  rgba(255,152,0,0.15)
+ *   New York: #089981 @ 85  →  rgba(8,153,129,0.15)
+ */
+
+interface SessionSpan {
+  startX: number
+  endX:   number
+  color:  string
+  label:  string
+  labelColor: string
+}
 
 class SessionRenderer implements ISeriesPrimitivePaneRenderer {
-  private _points: BarPoint[]
-  private _barWidth: number
-  constructor(points: BarPoint[], barWidth: number) {
-    this._points = points
-    this._barWidth = barWidth
-  }
+  private _spans: SessionSpan[]
+  constructor(spans: SessionSpan[]) { this._spans = spans }
+
   draw(target: any) {
     target.useBitmapCoordinateSpace((scope: any) => {
       const ctx: CanvasRenderingContext2D = scope.context
       const pr = scope.horizontalPixelRatio
-      const hw = (pr * this._barWidth) / 2
       const h  = scope.bitmapSize.height
       const maxX = scope.bitmapSize.width
-      for (const p of this._points) {
-        const cx = p.x * pr
-        if (cx + hw < 0 || cx - hw > maxX) continue
-        ctx.fillStyle = p.color
-        const left  = Math.max(0, Math.round(cx - hw))
-        const right = Math.min(maxX, Math.round(cx + hw))
-        ctx.fillRect(left, 0, right - left, h)
+
+      for (const s of this._spans) {
+        const left  = Math.round(s.startX * pr)
+        const right = Math.round(s.endX * pr)
+        if (right < 0 || left > maxX) continue
+        const x1 = Math.max(0, left)
+        const x2 = Math.min(maxX, right)
+        if (x2 <= x1) continue
+
+        // Session background fill
+        ctx.fillStyle = s.color
+        ctx.fillRect(x1, 0, x2 - x1, h)
+
+        // Session name label at top
+        const fontSize = Math.round(10 * (scope.verticalPixelRatio || 1))
+        ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'top'
+        ctx.fillStyle = s.labelColor
+        const midX = (x1 + x2) / 2
+        ctx.fillText(s.label, midX, Math.round(4 * (scope.verticalPixelRatio || 1)))
+        ctx.textAlign = 'left'
       }
     })
   }
@@ -39,55 +65,73 @@ class SessionPaneView implements ISeriesPrimitivePaneView {
   private _plugin: SessionHighlighting
   constructor(plugin: SessionHighlighting) { this._plugin = plugin }
   update() {}
+
   renderer(): ISeriesPrimitivePaneRenderer {
-    const timeScale = this._plugin._chart!.timeScale()
-    const bars      = this._plugin._bars
-    const points: BarPoint[] = bars.map(b => ({
-      x: (timeScale.timeToCoordinate(b.time) ?? -9999) as number,
-      color: b.color,
+    const chart = this._plugin._chart
+    if (!chart) return new SessionRenderer([])
+    const timeScale = chart.timeScale()
+    const toX = (t: number) => (timeScale.timeToCoordinate(t as Time) ?? -9999) as number
+
+    // Convert grouped spans to pixel coordinates
+    const spans: SessionSpan[] = this._plugin._spans.map(s => ({
+      startX: toX(s.startTime),
+      endX:   toX(s.endTime),
+      color:  s.color,
+      label:  s.label,
+      labelColor: s.labelColor,
     }))
-    let barWidth = 6
-    if (points.length > 2) {
-      const deltas: number[] = []
-      for (let i = 1; i < points.length; i++) {
-        const d = Math.abs(points[i].x - points[i - 1].x)
-        if (d > 0) deltas.push(d)
-      }
-      if (deltas.length > 0) {
-        deltas.sort((a, b) => a - b)
-        barWidth = deltas[Math.floor(deltas.length / 2)]
-      }
-    } else if (points.length > 1) {
-      barWidth = Math.abs(points[1].x - points[0].x)
-    }
-    return new SessionRenderer(points, barWidth)
+
+    return new SessionRenderer(spans)
   }
+
   zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
 }
 
-function sessionColor(unixSec: number): string {
+interface SessionInfo {
+  name: string
+  color: string
+  labelColor: string
+}
+
+function getSession(unixSec: number): SessionInfo | null {
   const d   = new Date(unixSec * 1000)
-  // ET = UTC-5 (EST) or UTC-4 (EDT). Use rough EDT offset for futures hours.
   const etH = (d.getUTCHours() - 4 + 24) % 24
   const etM = d.getUTCMinutes()
   const mins = etH * 60 + etM
 
-  // RTH 09:30–16:15 — subtle navy
-  if (mins >= 570 && mins < 975) return 'rgba(15,40,90,0.12)'
-  // Pre-market 04:00–09:30 — faint amber
-  if (mins >= 240 && mins < 570) return 'rgba(90,45,8,0.09)'
-  // Post-market 16:15–18:00 — barely-there brown
-  if (mins >= 975 && mins < 1080) return 'rgba(60,30,8,0.06)'
-  // Overnight/Asia 18:00–04:00 — muted amber
-  return 'rgba(100,55,10,0.12)'
+  // New York RTH 09:30–16:00 ET
+  if (mins >= 570 && mins < 960) return {
+    name: 'New York',
+    color: 'rgba(8,153,129,0.15)',
+    labelColor: 'rgba(8,153,129,0.45)',
+  }
+  // London overlap/pre-NY: roughly 03:30–09:30 ET (London 08:30–14:30 GMT)
+  if (mins >= 210 && mins < 570) return {
+    name: 'London',
+    color: 'rgba(255,152,0,0.15)',
+    labelColor: 'rgba(255,152,0,0.45)',
+  }
+  // Tokyo: roughly 19:00–01:00 ET (Tokyo 09:00–15:00 JST)
+  if (mins >= 1140 || mins < 60) return {
+    name: 'Tokyo',
+    color: 'rgba(41,98,255,0.15)',
+    labelColor: 'rgba(41,98,255,0.45)',
+  }
+  return null
 }
 
-interface BarData { time: Time; color: string }
+interface InternalSpan {
+  startTime: number
+  endTime:   number
+  color:     string
+  label:     string
+  labelColor: string
+}
 
 export class SessionHighlighting implements ISeriesPrimitive<Time> {
   _chart:     any
   _series:    any
-  _bars:      BarData[] = []
+  _spans:     InternalSpan[] = []
   _paneViews: SessionPaneView[]
   private _requestUpdate?: () => void
   private _onDataChanged = () => this._rebuild()
@@ -110,10 +154,44 @@ export class SessionHighlighting implements ISeriesPrimitive<Time> {
 
   private _rebuild() {
     const data = this._series?.data() ?? []
-    this._bars = data.map((d: any) => ({
-      time:  d.time as Time,
-      color: sessionColor(d.time as number),
-    }))
+    if (data.length < 2) { this._spans = []; this._requestUpdate?.(); return }
+
+    const barInterval = (data[data.length - 1] as any).time - (data[data.length - 2] as any).time
+
+    // Group consecutive bars into session spans
+    const spans: InternalSpan[] = []
+    let current: InternalSpan | null = null
+
+    for (const bar of data) {
+      const t = (bar as any).time as number
+      const session = getSession(t)
+
+      if (session) {
+        if (current && current.label === session.name) {
+          // Extend current span
+          current.endTime = t + barInterval
+        } else {
+          // Start new span
+          if (current) spans.push(current)
+          current = {
+            startTime: t,
+            endTime: t + barInterval,
+            color: session.color,
+            label: session.name,
+            labelColor: session.labelColor,
+          }
+        }
+      } else {
+        // Between sessions
+        if (current) {
+          spans.push(current)
+          current = null
+        }
+      }
+    }
+    if (current) spans.push(current)
+
+    this._spans = spans
     this._requestUpdate?.()
   }
 
