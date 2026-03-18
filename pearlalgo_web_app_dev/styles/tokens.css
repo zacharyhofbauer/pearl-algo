@@ -12,34 +12,34 @@
   /* ============================================================================
    * Core Colors
    * ============================================================================ */
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-card: #1a1a24;
-  --bg-elevated: #22222e;  /* For elevated surfaces */
-  --text-primary: #f0eeeb;  /* Slightly brighter for better contrast */
-  --text-secondary: #b0b8c8;  /* Improved contrast: was #a0a8b8 */
-  --text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on card bg #1a1a24, ~6:1 on #0a0a0f */
-  --text-muted: #6e7380;      /* WCAG AA: ~4.5:1 on #0a0a0f; was #555a66 (~2.8:1 FAIL) */
-  --accent-cyan: #00d4ff;
-  --accent-green: #00e676;
-  --accent-red: #ff5252;
-  --accent-yellow: #ffc107;
+  --bg-primary: #131722;
+  --bg-secondary: #1e222d;
+  --bg-card: #1e222d;
+  --bg-elevated: #2a2e39;  /* For elevated surfaces */
+  --text-primary: #d1d4dc;  /* Slightly brighter for better contrast */
+  --text-secondary: #787b86;  /* Improved contrast: was #a0a8b8 */
+  --text-tertiary: #5d6067;   /* WCAG AA: ~5:1 on card bg #1a1a24, ~6:1 on #0a0a0f */
+  --text-muted: #4a4e59;      /* WCAG AA: ~4.5:1 on #0a0a0f; was #555a66 (~2.8:1 FAIL) */
+  --accent-cyan: #2962ff;
+  --accent-green: #26a69a;
+  --accent-red: #ef5350;
+  --accent-yellow: #f57f17;
   --accent-purple: #ab47bc;
-  --border-color: #2a2a3a;
-  --border-subtle: #1e1e28;   /* For subtle separators */
+  --border-color: #2a2e39;
+  --border-subtle: #363a45;   /* For subtle separators */
   --grid-color: #1e222d;
 
   /* RGB variants for rgba() usage */
-  --accent-green-rgb: 0, 230, 118;
-  --accent-red-rgb: 255, 82, 82;
-  --accent-cyan-rgb: 0, 212, 255;
-  --accent-yellow-rgb: 255, 193, 7;
+  --accent-green-rgb: 38, 166, 154;
+  --accent-red-rgb: 239, 83, 80;
+  --accent-cyan-rgb: 41, 98, 255;
+  --accent-yellow-rgb: 245, 127, 23;
   --accent-purple-rgb: 171, 71, 188;
-  --text-tertiary-rgb: 138, 148, 166;
+  --text-tertiary-rgb: 93, 96, 103;
 
   /* Price highlight */
-  --price-color: #ffffff;
-  --price-glow: 0 0 10px rgba(0, 212, 255, 0.3);
+  --price-color: #d1d4dc;
+  --price-glow: none;
 
   /* ============================================================================
    * Typography
@@ -59,9 +59,9 @@
   --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
 
   /* Panel chrome (data-panel headers, Trading View–style consistency) */
-  --panel-title-font-size: var(--font-size-md);
-  --panel-title-font-weight: var(--font-weight-bold);
-  --panel-title-color: var(--text-primary);
+  --panel-title-font-size: 10px;
+  --panel-title-font-weight: 500;
+  --panel-title-color: #787b86;
 
   /* ============================================================================
    * Spacing Scale (4px base)
@@ -157,8 +157,8 @@
   /* ============================================================================
    * Direction Colors
    * ============================================================================ */
-  --color-long: var(--accent-cyan);
-  --color-short: #ff6ec7;
+  --color-long: var(--accent-green);
+  --color-short: var(--accent-red);
 
   /* ============================================================================
    * Color Variants (lighter/darker shades)
@@ -173,20 +173,20 @@
   /* ============================================================================
    * Background Variants (RGB for rgba() usage)
    * ============================================================================ */
-  --bg-secondary-rgb: 18, 18, 28;
-  --bg-elevated-rgb: 24, 24, 36;
-  --bg-card-rgb: 25, 25, 40;
-  --bg-neutral-rgb: 100, 100, 120;
-  --bg-border-rgb: 60, 60, 80;
-  --bg-border-light-rgb: 80, 80, 120;
-  --bg-header-rgb: 16, 16, 24;
-  --bg-header-light-rgb: 22, 22, 32;
-  --border-color-rgb: 42, 42, 58;
+  --bg-secondary-rgb: 30, 34, 45;
+  --bg-elevated-rgb: 42, 46, 57;
+  --bg-card-rgb: 30, 34, 45;
+  --bg-neutral-rgb: 93, 96, 103;
+  --bg-border-rgb: 42, 46, 57;
+  --bg-border-light-rgb: 54, 58, 69;
+  --bg-header-rgb: 30, 34, 45;
+  --bg-header-light-rgb: 42, 46, 57;
+  --border-color-rgb: 42, 46, 57;
 
   /* ============================================================================
    * Archive Page Variants
    * ============================================================================ */
-  --bg-archive: #14141a;
+  --bg-archive: #131722;
   --border-archive: rgba(255, 255, 255, 0.08);
   --accent-archive: rgba(255, 193, 7, 0.6);
 
@@ -194,8 +194,8 @@
    * Scrollbar Colors
    * ============================================================================ */
   --scrollbar-track: var(--bg-primary);
-  --scrollbar-thumb: #2a2a3a;
-  --scrollbar-thumb-hover: #3a3a4a;
+  --scrollbar-thumb: #2a2e39;
+  --scrollbar-thumb-hover: #363a45;
   --scrollbar-width: 8px;
   --scrollbar-width-thin: 6px;
 }

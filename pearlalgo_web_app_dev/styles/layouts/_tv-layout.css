@@ -11,7 +11,7 @@
   height: 100dvh;
   height: 100vh;
   overflow: hidden;
-  background: #0d0d11;
+  background: #131722;
   overscroll-behavior-y: contain;
 }
 
@@ -28,7 +28,7 @@
 .tv-sidebar {
   flex: 0 0 40px;
   width: 40px;
-  background: #0d0d11;
+  background: #131722;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -38,11 +38,11 @@
 }
 
 .tv-sidebar-left {
-  border-right: 1px solid #1e222d;
+  border-right: 1px solid #2a2e39;
 }
 
 .tv-sidebar-right {
-  border-left: 1px solid #1e222d;
+  border-left: 1px solid #2a2e39;
 }
 
 /* Main: chart + bottom panels — fills remaining width */
@@ -71,8 +71,8 @@
   min-height: 80px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-top: 1px solid #1e222d;
-  background: #0a0a0f;
+  border-top: 1px solid #2a2e39;
+  background: #131722;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.1) transparent;
 }

@@ -909,3 +909,38 @@ case "$COMMAND" in
         exit 1
         ;;
 esac
+
+build_dev_webapp() {
+    # Build dev webapp, copy static assets, restart dev service
+    # Run after any CSS/JS/TSX changes to pearlalgo_web_app_dev/
+    local DEV_DIR="/home/pearlalgo/pearl-algo-workspace/pearlalgo_web_app_dev"
+    echo ""
+    echo -e "${BOLD}Building dev webapp...${NC}"
+    echo ""
+
+    cd "$DEV_DIR" || { echo -e "${RED}Dev webapp dir not found${NC}"; exit 1; }
+
+    echo -e "${CYAN}Running npm build...${NC}"
+    npm run build 2>&1 | tail -8
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Build failed — check CSS/TS errors above${NC}"
+        exit 1
+    fi
+
+    echo -e "${CYAN}Copying static assets...${NC}"
+    cp -r .next/static .next/standalone/.next/static
+    cp -r public .next/standalone/public 2>/dev/null || true
+
+    echo -e "${CYAN}Restarting dev service...${NC}"
+    sudo systemctl restart pearlalgo-webapp-dev
+    sleep 3
+
+    if sudo systemctl is-active pearlalgo-webapp-dev &>/dev/null; then
+        echo -e "${GREEN}Dev webapp live on port 3002${NC}"
+    else
+        echo -e "${RED}Dev service failed to start${NC}"
+        exit 1
+    fi
+    echo ""
+}

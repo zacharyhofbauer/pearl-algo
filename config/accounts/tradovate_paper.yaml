@@ -62,7 +62,7 @@ trading_circuit_breaker:
   - midday
   - afternoon
   - closing
-  enable_direction_gating: false
+  enable_direction_gating: true
   direction_gating_min_confidence: 0.75
   enable_regime_avoidance: false
   blocked_regimes: []

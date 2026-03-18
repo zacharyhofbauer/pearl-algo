@@ -70,7 +70,7 @@
   padding: 8px 12px !important;
   gap: 16px;
   border-top: 1px solid #1e222d;
-  background: #12121a !important;
+  background: var(--bg-secondary) !important;
 }
 
 .tv-layout .account-strip-label {
@@ -89,7 +89,7 @@
 .tv-panel-area .data-panel {
   border: none !important;
   border-radius: 0 !important;
-  background: #0a0a0f !important;
+  background: var(--bg-primary) !important;
   box-shadow: none !important;
   content-visibility: visible;
 }

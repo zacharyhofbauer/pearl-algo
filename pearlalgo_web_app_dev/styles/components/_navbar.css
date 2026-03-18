@@ -1,7 +1,7 @@
 /* NavBar - Shared top navigation across all pages */
 
 :root {
-  --nav-bar-height: 44px;
+  --nav-bar-height: 36px;
 }
 
 .nav-bar {
@@ -154,7 +154,7 @@
   .nav-bar {
     padding: 0 var(--space-4);
     gap: var(--space-3);
-    height: 40px;
+    height: 36px;
   }
 
   .nav-bar-brand {
@@ -168,7 +168,7 @@
   .nav-bar-link {
     padding: 5px 7px;
     font-size: 11px;
-    min-height: 40px;
+    min-height: 36px;
     display: flex;
     align-items: center;
     -webkit-tap-highlight-color: rgba(0, 212, 255, 0.15);

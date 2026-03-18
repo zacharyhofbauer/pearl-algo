@@ -4,7 +4,7 @@
 .agent-offline-banner {
   background: rgba(var(--accent-red-rgb), 0.15);
   border: 1px solid rgba(var(--accent-red-rgb), 0.4);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 8px 14px;
   margin: 0 0 8px 0;
   font-size: 0.82rem;
@@ -49,7 +49,7 @@
   gap: 2px;
   background: rgba(19, 23, 34, 0.88);
   padding: 3px;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid var(--border-color);
 }
 
@@ -67,7 +67,7 @@
   height: 28px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--text-primary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-default);
@@ -359,7 +359,7 @@
 /* Marker Tooltip - Clean Design */
 .marker-tooltip {
   background: rgba(19, 23, 34, 0.96);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 0;
   min-width: 180px;
   max-width: 200px;
@@ -399,7 +399,7 @@
   font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: 0;
   letter-spacing: 0.5px;
 }
 
@@ -467,7 +467,7 @@
   padding: 6px 10px;
   margin-top: 8px;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
@@ -519,7 +519,7 @@
 .tooltip-signal-tag {
   font-size: 9px;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
 }
@@ -640,7 +640,7 @@
   padding: 4px 6px;
   margin-bottom: 4px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 4px;
+  border-radius: 0;
   font-size: var(--font-size-xs);
 }
 
@@ -787,7 +787,7 @@
 .annotation-modal {
   background: var(--surface-3);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0;
   padding: var(--space-3);
   min-width: 220px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -820,7 +820,7 @@
   width: 100%;
   background: var(--surface-1);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 0;
   padding: var(--space-2);
   color: var(--text-primary);
   font-size: 13px;
@@ -865,7 +865,7 @@
 .annotation-cancel-btn,
 .annotation-save-btn {
   padding: 6px 14px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -931,7 +931,7 @@
   transform: translateX(-50%);
   background: var(--surface-3);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 0;
   padding: var(--space-2);
   min-width: 150px;
   max-width: 250px;
@@ -962,7 +962,7 @@
   padding: 4px 8px;
   background: rgba(255, 82, 82, 0.2);
   border: 1px solid rgba(255, 82, 82, 0.4);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--color-error);
   font-size: 10px;
   cursor: pointer;
@@ -1282,7 +1282,7 @@
   right: 10px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0;
   padding: var(--space-4);
   z-index: var(--z-overlay);
   min-width: 200px;
@@ -1333,7 +1333,7 @@
   width: 36px;
   height: 20px;
   background: var(--bg-secondary);
-  border-radius: 10px;
+  border-radius: 0;
   cursor: pointer;
   transition: background 0.2s;
 }

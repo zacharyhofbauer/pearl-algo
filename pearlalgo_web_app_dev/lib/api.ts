@@ -47,7 +47,7 @@ export function getApiUrl(): string {
   const urlParams = new URLSearchParams(window.location.search)
   const account = urlParams.get('account')
   const apiPort = urlParams.get('api_port')
-  const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
+  const isLocal = ["localhost", "127.0.0.1"].includes(hostname) || hostname.startsWith("100.")
 
   // Account-based switching: ?account=tv_paper uses /tv_paper/ prefix on production
   if (account === 'tv_paper') {
