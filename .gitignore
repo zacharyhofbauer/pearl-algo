@@ -70,3 +70,7 @@ config/*.tmp
 
 # Junk files created by MagicMock state_dir in tests
 <MagicMock*
+
+*.backup*
+*.bak_*
+*.backup_*
