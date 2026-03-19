@@ -106,6 +106,12 @@ interface TradeDockPanelProps {
   orderStats?: TradovateOrderStats | null
   /** Recent signal lifecycle events (generated/entered/exited/etc) */
   recentSignals?: RecentSignalEvent[]
+  /** Account equity for panel header */
+  accountEquity?: number | null
+  /** Account total P&L for panel header */
+  accountTotalPnl?: number | null
+  /** Account win rate for panel header */
+  accountWinRate?: number | null
 }
 
 type Tab = 'positions' | 'history' | 'stats' | 'signals'
@@ -132,6 +138,9 @@ function TradeDockPanel({
   workingOrders,
   orderStats,
   recentSignals,
+  accountEquity,
+  accountTotalPnl,
+  accountWinRate,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -186,8 +195,50 @@ function TradeDockPanel({
     [openRows]
   )
 
+  const fmtMoney = (n: number | null | undefined) => {
+    if (n == null) return '\u2014'
+    const abs = Math.abs(n)
+    return (n >= 0 ? '$' : '-$') + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+  const fmtSignedMoney = (n: number | null | undefined) => {
+    if (n == null) return '\u2014'
+    const abs = Math.abs(n)
+    const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return n >= 0 ? `+$${formatted}` : `-$${formatted}`
+  }
+
   const headerStats = (
     <div className="trade-dock-header-stats" aria-label="Daily summary">
+      {/* Account data (merged from AccountStrip) */}
+      {(accountEquity != null || accountTotalPnl != null) && (
+        <div className="panel-account-data">
+          {accountEquity != null && (
+            <div className="panel-account-item">
+              <span className="panel-account-label">Equity</span>
+              <span className="panel-account-value">{fmtMoney(accountEquity)}</span>
+            </div>
+          )}
+          {accountTotalPnl != null && (
+            <>
+              <span className="panel-account-sep">|</span>
+              <div className="panel-account-item">
+                <span className="panel-account-label">Profit</span>
+                <span className={`panel-account-value ${accountTotalPnl >= 0 ? 'positive' : 'negative'}`}>{fmtSignedMoney(accountTotalPnl)}</span>
+              </div>
+            </>
+          )}
+          {accountWinRate != null && (
+            <>
+              <span className="panel-account-sep">|</span>
+              <div className="panel-account-item">
+                <span className="panel-account-label">Win</span>
+                <span className="panel-account-value">{accountWinRate.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {typeof dailyPnL === 'number' && (
         <div className={`dock-stat pnl ${dailyPnL >= 0 ? 'positive' : 'negative'}`}>
           <span className="dock-stat-k">P&amp;L</span>
@@ -719,7 +770,7 @@ function TradeDockPanel({
                       {closeResult.message}
                     </div>
                   )}
-                  {openCount > 0 && displayWorkingOrders.length === 0 && (
+                  {openCount > 0 && displayWorkingOrders.length === 0 && openRows.every(p => !p.stop_loss && !p.take_profit) && (
                     <div className="trade-controls-result error">
                       Open position has no visible working protective orders (SL/TP). Verify protection in Tradovate.
                     </div>

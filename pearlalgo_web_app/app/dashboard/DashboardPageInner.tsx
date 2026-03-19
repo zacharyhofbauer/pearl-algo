@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
-import AccountStrip from '@/components/AccountStrip'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary, type RecentSignalEvent } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
@@ -18,6 +17,7 @@ import {
   useAgentStore,
   useChartStore,
   useUIStore,
+  useChartSettingsStore,
   type Timeframe,
   type Position,
   type PositionLine,
@@ -68,6 +68,56 @@ export default function DashboardPageInner() {
 
   // Badge tooltip state (which badge explanation is showing)
   const [badgeTip, setBadgeTip] = useState<string | null>(null)
+
+  // Indicators dropdown state
+  const [showIndicatorsDropdown, setShowIndicatorsDropdown] = useState(false)
+  const indicatorSettings = useChartSettingsStore((s) => s.indicators)
+  const toggleIndicator = useChartSettingsStore((s) => s.toggleIndicator)
+
+  // Close indicators dropdown on outside click
+  useEffect(() => {
+    if (!showIndicatorsDropdown) return
+    const close = () => setShowIndicatorsDropdown(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [showIndicatorsDropdown])
+
+  // ── AGENT OFFLINE grace period (15 s) ───────────────────────────────────────
+  // Avoid flashing "AGENT OFFLINE" on brief WS reconnects.
+  const offlineSinceRef = useRef<number | null>(null)
+  const [showOffline, setShowOffline] = useState(false)
+
+  useEffect(() => {
+    const isReallyOffline = (() => {
+      // WS must be disconnected
+      if (wsStatus === 'connected') return false
+      // And agent must report not-running OR data must be stale (>30 s)
+      if (agentState?.running === false) return true
+      const lastUp = useAgentStore.getState().lastUpdated
+      if (lastUp && Date.now() - lastUp.getTime() > 30_000) return true
+      return false
+    })()
+
+    if (!isReallyOffline) {
+      offlineSinceRef.current = null
+      setShowOffline(false)
+      return
+    }
+
+    // Start tracking when the offline condition began
+    if (offlineSinceRef.current === null) offlineSinceRef.current = Date.now()
+
+    // If already past 15 s, show immediately
+    if (Date.now() - offlineSinceRef.current >= 15_000) {
+      setShowOffline(true)
+      return
+    }
+
+    // Otherwise wait for the remaining time
+    const remaining = 15_000 - (Date.now() - offlineSinceRef.current)
+    const timer = setTimeout(() => setShowOffline(true), remaining)
+    return () => clearTimeout(timer)
+  }, [wsStatus, agentState?.running, lastUpdate])
   const [isCompactHeader, setIsCompactHeader] = useState(false)
 
   // Local state for active positions (for chart price lines) - updated from HTTP + WebSocket
@@ -432,12 +482,78 @@ export default function DashboardPageInner() {
             ))}
           </div>
 
+          {/* Center: Action buttons */}
+          <div className="header-actions">
+            {/* Indicators toggle */}
+            <div style={{ position: 'relative' }}>
+              <button
+                className="header-action-btn"
+                title="Indicators"
+                onClick={() => setShowIndicatorsDropdown((v) => !v)}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1,12 4,4 8,10 12,2 15,8" />
+                </svg>
+              </button>
+              {showIndicatorsDropdown && (
+                <div className="indicators-dropdown" onClick={(e) => e.stopPropagation()}>
+                  {([
+                    { key: 'ema9' as const, label: 'EMA 9' },
+                    { key: 'ema21' as const, label: 'EMA 21' },
+                    { key: 'vwap' as const, label: 'VWAP' },
+                    { key: 'bollingerBands' as const, label: 'Bollinger Bands' },
+                    { key: 'atrBands' as const, label: 'ATR Bands' },
+                  ]).map(({ key, label }) => (
+                    <div key={key} className="indicator-toggle-item" onClick={() => toggleIndicator(key)}>
+                      <span>{label}</span>
+                      <span className={`indicator-dot ${indicatorSettings[key] ? 'active' : ''}`} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Fullscreen */}
+            <button
+              className="header-action-btn"
+              title="Fullscreen"
+              onClick={() => {
+                if (document.fullscreenElement) {
+                  document.exitFullscreen()
+                } else {
+                  document.documentElement.requestFullscreen()
+                }
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="1,5 1,1 5,1" /><polyline points="11,1 15,1 15,5" /><polyline points="15,11 15,15 11,15" /><polyline points="5,15 1,15 1,11" />
+              </svg>
+            </button>
+
+            {/* Screenshot */}
+            <button
+              className="header-action-btn"
+              title="Screenshot"
+              onClick={() => {
+                if (mainChartApi) {
+                  mainChartApi.takeScreenshot()
+                }
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="3" width="14" height="11" rx="2" /><circle cx="8" cy="9" r="3" /><path d="M5 3L6 1h4l1 2" />
+              </svg>
+            </button>
+          </div>
+
           {/* Right: Status badges */}
           <div className="header-badges">
             {/* System status badges - tap for explanation */}
             {agentState && (
               <span
                 className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+                role="button" tabIndex={0}
+                title="Agent — Trading scanner process status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'agent' ? null : 'agent') }}
               >
                 <span className="badge-dot"></span>
@@ -449,6 +565,8 @@ export default function DashboardPageInner() {
             {agentState && (
               <span
                 className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}
+                role="button" tabIndex={0}
+                title="Gateway — IBKR connection status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'gw' ? null : 'gw') }}
               >
                 <span className="badge-dot"></span>
@@ -458,6 +576,8 @@ export default function DashboardPageInner() {
             {aiStatus.aiMode && (
               <span
                 className={`badge ai-badge ${aiStatus.aiMode}`}
+                role="button" tabIndex={0}
+                title="AI/ML — Signal filtering mode"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
               >
                 {isCompactHeader && aiStatus.aiMode === 'shadow'
@@ -471,6 +591,8 @@ export default function DashboardPageInner() {
             {marketStatus && (
               <span
                 className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
+                role="button" tabIndex={0}
+                title="Market — CME Futures session status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
               >
                 {isCompactHeader ? (marketStatus.is_open ? 'OPN' : 'CLS') : (marketStatus.is_open ? 'OPEN' : 'CLOSED')}
@@ -479,6 +601,8 @@ export default function DashboardPageInner() {
             {agentState && (
               <span
                 className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}
+                role="button" tabIndex={0}
+                title="Data — Market data feed freshness"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
               >
                 <span className="badge-dot"></span>
@@ -488,6 +612,8 @@ export default function DashboardPageInner() {
             {agentState?.ml_filter_performance?.lift_ok && agentState.ml_filter_performance.win_rate_pass != null && (
               <span
                 className={`badge ml-badge ${(agentState.ml_filter_performance.lift_win_rate || 0) > 0.1 ? 'good' : 'neutral'}`}
+                role="button" tabIndex={0}
+                title="ML Filter — Win rate when ML passes signal"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ml' ? null : 'ml') }}
               >
                 ML {Math.round((agentState.ml_filter_performance.win_rate_pass) * 100)}%
@@ -496,6 +622,8 @@ export default function DashboardPageInner() {
             {agentState?.shadow_counters && (agentState.shadow_counters.blocked_total > 0) && (
               <span
                 className={`badge saved-badge ${(agentState.shadow_counters.net_saved || 0) >= 0 ? 'positive' : 'negative'}`}
+                role="button" tabIndex={0}
+                title="Shadow Savings — Net P&L impact of blocked signals"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'saved' ? null : 'saved') }}
               >
                 {(agentState.shadow_counters.net_saved || 0) >= 0 ? '↑' : '↓'}${Math.abs(agentState.shadow_counters.net_saved || 0).toFixed(0)}
@@ -550,15 +678,17 @@ export default function DashboardPageInner() {
   // Chart section component
   const renderChart = () => (
     <div className="chart-wrapper">
-      {/* Agent/Execution offline banner */}
-      {agentState && (agentState.running === false || agentState.execution_state?.enabled === false) && (
+      {/* Agent/Execution offline banner (15 s grace period for OFFLINE) */}
+      {agentState && (showOffline || agentState.execution_state?.enabled === false) && (
         <div className="agent-offline-banner">
           <span className="agent-offline-title">
-            {agentState.running === false ? 'AGENT OFFLINE' : 'EXECUTION DISABLED'}
+            {showOffline && agentState.running === false ? 'AGENT OFFLINE' : showOffline ? 'DATA STALE' : 'EXECUTION DISABLED'}
           </span>
           <span className="agent-offline-message">
-            {agentState.running === false
+            {showOffline && agentState.running === false
               ? 'The trading agent is not running. Data may be stale.'
+              : showOffline
+              ? 'No updates received for >30 s. Connection may be lost.'
               : 'Execution is disabled. Orders will not be placed.'}
           </span>
         </div>
@@ -630,8 +760,6 @@ export default function DashboardPageInner() {
               timeframe={timeframe}
               onChartReady={setMainChartApi}
               positionLines={positionLines}
-              positions={positions}
-              srPower={undefined}
             />
           </ErrorBoundary>
         )}
@@ -648,15 +776,6 @@ export default function DashboardPageInner() {
         chart={renderChart()}
         panels={
           <>
-            <AccountStrip
-              balance={null}
-              totalPnl={performanceSummary?.all?.pnl ?? null}
-              dailyPnl={performanceSummary?.td?.pnl ?? agentState?.daily_pnl ?? null}
-              trades={performanceSummary?.all?.trades ?? null}
-              winRate={performanceSummary?.all?.win_rate ?? null}
-              equity={agentState?.tradovate_account?.equity ?? performanceSummary?.all?.tradovate_equity ?? null}
-              openPnl={agentState?.tradovate_account?.open_pnl ?? null}
-            />
             <ErrorBoundary panelName="Trades">
               <TradeDockPanel
                 positions={positions}
@@ -680,6 +799,9 @@ export default function DashboardPageInner() {
                 recentSignals={recentSignals}
                 workingOrders={agentState?.tradovate_account?.working_orders}
                 orderStats={agentState?.tradovate_account?.order_stats || null}
+                accountEquity={agentState?.tradovate_account?.equity ?? performanceSummary?.all?.tradovate_equity ?? null}
+                accountTotalPnl={performanceSummary?.all?.pnl ?? null}
+                accountWinRate={performanceSummary?.all?.win_rate ?? null}
               />
             </ErrorBoundary>
           </>

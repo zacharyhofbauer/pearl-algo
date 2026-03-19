@@ -47,6 +47,8 @@ export function getApiUrl(): string {
   const urlParams = new URLSearchParams(window.location.search)
   const account = urlParams.get('account')
   const apiPort = urlParams.get('api_port')
+  
+
   const isLocal = ['localhost', '127.0.0.1'].includes(hostname)
 
   // Account-based switching: ?account=tv_paper uses /tv_paper/ prefix on production
@@ -54,7 +56,7 @@ export function getApiUrl(): string {
     if (isLocal) {
       return 'http://localhost:8001'
     }
-    // On production: use /tv_paper path prefix (routed by Cloudflare tunnel)
+    // On production: use /tv_paper path prefix (routed by Cloudflare tunnel or Next.js proxy)
     return '/tv_paper'
   }
 
@@ -67,7 +69,7 @@ export function getApiUrl(): string {
     return `${protocol}//${hostname}:${apiPort}`
   }
 
-  // Default: relative URLs on public domain (pearlalgo.io), localhost:8001 for local dev
+  // Default: relative URLs — works for both pearlalgo.io and Tailscale (Next.js proxies /api/*)
   return isLocal ? 'http://localhost:8001' : ''
 }
 

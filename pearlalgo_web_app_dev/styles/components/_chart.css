@@ -176,6 +176,7 @@
   gap: 12px;
   background: transparent;
   padding: 4px 8px;
+  overflow: hidden;
   pointer-events: none;
   font-size: 12px;
 }

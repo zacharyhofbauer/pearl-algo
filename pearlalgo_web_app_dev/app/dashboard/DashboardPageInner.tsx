@@ -552,6 +552,8 @@ export default function DashboardPageInner() {
             {agentState && (
               <span
                 className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
+                role="button" tabIndex={0}
+                title="Agent — Trading scanner process status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'agent' ? null : 'agent') }}
               >
                 <span className="badge-dot"></span>
@@ -563,6 +565,8 @@ export default function DashboardPageInner() {
             {agentState && (
               <span
                 className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}
+                role="button" tabIndex={0}
+                title="Gateway — IBKR connection status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'gw' ? null : 'gw') }}
               >
                 <span className="badge-dot"></span>
@@ -572,6 +576,8 @@ export default function DashboardPageInner() {
             {aiStatus.aiMode && (
               <span
                 className={`badge ai-badge ${aiStatus.aiMode}`}
+                role="button" tabIndex={0}
+                title="AI/ML — Signal filtering mode"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ai' ? null : 'ai') }}
               >
                 {isCompactHeader && aiStatus.aiMode === 'shadow'
@@ -585,6 +591,8 @@ export default function DashboardPageInner() {
             {marketStatus && (
               <span
                 className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
+                role="button" tabIndex={0}
+                title="Market — CME Futures session status"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'market' ? null : 'market') }}
               >
                 {isCompactHeader ? (marketStatus.is_open ? 'OPN' : 'CLS') : (marketStatus.is_open ? 'OPEN' : 'CLOSED')}
@@ -593,6 +601,8 @@ export default function DashboardPageInner() {
             {agentState && (
               <span
                 className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}
+                role="button" tabIndex={0}
+                title="Data — Market data feed freshness"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
               >
                 <span className="badge-dot"></span>
@@ -602,6 +612,8 @@ export default function DashboardPageInner() {
             {agentState?.ml_filter_performance?.lift_ok && agentState.ml_filter_performance.win_rate_pass != null && (
               <span
                 className={`badge ml-badge ${(agentState.ml_filter_performance.lift_win_rate || 0) > 0.1 ? 'good' : 'neutral'}`}
+                role="button" tabIndex={0}
+                title="ML Filter — Win rate when ML passes signal"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'ml' ? null : 'ml') }}
               >
                 ML {Math.round((agentState.ml_filter_performance.win_rate_pass) * 100)}%
@@ -610,6 +622,8 @@ export default function DashboardPageInner() {
             {agentState?.shadow_counters && (agentState.shadow_counters.blocked_total > 0) && (
               <span
                 className={`badge saved-badge ${(agentState.shadow_counters.net_saved || 0) >= 0 ? 'positive' : 'negative'}`}
+                role="button" tabIndex={0}
+                title="Shadow Savings — Net P&L impact of blocked signals"
                 onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'saved' ? null : 'saved') }}
               >
                 {(agentState.shadow_counters.net_saved || 0) >= 0 ? '↑' : '↓'}${Math.abs(agentState.shadow_counters.net_saved || 0).toFixed(0)}
