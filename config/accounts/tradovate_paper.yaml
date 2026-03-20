@@ -24,7 +24,7 @@ execution:
   adapter: tradovate
   enforce_protection_guard: true
   max_positions: 5
-  max_position_size_per_order: 3
+  max_position_size_per_order: 1
   max_orders_per_day: 500
   max_daily_loss: 1150.0
   cooldown_seconds: 30
@@ -78,7 +78,7 @@ auto_flat:
   notify: false
 risk:
   min_position_size: 1
-  max_position_size: 3
+  max_position_size: 1
 session:
   start_time: "18:00"
   end_time: "15:45"
