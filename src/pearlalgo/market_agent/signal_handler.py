@@ -106,6 +106,11 @@ class SignalHandler:
         # Audit
         self._audit_logger = audit_logger
 
+        # Execution serialization semaphore — prevents signal storms.
+        # follower_execute acquires this before executing; queued signals
+        # re-check position limits when their turn comes.
+        self._execution_semaphore: asyncio.Semaphore = asyncio.Semaphore(1)
+
         # Tracking
         self.signal_count = 0
         self.signals_sent = 0
@@ -247,44 +252,51 @@ class SignalHandler:
         IBKR Virtual-specific. Only runs: circuit breaker -> position sizing ->
         tracking -> virtual entry -> execution -> notification.
 
+        Serialized via _execution_semaphore to prevent signal storms: concurrent
+        signals queue here and re-check position limits after acquiring the lock,
+        so the circuit breaker sees real broker position state on each attempt.
+
         Args:
             signal: Signal dictionary from strategy or forwarded source
         """
-        try:
-            # Circuit breaker check
-            if not self._check_circuit_breaker(signal, None):
-                return
+        async with self._execution_semaphore:
+            try:
+                # Circuit breaker check (re-evaluated inside semaphore so each
+                # queued signal sees current position state, not stale snapshot
+                # from before prior signals were recorded).
+                if not self._check_circuit_breaker(signal, None):
+                    return
 
-            # Position sizing: compute if not already set
-            self._ensure_position_size(signal)
+                # Position sizing: compute if not already set
+                self._ensure_position_size(signal)
 
-            # Track signal generation
-            signal_id = self.performance_tracker.track_signal_generated(signal)
-            self.last_signal_generated_at = get_utc_timestamp()
-            self.last_signal_id_prefix = str(signal_id)[:16]
+                # Track signal generation
+                signal_id = self.performance_tracker.track_signal_generated(signal)
+                self.last_signal_generated_at = get_utc_timestamp()
+                self.last_signal_id_prefix = str(signal_id)[:16]
 
-            # Guard: entry price validation
-            validated_price = self._validate_entry_price(signal, signal_id)
-            if validated_price is None:
-                return
+                # Guard: entry price validation
+                validated_price = self._validate_entry_price(signal, signal_id)
+                if validated_price is None:
+                    return
 
-            # Virtual entry
-            entry_price = self._track_virtual_entry(signal, signal_id)
+                # Virtual entry
+                entry_price = self._track_virtual_entry(signal, signal_id)
 
-            # Audit: trade entered
-            self._log_trade_entry(signal_id, signal, entry_price, "follower")
+                # Audit: trade entered
+                self._log_trade_entry(signal_id, signal, entry_price, "follower")
 
-            # Execute directly (no bandit/ML gating)
-            await self._execute_signal(signal, policy_decision=None)
+                # Execute directly (no bandit/ML gating)
+                await self._execute_signal(signal, policy_decision=None)
 
-            # Queue notification
-            await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data=None)
+                # Queue notification
+                await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data=None)
 
-            self.signal_count += 1
+                self.signal_count += 1
 
-        except Exception as e:
-            logger.error(f"Error in follower_execute: {e}", exc_info=True)
-            self.error_count += 1
+            except Exception as e:
+                logger.error(f"Error in follower_execute: {e}", exc_info=True)
+                self.error_count += 1
 
     # ------------------------------------------------------------------
     # Shared helpers (eliminate duplication between process_signal & follower_execute)

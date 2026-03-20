@@ -4,24 +4,20 @@
    COMBINED HEADER - Single Row (Timeframes + Badges)
    ============================================ */
 .header-combined {
-  margin: 0;
-  padding: 0;
-  flex-shrink: 0;
-  border-bottom: 1px solid #2a2e39;
-  background: #161a25;
+  margin-bottom: 4px;
 }
 
-/* Single row: timeframes left, badges right — flat toolbar like TradingView */
+/* Single row: timeframes left, badges right */
 .header-row-single {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: nowrap;
-  padding: 2px 8px 2px 8px;
-  background: transparent;
-  border-radius: 0;
-  border: none;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
 }
 
 .header-combined .header-timeframe {
@@ -30,11 +26,11 @@
 
 /* Stale Warning Banner */
 .header-combined .stale-warning {
-  background: rgba(var(--accent-red-rgb), 0.1);
+  background: linear-gradient(90deg, rgba(var(--accent-red-rgb), 0.12) 0%, rgba(var(--accent-red-rgb), 0.08) 100%);
   border: 1px solid rgba(var(--accent-red-rgb), 0.25);
   color: var(--accent-red-light);
   padding: 6px 16px;
-  border-radius: 0;
+  border-radius: 8px;
   font-size: 12px;
   text-align: center;
   margin-bottom: 8px;
@@ -78,7 +74,7 @@
   color: var(--accent-cyan);
   background: rgba(var(--accent-cyan-rgb), 0.12);
   padding: 3px 8px;
-  border-radius: 0;
+  border-radius: 6px;
   font-size: clamp(11px, 2.5vw, 13px);
 }
 
@@ -87,7 +83,7 @@
   display: flex;
   justify-content: flex-start;
   gap: 3px;
-
+  background: rgba(0, 0, 0, 0.35);
   padding: 2px;
   border-radius: 7px;
 }
@@ -101,11 +97,7 @@
   border: none;
   border-radius: 5px;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
-}
-
-.header-timeframe .tf-btn:active {
-  transform: scale(0.95);
+  transition: all 0.2s ease;
 }
 
 .header-timeframe .tf-btn:hover {
@@ -129,7 +121,7 @@
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-radius: 0;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -162,7 +154,7 @@
   padding: 8px 10px;
   background: rgba(var(--bg-card-rgb), 0.95);
   border: 1px solid rgba(var(--bg-border-light-rgb), 0.3);
-  border-radius: 0;
+  border-radius: 8px;
   animation: tooltip-in 0.15s ease;
   cursor: pointer;
 }
@@ -187,17 +179,6 @@
 .header-badges .badge {
   cursor: pointer;
   transition: opacity 0.15s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.header-badges .badge:focus-visible {
-  outline: 2px solid var(--accent-cyan);
-  outline-offset: 2px;
-}
-
-.header-timeframe .tf-btn:focus-visible {
-  outline: 2px solid var(--accent-cyan);
-  outline-offset: 1px;
 }
 .header-badges .badge:active {
   opacity: 0.7;
@@ -345,14 +326,8 @@
   color: var(--accent-green);
 }
 .header-badges .data-badge.stale {
-  background: rgba(255, 82, 82, 0.18);
+  background: rgba(255, 82, 82, 0.12);
   color: var(--accent-red);
-  animation: stale-pulse 2s ease-in-out infinite;
-}
-
-@keyframes stale-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
 }
 
 /* Circuit breaker badge */
@@ -479,13 +454,13 @@
     padding: 4px 10px;
     font-size: 10px;
     margin-bottom: 4px;
-    border-radius: 0;
+    border-radius: 6px;
   }
 
   .header-row-single {
-    padding: 2px 0;
-    gap: 4px;
-    border-radius: 0;
+    padding: 4px 7px;
+    gap: 5px;
+    border-radius: 8px;
   }
 
   .header-timeframe {
@@ -504,11 +479,6 @@
     padding: 4px 7px;
     font-size: 10px;
     flex-shrink: 0;
-    min-height: 44px;
-    min-width: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
   }
 
   .header-badges .badge {
@@ -638,7 +608,7 @@
 /* Large screens */
 @media (min-width: 1200px) {
   .header-row-single {
-    padding: 4px 8px;
+    padding: 14px 24px;
   }
 }
 
@@ -656,10 +626,10 @@
   justify-content: space-between;
   align-items: center;
   padding: clamp(6px, 1.5vw, 12px) clamp(10px, 2vw, 22px);
-  background: var(--bg-secondary);
+  background: linear-gradient(145deg, rgba(16, 16, 24, 0.97) 0%, rgba(22, 22, 32, 0.95) 100%);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-radius: 0;
+  border-radius: 10px;
   border: 1px solid rgba(42, 42, 58, 0.5);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
@@ -827,11 +797,6 @@
 
 .main-content {
   overscroll-behavior-y: contain;
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;
-  height: 100vh;
-  overflow: hidden;
 }
 
 /* Pull-to-refresh */

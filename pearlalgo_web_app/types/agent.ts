@@ -477,6 +477,7 @@ export interface AgentState {
   ml_filter_performance: MLFilterPerformance | null
   session_context: SessionContext | null
   signal_activity: SignalActivity | null
+  openclaw_status?: { status: string; port?: number } | null
 }
 
 /**

@@ -4,7 +4,7 @@
 .agent-offline-banner {
   background: rgba(var(--accent-red-rgb), 0.15);
   border: 1px solid rgba(var(--accent-red-rgb), 0.4);
-  border-radius: 0;
+  border-radius: 6px;
   padding: 8px 14px;
   margin: 0 0 8px 0;
   font-size: 0.82rem;
@@ -47,15 +47,15 @@
 .chart-actions-buttons {
   display: flex;
   gap: 2px;
-  background: rgba(19, 23, 34, 0.88);
+  background: rgba(10, 10, 15, 0.85);
   padding: 3px;
-  border-radius: 0;
+  border-radius: 4px;
   border: 1px solid var(--border-color);
 }
 
 /* Freshness indicator in chart header */
 .chart-actions .freshness-floating {
-  background: rgba(19, 23, 34, 0.92);
+  background: rgba(10, 10, 15, 0.9);
   backdrop-filter: blur(8px);
 }
 
@@ -67,7 +67,7 @@
   height: 28px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0;
+  border-radius: 4px;
   color: var(--text-primary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-default);
@@ -145,18 +145,16 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
-  min-height: 0;
 }
 
-/* Chart container — full bleed, borderless like TradingView */
+/* Chart container */
 .chart-container {
   flex: 1;
-  background: #131722;
-  border-radius: 0;
-  border: none;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
   overflow: hidden;
-  position: relative;
+  position: relative; /* Needed for absolute positioning of chart-actions */
 }
 
 /* =====================================================
@@ -164,7 +162,7 @@
    Single bar: Price | Countdown | Legend
    ===================================================== */
 
-/* Live Price & Candle Countdown Overlay — transparent like TradingView OHLC bar */
+/* Live Price & Candle Countdown Overlay */
 .chart-info-bar {
   position: absolute;
   top: 0;
@@ -174,9 +172,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: transparent;
-  padding: 4px 8px;
-  overflow: hidden;
+  background: linear-gradient(180deg, rgba(10, 10, 15, 0.92) 0%, rgba(10, 10, 15, 0.85) 100%);
+  backdrop-filter: blur(8px);
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: none;
   font-size: 12px;
 }
@@ -359,8 +358,8 @@
 
 /* Marker Tooltip - Clean Design */
 .marker-tooltip {
-  background: rgba(19, 23, 34, 0.96);
-  border-radius: 0;
+  background: rgba(10, 10, 15, 0.95);
+  border-radius: 10px;
   padding: 0;
   min-width: 180px;
   max-width: 200px;
@@ -400,7 +399,7 @@
   font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 4px 10px;
-  border-radius: 0;
+  border-radius: 4px;
   letter-spacing: 0.5px;
 }
 
@@ -468,7 +467,7 @@
   padding: 6px 10px;
   margin-top: 8px;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 0;
+  border-radius: 4px;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
@@ -520,7 +519,7 @@
 .tooltip-signal-tag {
   font-size: 9px;
   padding: 2px 6px;
-  border-radius: 0;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
 }
@@ -641,7 +640,7 @@
   padding: 4px 6px;
   margin-bottom: 4px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 0;
+  border-radius: 4px;
   font-size: var(--font-size-xs);
 }
 
@@ -703,71 +702,6 @@
 }
 
 /* =====================================================
-   OHLC DATA BAR
-   ===================================================== */
-
-.chart-ohlc-bar {
-  position: absolute;
-  top: 24px;
-  left: 0;
-  right: 0;
-  z-index: var(--z-overlay-low);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  pointer-events: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: transparent;
-}
-
-.chart-ohlc-bar.ohlc-up { color: var(--accent-green); }
-.chart-ohlc-bar.ohlc-down { color: var(--accent-red); }
-
-.chart-ohlc-bar .ohlc-label {
-  color: var(--text-tertiary);
-  font-size: 10px;
-  margin-left: 4px;
-}
-
-.chart-ohlc-bar .ohlc-label:first-child {
-  margin-left: 0;
-}
-
-.chart-ohlc-bar .ohlc-value {
-  font-weight: 600;
-  letter-spacing: -0.3px;
-}
-
-.chart-ohlc-bar .ohlc-change {
-  margin-left: 6px;
-  font-weight: 500;
-}
-
-.chart-ohlc-bar .ohlc-volume {
-  margin-left: 6px;
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-
-@media (max-width: 640px) {
-  .chart-ohlc-bar {
-    top: 20px;
-    font-size: 9px;
-    padding: 2px 6px;
-    gap: 2px;
-  }
-  .chart-ohlc-bar .ohlc-label { font-size: 8px; margin-left: 2px; }
-  .chart-ohlc-bar .ohlc-change { margin-left: 3px; }
-  .chart-ohlc-bar .ohlc-volume { display: none; }
-}
-
-@media (max-width: 400px) {
-  .chart-ohlc-bar { top: 18px; font-size: 8px; }
-}
-
-/* =====================================================
    CHART FOCUS STATE
    ===================================================== */
 
@@ -788,7 +722,7 @@
 .annotation-modal {
   background: var(--surface-3);
   border: 1px solid var(--border-color);
-  border-radius: 0;
+  border-radius: 8px;
   padding: var(--space-3);
   min-width: 220px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -821,7 +755,7 @@
   width: 100%;
   background: var(--surface-1);
   border: 1px solid var(--border-color);
-  border-radius: 0;
+  border-radius: 4px;
   padding: var(--space-2);
   color: var(--text-primary);
   font-size: 13px;
@@ -866,7 +800,7 @@
 .annotation-cancel-btn,
 .annotation-save-btn {
   padding: 6px 14px;
-  border-radius: 0;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -932,7 +866,7 @@
   transform: translateX(-50%);
   background: var(--surface-3);
   border: 1px solid var(--border-color);
-  border-radius: 0;
+  border-radius: 6px;
   padding: var(--space-2);
   min-width: 150px;
   max-width: 250px;
@@ -963,7 +897,7 @@
   padding: 4px 8px;
   background: rgba(255, 82, 82, 0.2);
   border: 1px solid rgba(255, 82, 82, 0.4);
-  border-radius: 0;
+  border-radius: 4px;
   color: var(--color-error);
   font-size: 10px;
   cursor: pointer;
@@ -1283,7 +1217,7 @@
   right: 10px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 0;
+  border-radius: 8px;
   padding: var(--space-4);
   z-index: var(--z-overlay);
   min-width: 200px;
@@ -1334,7 +1268,7 @@
   width: 36px;
   height: 20px;
   background: var(--bg-secondary);
-  border-radius: 0;
+  border-radius: 10px;
   cursor: pointer;
   transition: background 0.2s;
 }

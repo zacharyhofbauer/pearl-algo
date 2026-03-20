@@ -1,20 +1,19 @@
-/* NavBar - TradingView dark toolbar */
+/* NavBar - Shared top navigation across all pages */
 
 :root {
-  --nav-bar-height: 36px;
+  --nav-bar-height: 44px;
 }
 
 .nav-bar {
   display: flex;
   align-items: center;
-  padding: 0;
-  background: var(--bg-primary);
+  padding: 0 var(--space-5);
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   height: var(--nav-bar-height);
 }
 
 .nav-bar-inner {
-  padding-left: 8px;
   display: flex;
   align-items: center;
   gap: var(--space-4);
@@ -23,6 +22,9 @@
 
 @media (min-width: 1024px) {
   .nav-bar-inner {
+    max-width: var(--content-max-width);
+    margin-left: auto;
+    margin-right: auto;
   }
 }
 
@@ -43,7 +45,7 @@
 }
 
 .nav-bar-brand.active {
-  color: var(--text-primary);
+  color: var(--accent-cyan);
 }
 
 .nav-bar-logo {
@@ -62,24 +64,22 @@
 
 .nav-bar-link {
   text-decoration: none;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 0 12px;
-  height: var(--nav-bar-height);
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid transparent;
-  transition: color var(--duration-fast) var(--ease-default);
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
 }
 
 .nav-bar-link:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .nav-bar-link.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent-cyan);
+  color: var(--accent-cyan);
 }
 
 /* Dashboard context (symbol, status dot, AI preview) — only on /dashboard */
@@ -150,21 +150,11 @@
   min-width: 0;
 }
 
-@media (min-width: 641px) {
-  .nav-bar {
-    padding: 0 40px;
-  }
-  /* Align with chart: no extra inner padding when we have 40px outer */
-  .nav-bar-inner {
-    padding-left: 0;
-  }
-}
-
 @media (max-width: 640px) {
   .nav-bar {
     padding: 0 var(--space-4);
     gap: var(--space-3);
-    height: 36px;
+    height: 40px;
   }
 
   .nav-bar-brand {
@@ -176,8 +166,11 @@
   }
 
   .nav-bar-link {
-    padding: 0 7px;
+    padding: 5px 7px;
     font-size: 11px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
     -webkit-tap-highlight-color: rgba(0, 212, 255, 0.15);
   }
 

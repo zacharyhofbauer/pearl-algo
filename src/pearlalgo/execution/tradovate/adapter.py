@@ -83,6 +83,12 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         self._live_positions_updated_at: float = 0.0  # time.monotonic()
         self._POSITION_CACHE_TTL: float = 5.0  # 2 minutes — stale after this
 
+        # Pending orders counter: incremented when place_bracket is called,
+        # decremented when WS confirms a fill or close. Provides a synchronous
+        # guard against signal storms when _live_positions cache is stale.
+        self._pending_orders_count: int = 0
+        self._pending_orders_lock: asyncio.Lock = asyncio.Lock()
+
         # Path for immediate fill persistence (set by service)
         self._fills_file: Optional[Path] = None
 
@@ -273,6 +279,21 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                             signal_id=signal_id,
                             error_message=f"opposite_direction_blocked: existing {existing_dir} vs requested {direction}",
                         )
+
+            # Block if pending (in-flight) orders would exceed position limit.
+            # This catches the race condition where multiple signals arrive before
+            # broker fills update _live_positions (signal storm scenario).
+            if self._pending_orders_count >= max_net_positions:
+                logger.info(
+                    f"Pending orders guard: {self._pending_orders_count} pending >= max "
+                    f"{max_net_positions}, blocking {signal_id}"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"pending_orders_limit ({self._pending_orders_count}/{max_net_positions}) reached",
+                )
 
             # Block if same-direction position already exists (no pyramiding — 1 trade at a time)
             for pos in active_broker_positions:
@@ -497,8 +518,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 signal_id=signal_id,
                 error_message=str(e),
             )
+        finally:
+            # Decrement pending counter on any exit path.
+            # The WS position cache takes over once broker fill arrives.
+            if pending_incremented:
+                async with self._pending_orders_lock:
+                    self._pending_orders_count = max(0, self._pending_orders_count - 1)
 
-    # ── Cancel / Flatten ──────────────────────────────────────────────
+    # ─latten ──────────────────────────────────────────────
 
     async def cancel_order(self, order_id: str) -> ExecutionResult:
         """Cancel a specific order on Tradovate."""
