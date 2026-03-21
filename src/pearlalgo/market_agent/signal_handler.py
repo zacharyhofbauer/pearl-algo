@@ -280,14 +280,24 @@ class SignalHandler:
                 if validated_price is None:
                     return
 
-                # Virtual entry
+                # Execute first — only record virtual entry if Tradovate confirms placement.
+                # Previously virtual entry was recorded before execution, causing trades.db
+                # to fill with phantom entries even when broker rejected the order.
+                await self._execute_signal(signal, policy_decision=None)
+
+                execution_status = signal.get("_execution_status", "")
+                if execution_status != "placed":
+                    logger.info(
+                        f"follower_execute: skipping virtual entry record — "
+                        f"execution_status={execution_status!r} (not placed)"
+                    )
+                    return
+
+                # Virtual entry — only reached if broker confirmed placement
                 entry_price = self._track_virtual_entry(signal, signal_id)
 
                 # Audit: trade entered
                 self._log_trade_entry(signal_id, signal, entry_price, "follower")
-
-                # Execute directly (no bandit/ML gating)
-                await self._execute_signal(signal, policy_decision=None)
 
                 # Queue notification
                 await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data=None)
