@@ -9,6 +9,7 @@ import { SessionHighlighting } from '@/lib/chart-plugins/session-highlighting'
 import { SDZones }              from '@/lib/chart-plugins/sd-zones'
 // TBT Trendlines disabled — tracked as future work on kanban
 import { TradeZones, type TradeZone } from '@/lib/chart-plugins/trade-zones'
+import { KeyLevelsPlugin }      from '@/lib/chart-plugins/key-levels'
 
 interface PositionLine {
   price: number
@@ -65,6 +66,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const sdZonesPluginRef = useRef<SDZones | null>(null)
   // tbtPluginRef removed — trendlines disabled
   const tradeZonesRef     = useRef<TradeZones | null>(null)
+  const keyLevelsRef      = useRef<KeyLevelsPlugin | null>(null)
 
   // S&R Power overlay ref
   const srPowerRef = useRef<HTMLDivElement>(null)
@@ -386,12 +388,15 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const tradeZonesPlugin = new TradeZones()
     const sessionPlugin = new SessionHighlighting()
     const sdZonesPlugin = new SDZones()
+    const keyLevelsPlugin   = new KeyLevelsPlugin()
     candleSeries.attachPrimitive(tradeZonesPlugin)
     candleSeries.attachPrimitive(sessionPlugin)
     candleSeries.attachPrimitive(sdZonesPlugin)
+    candleSeries.attachPrimitive(keyLevelsPlugin)
     tradeZonesRef.current     = tradeZonesPlugin
     sessionPluginRef.current = sessionPlugin
     sdZonesPluginRef.current = sdZonesPlugin
+    keyLevelsRef.current     = keyLevelsPlugin
 
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
@@ -410,9 +415,11 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       try { candleSeries.detachPrimitive(tradeZonesPlugin) } catch {}
       try { candleSeries.detachPrimitive(sessionPlugin) } catch {}
       try { candleSeries.detachPrimitive(sdZonesPlugin) } catch {}
+      try { candleSeries.detachPrimitive(keyLevelsPlugin) } catch {}
       tradeZonesRef.current     = null
       sessionPluginRef.current = null
       sdZonesPluginRef.current = null
+      keyLevelsRef.current     = null
       onChartReady?.(null)
       chart.remove()
     }

@@ -164,7 +164,7 @@
    Single bar: Price | Countdown | Legend
    ===================================================== */
 
-/* Live Price & Candle Countdown Overlay — transparent like TradingView OHLC bar */
+/* Live Price & Candle Countdown Overlay */
 .chart-info-bar {
   position: absolute;
   top: 0;
@@ -174,11 +174,13 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: transparent;
+  background: rgba(19, 23, 34, 0.85);
+  backdrop-filter: blur(4px);
   padding: 4px 8px;
   overflow: hidden;
   pointer-events: none;
   font-size: 12px;
+  border-bottom: 1px solid rgba(42, 46, 57, 0.5);
 }
 
 /* Price Section */
@@ -708,7 +710,7 @@
 
 .chart-ohlc-bar {
   position: absolute;
-  top: 24px;
+  top: 25px;
   left: 0;
   right: 0;
   z-index: var(--z-overlay-low);
@@ -719,7 +721,8 @@
   pointer-events: none;
   font-family: var(--font-mono);
   font-size: 11px;
-  background: transparent;
+  background: rgba(19, 23, 34, 0.85);
+  backdrop-filter: blur(4px);
 }
 
 .chart-ohlc-bar.ohlc-up { color: var(--accent-green); }
