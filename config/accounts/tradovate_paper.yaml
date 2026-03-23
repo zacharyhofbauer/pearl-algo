@@ -120,10 +120,10 @@ pearl_bot_auto:
   min_confidence_short: 0.78
   ema_fast: 9
   ema_slow: 21
-  allow_vwap_cross_entries: false
-  allow_vwap_retest_entries: false
-  allow_trend_momentum_entries: false
-  allow_trend_breakout_entries: false
+  allow_vwap_cross_entries: true
+  allow_vwap_retest_entries: true
+  allow_trend_momentum_entries: true
+  allow_trend_breakout_entries: true
   volume_ma_length: 20
   sr_length: 130
   sr_atr_mult: 0.5
