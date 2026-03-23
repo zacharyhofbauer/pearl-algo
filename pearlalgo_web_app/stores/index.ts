@@ -71,7 +71,7 @@ export {
   selectIsMarketOpen,
 } from './chartStore'
 
-export { useUIStore, type DataSource } from './uiStore'
+export { useUIStore, type DataSource, type RightPanelTab } from './uiStore'
 export {
   selectWsStatus,
   selectIsConnected,
@@ -81,6 +81,7 @@ export {
   selectIsFetching,
   selectLastFetchDuration,
   selectFetchCount,
+  selectActiveRightPanel,
 } from './uiStore'
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'

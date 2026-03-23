@@ -107,7 +107,7 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   volume: true,
   vwapBands: false,
   keyLevels: true,
-  tbtTrendlines: true,
+  tbtTrendlines: false,
 }
 
 export const useChartSettingsStore = create<ChartSettingsStore>()(

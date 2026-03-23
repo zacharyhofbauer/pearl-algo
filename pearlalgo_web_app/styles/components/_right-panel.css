@@ -1,0 +1,461 @@
+/* ============================================================================
+ * Right Panel — TradingView-style slide-out panel
+ * ============================================================================ */
+
+.tv-right-panel {
+  flex: 0 0 auto;
+  width: 0;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-left-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
+}
+
+.tv-right-panel[data-state="open"] {
+  width: 320px;
+  border-left-color: var(--border-color);
+}
+
+.tv-right-panel > * {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.tv-right-panel[data-state="open"] > * {
+  opacity: 1;
+  transition: opacity 0.15s ease 0.12s;
+}
+
+/* Header */
+.tv-right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  min-width: 320px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.tv-right-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.tv-right-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 150ms, background 150ms;
+}
+
+.tv-right-panel-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Body */
+.tv-right-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0;
+  min-width: 320px;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.tv-right-panel-body::-webkit-scrollbar { width: 6px; }
+.tv-right-panel-body::-webkit-scrollbar-track { background: transparent; }
+.tv-right-panel-body::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+.tv-right-panel-body::-webkit-scrollbar-thumb:hover { background: var(--bg-elevated); }
+
+/* Sidebar icon active state */
+.tv-sidebar-icon.active {
+  color: var(--accent-cyan);
+  background: rgba(var(--accent-cyan-rgb), 0.1);
+}
+
+/* ============================================================================
+ * Watchlist Panel
+ * ============================================================================ */
+
+.watchlist-symbol-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.watchlist-symbol-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.watchlist-price {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-change {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-change.up { color: var(--color-profit); }
+.watchlist-change.down { color: var(--color-loss); }
+
+.watchlist-pnl {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.watchlist-pnl.positive {
+  color: var(--color-profit);
+  background: rgba(var(--accent-green-rgb), 0.1);
+}
+
+.watchlist-pnl.negative {
+  color: var(--color-loss);
+  background: rgba(var(--accent-red-rgb), 0.1);
+}
+
+.watchlist-stats {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.watchlist-stat-value {
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.watchlist-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 12px 4px;
+}
+
+.watchlist-signal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(var(--border-color-rgb), 0.5);
+}
+
+.watchlist-signal-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.watchlist-signal-time {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  width: 52px;
+}
+
+.watchlist-signal-dir {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.watchlist-signal-dir.long {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.watchlist-signal-dir.short {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.15);
+}
+
+.watchlist-signal-price {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.watchlist-signal-status {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+/* ============================================================================
+ * System Logs Panel
+ * ============================================================================ */
+
+.logs-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(var(--border-color-rgb), 0.5);
+}
+
+.logs-entry:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.logs-time {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  width: 52px;
+}
+
+.logs-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: center;
+}
+
+.logs-type-badge.entry {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.logs-type-badge.exit {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.logs-type-badge.exit.loss {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.15);
+}
+
+.logs-type-badge.reject {
+  color: #ffb74d;
+  background: rgba(255, 183, 77, 0.15);
+}
+
+.logs-type-badge.ai {
+  color: var(--accent-purple);
+  background: rgba(var(--accent-purple-rgb), 0.15);
+}
+
+.logs-type-badge.system {
+  color: var(--text-secondary);
+  background: rgba(120, 123, 134, 0.15);
+}
+
+.logs-message {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+
+.logs-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 12px;
+}
+
+
+/* ============================================================================
+ * Logs Panel — separate panel left of watchlist
+ * ============================================================================ */
+
+.tv-logs-panel {
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tv-logs-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.tv-logs-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.tv-logs-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 150ms, background 150ms;
+}
+
+.tv-logs-panel-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tv-logs-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.tv-logs-panel-body::-webkit-scrollbar { width: 6px; }
+.tv-logs-panel-body::-webkit-scrollbar-track { background: transparent; }
+.tv-logs-panel-body::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+.tv-logs-panel-body::-webkit-scrollbar-thumb:hover { background: var(--bg-elevated); }
+
+/* System Status section inside logs panel */
+.system-status-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 12px 0 8px;
+}
+
+.system-status-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 12px 8px;
+}
+
+.system-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.system-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.system-status-label {
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.system-status-text {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Trade log section in watchlist */
+.watchlist-trade-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(var(--border-color-rgb), 0.5);
+}
+
+.watchlist-trade-pnl {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.watchlist-trade-pnl.positive { color: var(--color-profit); }
+.watchlist-trade-pnl.negative { color: var(--color-loss); }
+
+.watchlist-trade-reason {
+  font-size: 10px;
+  color: var(--text-secondary);
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * Mobile — hide right panel (sidebars already hidden)
+ * ============================================================================ */
+
+@media (max-width: 640px) {
+  .tv-right-panel,
+  .tv-logs-panel {
+    display: none;
+  }
+}
