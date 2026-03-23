@@ -62,8 +62,8 @@ trading_circuit_breaker:
   - midday
   - afternoon
   - closing
-  enable_direction_gating: true
-  direction_gating_min_confidence: 0.75
+  enable_direction_gating: false
+  direction_gating_min_confidence: 0.50
   enable_regime_avoidance: false
   blocked_regimes: []
   regime_avoidance_min_confidence: 0.7
@@ -116,8 +116,8 @@ advanced_exits:
     mae_percentile: 75
 pearl_bot_auto:
   min_confidence: 0.62
-  min_confidence_long: 0.72
-  min_confidence_short: 0.78
+  min_confidence_long: 0.60
+  min_confidence_short: 0.60
   ema_fast: 9
   ema_slow: 21
   allow_vwap_cross_entries: true
@@ -143,5 +143,5 @@ sd_threshold_pct: 10.0
 sd_resolution: 50
 vwap_std_dev: 1.0
 min_confidence: 0.62
-min_confidence_long: 0.72
-min_confidence_short: 0.78
+min_confidence_long: 0.60
+min_confidence_short: 0.60
