@@ -307,8 +307,6 @@ _TYPE_EXPECTATIONS: List[Tuple[str, str, str]] = [
     ("signals", "duplicate_window_seconds", "int"),
     ("risk", "max_risk_per_trade", "float"),
     ("risk", "max_drawdown", "float"),
-    ("risk", "stop_loss_atr_multiplier", "float"),
-    ("risk", "take_profit_risk_reward", "float"),
     ("signals", "min_confidence", "float"),
     ("signals", "min_risk_reward", "float"),
 ]

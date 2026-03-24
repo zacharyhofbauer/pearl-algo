@@ -275,8 +275,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "risk": {
         "max_risk_per_trade": defaults.MAX_RISK_PER_TRADE,
         "max_drawdown": defaults.MAX_DRAWDOWN,
-        "stop_loss_atr_multiplier": defaults.STOP_LOSS_ATR_MULTIPLIER,
-        "take_profit_risk_reward": defaults.TAKE_PROFIT_RISK_REWARD,
         "min_position_size": defaults.MIN_POSITION_SIZE,
         "max_position_size": defaults.MAX_POSITION_SIZE,
         "signal_type_size_multipliers": {},

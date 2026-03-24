@@ -13,8 +13,6 @@ telegram:
 risk:
   max_risk_per_trade: 0.015
   max_drawdown: 0.1
-  stop_loss_atr_multiplier: 4.0
-  take_profit_risk_reward: 1.5
   min_position_size: 1
   max_position_size: 50
   signal_type_size_multipliers:
@@ -136,6 +134,14 @@ pearl_bot_auto:
   ema_fast: 5
   ema_slow: 13
   min_confidence: 0.4
+  # SL/TP ATR multipliers (scalp-tuned)
+  stop_loss_atr_mult: 1.0
+  take_profit_atr_mult: 2.0
+  # Regime scaling factors
+  volatile_sl_mult: 1.3
+  volatile_tp_mult: 1.3
+  ranging_sl_mult: 0.8
+  ranging_tp_mult: 0.7
   allow_vwap_cross_entries: true
   allow_vwap_retest_entries: true
   allow_trend_momentum_entries: true
@@ -155,9 +161,6 @@ strategy:
   - unified_strategy
   signal_type_size_multipliers:
     unified_strategy: 1.0
-  use_scalp_presets: false
-  scalp_target_points: 20.0
-  scalp_stop_points: 12.0
   session_position_scaling:
     enabled: true
     london_multiplier: 0.8

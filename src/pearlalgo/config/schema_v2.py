@@ -36,8 +36,6 @@ class RiskConfig(BaseModel):
     """Risk management parameters."""
     max_risk_per_trade: float = 0.015
     max_drawdown: float = 0.1
-    stop_loss_atr_multiplier: float = 4.0
-    take_profit_risk_reward: float = 1.5
     min_position_size: int = 5
     max_position_size: int = 50
 

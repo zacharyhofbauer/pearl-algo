@@ -71,12 +71,11 @@ CONFIG = ConfigView({
     "key_level_breakout_confidence": 0.10,  # Confidence boost for breakout signals
     "key_level_rejection_penalty": 0.08,  # Confidence penalty for entering into resistance/support
     
-    # Risk Management - WIDE STOPS to avoid wicks
-    # Tight stops get hunted - use structure-based wide stops
-    "stop_loss_atr_mult": 3.5,      # WIDE: 3.5x ATR to survive wicks
-    "take_profit_atr_mult": 5.0,    # Let winners run: 5x ATR targets
+    # Risk Management - Scalp-appropriate ATR-based stops
+    "stop_loss_atr_mult": 1.0,      # 1.0x ATR (~15-25 pts on 5m MNQ)
+    "take_profit_atr_mult": 2.0,    # 2.0x ATR (~30-50 pts) for 1:2 R:R
     "min_confidence": 0.55,         # Allow trades with strong confluence
-    "min_risk_reward": 1.3,         # Maintain decent R:R with wide stops
+    "min_risk_reward": 1.3,         # Minimum R:R filter
 
     # Aggressive mode knobs (OFF by default; enable via config overrides)
     # When enabled, allows additional entry triggers beyond EMA crossover.
@@ -237,7 +236,8 @@ class MarketRegime:
     trend_strength: float  # ADX-like metric
     volatility_ratio: float  # Current vs average volatility
     recommendation: str  # "full_size", "reduced_size", "avoid"
-    
+    adx_value: float = 0.0  # Actual ADX(14) value for strategy routing
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "regime": self.regime,
@@ -245,6 +245,7 @@ class MarketRegime:
             "trend_strength": self.trend_strength,
             "volatility_ratio": self.volatility_ratio,
             "recommendation": self.recommendation,
+            "adx_value": self.adx_value,
         }
 
 
@@ -253,6 +254,7 @@ def detect_market_regime(
     lookback: int = 50,
     trend_threshold: float = 0.6,
     volatility_window: int = 20,
+    adx_period: int = 14,
 ) -> MarketRegime:
     """
     Detect current market regime using multiple indicators.
@@ -275,7 +277,10 @@ def detect_market_regime(
         )
     
     recent = df.tail(lookback)
-    
+
+    # ADX for true trend strength measurement
+    adx_value = calculate_adx(df, period=adx_period)
+
     # Calculate EMAs for trend detection
     ema_fast = recent["close"].ewm(span=9, adjust=False).mean()
     ema_slow = recent["close"].ewm(span=21, adjust=False).mean()
@@ -370,12 +375,81 @@ def detect_market_regime(
         trend_strength=trend_strength,
         volatility_ratio=volatility_ratio,
         recommendation=recommendation,
+        adx_value=adx_value,
     )
 
 
 # ============================================================================
 # INDICATOR FUNCTIONS (All inline, no classes)
 # ============================================================================
+
+
+def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
+    """Calculate Average Directional Index (ADX).
+
+    Returns the current ADX value (0-100).  Higher values indicate stronger
+    trend regardless of direction.  Returns 0.0 if insufficient data.
+    """
+    if len(df) < period + 1:
+        return 0.0
+    try:
+        high = df["high"].values
+        low = df["low"].values
+        close = df["close"].values
+
+        plus_dm = np.zeros(len(df))
+        minus_dm = np.zeros(len(df))
+        tr = np.zeros(len(df))
+
+        for i in range(1, len(df)):
+            up_move = high[i] - high[i - 1]
+            down_move = low[i - 1] - low[i]
+            plus_dm[i] = up_move if (up_move > down_move and up_move > 0) else 0.0
+            minus_dm[i] = down_move if (down_move > up_move and down_move > 0) else 0.0
+            tr[i] = max(
+                high[i] - low[i],
+                abs(high[i] - close[i - 1]),
+                abs(low[i] - close[i - 1]),
+            )
+
+        # Wilder smoothing (exponential with alpha = 1/period)
+        alpha = 1.0 / period
+        atr_s = np.zeros(len(df))
+        plus_di_s = np.zeros(len(df))
+        minus_di_s = np.zeros(len(df))
+
+        # Seed with SMA of first `period` values
+        atr_s[period] = np.mean(tr[1 : period + 1])
+        plus_di_s[period] = np.mean(plus_dm[1 : period + 1])
+        minus_di_s[period] = np.mean(minus_dm[1 : period + 1])
+
+        for i in range(period + 1, len(df)):
+            atr_s[i] = atr_s[i - 1] * (1 - alpha) + tr[i] * alpha
+            plus_di_s[i] = plus_di_s[i - 1] * (1 - alpha) + plus_dm[i] * alpha
+            minus_di_s[i] = minus_di_s[i - 1] * (1 - alpha) + minus_dm[i] * alpha
+
+        # DX series
+        dx = np.zeros(len(df))
+        for i in range(period, len(df)):
+            if atr_s[i] > 0:
+                pdi = 100.0 * plus_di_s[i] / atr_s[i]
+                mdi = 100.0 * minus_di_s[i] / atr_s[i]
+                di_sum = pdi + mdi
+                dx[i] = 100.0 * abs(pdi - mdi) / di_sum if di_sum > 0 else 0.0
+
+        # ADX = Wilder-smoothed DX
+        adx = np.zeros(len(df))
+        start = 2 * period
+        if start < len(df):
+            adx[start] = np.mean(dx[period : start + 1]) if start >= period else 0.0
+            for i in range(start + 1, len(df)):
+                adx[i] = adx[i - 1] * (1 - alpha) + dx[i] * alpha
+
+        return float(adx[-1])
+    except Exception as e:
+        logger.debug(f"ADX calculation failed: {e}")
+        return 0.0
+
 
 def calculate_ema(df: pd.DataFrame, period: int, source: str = "close") -> pd.Series:
     """EMA - from EMA_Crossover.pine"""
@@ -1198,12 +1272,12 @@ class StrategyParams(_BaseModel):
 
     # -- ATR & Risk Management -------------------------------------------
     atr_period: int = _Field(default=14, ge=2, description="ATR lookback period")
-    stop_loss_atr_mult: float = _Field(default=3.5, ge=0.5, description="SL ATR multiplier")
-    take_profit_atr_mult: float = _Field(default=5.0, ge=0.5, description="TP ATR multiplier")
-    volatile_sl_mult: float = _Field(default=1.2, description="SL multiplier in volatile regime")
-    volatile_tp_mult: float = _Field(default=1.2, description="TP multiplier in volatile regime")
-    ranging_sl_mult: float = _Field(default=0.9, description="SL multiplier in ranging regime")
-    ranging_tp_mult: float = _Field(default=0.8, description="TP multiplier in ranging regime")
+    stop_loss_atr_mult: float = _Field(default=1.0, ge=0.3, description="SL ATR multiplier")
+    take_profit_atr_mult: float = _Field(default=2.0, ge=0.5, description="TP ATR multiplier")
+    volatile_sl_mult: float = _Field(default=1.3, description="SL multiplier in volatile regime")
+    volatile_tp_mult: float = _Field(default=1.3, description="TP multiplier in volatile regime")
+    ranging_sl_mult: float = _Field(default=0.8, description="SL multiplier in ranging regime")
+    ranging_tp_mult: float = _Field(default=0.7, description="TP multiplier in ranging regime")
 
     # -- EMA settings ----------------------------------------------------
     ema_fast: int = _Field(default=9, ge=2)
@@ -1255,6 +1329,36 @@ class StrategyParams(_BaseModel):
     allow_trend_breakout_entries: bool = False
     trend_breakout_lookback_bars: int = _Field(default=5)
 
+    # -- ADX regime enhancement ------------------------------------------
+    adx_period: int = _Field(default=14, ge=5, description="ADX lookback period")
+    adx_trending_threshold: float = _Field(default=25.0, description="ADX above this = trending")
+    adx_ranging_threshold: float = _Field(default=20.0, description="ADX below this = ranging")
+
+    # -- ORB (Opening Range Breakout) ------------------------------------
+    allow_orb_entries: bool = False  # Disabled by default
+    orb_range_minutes: int = _Field(default=15, ge=5, description="Minutes to build opening range")
+    orb_window_end: str = _Field(default="11:00", description="Latest time for ORB entries (ET)")
+    orb_max_trades_per_day: int = _Field(default=1, ge=1, description="Max ORB trades per session")
+    orb_base_confidence: float = _Field(default=0.60, ge=0.0, le=1.0)
+    orb_vwap_boost: float = _Field(default=0.10, description="Boost if VWAP-aligned")
+    orb_volume_boost: float = _Field(default=0.08, description="Boost if volume confirmed")
+    orb_adx_boost: float = _Field(default=0.05, description="Boost if ADX > trending threshold")
+    orb_sl_atr_mult: float = _Field(default=1.0, description="SL ATR mult (or ORB range, whichever wider)")
+    orb_tp_atr_mult: float = _Field(default=2.0, description="TP ATR mult")
+
+    # -- VWAP 2SD Mean Reversion -----------------------------------------
+    allow_vwap_2sd_entries: bool = False  # Disabled by default
+    vwap_2sd_multiplier: float = _Field(default=2.0, ge=1.0, description="SD multiplier for outer bands")
+    vwap_2sd_rsi_long_threshold: float = _Field(default=35.0, description="RSI below = oversold for long")
+    vwap_2sd_rsi_short_threshold: float = _Field(default=65.0, description="RSI above = overbought for short")
+    vwap_2sd_window_start: str = _Field(default="10:00", description="Earliest time for 2SD entries (ET)")
+    vwap_2sd_window_end: str = _Field(default="15:00", description="Latest time for 2SD entries (ET)")
+    vwap_2sd_base_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
+    vwap_2sd_rsi_extreme_boost: float = _Field(default=0.12, description="Boost for RSI < 30 or > 70")
+    vwap_2sd_volume_boost: float = _Field(default=0.08, description="Boost for volume spike")
+    vwap_2sd_sl_atr_mult: float = _Field(default=0.75, description="SL ATR mult beyond the band")
+    vwap_2sd_volume_spike_mult: float = _Field(default=1.5, description="Volume > N × avg = spike")
+
 
 def _load_strategy_params(config: Dict) -> StrategyParams:
     """Build a :class:`StrategyParams` from a config dict.
@@ -1303,6 +1407,7 @@ class IndicatorResult:
     key_level_info: Dict
     vwap_band_signal: Optional[str]
     regime: "MarketRegime"
+    adx_value: float  # ADX(14) for strategy routing
     # Aggressive triggers (only populated when config enables them)
     vwap_cross_signal: Optional[str]
     vwap_retest_signal: Optional[str]
@@ -1420,9 +1525,338 @@ def _calculate_indicators(
         sd_signal=sd_signal, sd_confidence=sd_conf,
         key_levels=key_levels, key_level_signal=kl_signal, key_level_confidence=kl_conf,
         key_level_info=kl_info, vwap_band_signal=vwap_band_signal, regime=regime,
+        adx_value=regime.adx_value,
         vwap_cross_signal=vwap_cross_sig, vwap_retest_signal=vwap_retest_sig,
         trend_breakout_signal=trend_brk_sig, trend_momentum_signal=trend_mom_sig,
     )
+
+
+# ============================================================================
+# ORB (Opening Range Breakout) SESSION STATE
+# ============================================================================
+# Module-level state for tracking the opening range across bar updates.
+# Reset daily when a new RTH session is detected.
+
+_orb_state: Dict[str, Any] = {
+    "date": None,          # Current session date (str)
+    "orb_high": None,      # Opening range high
+    "orb_low": None,       # Opening range low
+    "orb_defined": False,  # Whether the range is locked
+    "trades_today": 0,     # ORB trades taken today
+}
+_orb_state_lock = threading.Lock()
+
+
+def _update_orb_range(
+    df: pd.DataFrame,
+    current_time: datetime,
+    params: "StrategyParams",
+) -> Tuple[Optional[float], Optional[float], bool]:
+    """Track the opening range (first N minutes of RTH).
+
+    Returns (orb_high, orb_low, orb_defined).  The range is only
+    "defined" once we are past the range-building window.
+    """
+    global _orb_state
+
+    et = ZoneInfo("America/New_York")
+    ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+    today_str = ct_et.strftime("%Y-%m-%d")
+    rth_start = ct_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    range_end = ct_et.replace(
+        hour=9,
+        minute=30 + params.orb_range_minutes,
+        second=0,
+        microsecond=0,
+    )
+
+    with _orb_state_lock:
+        # Reset on new day
+        if _orb_state["date"] != today_str:
+            _orb_state = {
+                "date": today_str,
+                "orb_high": None,
+                "orb_low": None,
+                "orb_defined": False,
+                "trades_today": 0,
+            }
+
+        # Only build the range during the window
+        if ct_et < rth_start:
+            return None, None, False
+
+        if ct_et <= range_end and not _orb_state["orb_defined"]:
+            # Filter bars within the range window
+            if "timestamp" in df.columns:
+                ts_col = pd.to_datetime(df["timestamp"], utc=True)
+                mask = (ts_col >= pd.Timestamp(rth_start, tz=et)) & (ts_col <= pd.Timestamp(range_end, tz=et))
+                range_bars = df.loc[mask]
+            else:
+                # Fallback: use last N bars (orb_range_minutes bars on 1m)
+                range_bars = df.tail(params.orb_range_minutes)
+
+            if not range_bars.empty:
+                _orb_state["orb_high"] = float(range_bars["high"].max())
+                _orb_state["orb_low"] = float(range_bars["low"].min())
+
+        # Lock the range once past the window
+        if ct_et > range_end and _orb_state["orb_high"] is not None:
+            _orb_state["orb_defined"] = True
+
+        return _orb_state["orb_high"], _orb_state["orb_low"], _orb_state["orb_defined"]
+
+
+def _check_orb_signal(
+    df: pd.DataFrame,
+    ind: "IndicatorResult",
+    params: "StrategyParams",
+    current_time: datetime,
+) -> Optional[Dict]:
+    """Check for Opening Range Breakout entry.
+
+    Returns a signal dict or None.
+    """
+    if not params.allow_orb_entries:
+        return None
+
+    et = ZoneInfo("America/New_York")
+    ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+
+    # Parse window end time
+    try:
+        end_parts = params.orb_window_end.split(":")
+        window_end = ct_et.replace(hour=int(end_parts[0]), minute=int(end_parts[1]), second=0, microsecond=0)
+    except (ValueError, IndexError):
+        window_end = ct_et.replace(hour=11, minute=0, second=0, microsecond=0)
+
+    range_end = ct_et.replace(hour=9, minute=30 + params.orb_range_minutes, second=0, microsecond=0)
+
+    # Only fire after range is defined and before window closes
+    if ct_et <= range_end or ct_et > window_end:
+        return None
+
+    orb_high, orb_low, orb_defined = _update_orb_range(df, current_time, params)
+    if not orb_defined or orb_high is None or orb_low is None:
+        return None
+
+    with _orb_state_lock:
+        if _orb_state["trades_today"] >= params.orb_max_trades_per_day:
+            return None
+
+    close = ind.close
+    adx = ind.adx_value
+    vwap_val = ind.vwap_val
+
+    # Minimum ADX filter — need some directional movement
+    if adx < params.adx_ranging_threshold:
+        return None
+
+    direction = None
+    if close > orb_high:
+        direction = "long"
+    elif close < orb_low:
+        direction = "short"
+
+    if direction is None:
+        return None
+
+    # Build confidence
+    confidence = params.orb_base_confidence
+    active_indicators = [f"ORB_BREAKOUT_{direction.upper()}"]
+
+    # VWAP alignment boost
+    if vwap_val is not None:
+        if (direction == "long" and close > vwap_val) or (direction == "short" and close < vwap_val):
+            confidence += params.orb_vwap_boost
+            active_indicators.append("VWAP_ALIGNED")
+
+    # Volume boost
+    if ind.volume_confirmed:
+        confidence += params.orb_volume_boost
+        active_indicators.append("VOL_CONFIRM")
+
+    # ADX strength boost
+    if adx > params.adx_trending_threshold:
+        confidence += params.orb_adx_boost
+        active_indicators.append(f"ADX_STRONG({adx:.0f})")
+
+    # SL/TP: SL at opposite side of ORB range or ATR-based (whichever is wider)
+    orb_range = orb_high - orb_low
+    atr = ind.atr
+    if direction == "long":
+        sl_distance = max(orb_range, atr * params.orb_sl_atr_mult)
+        stop_loss = close - sl_distance
+        take_profit = close + atr * params.orb_tp_atr_mult
+    else:
+        sl_distance = max(orb_range, atr * params.orb_sl_atr_mult)
+        stop_loss = close + sl_distance
+        take_profit = close - atr * params.orb_tp_atr_mult
+
+    # Record the trade
+    with _orb_state_lock:
+        _orb_state["trades_today"] += 1
+
+    return {
+        "direction": direction,
+        "entry_price": float(close),
+        "stop_loss": float(stop_loss),
+        "take_profit": float(take_profit),
+        "confidence": float(min(confidence, 0.99)),
+        "risk_reward": float(abs(take_profit - close) / abs(close - stop_loss)) if abs(close - stop_loss) > 0 else 0.0,
+        "reason": f"ORB_{direction.upper()}[{len(active_indicators)}]: " + " | ".join(active_indicators),
+        "indicators": {
+            "active_count": len(active_indicators),
+            "active_list": active_indicators,
+            "entry_trigger": "orb_breakout",
+            "orb_high": orb_high,
+            "orb_low": orb_low,
+            "orb_range": orb_range,
+            "adx_value": adx,
+        },
+    }
+
+
+def _check_vwap_2sd_signal(
+    df: pd.DataFrame,
+    ind: "IndicatorResult",
+    params: "StrategyParams",
+    current_time: datetime,
+) -> Optional[Dict]:
+    """Check for VWAP 2SD mean reversion entry.
+
+    Returns a signal dict or None.
+    """
+    if not params.allow_vwap_2sd_entries:
+        return None
+
+    et = ZoneInfo("America/New_York")
+    ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+
+    # Time window check
+    try:
+        start_parts = params.vwap_2sd_window_start.split(":")
+        end_parts = params.vwap_2sd_window_end.split(":")
+        window_start = ct_et.replace(hour=int(start_parts[0]), minute=int(start_parts[1]), second=0, microsecond=0)
+        window_end = ct_et.replace(hour=int(end_parts[0]), minute=int(end_parts[1]), second=0, microsecond=0)
+    except (ValueError, IndexError):
+        window_start = ct_et.replace(hour=10, minute=0, second=0, microsecond=0)
+        window_end = ct_et.replace(hour=15, minute=0, second=0, microsecond=0)
+
+    if ct_et < window_start or ct_et > window_end:
+        return None
+
+    # Need VWAP
+    if ind.vwap_val is None:
+        return None
+
+    # Mean reversion works best in non-trending conditions
+    adx = ind.adx_value
+    if adx > params.adx_trending_threshold:
+        return None
+
+    close = ind.close
+    vwap_val = ind.vwap_val
+    atr = ind.atr
+
+    # Calculate 2SD bands from existing VWAP infrastructure
+    try:
+        _vwap, upper_bands, lower_bands = calculate_vwap_bands(
+            df,
+            std_dev=params.vwap_2sd_multiplier,
+            bands=1,
+            vwap_series=ind.vwap_series,
+        )
+        if not upper_bands or not lower_bands:
+            return None
+        upper_2sd = float(upper_bands[0].iloc[-1])
+        lower_2sd = float(lower_bands[0].iloc[-1])
+    except Exception:
+        return None
+
+    # Calculate RSI
+    if len(df) < 14:
+        return None
+    try:
+        delta = df["close"].diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] != 0 else 100.0
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+    except Exception:
+        return None
+
+    direction = None
+    # Long: price at/below lower 2SD + RSI oversold + reversal candle
+    if close <= lower_2sd and rsi < params.vwap_2sd_rsi_long_threshold:
+        candle_open = float(df["open"].iloc[-1])
+        if close > candle_open:  # Bullish reversal candle
+            direction = "long"
+    # Short: price at/above upper 2SD + RSI overbought + reversal candle
+    elif close >= upper_2sd and rsi > params.vwap_2sd_rsi_short_threshold:
+        candle_open = float(df["open"].iloc[-1])
+        if close < candle_open:  # Bearish reversal candle
+            direction = "short"
+
+    if direction is None:
+        return None
+
+    # Volume spike check
+    vol_ma = df["volume"].rolling(20).mean().iloc[-1] if len(df) >= 20 else df["volume"].mean()
+    current_vol = float(df["volume"].iloc[-1])
+    volume_spike = current_vol > vol_ma * params.vwap_2sd_volume_spike_mult
+
+    # Build confidence
+    confidence = params.vwap_2sd_base_confidence
+    active_indicators = [f"VWAP_2SD_{direction.upper()}", f"RSI({rsi:.0f})"]
+
+    # RSI extreme boost
+    if rsi < 30 or rsi > 70:
+        confidence += params.vwap_2sd_rsi_extreme_boost
+        active_indicators.append("RSI_EXTREME")
+
+    # Volume spike boost
+    if volume_spike:
+        confidence += params.vwap_2sd_volume_boost
+        active_indicators.append("VOL_SPIKE")
+
+    # S&R confirmation
+    if ind.sr_signal:
+        if (direction == "long" and "long" in ind.sr_signal) or (direction == "short" and "short" in ind.sr_signal):
+            confidence += 0.05
+            active_indicators.append(f"SR:{ind.sr_signal}")
+
+    # SL/TP: SL beyond the band by ATR, TP at VWAP midline
+    if direction == "long":
+        stop_loss = close - atr * params.vwap_2sd_sl_atr_mult
+        take_profit = vwap_val  # Mean reversion target = VWAP
+    else:
+        stop_loss = close + atr * params.vwap_2sd_sl_atr_mult
+        take_profit = vwap_val
+
+    risk = abs(close - stop_loss)
+    reward = abs(take_profit - close)
+    risk_reward = reward / risk if risk > 0 else 0.0
+
+    return {
+        "direction": direction,
+        "entry_price": float(close),
+        "stop_loss": float(stop_loss),
+        "take_profit": float(take_profit),
+        "confidence": float(min(confidence, 0.99)),
+        "risk_reward": float(risk_reward),
+        "reason": f"VWAP2SD_{direction.upper()}[{len(active_indicators)}]: " + " | ".join(active_indicators),
+        "indicators": {
+            "active_count": len(active_indicators),
+            "active_list": active_indicators,
+            "entry_trigger": "vwap_2sd_reversion",
+            "rsi": float(rsi),
+            "upper_2sd": upper_2sd,
+            "lower_2sd": lower_2sd,
+            "vwap": vwap_val,
+            "adx_value": adx,
+            "volume_spike": volume_spike,
+        },
+    }
 
 
 def _apply_filters(
@@ -1730,18 +2164,20 @@ def generate_signals(
     else:  # "avoid"
         regime_multiplier = 0.5  # Reduce confidence by 50%
     
-    # Set dynamic SL/TP multipliers based on regime
-    base_sl_mult = float(config.get("stop_loss_atr_mult", 3.5))
-    base_tp_mult = float(config.get("take_profit_atr_mult", 5.0))
-    
+    # Set dynamic SL/TP multipliers based on regime (configurable)
+    base_sl_mult = float(config.get("stop_loss_atr_mult", 1.0))
+    base_tp_mult = float(config.get("take_profit_atr_mult", 2.0))
+    volatile_sl_scale = float(config.get("volatile_sl_mult", 1.3))
+    volatile_tp_scale = float(config.get("volatile_tp_mult", 1.3))
+    ranging_sl_scale = float(config.get("ranging_sl_mult", 0.8))
+    ranging_tp_scale = float(config.get("ranging_tp_mult", 0.7))
+
     if market_regime.regime == "volatile":
-        # Wider stops in volatile markets to avoid wicks
-        dynamic_sl_mult = base_sl_mult * 1.2
-        dynamic_tp_mult = base_tp_mult * 1.2
+        dynamic_sl_mult = base_sl_mult * volatile_sl_scale
+        dynamic_tp_mult = base_tp_mult * volatile_tp_scale
     elif market_regime.regime == "ranging":
-        # Tighter targets in ranging markets
-        dynamic_sl_mult = base_sl_mult * 0.9
-        dynamic_tp_mult = base_tp_mult * 0.8
+        dynamic_sl_mult = base_sl_mult * ranging_sl_scale
+        dynamic_tp_mult = base_tp_mult * ranging_tp_scale
     else:
         dynamic_sl_mult = base_sl_mult
         dynamic_tp_mult = base_tp_mult
@@ -1886,19 +2322,21 @@ def generate_signals(
             
             # NaN guards: ensure valid SL/TP before calculating R:R
             risk_amount = entry_price - stop_loss
+            max_stop_pts = float(config.get("max_stop_points", 45.0))
             if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss >= entry_price or risk_amount <= 0:
                 pass  # Skip invalid signal
+            elif risk_amount > max_stop_pts:
+                logger.debug(f"LONG rejected: SL {risk_amount:.1f} pts > max_stop_points {max_stop_pts}")
             else:
                 risk_reward = _safe_div(take_profit - entry_price, risk_amount, default=0.0)
-                
+
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
-                    # Use active_indicators for comprehensive reason
                     signal_candidates.append({
                         "direction": "long",
                         "entry_price": float(entry_price),
                         "stop_loss": float(stop_loss),
                         "take_profit": float(take_profit),
-                        "confidence": float(min(confidence, 0.99)),  # Cap at 0.99
+                        "confidence": float(min(confidence, 0.99)),
                         "risk_reward": float(risk_reward),
                         "reason": f"LONG[{len(active_indicators)}]: " + " | ".join(active_indicators),
                         "indicators": {
@@ -1917,7 +2355,7 @@ def generate_signals(
                             "key_levels": key_levels,
                         },
                     })
-    
+
     # Short signals - ALL 8 INDICATORS CONTRIBUTE + NEW TRIGGERS
     short_trigger = (
         bearish_cross
@@ -2054,19 +2492,21 @@ def generate_signals(
             
             # NaN guards: ensure valid SL/TP before calculating R:R
             risk_amount = stop_loss - entry_price
+            max_stop_pts = float(config.get("max_stop_points", 45.0))
             if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss <= entry_price or risk_amount <= 0:
                 pass  # Skip invalid signal
+            elif risk_amount > max_stop_pts:
+                logger.debug(f"SHORT rejected: SL {risk_amount:.1f} pts > max_stop_points {max_stop_pts}")
             else:
                 risk_reward = _safe_div(entry_price - take_profit, risk_amount, default=0.0)
-                
+
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
-                    # Use active_indicators for comprehensive reason
                     signal_candidates.append({
                         "direction": "short",
                         "entry_price": float(entry_price),
                         "stop_loss": float(stop_loss),
                         "take_profit": float(take_profit),
-                        "confidence": float(min(confidence, 0.99)),  # Cap at 0.99
+                        "confidence": float(min(confidence, 0.99)),
                         "risk_reward": float(risk_reward),
                         "reason": f"SHORT[{len(active_indicators)}]: " + " | ".join(active_indicators),
                         "indicators": {
@@ -2085,7 +2525,28 @@ def generate_signals(
                             "key_levels": key_levels,
                         },
                     })
-    
+
+    # ==========================================================================
+    # NEW STRATEGIES: ORB + VWAP 2SD (session-aware, additive)
+    # ==========================================================================
+    # Update ORB range state (must run every bar to track high/low)
+    if params.allow_orb_entries:
+        _update_orb_range(df, current_time, params)
+
+    orb_signal = safe_check(_check_orb_signal, df, ind, params, current_time)
+    if isinstance(orb_signal, tuple):
+        orb_signal = orb_signal[0] if orb_signal[0] else None
+    if isinstance(orb_signal, dict):
+        signal_candidates.append(orb_signal)
+        logger.info("ORB signal generated: %s conf=%.2f", orb_signal.get("direction"), orb_signal.get("confidence", 0))
+
+    vwap_2sd_signal = safe_check(_check_vwap_2sd_signal, df, ind, params, current_time)
+    if isinstance(vwap_2sd_signal, tuple):
+        vwap_2sd_signal = vwap_2sd_signal[0] if vwap_2sd_signal[0] else None
+    if isinstance(vwap_2sd_signal, dict):
+        signal_candidates.append(vwap_2sd_signal)
+        logger.info("VWAP 2SD signal generated: %s conf=%.2f", vwap_2sd_signal.get("direction"), vwap_2sd_signal.get("confidence", 0))
+
     # Add metadata to signals including regime information
     for signal in signal_candidates:
         signal["timestamp"] = current_time.isoformat()

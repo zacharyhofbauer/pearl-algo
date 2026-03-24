@@ -21,8 +21,8 @@
 | `execution.enabled` | current value | Master execution switch |
 | `execution.mode` | current value | Paper vs live |
 | `max_positions` | current value | Position limit |
-| `max_position_size_per_order` | 1 | Prop firm max per trade |
-| `max_position_size` | 1 | Must stay 1 contract |
+| `max_position_size_per_order` | 1 | 1 contract per order, adds allowed |
+| `max_position_size` | 5 | MFF max 5 MNQ total |
 | `circuit_breaker.*` | current values | Drawdown protection |
 | `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
 | `ibkr.execution` | inactive | IBKR is data-only |

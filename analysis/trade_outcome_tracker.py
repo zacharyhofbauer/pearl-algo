@@ -22,14 +22,14 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # PearlAlgo imports (must run from PearlAlgoWorkspace with venv activated)
-sys.path.insert(0, "/home/pearlalgo/PearlAlgoWorkspace/src")
+sys.path.insert(0, "/home/pearlalgo/pearl-algo-workspace/src")
 
 try:
     from pearlalgo.execution.tradovate.client import TradovateClient
     from pearlalgo.execution.tradovate.config import TradovateConfig
 except ImportError:
     print("ERROR: Cannot import PearlAlgo modules. Ensure you are running from")
-    print("       /home/pearlalgo/PearlAlgoWorkspace with .venv activated.")
+    print("       /home/pearlalgo/pearl-algo-workspace with .venv activated.")
     sys.exit(1)
 
 try:
@@ -41,8 +41,8 @@ except ImportError:
 
 PEARLALGO_API = "http://127.0.0.1:8001"
 SECRETS_ENV = Path("/home/pearlalgo/.config/pearlalgo/secrets.env")
-CANDLE_CACHE_1M = Path("/home/pearlalgo/PearlAlgoWorkspace/data/candle_cache_MNQ_1m_500.json")
-CANDLE_CACHE_5M = Path("/home/pearlalgo/PearlAlgoWorkspace/data/candle_cache_MNQ_5m_500.json")
+CANDLE_CACHE_1M = Path("/home/pearlalgo/pearl-algo-workspace/data/candle_cache_MNQ_1m_500.json")
+CANDLE_CACHE_5M = Path("/home/pearlalgo/pearl-algo-workspace/data/candle_cache_MNQ_5m_500.json")
 MNQ_TICK_VALUE = 0.50   # $0.50 per tick (0.25 points)
 MNQ_POINT_VALUE = 2.00  # $2.00 per point per contract
 ET = ZoneInfo("America/New_York")
