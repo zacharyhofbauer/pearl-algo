@@ -6,7 +6,7 @@ import type { WebSocketStatus } from '@/hooks/useWebSocket'
 export type DataSource = 'live' | 'cached' | 'unknown'
 
 // Right panel tab types
-export type RightPanelTab = 'watchlist' | 'logs' | null
+export type RightPanelTab = 'watchlist' | 'logs' | 'activity' | null
 
 interface UIStore {
   // Connection state
@@ -40,7 +40,7 @@ interface UIStore {
   setTheme: (theme: 'dark' | 'light') => void
   toggleHelp: () => void
   setActiveRightPanel: (panel: RightPanelTab) => void
-  toggleRightPanel: (panel: 'watchlist' | 'logs') => void
+  toggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity') => void
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void
   removeNotification: (id: string) => void
   clearNotifications: () => void

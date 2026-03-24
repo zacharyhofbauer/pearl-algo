@@ -8,6 +8,7 @@ import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import WatchlistPanel from '@/components/WatchlistPanel'
 import SystemLogsPanel from '@/components/SystemLogsPanel'
+import ActivityLogPanel from '@/components/ActivityLogPanel'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
 import { useAIStatus } from '@/hooks/useAIStatus'
@@ -806,6 +807,9 @@ export default function DashboardPageInner() {
           agentState={agentState}
         />
       )
+    }
+    if (activeRightPanel === 'activity') {
+      return <ActivityLogPanel recentSignals={recentSignals} />
     }
     return null
   }

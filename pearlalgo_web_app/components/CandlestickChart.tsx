@@ -68,8 +68,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const tradeZonesRef     = useRef<TradeZones | null>(null)
   const keyLevelsRef      = useRef<KeyLevelsPlugin | null>(null)
 
-  // S&R Power overlay ref
-  const srPowerRef = useRef<HTMLDivElement>(null)
+  // S&R Power overlay removed
 
   // Position price lines refs (for cleanup)
   const positionPriceLinesRef = useRef<IPriceLine[]>([])
@@ -991,33 +990,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     }
   }, [data])
 
-  // ── S&R Power overlay ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const el = srPowerRef.current
-    if (!el || !data?.length) return
-    const current = data[data.length - 1].close
-    const LB = 3
-    let sells = 0, buys = 0
-    const atrApprox = data.slice(-20).reduce((s: number, c: any) => s + ((c.high || 0) - (c.low || 0)), 0) / 20
-    const scanWindow = Math.max(atrApprox * 3, 30)
-    for (let i = LB; i < data.length - LB; i++) {
-      const h = data[i].high, l = data[i].low
-      let isH = true, isL = true
-      for (let j = i - LB; j <= i + LB; j++) {
-        if (j !== i) { if (data[j].high >= h) isH = false; if (data[j].low <= l) isL = false }
-      }
-      if (isH && h > current && h < current + scanWindow) sells++
-      if (isL && l < current && l > current - scanWindow) buys++
-    }
-    // Scale relative to total pivots found — avoids always-100 issue
-    const totalPivots = Math.max(sells + buys, 1)
-    const sp = Math.round((sells / totalPivots) * 100)
-    const bp = Math.round((buys  / totalPivots) * 100)
-    // ChartPrime S&R Power colors: fuchsia for sell (top), lime for buy (bottom)
-    el.innerHTML =
-      '<div style="color:rgba(255,0,255,0.75);font-size:11px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 3px rgba(0,0,0,0.7);margin-bottom:3px">Sell Power: ' + sp + '</div>' +
-      '<div style="color:rgba(0,255,0,0.75);font-size:11px;font-weight:600;font-family:monospace;letter-spacing:0.3px;text-shadow:0 1px 3px rgba(0,0,0,0.7)">Buy Power: ' + bp + '</div>'
-  }, [data])
+  // S&R Power overlay removed — was overlapping price labels and looked bad
 
   // Format price
   const formatPrice = (price?: number) => {
@@ -1059,11 +1032,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       ref={containerRef}
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
       style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* S&R Power badges — positioned below OHLC, away from price axis */}
-      <div
-        ref={srPowerRef}
-        className="sr-power-overlay"
-      />
       {/* Unified Chart Info Bar - Price, Countdown, Legend */}
       <div className="chart-info-bar">
         {/* Price Section */}

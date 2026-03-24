@@ -16,7 +16,7 @@ interface DashboardLayoutProps {
   chart: React.ReactNode
   panels: React.ReactNode
   activeRightPanel: RightPanelTab
-  onToggleRightPanel: (panel: 'watchlist' | 'logs') => void
+  onToggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity') => void
   onCloseRightPanel: () => void
   rightPanelContent: React.ReactNode
 }
@@ -113,7 +113,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
           >
             <div className="tv-right-panel-header">
               <span className="tv-right-panel-title">
-                {activeRightPanel === 'watchlist' ? 'Watchlist' : activeRightPanel === 'logs' ? 'Live Logs' : ''}
+                {activeRightPanel === 'watchlist' ? 'Watchlist' : activeRightPanel === 'activity' ? 'Activity Log' : activeRightPanel === 'logs' ? 'System Status' : ''}
               </span>
               <button className="tv-right-panel-close" onClick={onCloseRightPanel} title="Close panel">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -126,7 +126,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
             </div>
           </div>
 
-          {/* Right sidebar — widget toggles (watchlist, logs) */}
+          {/* Right sidebar — widget toggles */}
           <aside className="tv-sidebar tv-sidebar-right" aria-label="Widgets">
             <button
               className={`tv-sidebar-icon ${activeRightPanel === 'watchlist' ? 'active' : ''}`}
@@ -138,12 +138,21 @@ const DashboardLayout = React.memo(function DashboardLayout({
               </svg>
             </button>
             <button
+              className={`tv-sidebar-icon ${activeRightPanel === 'activity' ? 'active' : ''}`}
+              title="Activity Log"
+              onClick={() => onToggleRightPanel('activity')}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M3 4h12M3 8h8M3 12h10M3 16h6"/>
+              </svg>
+            </button>
+            <button
               className={`tv-sidebar-icon ${activeRightPanel === 'logs' ? 'active' : ''}`}
-              title="Live Logs"
+              title="System Status"
               onClick={() => onToggleRightPanel('logs')}
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M9 2a5 5 0 0 0-5 5v3l-1 2h12l-1-2V7a5 5 0 0 0-5-5z"/><path d="M7.5 14a1.5 1.5 0 0 0 3 0"/>
+                <circle cx="9" cy="9" r="7"/><line x1="9" y1="5" x2="9" y2="9"/><line x1="9" y1="9" x2="12" y2="11"/>
               </svg>
             </button>
             <button className="tv-sidebar-icon" title="Calendar">

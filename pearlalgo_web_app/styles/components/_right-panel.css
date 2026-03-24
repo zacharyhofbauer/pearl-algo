@@ -450,6 +450,113 @@
 }
 
 /* ============================================================================
+ * Activity Log Panel
+ * ============================================================================ */
+
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(var(--border-color-rgb), 0.4);
+}
+
+.activity-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.activity-time {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  width: 50px;
+}
+
+.activity-type {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: center;
+}
+
+.activity-type.entry {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.activity-type.exit-win {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.activity-type.exit-loss {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.15);
+}
+
+.activity-type.reject {
+  color: #ffb74d;
+  background: rgba(255, 183, 77, 0.15);
+}
+
+.activity-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.activity-dir {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.activity-dir.long {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.12);
+}
+
+.activity-dir.short {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.12);
+}
+
+.activity-price {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-primary);
+}
+
+.activity-reason {
+  font-size: 9px;
+  color: var(--text-secondary);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-pnl {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.activity-pnl.positive { color: var(--color-profit); }
+.activity-pnl.negative { color: var(--color-loss); }
+
+/* ============================================================================
  * Mobile — hide right panel (sidebars already hidden)
  * ============================================================================ */
 
