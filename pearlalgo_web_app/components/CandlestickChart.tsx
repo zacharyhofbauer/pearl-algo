@@ -976,6 +976,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     // Weekly open
     if (weeklyOpen) levels.push({ price: weeklyOpen, title: 'W Open', color: WEEKLY_COLOR })
 
+    // Render candle-derived levels immediately
     for (const lv of levels) {
       try {
         keyLevelLinesRef.current.push(series.createPriceLine({
@@ -984,7 +985,43 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         }))
       } catch {}
     }
+
+    // Fetch API-sourced levels (monthly, prev week/month) asynchronously
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { apiFetchJson } = await import('@/lib/api')
+        const apiLevels = await apiFetchJson<Record<string, number | null>>('/api/key-levels?symbol=MNQ')
+        if (cancelled || !series) return
+
+        const MONTHLY_COLOR = '#08d48c'   // green
+        const PREV_WEEK_COLOR = '#fffcbc' // pale yellow
+
+        const apiLines: Array<{ price: number; title: string; color: string }> = []
+
+        if (apiLevels.monthly_open)    apiLines.push({ price: apiLevels.monthly_open, title: 'M Open', color: MONTHLY_COLOR })
+        if (apiLevels.prev_month_high) apiLines.push({ price: apiLevels.prev_month_high, title: 'PM High', color: MONTHLY_COLOR })
+        if (apiLevels.prev_month_low)  apiLines.push({ price: apiLevels.prev_month_low, title: 'PM Low', color: MONTHLY_COLOR })
+        if (apiLevels.prev_month_mid)  apiLines.push({ price: apiLevels.prev_month_mid, title: 'PM Mid', color: MONTHLY_COLOR })
+        if (apiLevels.prev_week_high)  apiLines.push({ price: apiLevels.prev_week_high, title: 'PW High', color: PREV_WEEK_COLOR })
+        if (apiLevels.prev_week_low)   apiLines.push({ price: apiLevels.prev_week_low, title: 'PW Low', color: PREV_WEEK_COLOR })
+        if (apiLevels.prev_week_mid)   apiLines.push({ price: apiLevels.prev_week_mid, title: 'PW Mid', color: PREV_WEEK_COLOR })
+
+        for (const lv of apiLines) {
+          try {
+            keyLevelLinesRef.current.push(series.createPriceLine({
+              price: lv.price, color: lv.color, lineWidth: 1, lineStyle: 2,
+              axisLabelVisible: true, title: lv.title,
+            }))
+          } catch {}
+        }
+      } catch {
+        // API unavailable — candle-derived levels are still shown
+      }
+    })()
+
     return () => {
+      cancelled = true
       keyLevelLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
       keyLevelLinesRef.current = []
     }
