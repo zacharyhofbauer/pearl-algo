@@ -506,8 +506,11 @@ export default function DashboardPageInner() {
                     { key: 'ema9' as const, label: 'EMA 9' },
                     { key: 'ema21' as const, label: 'EMA 21' },
                     { key: 'vwap' as const, label: 'VWAP' },
+                    { key: 'vwapBands' as const, label: 'VWAP Bands' },
+                    { key: 'keyLevels' as const, label: 'Key Levels' },
                     { key: 'bollingerBands' as const, label: 'Bollinger Bands' },
                     { key: 'atrBands' as const, label: 'ATR Bands' },
+                    { key: 'volume' as const, label: 'Volume' },
                   ]).map(({ key, label }) => (
                     <div key={key} className="indicator-toggle-item" onClick={() => toggleIndicator(key)}>
                       <span>{label}</span>

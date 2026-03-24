@@ -1059,10 +1059,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       ref={containerRef}
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
       style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* S&R Power badges */}
+      {/* S&R Power badges — positioned below OHLC, away from price axis */}
       <div
         ref={srPowerRef}
-        style={{ position: 'absolute', top: 36, right: 8, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 3, pointerEvents: 'none' }}
+        className="sr-power-overlay"
       />
       {/* Unified Chart Info Bar - Price, Countdown, Legend */}
       <div className="chart-info-bar">
