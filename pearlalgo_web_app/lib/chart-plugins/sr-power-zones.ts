@@ -17,12 +17,10 @@ export interface SRPowerZoneData {
 class SRPowerRenderer implements ISeriesPrimitivePaneRenderer {
   private _data: SRPowerZoneData | null
   private _toY: (p: number) => number | null
-  private _width: number
 
-  constructor(data: SRPowerZoneData | null, toY: (p: number) => number | null, width: number) {
+  constructor(data: SRPowerZoneData | null, toY: (p: number) => number | null) {
     this._data = data
     this._toY = toY
-    this._width = width
   }
 
   draw(target: any) {
@@ -37,62 +35,67 @@ class SRPowerRenderer implements ISeriesPrimitivePaneRenderer {
 
       const { resistance, support, buyPower, sellPower } = this._data!
 
-      // Resistance zone (top) — red fill spanning full width
+      // Resistance line — dashed red at top
       const yRes = this._toY(resistance)
       if (yRes !== null) {
-        const yTop = Math.max(0, Math.round((yRes - 20) * prY))
-        const yBot = Math.min(H, Math.round((yRes + 20) * prY))
-        const h = Math.max(1, yBot - yTop)
+        const yPx = Math.round(yRes * prY)
+        // Only draw if within canvas bounds (with margin)
+        if (yPx > -50 * prY && yPx < H + 50 * prY) {
+          // Dashed line
+          ctx.strokeStyle = 'rgba(239,83,80,0.5)'
+          ctx.lineWidth = Math.round(1 * pr)
+          ctx.setLineDash([8 * pr, 4 * pr])
+          ctx.beginPath()
+          ctx.moveTo(0, yPx)
+          ctx.lineTo(W, yPx)
+          ctx.stroke()
+          ctx.setLineDash([])
 
-        // Fill
-        ctx.fillStyle = 'rgba(239,83,80,0.12)'
-        ctx.fillRect(0, yTop, W, h)
+          // Label — left side, with background
+          const label = `Sell Power: ${sellPower}`
+          ctx.font = `${Math.round(10 * pr)}px sans-serif`
+          const textW = ctx.measureText(label).width
+          const pad = Math.round(4 * pr)
+          const labelY = yPx + Math.round(12 * prY)
 
-        // Border line
-        ctx.strokeStyle = 'rgba(239,83,80,0.6)'
-        ctx.lineWidth = Math.round(1 * pr)
-        ctx.setLineDash([6 * pr, 4 * pr])
-        ctx.beginPath()
-        ctx.moveTo(0, Math.round(yRes * prY))
-        ctx.lineTo(W, Math.round(yRes * prY))
-        ctx.stroke()
-        ctx.setLineDash([])
-
-        // Sell Power label
-        ctx.font = `bold ${Math.round(11 * pr)}px sans-serif`
-        ctx.fillStyle = 'rgba(239,83,80,0.85)'
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(`Sell Power: ${sellPower}`, Math.round(8 * pr), Math.round(yRes * prY))
+          ctx.fillStyle = 'rgba(239,83,80,0.15)'
+          ctx.fillRect(Math.round(4 * pr), labelY - Math.round(8 * prY), textW + pad * 2, Math.round(14 * prY))
+          ctx.fillStyle = 'rgba(239,83,80,0.8)'
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(label, Math.round(4 * pr) + pad, labelY)
+        }
       }
 
-      // Support zone (bottom) — green fill spanning full width
+      // Support line — dashed green at bottom
       const ySup = this._toY(support)
       if (ySup !== null) {
-        const yTop = Math.max(0, Math.round((ySup - 20) * prY))
-        const yBot = Math.min(H, Math.round((ySup + 20) * prY))
-        const h = Math.max(1, yBot - yTop)
+        const yPx = Math.round(ySup * prY)
+        if (yPx > -50 * prY && yPx < H + 50 * prY) {
+          // Dashed line
+          ctx.strokeStyle = 'rgba(38,166,154,0.5)'
+          ctx.lineWidth = Math.round(1 * pr)
+          ctx.setLineDash([8 * pr, 4 * pr])
+          ctx.beginPath()
+          ctx.moveTo(0, yPx)
+          ctx.lineTo(W, yPx)
+          ctx.stroke()
+          ctx.setLineDash([])
 
-        // Fill
-        ctx.fillStyle = 'rgba(38,166,154,0.12)'
-        ctx.fillRect(0, yTop, W, h)
+          // Label — left side, with background
+          const label = `Buy Power: ${buyPower}`
+          ctx.font = `${Math.round(10 * pr)}px sans-serif`
+          const textW = ctx.measureText(label).width
+          const pad = Math.round(4 * pr)
+          const labelY = yPx - Math.round(12 * prY)
 
-        // Border line
-        ctx.strokeStyle = 'rgba(38,166,154,0.6)'
-        ctx.lineWidth = Math.round(1 * pr)
-        ctx.setLineDash([6 * pr, 4 * pr])
-        ctx.beginPath()
-        ctx.moveTo(0, Math.round(ySup * prY))
-        ctx.lineTo(W, Math.round(ySup * prY))
-        ctx.stroke()
-        ctx.setLineDash([])
-
-        // Buy Power label
-        ctx.font = `bold ${Math.round(11 * pr)}px sans-serif`
-        ctx.fillStyle = 'rgba(38,166,154,0.85)'
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(`Buy Power: ${buyPower}`, Math.round(8 * pr), Math.round(ySup * prY))
+          ctx.fillStyle = 'rgba(38,166,154,0.15)'
+          ctx.fillRect(Math.round(4 * pr), labelY - Math.round(8 * prY), textW + pad * 2, Math.round(14 * prY))
+          ctx.fillStyle = 'rgba(38,166,154,0.8)'
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(label, Math.round(4 * pr) + pad, labelY)
+        }
       }
     })
   }
@@ -103,11 +106,10 @@ class SRPowerPaneView implements ISeriesPrimitivePaneView {
   constructor(plugin: SRPowerZones) { this._plugin = plugin }
   update() {}
   renderer(): ISeriesPrimitivePaneRenderer {
-    const chart = this._plugin._chart
     const series = this._plugin._series
-    if (!chart || !series) return new SRPowerRenderer(null, () => null, 0)
+    if (!series) return new SRPowerRenderer(null, () => null)
     const toY = (p: number) => series.priceToCoordinate(p) as number | null
-    return new SRPowerRenderer(this._plugin._data, toY, 0)
+    return new SRPowerRenderer(this._plugin._data, toY)
   }
   zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
 }

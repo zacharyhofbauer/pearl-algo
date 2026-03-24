@@ -22,6 +22,9 @@ const EquityCurve = React.memo(function EquityCurve({ data, height = 280 }: Equi
 
     const chart = createChart(chartRef.current, {
       height,
+      localization: {
+        timeFormatter: (time: number) => new Date(time * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }),
+      },
       layout: { background: { color: 'transparent' }, textColor: '#8a92a0' },
       grid: {
         vertLines: { color: 'rgba(255,255,255,0.04)' },

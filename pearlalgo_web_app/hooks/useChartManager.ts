@@ -77,6 +77,16 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
+      localization: {
+        timeFormatter: (time: number) => {
+          const date = new Date(time * 1000)
+          return date.toLocaleString('en-US', {
+            month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit', hour12: true,
+            timeZone: 'America/New_York',
+          })
+        },
+      },
       layout: {
         background: { type: ColorType.Solid, color: '#131722' },
         textColor: '#d1d4dc',

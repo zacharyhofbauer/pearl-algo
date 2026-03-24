@@ -206,8 +206,20 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   useEffect(() => {
     if (!containerRef.current) return
 
+    const etTimeFormatter = (time: number) => {
+      const date = new Date(time * 1000)
+      return date.toLocaleString('en-US', {
+        month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', hour12: true,
+        timeZone: 'America/New_York',
+      })
+    }
+
     const chart = createChart(containerRef.current, {
       autoSize: true,
+      localization: {
+        timeFormatter: etTimeFormatter,
+      },
       layout: {
         background: { type: ColorType.Solid, color: '#131722' },
         textColor: '#d1d4dc',
@@ -229,9 +241,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         barSpacing: barSpacing,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
-          const hours = date.getHours().toString().padStart(2, '0')
-          const minutes = date.getMinutes().toString().padStart(2, '0')
-          return `${hours}:${minutes}`
+          return date.toLocaleTimeString('en-US', {
+            hour: 'numeric', minute: '2-digit', hour12: true,
+            timeZone: 'America/New_York',
+          }).replace(' ', '')
         },
       },
       crosshair: {
@@ -576,14 +589,47 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    // Cast time to Time type for lightweight-charts
-    const candleData = data.map((d) => ({
-      time: d.time as Time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }))
+    // Build EMA lookup maps for bar coloring
+    const ema9Map = new Map<number, number>()
+    const ema21Map = new Map<number, number>()
+    if (indicators?.ema9?.length) {
+      for (const d of indicators.ema9) ema9Map.set(d.time, d.value)
+    }
+    if (indicators?.ema21?.length) {
+      for (const d of indicators.ema21) ema21Map.set(d.time, d.value)
+    }
+
+    const emaEnabled = indicatorSettings.ema9 && indicatorSettings.ema21
+
+    // EMA crossover bar coloring — only color the candle where the cross happens.
+    // Default candles: teal up / red down. Crossover candle: cyan (bull cross) / magenta (bear cross).
+    let prevBullish: boolean | null = null
+    const candleData = data.map((d) => {
+      const e9 = ema9Map.get(d.time)
+      const e21 = ema21Map.get(d.time)
+      const hasEma = emaEnabled && e9 !== undefined && e21 !== undefined
+
+      if (hasEma) {
+        const bullish = e9! > e21!
+        const isCross = prevBullish !== null && bullish !== prevBullish
+        prevBullish = bullish
+
+        if (isCross) {
+          const color = bullish ? '#00d4ff' : '#e040fb' // cyan cross up, magenta cross down
+          return {
+            time: d.time as Time,
+            open: d.open, high: d.high, low: d.low, close: d.close,
+            color, wickColor: color, borderColor: color,
+          }
+        }
+        prevBullish = bullish
+      }
+
+      return {
+        time: d.time as Time,
+        open: d.open, high: d.high, low: d.low, close: d.close,
+      }
+    })
     candleSeriesRef.current.setData(candleData)
 
     // Keep the background guide series populated so its price lines render.
@@ -622,7 +668,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       chartRef.current.timeScale().scrollToRealTime()
       prevDataLength.current = data.length
     }
-  }, [data])
+  }, [data, indicators?.ema9, indicators?.ema21, indicatorSettings.ema9, indicatorSettings.ema21])
 
   // Update indicators
   useEffect(() => {
@@ -978,6 +1024,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const WEEKLY_COLOR  = '#fffcbc'   // pale yellow
     const _MONTHLY_COLOR = '#08d48c'   // green (used when API provides monthly levels)
 
+    // Only show axis labels on key levels, hide on secondary to avoid clutter
+    const KEY_AXIS_LABELS = new Set(['D Open', 'PDH', 'PDL', 'PDM', 'VWAP'])
+
     const levels: Array<{ price: number; title: string; color: string }> = []
 
     // Daily levels
@@ -998,12 +1047,19 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     // Weekly open
     if (weeklyOpen) levels.push({ price: weeklyOpen, title: 'W Open', color: WEEKLY_COLOR })
 
+    // Filter levels that are too far from current price (> 3% away) to avoid chart scale blow-up
+    const currentClose = data[data.length - 1]?.close || 0
+    const maxDistance = currentClose * 0.03
+    const filteredLevels = currentClose > 0
+      ? levels.filter(l => Math.abs(l.price - currentClose) <= maxDistance)
+      : levels
+
     // Render candle-derived levels immediately
-    for (const lv of levels) {
+    for (const lv of filteredLevels) {
       try {
         keyLevelLinesRef.current.push(series.createPriceLine({
           price: lv.price, color: lv.color, lineWidth: 1, lineStyle: 2,
-          axisLabelVisible: true, title: lv.title,
+          axisLabelVisible: KEY_AXIS_LABELS.has(lv.title), title: lv.title,
         }))
       } catch {}
     }
@@ -1035,11 +1091,18 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         if (apiLevels.prev_4h_low)  apiLines.push({ price: apiLevels.prev_4h_low, title: 'P4H Low', color: FOUR_H_COLOR })
         if (apiLevels.four_h_open)  apiLines.push({ price: apiLevels.four_h_open, title: '4H Open', color: FOUR_H_COLOR })
 
-        for (const lv of apiLines) {
+        // Filter API levels too far from current price (> 3%) to prevent chart scale blow-up
+        const price = data[data.length - 1]?.close || 0
+        const maxDist = price * 0.03
+        const filteredApiLines = price > 0
+          ? apiLines.filter(l => Math.abs(l.price - price) <= maxDist)
+          : apiLines
+
+        for (const lv of filteredApiLines) {
           try {
             keyLevelLinesRef.current.push(series.createPriceLine({
               price: lv.price, color: lv.color, lineWidth: 1, lineStyle: 2,
-              axisLabelVisible: true, title: lv.title,
+              axisLabelVisible: KEY_AXIS_LABELS.has(lv.title), title: lv.title,
             }))
           } catch {}
         }
@@ -1197,9 +1260,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
             {new Date(tooltip.marker.time * 1000).toLocaleString('en-US', {
               month: 'short',
               day: 'numeric',
-              hour: '2-digit',
+              hour: 'numeric',
               minute: '2-digit',
-              hour12: false
+              hour12: true,
+              timeZone: 'America/New_York',
             })}
           </div>
 

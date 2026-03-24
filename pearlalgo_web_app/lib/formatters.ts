@@ -45,19 +45,20 @@ export function formatTime(ts?: string | null): string {
   if (!ts) return '—'
   const d = new Date(ts)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
 }
 
 /**
- * Format a Date object to HH:MM:SS format
+ * Format a Date object to h:mm:ss AM/PM ET format
  */
 export function formatTimeFromDate(date: Date | null): string {
   if (!date) return '--:--'
   return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
+    hour12: true,
+    timeZone: 'America/New_York',
   })
 }
 
@@ -93,7 +94,7 @@ export function formatRelativeTime(isoString: string | Date | null): string {
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
 }
 
 /**

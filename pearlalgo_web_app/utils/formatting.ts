@@ -70,9 +70,10 @@ export function formatTime(
   if (Number.isNaN(d.getTime())) return '—'
   
   return d.toLocaleTimeString('en-US', {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    ...(options.hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
+    hour12: true,
+    timeZone: 'America/New_York',
   })
 }
 
@@ -97,7 +98,7 @@ export function formatRelativeTime(isoString: string | null | undefined): string
     if (minutes < 60) return `${minutes}m ago`
     
     // Fall back to absolute time if more than an hour
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
   } catch {
     return '—'
   }

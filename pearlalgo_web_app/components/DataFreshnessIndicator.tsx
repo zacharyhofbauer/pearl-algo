@@ -241,7 +241,7 @@ const DataFreshnessIndicator = React.memo(function DataFreshnessIndicator({
           <div className="freshness-floating-details">
             <div className="detail-row">
               <span>Last Update</span>
-              <span>{lastUpdate ? lastUpdate.toLocaleTimeString() : 'Never'}</span>
+              <span>{lastUpdate ? lastUpdate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) : 'Never'}</span>
             </div>
             <div className="detail-row">
               <span>Data Age</span>

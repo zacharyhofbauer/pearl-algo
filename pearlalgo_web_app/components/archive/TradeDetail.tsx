@@ -17,6 +17,7 @@ function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString('en-US', {
       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
+      hour12: true, timeZone: 'America/New_York',
     })
   } catch {
     return iso

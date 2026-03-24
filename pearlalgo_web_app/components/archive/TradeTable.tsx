@@ -34,7 +34,7 @@ function formatPnL(n: number) {
 function formatTime(iso: string) {
   try {
     const d = new Date(iso)
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
   } catch {
     return iso
   }

@@ -9,6 +9,7 @@ import {
 
 /**
  * Trading Sessions — box-per-session rendering matching TradingView indicator.
+ * Renders within the session's price range (high/low), not full chart height.
  *
  * Colors from PineScript (85% transparent = 0.15 alpha):
  *   Tokyo:    #2962FF @ 85  →  rgba(41,98,255,0.15)
@@ -19,6 +20,8 @@ import {
 interface SessionSpan {
   startX: number
   endX:   number
+  yTop:   number | null
+  yBot:   number | null
   color:  string
   label:  string
   labelColor: string
@@ -32,8 +35,9 @@ class SessionRenderer implements ISeriesPrimitivePaneRenderer {
     target.useBitmapCoordinateSpace((scope: any) => {
       const ctx: CanvasRenderingContext2D = scope.context
       const pr = scope.horizontalPixelRatio
-      const h  = scope.bitmapSize.height
+      const prY = scope.verticalPixelRatio
       const maxX = scope.bitmapSize.width
+      const maxY = scope.bitmapSize.height
 
       for (const s of this._spans) {
         const left  = Math.round(s.startX * pr)
@@ -43,18 +47,27 @@ class SessionRenderer implements ISeriesPrimitivePaneRenderer {
         const x2 = Math.min(maxX, right)
         if (x2 <= x1) continue
 
-        // Session background fill
-        ctx.fillStyle = s.color
-        ctx.fillRect(x1, 0, x2 - x1, h)
+        // Use session price range if available, otherwise full height
+        let y1 = 0
+        let y2 = maxY
+        if (s.yTop !== null && s.yBot !== null) {
+          y1 = Math.max(0, Math.round(Math.min(s.yTop, s.yBot) * prY))
+          y2 = Math.min(maxY, Math.round(Math.max(s.yTop, s.yBot) * prY))
+          if (y2 <= y1) continue
+        }
 
-        // Session name label at top
-        const fontSize = Math.round(10 * (scope.verticalPixelRatio || 1))
+        // Session background fill — within price range
+        ctx.fillStyle = s.color
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1)
+
+        // Session name label at top of the box
+        const fontSize = Math.round(10 * (prY || 1))
         ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
         ctx.fillStyle = s.labelColor
         const midX = (x1 + x2) / 2
-        ctx.fillText(s.label, midX, Math.round(4 * (scope.verticalPixelRatio || 1)))
+        ctx.fillText(s.label, midX, y1 + Math.round(4 * (prY || 1)))
         ctx.textAlign = 'left'
       }
     })
@@ -68,14 +81,17 @@ class SessionPaneView implements ISeriesPrimitivePaneView {
 
   renderer(): ISeriesPrimitivePaneRenderer {
     const chart = this._plugin._chart
-    if (!chart) return new SessionRenderer([])
+    const series = this._plugin._series
+    if (!chart || !series) return new SessionRenderer([])
     const timeScale = chart.timeScale()
     const toX = (t: number) => (timeScale.timeToCoordinate(t as Time) ?? -9999) as number
+    const toY = (p: number) => series.priceToCoordinate(p) as number | null
 
-    // Convert grouped spans to pixel coordinates
     const spans: SessionSpan[] = this._plugin._spans.map(s => ({
       startX: toX(s.startTime),
       endX:   toX(s.endTime),
+      yTop:   s.highPrice !== null ? toY(s.highPrice) : null,
+      yBot:   s.lowPrice !== null ? toY(s.lowPrice) : null,
       color:  s.color,
       label:  s.label,
       labelColor: s.labelColor,
@@ -105,13 +121,13 @@ function getSession(unixSec: number): SessionInfo | null {
     color: 'rgba(8,153,129,0.15)',
     labelColor: 'rgba(8,153,129,0.45)',
   }
-  // London overlap/pre-NY: roughly 03:30–09:30 ET (London 08:30–14:30 GMT)
+  // London overlap/pre-NY: roughly 03:30–09:30 ET
   if (mins >= 210 && mins < 570) return {
     name: 'London',
     color: 'rgba(255,152,0,0.15)',
     labelColor: 'rgba(255,152,0,0.45)',
   }
-  // Tokyo: roughly 19:00–01:00 ET (Tokyo 09:00–15:00 JST)
+  // Tokyo: roughly 19:00–01:00 ET
   if (mins >= 1140 || mins < 60) return {
     name: 'Tokyo',
     color: 'rgba(41,98,255,0.15)',
@@ -121,10 +137,12 @@ function getSession(unixSec: number): SessionInfo | null {
 }
 
 interface InternalSpan {
-  startTime: number
-  endTime:   number
-  color:     string
-  label:     string
+  startTime:  number
+  endTime:    number
+  highPrice:  number | null
+  lowPrice:   number | null
+  color:      string
+  label:      string
   labelColor: string
 }
 
@@ -158,24 +176,30 @@ export class SessionHighlighting implements ISeriesPrimitive<Time> {
 
     const barInterval = (data[data.length - 1] as any).time - (data[data.length - 2] as any).time
 
-    // Group consecutive bars into session spans
+    // Group consecutive bars into session spans, tracking price range
     const spans: InternalSpan[] = []
     let current: InternalSpan | null = null
 
     for (const bar of data) {
       const t = (bar as any).time as number
+      const high = (bar as any).high as number
+      const low = (bar as any).low as number
       const session = getSession(t)
 
       if (session) {
         if (current && current.label === session.name) {
-          // Extend current span
+          // Extend current span and update price range
           current.endTime = t + barInterval
+          if (current.highPrice === null || high > current.highPrice) current.highPrice = high
+          if (current.lowPrice === null || low < current.lowPrice) current.lowPrice = low
         } else {
           // Start new span
           if (current) spans.push(current)
           current = {
             startTime: t,
             endTime: t + barInterval,
+            highPrice: high,
+            lowPrice: low,
             color: session.color,
             label: session.name,
             labelColor: session.labelColor,
