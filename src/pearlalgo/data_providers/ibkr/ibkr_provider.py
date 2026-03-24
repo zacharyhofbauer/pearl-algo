@@ -402,6 +402,10 @@ class IBKRProvider(DataProvider):
             # Ensure timestamp is datetime and set as index
             if "timestamp" in df.columns:
                 df["timestamp"] = pd.to_datetime(df["timestamp"])
+                # Ensure timezone-aware (UTC) so comparisons with tz-aware
+                # start/end params don't raise dtype mismatch errors
+                if df["timestamp"].dt.tz is None:
+                    df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
                 df = df.set_index("timestamp")
 
             # Filter by start/end if needed (IB may return more data)

@@ -51,7 +51,21 @@
 }
 
 .nav-bar-name {
-  letter-spacing: 0.3px;
+  letter-spacing: 1.2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--pearl-shimmer);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: pearl-shift 6s ease-in-out infinite;
+}
+
+@keyframes pearl-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
 .nav-bar-links {
@@ -94,13 +108,15 @@
 }
 
 .nav-context-symbol {
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--accent-cyan);
-  letter-spacing: 0.5px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: rgba(var(--accent-cyan-rgb), 0.12);
+  letter-spacing: 0.8px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(var(--accent-cyan-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-cyan-rgb), 0.15);
   flex-shrink: 0;
 }
 
@@ -116,28 +132,29 @@
 
 .nav-context-dot.connected {
   background: var(--accent-green);
-  box-shadow: 0 0 4px var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green), 0 0 8px rgba(var(--accent-green-rgb), 0.3);
 }
 
 .nav-context-dot.live {
   background: var(--accent-green);
-  box-shadow: 0 0 6px var(--accent-green);
-  animation: nav-pulse-live 2s infinite ease-in-out;
+  box-shadow: 0 0 4px var(--accent-green), 0 0 10px rgba(var(--accent-green-rgb), 0.4);
+  animation: nav-pulse-live 2.5s infinite cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 .nav-context-dot.shadow {
   background: var(--accent-yellow);
-  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+  box-shadow: 0 0 4px rgba(var(--accent-yellow-rgb), 0.5), 0 0 8px rgba(var(--accent-yellow-rgb), 0.2);
 }
 
 .nav-context-dot.market-closed {
   background: var(--accent-red);
-  box-shadow: 0 0 4px var(--accent-red);
+  box-shadow: 0 0 3px rgba(var(--accent-red-rgb), 0.4);
+  opacity: 0.7;
 }
 
 @keyframes nav-pulse-live {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%, 100% { box-shadow: 0 0 4px var(--accent-green), 0 0 10px rgba(var(--accent-green-rgb), 0.4); }
+  50% { box-shadow: 0 0 6px var(--accent-green), 0 0 16px rgba(var(--accent-green-rgb), 0.6); }
 }
 
 .nav-context-preview {

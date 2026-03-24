@@ -2,6 +2,17 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import NavBar from '@/components/NavBar'
 
+/* Premium monospace for trading data — JetBrains Mono has distinct 0/O, 1/l glyphs
+   and tabular figures built-in, critical for price readability */
+import { JetBrains_Mono } from 'next/font/google'
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono-premium',
+  display: 'swap',
+  weight: ['400', '500', '600', '700'],
+})
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://pearlalgo.io'),
   title: 'PEARL Algo — Algorithmic Trading Dashboard',
@@ -64,7 +75,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="PEARL" />
       </head>
-      <body>
+      <body className={jetbrainsMono.variable}>
         <noscript>
           <div style={{
             position: 'fixed',

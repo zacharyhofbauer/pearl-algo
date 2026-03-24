@@ -397,7 +397,7 @@ def _load_api_keys() -> set:
                     if line and not line.startswith("#"):
                         keys.add(line)
             except Exception as e:
-                print(f"[Auth] Warning: Failed to read API key file: {e}")
+                logger.warning("[Auth] Failed to read API key file: %s", e)
 
     # Auto-generate a key if none configured and auth is enabled
     if not keys and _auth_enabled:
@@ -410,12 +410,10 @@ def _load_api_keys() -> set:
             auto_key_file.parent.mkdir(parents=True, exist_ok=True)
             auto_key_file.write_text(auto_key + "\n")
             os.chmod(str(auto_key_file), 0o600)
-            print(f"[Auth] Auto-generated API key written to {auto_key_file} (mode 0600)")
+            logger.info("[Auth] Auto-generated API key written to %s (mode 0600)", auto_key_file)
         except Exception as e:
-            # Last resort: print to stdout only if file write fails
-            print(f"[Auth] WARNING: Could not write API key to file ({e}), printing to stdout")
-            print(f"[Auth] Auto-generated API key: {auto_key}")
-        print(f"[Auth] Set PEARL_API_KEY environment variable to use a persistent key")
+            logger.warning("[Auth] Could not write API key to file (%s). Key NOT printed for security.", e)
+        logger.info("[Auth] Set PEARL_API_KEY environment variable to use a persistent key")
 
     return keys
 
@@ -426,9 +424,9 @@ def _init_auth():
 
     if _auth_enabled:
         _api_keys = _load_api_keys()
-        print(f"[Auth] Authentication ENABLED - {len(_api_keys)} API key(s) configured")
+        logger.info("[Auth] Authentication ENABLED - %d API key(s) configured", len(_api_keys))
     else:
-        print(f"[Auth] Authentication DISABLED (set PEARL_API_AUTH_ENABLED=true to enable)")
+        logger.info("[Auth] Authentication DISABLED (set PEARL_API_AUTH_ENABLED=true to enable)")
 
 
 async def verify_api_key(
@@ -711,8 +709,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["X-API-Key", "X-PEARL-OPERATOR", "Content-Type", "Authorization"],
 )
 
 # Route modules (health; more to follow per plan 15A)

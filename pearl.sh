@@ -399,6 +399,13 @@ build_chart() {
     local LOG_DIR="$SCRIPT_DIR/logs"
     cd "$CHART_DIR"
     export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
+
+    # Stop webapp before build to avoid serving stale/missing files during overwrite
+    if systemctl is-active --quiet pearlalgo-webapp 2>/dev/null; then
+        echo "   Stopping webapp for build..."
+        sudo systemctl stop pearlalgo-webapp 2>/dev/null || true
+    fi
+
     npm run build > "$LOG_DIR/web_app_build.log" 2>&1
     local rc=$?
     if [ $rc -eq 0 ]; then
@@ -408,8 +415,17 @@ build_chart() {
             cp -r public .next/standalone/public 2>/dev/null || true
         fi
         echo -e "   ${GREEN}Build successful${NC}"
+        # Restart webapp after successful build
+        if systemctl is-enabled --quiet pearlalgo-webapp 2>/dev/null; then
+            echo "   Restarting webapp..."
+            sudo systemctl start pearlalgo-webapp 2>/dev/null || true
+        fi
     else
         echo -e "   ${RED}Build failed!${NC} Check logs/web_app_build.log"
+        # Restart webapp even on failure so old version keeps serving
+        if systemctl is-enabled --quiet pearlalgo-webapp 2>/dev/null; then
+            sudo systemctl start pearlalgo-webapp 2>/dev/null || true
+        fi
     fi
     cd "$SCRIPT_DIR"
     return $rc

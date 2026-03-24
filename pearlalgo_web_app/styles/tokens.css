@@ -37,6 +37,10 @@
   --accent-purple-rgb: 171, 71, 188;
   --text-tertiary-rgb: 93, 96, 103;
 
+  /* Pearl brand — subtle iridescent accent */
+  --pearl-shimmer: linear-gradient(135deg, #e8dfd5 0%, #c9b8a8 25%, #f0e6dc 50%, #d4c4b4 75%, #e8dfd5 100%);
+  --pearl-glow: rgba(232, 223, 213, 0.15);
+
   /* Price highlight */
   --price-color: #d1d4dc;
   --price-glow: none;
@@ -56,7 +60,7 @@
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
-  --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+  --font-mono: var(--font-mono-premium, 'JetBrains Mono'), 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
 
   /* Panel chrome (data-panel headers, Trading View–style consistency) */
   --panel-title-font-size: 10px;
