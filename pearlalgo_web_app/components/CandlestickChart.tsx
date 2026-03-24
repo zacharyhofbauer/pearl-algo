@@ -46,9 +46,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-  const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const vwapUpperRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const vwapLowerRef = useRef<ISeriesApi<'Line'> | null>(null)
   const positionGuideSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
 
@@ -251,24 +251,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       },
     })
 
-    // EMA 9 line (cyan)
-    const ema9Series = chart.addLineSeries({
-      color: '#00d4ff',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-
-    // EMA 21 line (yellow)
-    const ema21Series = chart.addLineSeries({
-      color: '#ffc107',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-
     // VWAP line
     const vwapSeries = chart.addLineSeries({
       color: 'rgba(100,181,246,0.85)',
@@ -280,6 +262,26 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
+
+    // VWAP 1x StdDev Bands (dashed, semi-transparent blue)
+    const vwapUpper = chart.addLineSeries({
+      color: 'rgba(100,181,246,0.25)',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    const vwapLower = chart.addLineSeries({
+      color: 'rgba(100,181,246,0.25)',
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    vwapUpperRef.current = vwapUpper
+    vwapLowerRef.current = vwapLower
 
     // Bollinger Bands (blue, semi-transparent)
     const bbUpper = chart.addLineSeries({
@@ -400,8 +402,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
     volumeSeriesRef.current = volumeSeries
-    ema9SeriesRef.current = ema9Series
-    ema21SeriesRef.current = ema21Series
     vwapSeriesRef.current = vwapSeries
 
     // Notify parent that chart is ready
@@ -566,14 +566,50 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    // Cast time to Time type for lightweight-charts
-    const candleData = data.map((d) => ({
-      time: d.time as Time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }))
+    // Build EMA lookup maps for bar coloring
+    const ema9Map = new Map<number, number>()
+    const ema21Map = new Map<number, number>()
+    if (indicators?.ema9?.length) {
+      for (const d of indicators.ema9) ema9Map.set(d.time, d.value)
+    }
+    if (indicators?.ema21?.length) {
+      for (const d of indicators.ema21) ema21Map.set(d.time, d.value)
+    }
+
+    const emaEnabled = indicatorSettings.ema9 && indicatorSettings.ema21
+
+    // Cast time to Time type for lightweight-charts, with EMA crossover coloring
+    const candleData = data.map((d) => {
+      const ema9Val = ema9Map.get(d.time)
+      const ema21Val = ema21Map.get(d.time)
+      const isBullishEMA = emaEnabled && ema9Val !== undefined && ema21Val !== undefined && ema9Val > ema21Val
+      const isBearishEMA = emaEnabled && ema9Val !== undefined && ema21Val !== undefined && ema9Val <= ema21Val
+      const isUp = d.close >= d.open
+
+      let color: string | undefined
+      let borderColor: string | undefined
+      let wickColor: string | undefined
+
+      if (isBullishEMA) {
+        color = isUp ? '#00d4ff' : '#006680'
+        borderColor = isUp ? '#00d4ff' : '#006680'
+        wickColor = isUp ? '#00d4ff88' : '#00668088'
+      } else if (isBearishEMA) {
+        color = isUp ? '#e040fb' : '#7b1fa2'
+        borderColor = isUp ? '#e040fb' : '#7b1fa2'
+        wickColor = isUp ? '#e040fb88' : '#7b1fa288'
+      }
+      // If neither, lightweight-charts uses its defaults (green/red)
+
+      return {
+        time: d.time as Time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+        ...(color ? { color, borderColor, wickColor } : {}),
+      }
+    })
     candleSeriesRef.current.setData(candleData)
 
     // Keep the background guide series populated so its price lines render.
@@ -612,29 +648,26 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       chartRef.current.timeScale().scrollToRealTime()
       prevDataLength.current = data.length
     }
-  }, [data])
+  }, [data, indicators, indicatorSettings.ema9, indicatorSettings.ema21])
 
   // Update indicators
   useEffect(() => {
     if (!indicators) return
 
-    if (ema9SeriesRef.current && indicators.ema9?.length) {
-      const ema9Data = indicators.ema9.map((d) => ({ time: d.time as Time, value: d.value }))
-      ema9SeriesRef.current.setData(ema9Data)
-    }
-    if (ema21SeriesRef.current && indicators.ema21?.length) {
-      const ema21Data = indicators.ema21.map((d) => ({ time: d.time as Time, value: d.value }))
-      ema21SeriesRef.current.setData(ema21Data)
-    }
     if (vwapSeriesRef.current) {
       if (indicators.vwap?.length) {
         const vwapData = indicators.vwap.map((d) => ({ time: d.time as Time, value: d.value }))
         vwapSeriesRef.current.setData(vwapData)
+        // Clear bands when using pre-computed VWAP (no stddev data available)
+        vwapUpperRef.current?.setData([])
+        vwapLowerRef.current?.setData([])
       } else if (data?.length) {
-        // Compute VWAP from candles: cumsum(tp*v)/cumsum(v), reset at 18:00 ET
+        // Compute VWAP + 1x StdDev bands from candles, reset at 18:00 ET
         const toET = (unix: number) => unix - 4 * 3600
         const vwapData: Array<{ time: Time; value: number }> = []
-        let cumTPV = 0, cumVol = 0
+        const upperData: Array<{ time: Time; value: number }> = []
+        const lowerData: Array<{ time: Time; value: number }> = []
+        let cumTPV = 0, cumVol = 0, cumTP2V = 0
         let lastSessionDay = -1
         for (const c of data) {
           const et = toET(c.time as number)
@@ -642,17 +675,32 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           const dayET = Math.floor(et / 86400)
           // Reset at 18:00 ET (new futures session)
           if (hourET >= 18 && dayET !== lastSessionDay) {
-            cumTPV = 0; cumVol = 0; lastSessionDay = dayET
+            cumTPV = 0; cumVol = 0; cumTP2V = 0; lastSessionDay = dayET
           }
           const vol = (c as any).volume ?? 1
           const tp = (c.high + c.low + c.close) / 3
           cumTPV += tp * vol
+          cumTP2V += tp * tp * vol
           cumVol += vol
           if (cumVol > 0) {
-            vwapData.push({ time: c.time as Time, value: cumTPV / cumVol })
+            const vwap = cumTPV / cumVol
+            vwapData.push({ time: c.time as Time, value: vwap })
+            // Variance = E[tp^2] - E[tp]^2 = cumTP2V/cumVol - vwap^2
+            const variance = cumTP2V / cumVol - vwap * vwap
+            const stddev = Math.sqrt(Math.max(0, variance))
+            upperData.push({ time: c.time as Time, value: vwap + stddev })
+            lowerData.push({ time: c.time as Time, value: vwap - stddev })
           }
         }
         vwapSeriesRef.current.setData(vwapData)
+        // Set VWAP band data (respects vwapBands toggle)
+        if (indicatorSettings.vwapBands) {
+          vwapUpperRef.current?.setData(upperData)
+          vwapLowerRef.current?.setData(lowerData)
+        } else {
+          vwapUpperRef.current?.setData([])
+          vwapLowerRef.current?.setData([])
+        }
       }
     }
 
@@ -692,7 +740,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       atrUpperRef.current?.setData([])
       atrLowerRef.current?.setData([])
     }
-  }, [indicators, indicatorSettings.bollingerBands, indicatorSettings.atrBands])
+  }, [indicators, data, indicatorSettings.bollingerBands, indicatorSettings.atrBands, indicatorSettings.vwapBands])
 
   // Update markers - use aggregated markers to prevent stacking
   useEffect(() => {
@@ -1087,8 +1135,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
         {/* Legend Section */}
         <div className="info-legend">
-          <span className="leg"><span className="line ema9"></span>9</span>
-          <span className="leg"><span className="line ema21"></span>21</span>
+          <span className="leg" title="EMA crossover bar coloring"><span className="mkr ema-bull" style={{color:'#00d4ff'}}>|</span><span className="mkr ema-bear" style={{color:'#e040fb'}}>|</span> EMA</span>
           <span className="leg"><span className="line vwap"></span>V</span>
           <span className="leg-sep"></span>
           <span className="leg"><span className="line entry"></span>E</span>
