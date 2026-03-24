@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, IPriceLine, TickMarkType } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, IPriceLine, TickMarkType, LineSeries, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
 import { SessionHighlighting } from '@/lib/chart-plugins/session-highlighting'
 import { SDZones }              from '@/lib/chart-plugins/sd-zones'
 import { TradeZones }           from '@/lib/chart-plugins/trade-zones'
@@ -91,10 +91,9 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
         background: { type: ColorType.Solid, color: '#131722' },
         textColor: '#d1d4dc',
       },
-      watermark: { visible: false },
       grid: {
-        vertLines: { color: 'rgba(42,46,57,0.3)' },
-        horzLines: { color: 'rgba(42,46,57,0.3)' },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       rightPriceScale: {
         borderColor: '#2a2e39',
@@ -136,7 +135,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // EMA 9 line (cyan)
-    const ema9Series = chart.addLineSeries({
+    const ema9Series = chart.addSeries(LineSeries, {
       color: '#00d4ff',
       lineWidth: 1,
       priceLineVisible: false,
@@ -145,7 +144,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // EMA 21 line (yellow)
-    const ema21Series = chart.addLineSeries({
+    const ema21Series = chart.addSeries(LineSeries, {
       color: '#ffc107',
       lineWidth: 1,
       priceLineVisible: false,
@@ -154,7 +153,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // VWAP line (no title — label handled by key levels price line)
-    const vwapSeries = chart.addLineSeries({
+    const vwapSeries = chart.addSeries(LineSeries, {
       color: 'rgba(100,181,246,0.85)',
       lineWidth: 1,
       lineStyle: 0,
@@ -165,7 +164,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // Bollinger Bands (blue, semi-transparent)
-    const bbUpper = chart.addLineSeries({
+    const bbUpper = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.5)',
       lineWidth: 1,
       lineStyle: 0,
@@ -173,7 +172,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const bbMiddle = chart.addLineSeries({
+    const bbMiddle = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.8)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -181,7 +180,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const bbLower = chart.addLineSeries({
+    const bbLower = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.5)',
       lineWidth: 1,
       lineStyle: 0,
@@ -191,7 +190,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // ATR Bands (orange, semi-transparent)
-    const atrUpper = chart.addLineSeries({
+    const atrUpper = chart.addSeries(LineSeries, {
       color: 'rgba(255, 152, 0, 0.5)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -199,7 +198,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const atrLower = chart.addLineSeries({
+    const atrLower = chart.addSeries(LineSeries, {
       color: 'rgba(255, 152, 0, 0.5)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -210,12 +209,12 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
 
     // VWAP AA Bands — 1x std dev only (green, matching TradingView band 1)
     const vwapBandOpts = { lineWidth: 1 as const, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null }
-    const vwapUpper1 = chart.addLineSeries({ ...vwapBandOpts, color: 'rgba(76, 175, 80, 0.5)' })
-    const vwapLower1 = chart.addLineSeries({ ...vwapBandOpts, color: 'rgba(76, 175, 80, 0.5)' })
+    const vwapUpper1 = chart.addSeries(LineSeries, { ...vwapBandOpts, color: 'rgba(76, 175, 80, 0.5)' })
+    const vwapLower1 = chart.addSeries(LineSeries, { ...vwapBandOpts, color: 'rgba(76, 175, 80, 0.5)' })
 
     // Position line guide series (added before candles so its price lines render
     // behind candles/markers instead of on top of price action).
-    const positionGuideSeries = chart.addLineSeries({
+    const positionGuideSeries = chart.addSeries(LineSeries, {
       color: 'rgba(0, 0, 0, 0)',
       lineWidth: 1,
       priceLineVisible: false,
@@ -224,7 +223,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // Candlestick series - TradingView standard teal/red
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#26a69a',
       downColor: '#ef5350',
       borderVisible: false,
@@ -239,7 +238,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // Volume series
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -252,7 +251,7 @@ export function useChartManager({ containerRef, barSpacing, timeframe, onChartRe
     })
 
     // Connection line - added LAST so it renders ON TOP of everything when hovering
-    const connectionLine = chart.addLineSeries({
+    const connectionLine = chart.addSeries(LineSeries, {
       color: '#00e676',
       lineWidth: 4,
       lineStyle: 0, // solid

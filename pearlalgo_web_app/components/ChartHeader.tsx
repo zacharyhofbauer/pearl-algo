@@ -109,16 +109,28 @@ export default function ChartHeader({
             {showIndicatorsDropdown && (
               <div className="indicators-dropdown" onClick={(e) => e.stopPropagation()}>
                 {([
-                  { key: 'ema9' as const, label: 'EMA 9' },
-                  { key: 'ema21' as const, label: 'EMA 21' },
-                  { key: 'vwap' as const, label: 'VWAP' },
-                  { key: 'vwapBands' as const, label: 'VWAP Bands' },
-                  { key: 'bollingerBands' as const, label: 'Bollinger Bands' },
-                  { key: 'atrBands' as const, label: 'ATR Bands' },
-                  { key: 'keyLevels' as const, label: 'Key Levels' },
-                  { key: 'tbtTrendlines' as const, label: 'TBT Trendlines' },
+                  { key: 'ema9' as const, label: 'EMA Crossover', group: 'overlay' },
+                  { key: 'vwap' as const, label: 'VWAP', group: 'overlay' },
+                  { key: 'vwapBands' as const, label: 'VWAP Bands', group: 'overlay' },
+                  { key: 'keyLevels' as const, label: 'Key Levels', group: 'overlay' },
+                  { key: 'srPowerZones' as const, label: 'S&R Power', group: 'overlay' },
+                  { key: 'sessions' as const, label: 'Sessions', group: 'overlay' },
+                  { key: 'tbtTrendlines' as const, label: 'TBT Trendlines', group: 'overlay' },
+                  { key: 'sdZones' as const, label: 'S/D Zones', group: 'overlay' },
+                  { key: 'bollingerBands' as const, label: 'Bollinger Bands', group: 'overlay' },
+                  { key: 'atrBands' as const, label: 'ATR Bands', group: 'overlay' },
+                  { key: 'rsi' as const, label: 'RSI (14)', group: 'pane' },
+                  { key: 'volume' as const, label: 'Volume', group: 'pane' },
                 ]).map(({ key, label }) => (
-                  <div key={key} className="indicator-toggle-item" onClick={() => toggleIndicator(key)}>
+                  <div key={key} className="indicator-toggle-item" onClick={() => {
+                    // EMA Crossover toggles both ema9 and ema21 together
+                    if (key === 'ema9') {
+                      toggleIndicator('ema9')
+                      toggleIndicator('ema21')
+                    } else {
+                      toggleIndicator(key)
+                    }
+                  }}>
                     <span>{label}</span>
                     <span className={`indicator-dot ${indicatorSettings[key] ? 'active' : ''}`} />
                   </div>

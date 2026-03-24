@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine, LineSeries, CandlestickSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsData, ATRBandsData } from '@/stores'
 import { useChartSettingsStore } from '@/stores'
 import { SessionHighlighting } from '@/lib/chart-plugins/session-highlighting'
@@ -69,6 +69,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   const tradeZonesRef     = useRef<TradeZones | null>(null)
   const keyLevelsRef      = useRef<KeyLevelsPlugin | null>(null)
   const srPowerRef        = useRef<SRPowerZones | null>(null)
+
+  // Series markers primitive ref (v5 API)
+  const seriesMarkersRef = useRef<any>(null)
 
   // Position price lines refs (for cleanup)
   const positionPriceLinesRef = useRef<IPriceLine[]>([])
@@ -225,8 +228,8 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         textColor: '#d1d4dc',
       },
       grid: {
-        vertLines: { color: 'rgba(42,46,57,0.5)' },
-        horzLines: { color: 'rgba(42,46,57,0.5)' },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       rightPriceScale: {
         borderColor: '#2a2e39',
@@ -265,7 +268,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
 
     // VWAP line
-    const vwapSeries = chart.addLineSeries({
+    const vwapSeries = chart.addSeries(LineSeries, {
       color: 'rgba(100,181,246,0.85)',
       lineWidth: 1,
       lineStyle: 0,
@@ -277,7 +280,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
 
     // VWAP 1x StdDev Bands (dashed, semi-transparent blue)
-    const vwapUpper = chart.addLineSeries({
+    const vwapUpper = chart.addSeries(LineSeries, {
       color: 'rgba(100,181,246,0.25)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -285,7 +288,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const vwapLower = chart.addLineSeries({
+    const vwapLower = chart.addSeries(LineSeries, {
       color: 'rgba(100,181,246,0.25)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -297,7 +300,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     vwapLowerRef.current = vwapLower
 
     // Bollinger Bands (blue, semi-transparent)
-    const bbUpper = chart.addLineSeries({
+    const bbUpper = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.5)',
       lineWidth: 1,
       lineStyle: 0,
@@ -305,7 +308,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const bbMiddle = chart.addLineSeries({
+    const bbMiddle = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.8)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -313,7 +316,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const bbLower = chart.addLineSeries({
+    const bbLower = chart.addSeries(LineSeries, {
       color: 'rgba(41, 98, 255, 0.5)',
       lineWidth: 1,
       lineStyle: 0,
@@ -326,7 +329,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     bbLowerRef.current = bbLower
 
     // ATR Bands (orange, semi-transparent)
-    const atrUpper = chart.addLineSeries({
+    const atrUpper = chart.addSeries(LineSeries, {
       color: 'rgba(255, 152, 0, 0.5)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -334,7 +337,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const atrLower = chart.addLineSeries({
+    const atrLower = chart.addSeries(LineSeries, {
       color: 'rgba(255, 152, 0, 0.5)',
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -347,7 +350,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
     // Position line guide series (added before candles so its price lines render
     // behind candles/markers instead of on top of price action).
-    const positionGuideSeries = chart.addLineSeries({
+    const positionGuideSeries = chart.addSeries(LineSeries, {
       color: 'rgba(0, 0, 0, 0)',
       lineWidth: 1,
       priceLineVisible: false,
@@ -357,7 +360,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     positionGuideSeriesRef.current = positionGuideSeries
 
     // Candlestick series - TradingView standard teal/red
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#26a69a',
       downColor: '#ef5350',
       borderVisible: false,
@@ -372,7 +375,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
 
     // Volume series
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -388,7 +391,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     })
 
     // Connection line - added LAST so it renders ON TOP of everything when hovering
-    const connectionLine = chart.addLineSeries({
+    const connectionLine = chart.addSeries(LineSeries, {
       color: '#00e676',
       lineWidth: 4,
       lineStyle: 0, // solid
@@ -822,7 +825,12 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         })
       }
       
-      candleSeriesRef.current.setMarkers(displayMarkers)
+      // v5: use createSeriesMarkers primitive
+      if (seriesMarkersRef.current) {
+        seriesMarkersRef.current.setMarkers(displayMarkers)
+      } else {
+        seriesMarkersRef.current = createSeriesMarkers(candleSeriesRef.current, displayMarkers)
+      }
     } catch (e) {
       console.warn('Failed to set markers:', e)
     }
@@ -1118,15 +1126,51 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     }
   }, [data])
 
-  // Update S&R Power overlay when indicators change
+  // Update S&R Power overlay when indicators change or toggle
   useEffect(() => {
     if (!srPowerRef.current) return
-    if (indicators?.srPower) {
+    if (indicatorSettings.srPowerZones && indicators?.srPower) {
       srPowerRef.current.setData(indicators.srPower)
     } else {
       srPowerRef.current.setData(null)
     }
-  }, [indicators?.srPower])
+  }, [indicators?.srPower, indicatorSettings.srPowerZones])
+
+  // Toggle plugin visibility reactively
+  useEffect(() => {
+    // Sessions: clear spans when disabled
+    if (sessionPluginRef.current) {
+      const sp = sessionPluginRef.current as any
+      if (!indicatorSettings.sessions) {
+        sp._spans = []
+        sp._requestUpdate?.()
+      } else {
+        sp._rebuild?.()
+      }
+    }
+    // SD Zones: clear zones when disabled
+    if (sdZonesPluginRef.current) {
+      const sd = sdZonesPluginRef.current as any
+      if (!indicatorSettings.sdZones) {
+        sd._zones = []
+        sd._requestUpdate?.()
+      } else {
+        sd._rebuild?.()
+      }
+    }
+    // Volume: show/hide
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.applyOptions({
+        visible: indicatorSettings.volume,
+      })
+    }
+    // VWAP: show/hide
+    if (vwapSeriesRef.current) {
+      vwapSeriesRef.current.applyOptions({
+        visible: indicatorSettings.vwap,
+      })
+    }
+  }, [indicatorSettings.sessions, indicatorSettings.sdZones, indicatorSettings.volume, indicatorSettings.vwap])
 
   // Format price
   const formatPrice = (price?: number) => {

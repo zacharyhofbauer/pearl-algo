@@ -776,11 +776,13 @@ export default function DashboardPageInner() {
                   positionLines={positionLines}
                 />
               </div>
-              <RSIPane
-                rsiData={indicators?.rsi}
-                mainChart={mainChartApi}
-                barSpacing={barSpacing}
-              />
+              {indicatorSettings.rsi && (
+                <RSIPane
+                  rsiData={indicators?.rsi}
+                  mainChart={mainChartApi}
+                  barSpacing={barSpacing}
+                />
+              )}
             </div>
           </ErrorBoundary>
         )}

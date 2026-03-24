@@ -16,6 +16,8 @@ export interface IndicatorVisibility {
   tbtTrendlines: boolean
   srPowerZones: boolean
   rsi: boolean
+  sessions: boolean
+  sdZones: boolean
 }
 
 export interface ChartThemeColors {
@@ -112,6 +114,8 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   tbtTrendlines: true,
   srPowerZones: true,
   rsi: true,
+  sessions: true,
+  sdZones: true,
 }
 
 export const useChartSettingsStore = create<ChartSettingsStore>()(

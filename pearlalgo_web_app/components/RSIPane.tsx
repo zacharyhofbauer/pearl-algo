@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import { createChart, ColorType, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
+import { createChart, ColorType, IChartApi, ISeriesApi, Time, LineSeries } from 'lightweight-charts'
 import type { IndicatorData } from '@/stores'
 
 interface RSIPaneProps {
@@ -41,8 +41,8 @@ function RSIPane({ rsiData, mainChart, barSpacing = 10 }: RSIPaneProps) {
         fontSize: 10,
       },
       grid: {
-        vertLines: { color: 'rgba(42,46,57,0.3)' },
-        horzLines: { color: 'rgba(42,46,57,0.3)' },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       rightPriceScale: {
         borderColor: '#2a2e39',
@@ -60,7 +60,7 @@ function RSIPane({ rsiData, mainChart, barSpacing = 10 }: RSIPaneProps) {
     })
 
     // RSI line series
-    const rsiSeries = chart.addLineSeries({
+    const rsiSeries = chart.addSeries(LineSeries, {
       color: '#7c4dff',
       lineWidth: 1,
       priceLineVisible: false,
