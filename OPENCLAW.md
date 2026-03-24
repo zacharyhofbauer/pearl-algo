@@ -54,12 +54,12 @@ OpenClaw is the autonomous trading decision agent for PearlAlgo MNQ futures.
 
 | # | Rule | Reason |
 |---|---|---|
-| 1 | Max **1 contract** per trade | MFF prop firm compliance |
-| 2 | Max **5 total positions** open | Prop firm position limit |
+| 1 | Max **1 contract per order** (same-direction adds allowed) | MFF prop firm compliance |
+| 2 | Max **5 total positions** open | Prop firm position limit (max_position_size=5) |
 | 3 | **Never disable** the circuit breaker (`trading_circuit_breaker.mode` must stay `enforce`) | Loss protection |
 | 4 | **Never re-enable** IBKR execution | IBKR is data-only; Tradovate is the execution venue |
 | 5 | **Never enable** virtual PnL (`virtual_pnl.enabled` must stay `false`) | Paper account uses real broker PnL |
-| 6 | **Never increase** position sizes above 1 (`max_position_size: 1`, `max_position_size_per_order: 1`) | MFF compliance |
+| 6 | **Never increase** `max_position_size_per_order` above 1 (total `max_position_size` = 5) | MFF compliance |
 | 7 | **Never modify** `execution.armed` or `execution.enabled` without explicit user approval | Execution state changes are safety-critical |
 | 8 | **Beware YAML duplicate keys** — last key wins silently with no warning | Can cause silent config corruption |
 
@@ -71,6 +71,8 @@ OpenClaw is the autonomous trading decision agent for PearlAlgo MNQ futures.
 - **Short trades** have a poor win rate compared to longs. Apply extra scrutiny to short signals.
 - **Session filter is OFF** by design (`enable_session_filter: false`). OpenClaw makes per-trade decisions rather than blanket session blocks.
 - **Historical SL/TP data**: 87% of trades before 2026-03-06 had NULL stop-loss/take-profit values (data recording bug, now fixed). Do not draw SL/TP conclusions from pre-fix data.
+- **SL/TP are scalp-tuned (2026-03-24)**: SL = 1.0x ATR (~15-25 pts), TP = 2.0x ATR (~30-50 pts). Hard cap `max_stop_points: 45` enforced. All multipliers configurable in `pearl_bot_auto:` YAML section.
+- **Same-direction adds allowed**: Pyramiding guard removed. Max 5 total contracts enforced by `max_positions`.
 
 ---
 

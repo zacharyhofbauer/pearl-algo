@@ -10,7 +10,7 @@
 - **PYTHONPATH:** `src/`
 - **Market data:** IBKR gateway (data-only, port 4001)
 - **Order execution:** Tradovate paper account (demo, port 8001 API)
-- **Prop firm:** MFF 50K Rapid — 1 contract max per trade, $1000 daily loss limit
+- **Prop firm:** MFF 50K Rapid — 1 contract per order, max 5 total positions, $1000 daily loss limit
 
 ## Services (systemd — always `sudo systemctl`)
 
@@ -29,7 +29,7 @@
 | Field | Constraint |
 |---|---|
 | `max_position_size_per_order` | Must stay **1** |
-| `max_position_size` | Must stay **1** |
+| `max_position_size` | Must stay **5** (MFF max 5 MNQ total) |
 | `execution.armed` / `execution.enabled` | Never change without explicit user approval |
 | `trading_circuit_breaker.mode` | Must stay `enforce` |
 | `virtual_pnl.enabled` | Must stay `false` |
@@ -70,6 +70,18 @@
 - Dark theme only: `--bg-primary: #131722`
 - After visual changes: screenshot `http://localhost:3001` to verify
 
+## SL/TP Configuration (scalp-tuned as of 2026-03-24)
+
+All SL/TP multipliers live in `pearl_bot_auto:` section of YAML configs (no code changes needed to tune):
+
+| Parameter | Value | Effect on MNQ (5m ATR ~20-30pts) |
+|---|---|---|
+| `stop_loss_atr_mult` | 1.0x | ~20-30 pts SL |
+| `take_profit_atr_mult` | 2.0x | ~40-60 pts TP (1:2 R:R) |
+| `volatile_sl_mult` / `volatile_tp_mult` | 1.3x | Wider in volatile regime |
+| `ranging_sl_mult` / `ranging_tp_mult` | 0.8x / 0.7x | Tighter in chop |
+| `max_stop_points` (signals section) | 45.0 | Hard cap — rejects signals with wider SL |
+
 ## Common Commands
 
 ```bash
@@ -80,7 +92,7 @@ sudo systemctl is-active pearlalgo-agent pearlalgo-api pearlalgo-webapp
 sudo journalctl -u pearlalgo-agent -f --no-pager -n 50
 
 # API state
-curl http://localhost:8001/api/state?api_key=EL0lFv7oAVPhLwkqLTXCNvALmGVWBmoyb_pDKSOeKZ4
+curl -H "X-API-Key: $(grep PEARL_API_KEY ~/.config/pearlalgo/secrets.env | cut -d= -f2)" http://localhost:8001/api/state
 
 # Today's P&L
 python3 -c "import sqlite3; c=sqlite3.connect('data/tradovate/paper/trades.db'); print(c.execute('SELECT SUM(pnl_usd) FROM trades WHERE date(exit_time)=date(\"now\")').fetchone())"
@@ -92,7 +104,7 @@ source .venv/bin/activate && pytest tests/ -x -q
 ## Forbidden Actions
 
 1. Do NOT re-enable IBKR execution
-2. Do NOT increase contract sizes above 1
+2. Do NOT increase contract sizes above 1 per order (5 total max)
 3. Do NOT disable circuit breaker or drawdown limits
 4. Do NOT enable virtual PnL
 5. Do NOT call `yaml.dump()` on any config file
