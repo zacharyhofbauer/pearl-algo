@@ -86,6 +86,8 @@ export {
 
 export { useAnnotationStore, type ChartAnnotation } from './annotationStore'
 
+export { useSettingsStore, type FieldSchema } from './settingsStore'
+
 export {
   useChartSettingsStore,
   type ChartTheme,

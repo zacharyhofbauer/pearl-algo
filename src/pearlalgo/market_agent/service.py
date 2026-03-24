@@ -964,24 +964,46 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             except Exception:
                 pass
 
-            # Trailing stop check
+            # Trailing stop check (with override file IPC + regime presets)
             if self._trailing_stop_manager and self._trailing_stop_manager.enabled:
                 try:
                     current_atr = self._get_current_atr(market_data)
                     if current_atr > 0:
+                        # Check for external override file (OpenClaw / operator)
+                        self._ingest_trailing_stop_override()
+
+                        # Apply regime-adaptive preset if no external override
+                        self._apply_regime_trailing_preset(market_data)
+
                         new_stop = self._trailing_stop_manager.check_and_update(
                             position_id=str(_cid),
                             current_price=current_price,
                             current_atr=current_atr,
                         )
+
+                        # Also retry if broker stop is out of sync with internal stop
+                        ts_state = self._trailing_stop_manager.get_state(str(_cid))
+                        if new_stop is None and ts_state and ts_state.get("current_phase"):
+                            last_broker = getattr(self, '_last_broker_stop', None)
+                            internal_stop = ts_state["current_stop"]
+                            if last_broker is None or abs(internal_stop - last_broker) > 0.25:
+                                new_stop = internal_stop
+                                logger.info(f"Trailing stop: retrying broker sync (internal={internal_stop:.2f}, last_broker={last_broker})")
+
                         if new_stop is not None:
                             stop_order_id = await self._find_stop_order_id(direction)
                             if stop_order_id:
+                                logger.info(f"Trailing stop: modifying order {stop_order_id} to {new_stop:.2f}")
                                 success = await self.execution_adapter.modify_stop_order(
                                     stop_order_id, new_stop
                                 )
                                 if success:
+                                    self._last_broker_stop = new_stop
                                     logger.info(f"Trailing stop moved to {new_stop:.2f}")
+                                else:
+                                    logger.warning(f"Trailing stop: modify_stop_order returned False for order {stop_order_id}")
+                            else:
+                                logger.warning(f"Trailing stop: could not find stop order for {direction} position to move to {new_stop:.2f}")
                 except Exception as e:
                     logger.warning(f"Trailing stop update failed: {e}")
 
@@ -1135,16 +1157,122 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         except Exception:
             return 0.0
 
+    def _ingest_trailing_stop_override(self) -> None:
+        """Check for trailing_stop_override.json flag file and apply if present."""
+        try:
+            if not self._trailing_stop_manager or not self._trailing_stop_manager.allow_external_override:
+                return
+            state_dir = self.state_manager.state_dir
+
+            # Check for clear-override flag first
+            clear_file = state_dir / "trailing_stop_clear_override.flag"
+            if clear_file.exists():
+                clear_file.unlink(missing_ok=True)
+                self._trailing_stop_manager.clear_override()
+                logger.info("Trailing stop override cleared via flag file")
+
+            override_file = state_dir / "trailing_stop_override.json"
+            if not override_file.exists():
+                return
+
+            raw = json.loads(override_file.read_text())
+            override_file.unlink(missing_ok=True)
+
+            from pearlalgo.execution.tradovate.trailing_stop import TrailingOverride
+
+            ttl_minutes = min(
+                int(raw.get("ttl_minutes", 30)),
+                self._trailing_stop_manager.max_override_ttl_minutes,
+            )
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+
+            override = TrailingOverride(
+                trail_atr_multiplier=float(raw.get("trail_atr_multiplier", 1.0)),
+                activation_atr_multiplier=float(raw.get("activation_atr_multiplier", 1.0)),
+                force_phase=raw.get("force_phase"),
+                min_move_override=raw.get("min_move_override"),
+                expires_at=expires_at,
+                source=str(raw.get("source", "external")),
+                reason=str(raw.get("reason", "")),
+            )
+            self._trailing_stop_manager.apply_override(override)
+
+            # Write ack file
+            ack_file = state_dir / "trailing_stop_override_ack.json"
+            ack_data = {
+                "applied": True,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "effective_params": self._trailing_stop_manager.get_override(),
+            }
+            ack_file.write_text(json.dumps(ack_data, default=str))
+            logger.info(f"Trailing stop override ingested: source={override.source}, reason={override.reason}")
+        except Exception as e:
+            logger.warning(f"Failed to ingest trailing stop override: {e}")
+
+    def _apply_regime_trailing_preset(self, market_data: Dict) -> None:
+        """Apply regime-adaptive trailing stop preset based on current market conditions."""
+        try:
+            if not self._trailing_stop_manager or not self._trailing_stop_manager.regime_adaptive:
+                return
+            df = market_data.get('df')
+            if df is None or len(df) < 50:
+                return
+
+            from pearlalgo.trading_bots.pearl_bot_auto import detect_market_regime
+            regime_result = detect_market_regime(df)
+            # Normalize regime names: trending_up/trending_down -> trending
+            regime = regime_result.regime
+            if regime.startswith("trending"):
+                regime = "trending"
+            self._trailing_stop_manager.apply_regime_preset(regime)
+        except Exception as e:
+            logger.debug(f"Regime trailing preset failed (non-fatal): {e}")
+
     async def _find_stop_order_id(self, direction: str) -> Optional[int]:
-        """Find the working stop order ID for the current position."""
+        """Find the working stop order ID for the current position.
+
+        Uses the raw Tradovate /order/list response, handling both ``orderType``
+        and ``ordType`` field variants.  Falls back to OCO-linked sell orders
+        when the order type is missing (sparse Tradovate rows).
+        """
         try:
             orders = await self.execution_adapter._client.get_orders()
             stop_action = "Sell" if direction == "long" else "Buy"
+            working_states = {"Working", "Accepted", "working", "accepted"}
+
+            best_candidate = None
             for order in orders:
-                if (order.get("orderType") == "Stop"
-                        and order.get("action") == stop_action
-                        and order.get("ordStatus") in ("Working", "Accepted")):
+                action = order.get("action", "")
+                if action != stop_action:
+                    continue
+
+                status = (
+                    order.get("ordStatus")
+                    or order.get("status")
+                    or ""
+                )
+                if status not in working_states:
+                    continue
+
+                order_type = str(
+                    order.get("orderType")
+                    or order.get("ordType")
+                    or order.get("type")
+                    or ""
+                ).strip()
+
+                # Direct match: order is explicitly a Stop
+                if order_type.lower() in ("stop", "stoplimit", "stopmarket"):
                     return int(order["id"])
+
+                # Fallback: order has a stopPrice (even without explicit type)
+                stop_px = order.get("stopPrice") or order.get("triggerPrice")
+                if stop_px is not None:
+                    best_candidate = int(order["id"])
+
+            # Return the best fallback if no explicit Stop type found
+            if best_candidate:
+                return best_candidate
         except Exception as e:
             logger.debug(f"Could not find stop order: {e}")
         return None
@@ -1152,6 +1280,65 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """Delegate to VirtualTradeManager (extracted for testability)."""
         self.virtual_trade_manager.process_exits(market_data)
+
+    async def _sync_virtual_trades_with_broker(self) -> None:
+        """Close stale virtual trades that no longer have a matching broker position.
+
+        When virtual PnL is disabled (Tradovate is source of truth), virtual
+        trades in signals.jsonl can accumulate as "entered" forever because
+        ``process_exits()`` is a no-op.  This method checks the broker for
+        actual open positions and closes any virtual trades that don't have
+        a corresponding broker position.
+        """
+        if self.execution_adapter is None:
+            return
+
+        # Only run every 60 seconds to avoid API spam
+        now = datetime.now(timezone.utc)
+        last_sync = getattr(self, '_last_virtual_trade_sync', None)
+        if last_sync and (now - last_sync).total_seconds() < 60:
+            return
+        self._last_virtual_trade_sync = now
+
+        try:
+            broker_positions = await self.execution_adapter.get_positions()
+            broker_has_position = any(
+                getattr(p, 'quantity', 0) != 0 for p in broker_positions
+            )
+
+            # Get virtual trades that are "entered"
+            recent_signals = self.state_manager.get_recent_signals(limit=300)
+            latest_by_id: Dict[str, Dict] = {}
+            for rec in recent_signals:
+                if isinstance(rec, dict):
+                    sig_id = str(rec.get("signal_id") or "")
+                    if sig_id:
+                        latest_by_id[sig_id] = rec
+
+            entered_count = sum(
+                1 for rec in latest_by_id.values()
+                if rec.get("status") == "entered"
+            )
+
+            # If broker is flat but virtual trades show "entered", close them
+            if not broker_has_position and entered_count > 0:
+                closed = 0
+                for sig_id, rec in latest_by_id.items():
+                    if rec.get("status") == "entered":
+                        self.state_manager.append_signal({
+                            "signal_id": sig_id,
+                            "status": "exited",
+                            "exit_reason": "broker_flat_sync",
+                            "exit_time": now.isoformat(),
+                        })
+                        closed += 1
+                if closed > 0:
+                    logger.info(
+                        f"Broker sync: closed {closed} stale virtual trade(s) "
+                        f"(broker is flat, virtual trades were still 'entered')"
+                    )
+        except Exception as e:
+            logger.debug(f"Virtual trade broker sync check failed: {e}")
 
     def _get_status_snapshot(self) -> Dict[str, Any]:
         """Get current status snapshot for Pearl suggestions."""

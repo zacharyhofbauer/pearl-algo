@@ -530,7 +530,7 @@ class TradingCircuitBreaker:
             List of warning messages (empty if all valid)
         """
         warnings = []
-        if str(self.config.mode) not in ("warn_only", "enforce"):
+        if str(self.config.mode) not in ("warn_only", "shadow", "enforce"):
             warnings.append(
                 f"mode={self.config.mode} should be 'warn_only' or 'enforce'"
             )

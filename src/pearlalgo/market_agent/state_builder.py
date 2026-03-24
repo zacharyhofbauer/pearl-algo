@@ -38,6 +38,23 @@ class StateBuilder:
     def __init__(self, service: "MarketAgentService") -> None:
         self.service = service
 
+    def _get_trailing_stop_state(self) -> Optional[Dict[str, Any]]:
+        """Get trailing stop state for all tracked positions + active override."""
+        try:
+            tsm = getattr(self.service, "_trailing_stop_manager", None)
+            if tsm is None or not tsm.enabled:
+                return {"enabled": False, "positions": {}, "active_override": None}
+            return {
+                "enabled": True,
+                "regime_adaptive": tsm.regime_adaptive,
+                "positions": tsm.get_all_states(),
+                "active_override": tsm.get_override(),
+                "active_positions_count": tsm.active_positions,
+            }
+        except Exception as e:
+            logger.debug(f"Non-critical trailing stop state build: {e}")
+            return None
+
     def _get_connection_status(self) -> str:
         """Determine gateway connection status."""
         try:
@@ -195,8 +212,8 @@ class StateBuilder:
                 "timeframe": self.service.config.timeframe,
                 "scan_interval": self.service.config.scan_interval,
                 # Session window (for Telegram UI observability)
-                "session_start_time": getattr(self.service.config, "start_time", "18:00"),
-                "session_end_time": getattr(self.service.config, "end_time", "16:10"),
+                "session_start_time": (self.service.config.get("session", {}) or {}).get("start_time", "18:00"),
+                "session_end_time": (self.service.config.get("session", {}) or {}).get("end_time", "17:00"),
                 # Adaptive cadence config
                 "adaptive_cadence_enabled": self.service._adaptive_cadence_enabled,
                 "scan_interval_active": self.service._scan_interval_active,
@@ -242,6 +259,8 @@ class StateBuilder:
             "close_all_last_count": self.service._last_close_all_count,
             "close_all_last_pnl": self.service._last_close_all_pnl,
             "close_all_last_price_source": self.service._last_close_all_price_source,
+            # Trailing stop state (positions, phases, active override)
+            "trailing_stop": self._get_trailing_stop_state(),
         }
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open

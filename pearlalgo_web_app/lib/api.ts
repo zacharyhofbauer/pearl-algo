@@ -24,6 +24,7 @@ function shouldAttachOperatorHeader(path: string): boolean {
   if (path === '/api/pearl-suggestion/accept') return true
   if (path === '/api/pearl-suggestion/dismiss') return true
   if (path.startsWith('/api/operator/')) return true
+  if (path === '/api/config') return true
   return false
 }
 

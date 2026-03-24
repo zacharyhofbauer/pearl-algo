@@ -566,6 +566,14 @@ class ServiceLoopMixin:
                 except Exception as e:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
 
+                # Sync virtual trades with broker state: if broker is flat but
+                # signals.jsonl has "entered" records, close them.  This prevents
+                # stale virtual trades from blocking the circuit breaker.
+                try:
+                    await self._sync_virtual_trades_with_broker()
+                except Exception as e:
+                    logger.debug(f"Virtual trade broker sync failed (non-fatal): {e}")
+
                 # Refresh ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
                 try:
                     self.signal_orchestrator.refresh_ml_lift()

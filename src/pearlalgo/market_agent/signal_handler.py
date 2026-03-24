@@ -417,22 +417,42 @@ class SignalHandler:
 
         # Get active positions for clustering check.
         # signals.jsonl is append-only, so derive active positions from the
-        # latest status per signal_id (not raw "entered" rows).
+        # Use BROKER position cache as source of truth when available.
+        # Falls back to virtual trades (signals.jsonl) only if broker data is unavailable.
         active_positions = []
         try:
-            recent_signals = self.state_manager.get_recent_signals(limit=300)
-            latest_by_id: Dict[str, Dict[str, Any]] = {}
-            for rec in recent_signals:
-                if not isinstance(rec, dict):
-                    continue
-                sig_id = str(rec.get("signal_id") or "")
-                if not sig_id:
-                    continue
-                latest_by_id[sig_id] = rec
+            broker_positions = None
+            if self.execution_adapter is not None:
+                # Use the cached _live_positions (sync, no await needed)
+                live_pos = getattr(self.execution_adapter, "_live_positions", None)
+                if live_pos is not None:
+                    broker_positions = list(live_pos.values())
 
-            for rec in latest_by_id.values():
-                if rec.get("status") == "entered":
-                    active_positions.append(rec)
+            if broker_positions:
+                # Use broker data — each position with net_pos != 0 counts
+                for pos in broker_positions:
+                    net_pos = pos.get("netPos") or pos.get("net_pos") or 0
+                    if net_pos != 0:
+                        active_positions.append({
+                            "direction": "long" if net_pos > 0 else "short",
+                            "entry_price": pos.get("netPrice") or pos.get("net_price") or 0,
+                            "position_size": abs(net_pos),
+                        })
+            else:
+                # Fallback: virtual trades from signals.jsonl
+                recent_signals = self.state_manager.get_recent_signals(limit=300)
+                latest_by_id: Dict[str, Dict[str, Any]] = {}
+                for rec in recent_signals:
+                    if not isinstance(rec, dict):
+                        continue
+                    sig_id = str(rec.get("signal_id") or "")
+                    if not sig_id:
+                        continue
+                    latest_by_id[sig_id] = rec
+
+                for rec in latest_by_id.values():
+                    if rec.get("status") == "entered":
+                        active_positions.append(rec)
         except Exception as e:
             ErrorHandler.log_and_continue(
                 "circuit_breaker active positions fetch", e,
@@ -468,7 +488,7 @@ class SignalHandler:
             signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
 
             cb_mode = str(getattr(self.trading_circuit_breaker.config, "mode", "enforce"))
-            if cb_mode == "warn_only":
+            if cb_mode in ("warn_only", "shadow"):
                 self.trading_circuit_breaker.record_would_block(cb_decision.reason)
                 logger.warning(
                     f"⚠️ Trading circuit breaker would block (warn-only): {cb_decision.reason} | "

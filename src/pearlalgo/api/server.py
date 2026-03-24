@@ -2639,6 +2639,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
         "futures_market_open": state.get("futures_market_open", False),
+        "strategy_session_open": state.get("strategy_session_open"),
         "data_fresh": state.get("data_fresh", False),
         "last_updated": datetime.now(timezone.utc).isoformat(),
 
@@ -2712,6 +2713,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 
         # Account display config (config-driven names for UI)
         "accounts": _get_accounts_config(),
+
+        # Trailing stop state (positions, phases, active override)
+        "trailing_stop": state.get("trailing_stop"),
     }
 
 
@@ -2907,6 +2911,144 @@ async def close_trade(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to request close: {str(e)[:200]}")
+
+
+# =============================================================================
+# Trailing Stop Override API
+# =============================================================================
+
+@app.post("/api/trailing-stop/override")
+async def trailing_stop_override(
+    payload: Dict[str, Any] = Body(default={}),
+    _: str = Depends(require_operator_or_api_key),
+):
+    """
+    Apply a dynamic trailing stop parameter override.
+
+    OpenClaw or operators can adjust trailing stop behavior by scaling the
+    ATR multipliers used for phase activation and trail distance.
+
+    Body parameters:
+        trail_atr_multiplier (float): Scale trail distance (0.5-2.0, default 1.0)
+        activation_atr_multiplier (float): Scale activation thresholds (0.5-2.0, default 1.0)
+        force_phase (str|null): Force a specific phase ("breakeven", "lock_profit", "tight_trail")
+        ttl_minutes (int): Override lifetime in minutes (1-120, default 30)
+        source (str): Who is setting it ("openclaw", "manual")
+        reason (str): Human-readable reason for the override
+    """
+    _check_rate_limit("trailing-stop-override")
+
+    sd = _require_state_dir()
+
+    # Validate bounds
+    trail_mult = float(payload.get("trail_atr_multiplier", 1.0))
+    act_mult = float(payload.get("activation_atr_multiplier", 1.0))
+    ttl = int(payload.get("ttl_minutes", 30))
+
+    if not (0.5 <= trail_mult <= 2.0):
+        raise HTTPException(status_code=422, detail="trail_atr_multiplier must be between 0.5 and 2.0")
+    if not (0.5 <= act_mult <= 2.0):
+        raise HTTPException(status_code=422, detail="activation_atr_multiplier must be between 0.5 and 2.0")
+    if not (1 <= ttl <= 120):
+        raise HTTPException(status_code=422, detail="ttl_minutes must be between 1 and 120")
+
+    valid_phases = {"breakeven", "lock_profit", "tight_trail"}
+    force_phase = payload.get("force_phase")
+    if force_phase and force_phase not in valid_phases:
+        raise HTTPException(status_code=422, detail=f"force_phase must be one of {valid_phases}")
+
+    try:
+        sd.mkdir(parents=True, exist_ok=True)
+        override_file = sd / "trailing_stop_override.json"
+        override_data = {
+            "trail_atr_multiplier": trail_mult,
+            "activation_atr_multiplier": act_mult,
+            "force_phase": force_phase,
+            "min_move_override": payload.get("min_move_override"),
+            "ttl_minutes": ttl,
+            "source": str(payload.get("source", "api")),
+            "reason": str(payload.get("reason", "")),
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        override_file.write_text(json.dumps(override_data, indent=2), encoding="utf-8")
+        logger.info("trailing-stop-override: wrote %s", override_file)
+
+        # Wait briefly for ack
+        ack_file = sd / "trailing_stop_override_ack.json"
+        acked = False
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            if ack_file.exists():
+                try:
+                    ack_data = json.loads(ack_file.read_text())
+                    ack_file.unlink(missing_ok=True)
+                    return {"ok": True, "message": "Override applied.", "effective_params": ack_data.get("effective_params")}
+                except Exception:
+                    pass
+                acked = True
+                break
+
+        if acked:
+            return {"ok": True, "message": "Override applied."}
+        return {
+            "ok": True,
+            "message": "Override queued (not yet acknowledged by agent).",
+            "warning": "Command sent but not acknowledged within timeout",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write override: {str(e)[:200]}")
+
+
+@app.get("/api/trailing-stop/state")
+async def trailing_stop_state(_: str = Depends(require_operator_or_api_key)):
+    """
+    Get current trailing stop state for all tracked positions.
+
+    Returns phase, current stop, best price, and active override info.
+    """
+    try:
+        sd = _require_state_dir()
+        state_file = sd / "state.json"
+        if not state_file.exists():
+            return {"trailing_stop": {"enabled": False, "positions": {}, "active_override": None}}
+
+        state_data = json.loads(state_file.read_text())
+        ts_state = state_data.get("trailing_stop", {})
+        return {"trailing_stop": ts_state}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read trailing stop state: {str(e)[:200]}")
+
+
+@app.delete("/api/trailing-stop/override")
+async def clear_trailing_stop_override(_: str = Depends(require_operator_or_api_key)):
+    """Clear any pending or active trailing stop override."""
+    _check_rate_limit("trailing-stop-clear")
+
+    sd = _require_state_dir()
+
+    try:
+        # Remove pending override file if exists
+        override_file = sd / "trailing_stop_override.json"
+        override_file.unlink(missing_ok=True)
+
+        # Write a clear-override flag that the service will pick up
+        clear_file = sd / "trailing_stop_clear_override.flag"
+        clear_file.write_text(json.dumps({
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "source": "api",
+        }), encoding="utf-8")
+        logger.info("trailing-stop-clear: wrote %s", clear_file)
+        return {"ok": True, "message": "Override clear requested."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear override: {str(e)[:200]}")
+
+# ---------------------------------------------------------------------------
+# Config management endpoints
+# ---------------------------------------------------------------------------
+from pearlalgo.api.config_endpoints import config_router
+app.include_router(config_router, dependencies=[Depends(require_operator_or_api_key)])
 
 
 def _write_operator_request(state_dir: Path, prefix: str, payload: Dict[str, Any]) -> Path:

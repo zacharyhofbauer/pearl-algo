@@ -308,6 +308,11 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "holiday_overrides": defaults.MARKET_HOURS_HOLIDAY_OVERRIDES.copy(),
         "early_closes": defaults.MARKET_HOURS_EARLY_CLOSES.copy(),
     },
+    "session": {
+        "start_time": "18:00",
+        "end_time": "17:00",
+        "timezone": "America/New_York",
+    },
     "execution": {
         "enabled": defaults.EXECUTION_ENABLED,
         "armed": defaults.EXECUTION_ARMED,

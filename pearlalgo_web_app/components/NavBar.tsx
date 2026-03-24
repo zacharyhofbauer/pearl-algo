@@ -24,6 +24,7 @@ export default function NavBar() {
   const isHome = pathname === '/' || pathname === ''
   const isDashboard = pathname?.startsWith('/dashboard')
   const isArchive = pathname?.startsWith('/archive')
+  const isSettings = pathname?.startsWith('/settings')
 
   const dashboardContext = useMemo(() => {
     if (!isDashboard || !agentState) return null
@@ -86,6 +87,13 @@ export default function NavBar() {
             aria-current={isArchive ? 'page' : undefined}
           >
             Archive
+          </Link>
+          <Link
+            href="/settings"
+            className={`nav-bar-link ${isSettings ? 'active' : ''}`}
+            aria-current={isSettings ? 'page' : undefined}
+          >
+            Settings
           </Link>
           {dashboardContext && (
             <div className="nav-dashboard-context" aria-label="Dashboard status">

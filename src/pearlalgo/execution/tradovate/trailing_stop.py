@@ -9,15 +9,76 @@ moves in the favorable direction:
 3. Tight trail: After 3.0 ATR favorable -> trail 1.0 ATR behind best price
 
 The stop only ever moves in the favorable direction (ratchet — never loosens).
+
+Supports dynamic parameter overrides from OpenClaw or regime-adaptive presets.
+Overrides scale the phase multipliers but never violate the ratchet invariant.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Hard bounds for override multipliers — prevents absurd values
+MULTIPLIER_MIN = 0.5
+MULTIPLIER_MAX = 2.0
+
+
+def _clamp(value: float, lo: float = MULTIPLIER_MIN, hi: float = MULTIPLIER_MAX) -> float:
+    return max(lo, min(hi, value))
+
+
+@dataclass
+class TrailingOverride:
+    """Dynamic parameter override for trailing stop behavior."""
+    trail_atr_multiplier: float = 1.0       # Scale trail_atr (0.5 = 50% tighter)
+    activation_atr_multiplier: float = 1.0  # Scale activation thresholds
+    force_phase: Optional[str] = None       # Force a specific phase
+    min_move_override: Optional[float] = None  # Override min_move_points
+    expires_at: Optional[datetime] = None
+    source: str = "default"                 # Who set it: "openclaw", "regime", "manual"
+    reason: str = ""
+
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) >= self.expires_at
+
+    def clamp(self) -> TrailingOverride:
+        """Return a copy with multipliers clamped to safe bounds."""
+        return TrailingOverride(
+            trail_atr_multiplier=_clamp(self.trail_atr_multiplier),
+            activation_atr_multiplier=_clamp(self.activation_atr_multiplier),
+            force_phase=self.force_phase,
+            min_move_override=self.min_move_override,
+            expires_at=self.expires_at,
+            source=self.source,
+            reason=self.reason,
+        )
+
+
+# Regime-adaptive presets — applied automatically when no external override is active
+REGIME_PRESETS: Dict[str, TrailingOverride] = {
+    "trending": TrailingOverride(
+        trail_atr_multiplier=1.2,
+        source="regime",
+        reason="Trending - wider trail to let winners run",
+    ),
+    "volatile": TrailingOverride(
+        trail_atr_multiplier=0.7,
+        source="regime",
+        reason="Volatile - tighter trail to protect gains",
+    ),
+    "ranging": TrailingOverride(
+        trail_atr_multiplier=0.85,
+        source="regime",
+        reason="Ranging - slightly tighter for quick exits",
+    ),
+}
 
 
 @dataclass
@@ -46,6 +107,10 @@ class TrailingStopManager:
     Call check_and_update() on each price tick/bar to determine if the stop
     should be moved. The manager returns the new stop price if a modification
     is needed, or None if no change.
+
+    Supports dynamic overrides that scale phase parameters. Overrides can come
+    from OpenClaw (via API), regime presets, or manual operator commands.
+    The ratchet invariant is always enforced after override calculations.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -56,6 +121,11 @@ class TrailingStopManager:
             trailing_stop:
               enabled: true
               min_move_points: 0.50
+              allow_external_override: true
+              regime_adaptive: true
+              override_bounds:
+                trail_atr_multiplier: [0.5, 2.0]
+                activation_atr_multiplier: [0.5, 2.0]
               phases:
                 - name: breakeven
                   activation_atr: 1.0
@@ -70,6 +140,16 @@ class TrailingStopManager:
         ts_config = config.get("trailing_stop", {})
         self.enabled = bool(ts_config.get("enabled", False))
         self.min_move_points = float(ts_config.get("min_move_points", 0.50))
+        self.allow_external_override = bool(ts_config.get("allow_external_override", True))
+        self.regime_adaptive = bool(ts_config.get("regime_adaptive", True))
+        self.max_override_ttl_minutes = int(ts_config.get("max_override_ttl_minutes", 120))
+
+        # Parse override bounds from config
+        bounds = ts_config.get("override_bounds", {})
+        trail_bounds = bounds.get("trail_atr_multiplier", [MULTIPLIER_MIN, MULTIPLIER_MAX])
+        act_bounds = bounds.get("activation_atr_multiplier", [MULTIPLIER_MIN, MULTIPLIER_MAX])
+        self._trail_mult_bounds = (float(trail_bounds[0]), float(trail_bounds[1]))
+        self._act_mult_bounds = (float(act_bounds[0]), float(act_bounds[1]))
 
         # Parse phases (sorted by activation_atr descending for checking highest first)
         raw_phases = ts_config.get("phases", [])
@@ -85,11 +165,90 @@ class TrailingStopManager:
         # Active trailing states keyed by contract_id or position identifier
         self._states: Dict[str, TrailingState] = {}
 
+        # Active override (None = use defaults)
+        self._override: Optional[TrailingOverride] = None
+
         if self.enabled:
             logger.info(
                 f"TrailingStopManager initialized: {len(self.phases)} phases, "
-                f"min_move={self.min_move_points}pts"
+                f"min_move={self.min_move_points}pts, "
+                f"regime_adaptive={self.regime_adaptive}, "
+                f"allow_external_override={self.allow_external_override}"
             )
+
+    def apply_override(self, override: TrailingOverride) -> None:
+        """Apply a parameter override. Clamps multipliers to configured bounds."""
+        clamped = TrailingOverride(
+            trail_atr_multiplier=_clamp(
+                override.trail_atr_multiplier,
+                self._trail_mult_bounds[0],
+                self._trail_mult_bounds[1],
+            ),
+            activation_atr_multiplier=_clamp(
+                override.activation_atr_multiplier,
+                self._act_mult_bounds[0],
+                self._act_mult_bounds[1],
+            ),
+            force_phase=override.force_phase,
+            min_move_override=override.min_move_override,
+            expires_at=override.expires_at,
+            source=override.source,
+            reason=override.reason,
+        )
+        self._override = clamped
+        logger.info(
+            f"Trailing stop override applied: source={clamped.source} | "
+            f"trail_mult={clamped.trail_atr_multiplier:.2f} | "
+            f"act_mult={clamped.activation_atr_multiplier:.2f} | "
+            f"force_phase={clamped.force_phase} | "
+            f"reason={clamped.reason} | "
+            f"expires_at={clamped.expires_at}"
+        )
+
+    def apply_regime_preset(self, regime: str) -> None:
+        """Apply a regime-based preset if regime_adaptive is enabled and no external override."""
+        if not self.regime_adaptive:
+            return
+        # Don't overwrite external (openclaw/manual) overrides with regime presets
+        if self._override and self._override.source not in ("regime", "default"):
+            return
+        preset = REGIME_PRESETS.get(regime)
+        if preset:
+            self._override = preset
+            logger.debug(f"Regime preset applied: {regime} -> trail_mult={preset.trail_atr_multiplier}")
+
+    def clear_override(self) -> None:
+        """Clear the active override, reverting to default parameters."""
+        if self._override:
+            logger.info(f"Trailing stop override cleared (was: source={self._override.source})")
+            self._override = None
+
+    def get_override(self) -> Optional[Dict[str, Any]]:
+        """Get current override state (for API/debugging)."""
+        if self._override is None:
+            return None
+        remaining = None
+        if self._override.expires_at:
+            delta = self._override.expires_at - datetime.now(timezone.utc)
+            remaining = max(0, delta.total_seconds() / 60.0)
+        return {
+            "trail_atr_multiplier": self._override.trail_atr_multiplier,
+            "activation_atr_multiplier": self._override.activation_atr_multiplier,
+            "force_phase": self._override.force_phase,
+            "source": self._override.source,
+            "reason": self._override.reason,
+            "expires_in_minutes": remaining,
+        }
+
+    def _get_effective_override(self) -> Optional[TrailingOverride]:
+        """Get the active override, auto-clearing if expired."""
+        if self._override is None:
+            return None
+        if self._override.is_expired():
+            logger.info(f"Trailing stop override expired (source={self._override.source})")
+            self._override = None
+            return None
+        return self._override
 
     def register_position(
         self,
@@ -143,6 +302,14 @@ class TrailingStopManager:
         if current_atr <= 0:
             return None
 
+        # Get effective override (auto-clears expired)
+        override = self._get_effective_override()
+        trail_mult = override.trail_atr_multiplier if override else 1.0
+        act_mult = override.activation_atr_multiplier if override else 1.0
+        forced_phase = override.force_phase if override else None
+        min_move = (override.min_move_override if override and override.min_move_override is not None
+                    else self.min_move_points)
+
         # Update best price
         if state.direction == "long":
             state.best_price = max(state.best_price, current_price)
@@ -159,7 +326,13 @@ class TrailingStopManager:
         active_phase = None
 
         for phase in self.phases:
-            if favorable_move >= phase.activation_atr * current_atr:
+            # If force_phase is set, skip to the forced phase
+            if forced_phase and phase.name != forced_phase:
+                continue
+
+            activation_threshold = phase.activation_atr * act_mult * current_atr
+
+            if favorable_move >= activation_threshold:
                 if phase.trail_atr == 0.0:
                     # Breakeven: entry + 1 tick
                     tick = 0.25  # MNQ tick size
@@ -168,7 +341,7 @@ class TrailingStopManager:
                     else:
                         candidate = state.entry_price - tick
                 else:
-                    trail_distance = phase.trail_atr * current_atr
+                    trail_distance = phase.trail_atr * trail_mult * current_atr
                     if state.direction == "long":
                         candidate = state.best_price - trail_distance
                     else:
@@ -189,7 +362,7 @@ class TrailingStopManager:
 
         # Min move filter: avoid API churn
         move_size = abs(new_stop - state.last_modified_stop)
-        if move_size < self.min_move_points:
+        if move_size < min_move:
             return None
 
         # Update state
@@ -198,10 +371,12 @@ class TrailingStopManager:
         state.last_modified_stop = new_stop
         state.current_phase = active_phase
 
+        override_info = f" | override={override.source}" if override else ""
         logger.info(
             f"Trailing stop update: {position_id} | phase={active_phase} | "
             f"stop {old_stop:.2f} -> {new_stop:.2f} | "
             f"best={state.best_price:.2f} | move={favorable_move:.2f}pts"
+            f"{override_info}"
         )
 
         return new_stop
@@ -218,6 +393,19 @@ class TrailingStopManager:
             "best_price": state.best_price,
             "current_phase": state.current_phase,
         }
+
+    def get_all_states(self) -> Dict[str, Dict[str, Any]]:
+        """Get trailing state for all tracked positions."""
+        result = {}
+        for pid, state in self._states.items():
+            result[pid] = {
+                "entry_price": state.entry_price,
+                "direction": state.direction,
+                "current_stop": state.current_stop,
+                "best_price": state.best_price,
+                "current_phase": state.current_phase,
+            }
+        return result
 
     @property
     def active_positions(self) -> int:

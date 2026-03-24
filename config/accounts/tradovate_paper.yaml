@@ -46,8 +46,8 @@ trading_circuit_breaker:
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
   tv_paper_trading_start_hour_et: 18
-  tv_paper_trading_end_hour_et: 16
-  tv_paper_trading_end_minute_et: 10
+  tv_paper_trading_end_hour_et: 17
+  tv_paper_trading_end_minute_et: 0
   tv_paper_near_max_loss_buffer: 200.0
   tv_paper_enable_news_blackout: true
   max_consecutive_losses: 5
@@ -81,13 +81,19 @@ risk:
   max_position_size: 5
 session:
   start_time: "18:00"
-  end_time: "15:45"
+  end_time: "17:00"
   timezone: "America/New_York"
 service:
   dashboard_chart_enabled: false
 trailing_stop:
   enabled: true
   min_move_points: 0.5
+  allow_external_override: true
+  max_override_ttl_minutes: 120
+  regime_adaptive: true
+  override_bounds:
+    trail_atr_multiplier: [0.5, 2.0]
+    activation_atr_multiplier: [0.5, 2.0]
   phases:
   - name: breakeven
     activation_atr: 1.0
@@ -123,8 +129,8 @@ pearl_bot_auto:
   ema_fast: 9
   ema_slow: 21
   # SL/TP ATR multipliers (scalp-tuned for paper)
-  stop_loss_atr_mult: 1.0
-  take_profit_atr_mult: 2.0
+  stop_loss_atr_mult: 1.5
+  take_profit_atr_mult: 2.5
   volatile_sl_mult: 1.3
   volatile_tp_mult: 1.3
   ranging_sl_mult: 0.8
