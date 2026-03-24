@@ -7,9 +7,10 @@ import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsD
 import { useChartSettingsStore } from '@/stores'
 import { SessionHighlighting } from '@/lib/chart-plugins/session-highlighting'
 import { SDZones }              from '@/lib/chart-plugins/sd-zones'
-// TBT Trendlines disabled — tracked as future work on kanban
+import { TBTTrendlines }          from '@/lib/chart-plugins/tbt-trendlines'
 import { TradeZones, type TradeZone } from '@/lib/chart-plugins/trade-zones'
 import { KeyLevelsPlugin }      from '@/lib/chart-plugins/key-levels'
+import { SRPowerZones }         from '@/lib/chart-plugins/sr-power-zones'
 
 interface PositionLine {
   price: number
@@ -64,11 +65,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   // Chart overlay plugins (attached as primitives to candleSeries)
   const sessionPluginRef = useRef<SessionHighlighting | null>(null)
   const sdZonesPluginRef = useRef<SDZones | null>(null)
-  // tbtPluginRef removed — trendlines disabled
+  const tbtPluginRef      = useRef<TBTTrendlines | null>(null)
   const tradeZonesRef     = useRef<TradeZones | null>(null)
   const keyLevelsRef      = useRef<KeyLevelsPlugin | null>(null)
-
-  // S&R Power overlay removed
+  const srPowerRef        = useRef<SRPowerZones | null>(null)
 
   // Position price lines refs (for cleanup)
   const positionPriceLinesRef = useRef<IPriceLine[]>([])
@@ -183,9 +183,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         position: (isExitDominant 
           ? (dominantDirection === 'long' ? 'aboveBar' : 'belowBar')
           : (dominantDirection === 'long' ? 'belowBar' : 'aboveBar')) as 'aboveBar' | 'belowBar',
-        color: isExitDominant 
+        color: isExitDominant
           ? (totalPnl >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
-          : 'rgba(180, 180, 180, 0.9)',
+          : (dominantDirection === 'long' ? '#2196F3' : '#f44336'),
         shape: 'circle' as const,
         text: `${group.length}`,
         kind: isExitDominant ? 'exit' : 'entry',
@@ -390,14 +390,20 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const sessionPlugin = new SessionHighlighting()
     const sdZonesPlugin = new SDZones()
     const keyLevelsPlugin   = new KeyLevelsPlugin()
+    const tbtPlugin         = new TBTTrendlines()
+    const srPowerPlugin     = new SRPowerZones()
     candleSeries.attachPrimitive(tradeZonesPlugin)
     candleSeries.attachPrimitive(sessionPlugin)
     candleSeries.attachPrimitive(sdZonesPlugin)
     candleSeries.attachPrimitive(keyLevelsPlugin)
+    candleSeries.attachPrimitive(tbtPlugin)
+    candleSeries.attachPrimitive(srPowerPlugin)
     tradeZonesRef.current     = tradeZonesPlugin
     sessionPluginRef.current = sessionPlugin
     sdZonesPluginRef.current = sdZonesPlugin
     keyLevelsRef.current     = keyLevelsPlugin
+    tbtPluginRef.current     = tbtPlugin
+    srPowerRef.current       = srPowerPlugin
 
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
@@ -415,10 +421,14 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       try { candleSeries.detachPrimitive(sessionPlugin) } catch {}
       try { candleSeries.detachPrimitive(sdZonesPlugin) } catch {}
       try { candleSeries.detachPrimitive(keyLevelsPlugin) } catch {}
+      try { candleSeries.detachPrimitive(tbtPlugin) } catch {}
+      try { candleSeries.detachPrimitive(srPowerPlugin) } catch {}
       tradeZonesRef.current     = null
       sessionPluginRef.current = null
       sdZonesPluginRef.current = null
       keyLevelsRef.current     = null
+      tbtPluginRef.current     = null
+      srPowerRef.current       = null
       onChartReady?.(null)
       chart.remove()
     }
@@ -566,50 +576,14 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    // Build EMA lookup maps for bar coloring
-    const ema9Map = new Map<number, number>()
-    const ema21Map = new Map<number, number>()
-    if (indicators?.ema9?.length) {
-      for (const d of indicators.ema9) ema9Map.set(d.time, d.value)
-    }
-    if (indicators?.ema21?.length) {
-      for (const d of indicators.ema21) ema21Map.set(d.time, d.value)
-    }
-
-    const emaEnabled = indicatorSettings.ema9 && indicatorSettings.ema21
-
-    // Cast time to Time type for lightweight-charts, with EMA crossover coloring
-    const candleData = data.map((d) => {
-      const ema9Val = ema9Map.get(d.time)
-      const ema21Val = ema21Map.get(d.time)
-      const isBullishEMA = emaEnabled && ema9Val !== undefined && ema21Val !== undefined && ema9Val > ema21Val
-      const isBearishEMA = emaEnabled && ema9Val !== undefined && ema21Val !== undefined && ema9Val <= ema21Val
-      const isUp = d.close >= d.open
-
-      let color: string | undefined
-      let borderColor: string | undefined
-      let wickColor: string | undefined
-
-      if (isBullishEMA) {
-        color = isUp ? '#00d4ff' : '#006680'
-        borderColor = isUp ? '#00d4ff' : '#006680'
-        wickColor = isUp ? '#00d4ff88' : '#00668088'
-      } else if (isBearishEMA) {
-        color = isUp ? '#e040fb' : '#7b1fa2'
-        borderColor = isUp ? '#e040fb' : '#7b1fa2'
-        wickColor = isUp ? '#e040fb88' : '#7b1fa288'
-      }
-      // If neither, lightweight-charts uses its defaults (green/red)
-
-      return {
-        time: d.time as Time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        ...(color ? { color, borderColor, wickColor } : {}),
-      }
-    })
+    // Cast time to Time type for lightweight-charts
+    const candleData = data.map((d) => ({
+      time: d.time as Time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }))
     candleSeriesRef.current.setData(candleData)
 
     // Keep the background guide series populated so its price lines render.
@@ -648,7 +622,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       chartRef.current.timeScale().scrollToRealTime()
       prevDataLength.current = data.length
     }
-  }, [data, indicators, indicatorSettings.ema9, indicatorSettings.ema21])
+  }, [data])
 
   // Update indicators
   useEffect(() => {
@@ -760,8 +734,8 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
             if (m.kind === 'exit') {
               position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
             }
-            let color = m.kind === 'entry' 
-              ? 'rgba(180, 180, 180, 0.9)' 
+            let color = m.kind === 'entry'
+              ? (m.direction === 'long' ? '#2196F3' : '#f44336')
               : ((m.pnl || 0) >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
             
             return {
@@ -783,7 +757,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           let color = m.color
           if (!m._isGrouped) {
             if (m.kind === 'entry') {
-              color = 'rgba(180, 180, 180, 0.8)'
+              color = m.direction === 'long' ? '#2196F3' : '#f44336'
             } else if (m.kind === 'exit') {
               const isWin = (m.pnl || 0) >= 0
               color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'
@@ -1055,6 +1029,12 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         if (apiLevels.prev_week_low)   apiLines.push({ price: apiLevels.prev_week_low, title: 'PW Low', color: PREV_WEEK_COLOR })
         if (apiLevels.prev_week_mid)   apiLines.push({ price: apiLevels.prev_week_mid, title: 'PW Mid', color: PREV_WEEK_COLOR })
 
+        // 4H levels (orange)
+        const FOUR_H_COLOR = '#ff9800'
+        if (apiLevels.prev_4h_high) apiLines.push({ price: apiLevels.prev_4h_high, title: 'P4H High', color: FOUR_H_COLOR })
+        if (apiLevels.prev_4h_low)  apiLines.push({ price: apiLevels.prev_4h_low, title: 'P4H Low', color: FOUR_H_COLOR })
+        if (apiLevels.four_h_open)  apiLines.push({ price: apiLevels.four_h_open, title: '4H Open', color: FOUR_H_COLOR })
+
         for (const lv of apiLines) {
           try {
             keyLevelLinesRef.current.push(series.createPriceLine({
@@ -1075,7 +1055,15 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     }
   }, [data])
 
-  // S&R Power overlay removed — was overlapping price labels and looked bad
+  // Update S&R Power overlay when indicators change
+  useEffect(() => {
+    if (!srPowerRef.current) return
+    if (indicators?.srPower) {
+      srPowerRef.current.setData(indicators.srPower)
+    } else {
+      srPowerRef.current.setData(null)
+    }
+  }, [indicators?.srPower])
 
   // Format price
   const formatPrice = (price?: number) => {
@@ -1099,6 +1087,16 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
   }
 
   const pairedMarker = tooltip.marker ? findPairedMarker(tooltip.marker) : null
+
+  // Range info: current bar range + average range over last 20 bars
+  const rangeInfo = useMemo(() => {
+    if (!data || data.length < 2) return null
+    const last = data[data.length - 1]
+    const currentRange = last.high - last.low
+    const lookback = data.slice(-20)
+    const avgRange = lookback.reduce((sum, c) => sum + (c.high - c.low), 0) / lookback.length
+    return { range: currentRange, avg: avgRange }
+  }, [data])
 
   // Chart fills all available space via CSS flex layout
 
@@ -1135,7 +1133,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
 
         {/* Legend Section */}
         <div className="info-legend">
-          <span className="leg" title="EMA crossover bar coloring"><span className="mkr ema-bull" style={{color:'#00d4ff'}}>|</span><span className="mkr ema-bear" style={{color:'#e040fb'}}>|</span> EMA</span>
+          <span className="leg"><span className="line vwap" /> VWAP</span>
           <span className="leg"><span className="line vwap"></span>V</span>
           <span className="leg-sep"></span>
           <span className="leg"><span className="line entry"></span>E</span>
@@ -1168,6 +1166,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
             <span className="ohlc-label">C</span><span className="ohlc-value">{d.close.toFixed(2)}</span>
             <span className="ohlc-change">{sign}{d.change.toFixed(2)} ({sign}{d.changePct.toFixed(2)}%)</span>
             {d.volume != null && <span className="ohlc-volume">Vol {Math.round(d.volume).toLocaleString()}</span>}
+            {rangeInfo && <span className="ohlc-range">Range {(d.high - d.low).toFixed(2)} <span style={{opacity:0.5}}>Avg {rangeInfo.avg.toFixed(2)}</span></span>}
           </div>
         )
       })()}

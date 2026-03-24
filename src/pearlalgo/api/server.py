@@ -3691,6 +3691,26 @@ async def get_key_levels(
         now_utc = datetime.now(timezone.utc)
         levels = _bars_to_levels(candles, now_utc)
 
+        # --- 4H levels: prev completed 4H bar's high/open/low ---
+        try:
+            candles_4h, _ = await _fetch_candles(
+                symbol=symbol, timeframe="4h", bars=10, use_cache_fallback=True
+            )
+            if candles_4h and len(candles_4h) >= 2:
+                # Second-to-last bar is the previous completed 4H bar
+                prev_4h = candles_4h[-2]
+                levels["prev_4h_high"] = prev_4h.get("high")
+                levels["prev_4h_low"] = prev_4h.get("low")
+                levels["four_h_open"] = candles_4h[-1].get("open")  # current 4H bar open
+            else:
+                levels["prev_4h_high"] = None
+                levels["prev_4h_low"] = None
+                levels["four_h_open"] = None
+        except Exception:
+            levels["prev_4h_high"] = None
+            levels["prev_4h_low"] = None
+            levels["four_h_open"] = None
+
         # Cache the result
         _key_levels_cache = {"_symbol": cache_key, "_data": levels}
         _key_levels_cache_time = now

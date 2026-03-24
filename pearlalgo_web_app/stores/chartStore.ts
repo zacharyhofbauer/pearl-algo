@@ -43,6 +43,13 @@ export interface VolumeProfile {
   val: number  // Value Area Low
 }
 
+export interface SRPowerData {
+  resistance: number
+  support: number
+  buyPower: number
+  sellPower: number
+}
+
 export interface Indicators {
   ema9?: IndicatorData[]
   ema21?: IndicatorData[]
@@ -50,6 +57,8 @@ export interface Indicators {
   bollingerBands?: BollingerBandsData[]
   atrBands?: ATRBandsData[]
   volumeProfile?: VolumeProfile
+  srPower?: SRPowerData
+  rsi?: IndicatorData[]
 }
 
 export interface MarkerData {

@@ -238,6 +238,68 @@ def calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         for i, atr in enumerate(atr_bands) if atr is not None
     ]
 
+    # S&R Power Channel (ChartPrime) — resistance/support zones + buy/sell power count
+    sr_power = None
+    sr_length = min(130, len(candles))
+    if sr_length >= 20:
+        lookback = candles[-sr_length:]
+        lb_highs = [c["high"] for c in lookback]
+        lb_lows = [c["low"] for c in lookback]
+        lb_closes = [c["close"] for c in lookback]
+        lb_opens = [c["open"] for c in lookback]
+
+        max_price = max(lb_highs)
+        min_price = min(lb_lows)
+
+        # ATR for band width (simple 14-period on full dataset)
+        atr_period = min(14, len(closes) - 1)
+        if atr_period > 0:
+            trs = []
+            for j in range(1, len(closes)):
+                tr = max(highs[j] - lows[j], abs(highs[j] - closes[j-1]), abs(lows[j] - closes[j-1]))
+                trs.append(tr)
+            atr_val = sum(trs[-atr_period:]) / atr_period * 0.5
+        else:
+            atr_val = (max_price - min_price) * 0.02
+
+        resistance = max_price + atr_val
+        support = min_price - atr_val
+        buy_power = sum(1 for i in range(len(lb_closes)) if lb_closes[i] > lb_opens[i])
+        sell_power = sum(1 for i in range(len(lb_closes)) if lb_closes[i] < lb_opens[i])
+        sr_power = {
+            "resistance": round(resistance, 2),
+            "support": round(support, 2),
+            "buyPower": buy_power,
+            "sellPower": sell_power,
+        }
+
+    # RSI (14-period Wilder's smoothing)
+    rsi_data = []
+    rsi_period = 14
+    if len(closes) > rsi_period:
+        gains = []
+        losses = []
+        for j in range(1, len(closes)):
+            delta = closes[j] - closes[j-1]
+            gains.append(max(delta, 0))
+            losses.append(max(-delta, 0))
+
+        avg_gain = sum(gains[:rsi_period]) / rsi_period
+        avg_loss = sum(losses[:rsi_period]) / rsi_period
+
+        for j in range(rsi_period, len(closes)):
+            if j == rsi_period:
+                # First RSI value
+                rs = avg_gain / avg_loss if avg_loss != 0 else 100
+                rsi_val = 100 - (100 / (1 + rs))
+                rsi_data.append({"time": times[j], "value": round(rsi_val, 2)})
+            else:
+                avg_gain = (avg_gain * (rsi_period - 1) + gains[j - 1]) / rsi_period
+                avg_loss = (avg_loss * (rsi_period - 1) + losses[j - 1]) / rsi_period
+                rs = avg_gain / avg_loss if avg_loss != 0 else 100
+                rsi_val = 100 - (100 / (1 + rs))
+                rsi_data.append({"time": times[j], "value": round(rsi_val, 2)})
+
     # Format for TradingView
     return {
         "ema9": [{"time": times[i], "value": round(v, 2)} for i, v in enumerate(ema9) if v is not None],
@@ -246,4 +308,6 @@ def calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         "bollingerBands": bb_data,
         "atrBands": atr_data,
         "volumeProfile": volume_profile,
+        "srPower": sr_power,
+        "rsi": rsi_data,
     }

@@ -62,6 +62,7 @@ export type {
   BollingerBandsData,
   ATRBandsData,
   VolumeProfile,
+  SRPowerData,
   Position,
   PositionLine,
 } from './chartStore'

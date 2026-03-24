@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
+import RSIPane from '@/components/RSIPane'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary, type RecentSignalEvent } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
@@ -761,15 +762,24 @@ export default function DashboardPageInner() {
               </div>
             }
           >
-            <CandlestickChart
-              data={candles}
-              indicators={indicators}
-              markers={markers}
-              barSpacing={barSpacing}
-              timeframe={timeframe}
-              onChartReady={setMainChartApi}
-              positionLines={positionLines}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <CandlestickChart
+                  data={candles}
+                  indicators={indicators}
+                  markers={markers}
+                  barSpacing={barSpacing}
+                  timeframe={timeframe}
+                  onChartReady={setMainChartApi}
+                  positionLines={positionLines}
+                />
+              </div>
+              <RSIPane
+                rsiData={indicators?.rsi}
+                mainChart={mainChartApi}
+                barSpacing={barSpacing}
+              />
+            </div>
           </ErrorBoundary>
         )}
       </div>

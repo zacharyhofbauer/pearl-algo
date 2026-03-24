@@ -14,6 +14,8 @@ export interface IndicatorVisibility {
   vwapBands: boolean
   keyLevels: boolean
   tbtTrendlines: boolean
+  srPowerZones: boolean
+  rsi: boolean
 }
 
 export interface ChartThemeColors {
@@ -107,7 +109,9 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   volume: true,
   vwapBands: false,
   keyLevels: true,
-  tbtTrendlines: false,
+  tbtTrendlines: true,
+  srPowerZones: true,
+  rsi: true,
 }
 
 export const useChartSettingsStore = create<ChartSettingsStore>()(
