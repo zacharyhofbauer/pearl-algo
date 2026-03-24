@@ -68,14 +68,14 @@ trading_circuit_breaker:
   blocked_regimes: []
   regime_avoidance_min_confidence: 0.7
 telegram:
-  notification_tier: critical
+  notification_tier: debug
 auto_flat:
   enabled: true
   daily_enabled: true
   daily_time: '16:30'
   friday_enabled: false
   weekend_enabled: false
-  notify: false
+  notify: true
 risk:
   min_position_size: 1
   max_position_size: 1
@@ -98,6 +98,8 @@ trailing_stop:
   - name: tight_trail
     activation_atr: 3.0
     trail_atr: 1.0
+ml_filter:
+  mode: shadow
 virtual_pnl:
   enabled: false
 advanced_exits:
@@ -115,9 +117,9 @@ advanced_exits:
     enabled: true
     mae_percentile: 75
 pearl_bot_auto:
-  min_confidence: 0.62
-  min_confidence_long: 0.60
-  min_confidence_short: 0.60
+  min_confidence: 0.40
+  min_confidence_long: 0.40
+  min_confidence_short: 0.40
   ema_fast: 9
   ema_slow: 21
   allow_vwap_cross_entries: true
@@ -142,6 +144,6 @@ tbt_trend_type: wicks
 sd_threshold_pct: 10.0
 sd_resolution: 50
 vwap_std_dev: 1.0
-min_confidence: 0.62
-min_confidence_long: 0.60
-min_confidence_short: 0.60
+min_confidence: 0.40
+min_confidence_long: 0.40
+min_confidence_short: 0.40

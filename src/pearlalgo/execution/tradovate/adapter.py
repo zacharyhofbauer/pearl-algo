@@ -439,7 +439,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             f"tp={take_profit} sl={stop_loss} entry={entry_price}"
         )
 
+        pending_incremented = False
         try:
+            async with self._pending_orders_lock:
+                self._pending_orders_count += 1
+                pending_incremented = True
             result = await self._client.place_oso(
                 symbol=self._contract_symbol,
                 action=action,

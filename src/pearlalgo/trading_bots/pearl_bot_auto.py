@@ -1617,7 +1617,66 @@ def generate_signals(
         except Exception as e:
             logger.debug(f"Trend momentum check failed: {e}")
             trend_momentum_long, trend_momentum_short = False, False
-    
+
+    # =====================================================================
+    # NEW TRIGGERS: fire when EMA/VWAP alignment triggers are quiet
+    # =====================================================================
+    allow_mean_reversion = bool(config.get("allow_mean_reversion_entries", True))
+    allow_ema_pullback = bool(config.get("allow_ema_pullback_entries", True))
+    allow_vwap_reclaim = bool(config.get("allow_vwap_reclaim_entries", True))
+    mean_reversion_long, mean_reversion_short = False, False
+    ema_pullback_long, ema_pullback_short = False, False
+    vwap_reclaim_long, vwap_reclaim_short = False, False
+
+    # MEAN REVERSION: RSI oversold/overbought with price stretched from VWAP
+    if allow_mean_reversion and len(df) >= 14 and vwap_curr is not None:
+        try:
+            delta = df["close"].diff()
+            gain = delta.clip(lower=0).rolling(14).mean()
+            loss = (-delta.clip(upper=0)).rolling(14).mean()
+            rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] != 0 else 100.0
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+            vwap_dist_pct = (close - vwap_curr) / vwap_curr if vwap_curr != 0 else 0
+            # Long: RSI oversold + price stretched below VWAP
+            mean_reversion_long = bool(rsi < 35 and vwap_dist_pct < -0.001)
+            # Short: RSI overbought + price stretched above VWAP
+            mean_reversion_short = bool(rsi > 65 and vwap_dist_pct > 0.001)
+        except Exception as e:
+            logger.debug(f"Mean reversion check failed: {e}")
+
+    # EMA PULLBACK: price pulls back to EMA21 in a trend (not just crosses)
+    if allow_ema_pullback and len(df) >= 3:
+        try:
+            ema_slow_val = float(df["close"].ewm(span=int(config.get("ema_slow", 21))).mean().iloc[-1])
+            ema_fast_val = float(df["close"].ewm(span=int(config.get("ema_fast", 9))).mean().iloc[-1])
+            prev_low = float(df["low"].iloc[-1])
+            prev_high = float(df["high"].iloc[-1])
+            # Long: uptrend (EMA9>EMA21), bar wick touched EMA21 but closed above
+            ema_pullback_long = bool(
+                ema_fast_val > ema_slow_val
+                and prev_low <= ema_slow_val * 1.001
+                and close > ema_slow_val
+            )
+            # Short: downtrend, bar wick touched EMA21 but closed below
+            ema_pullback_short = bool(
+                ema_fast_val < ema_slow_val
+                and prev_high >= ema_slow_val * 0.999
+                and close < ema_slow_val
+            )
+        except Exception as e:
+            logger.debug(f"EMA pullback check failed: {e}")
+
+    # VWAP RECLAIM: price crosses back above/below VWAP (no EMA requirement)
+    if allow_vwap_reclaim and vwap_curr is not None and len(df) >= 2:
+        try:
+            prev_close_val = float(df["close"].iloc[-2])
+            # Long: previous bar closed below VWAP, current closes above
+            vwap_reclaim_long = bool(prev_close_val < vwap_curr and close > vwap_curr and volume_confirmed)
+            # Short: previous bar closed above VWAP, current closes below
+            vwap_reclaim_short = bool(prev_close_val > vwap_curr and close < vwap_curr and volume_confirmed)
+        except Exception as e:
+            logger.debug(f"VWAP reclaim check failed: {e}")
+
     # ------------------------------------------------------------------
     # Use pre-computed indicator signals from _calculate_indicators()
     # to avoid redundant computation of volume, S&R, TBT, S&D,
@@ -1690,15 +1749,20 @@ def generate_signals(
     # Combine signals with confidence scoring
     signal_candidates = []
     
-    # Long signals - ALL 8 INDICATORS CONTRIBUTE
+    # Long signals - ALL 8 INDICATORS CONTRIBUTE + NEW TRIGGERS
     long_trigger = (
         bullish_cross
         or (allow_vwap_cross_entries and bullish_vwap_cross and ema_bull_trend)
         or (allow_vwap_retest_entries and vwap_retest_long)
         or (allow_trend_momentum_entries and trend_momentum_long)
         or (allow_trend_breakout_entries and trend_breakout_long)
+        or (allow_mean_reversion and mean_reversion_long)
+        or (allow_ema_pullback and ema_pullback_long)
+        or (allow_vwap_reclaim and vwap_reclaim_long)
     )
-    if long_trigger and price_above_vwap:
+    # New triggers don't require price_above_vwap (that's their whole point)
+    needs_vwap_filter = not (mean_reversion_long or vwap_reclaim_long)
+    if long_trigger and (price_above_vwap or not needs_vwap_filter):
         # Base confidence: EMA/VWAP trigger + VWAP position = 0.5
         confidence = 0.50
         if bullish_cross:
@@ -1713,6 +1777,17 @@ def generate_signals(
         elif trend_breakout_long:
             entry_trigger = "trend_breakout"
             active_indicators = ["EMA_TREND", "TREND_BREAKOUT", "VWAP_ABOVE"]
+        elif mean_reversion_long:
+            entry_trigger = "mean_reversion"
+            confidence = 0.55  # Higher base — RSI oversold is a strong signal
+            active_indicators = ["RSI_OVERSOLD", "VWAP_STRETCHED"]
+        elif ema_pullback_long:
+            entry_trigger = "ema_pullback"
+            active_indicators = ["EMA_TREND", "EMA_PULLBACK", "VWAP_ABOVE"]
+        elif vwap_reclaim_long:
+            entry_trigger = "vwap_reclaim"
+            confidence = 0.55
+            active_indicators = ["VWAP_RECLAIM", "VOL_CONFIRM"]
         else:
             entry_trigger = "trend_momentum"
             active_indicators = ["EMA_TREND", "TREND_MOMENTUM", "VWAP_ABOVE"]
@@ -1843,15 +1918,19 @@ def generate_signals(
                         },
                     })
     
-    # Short signals - ALL 8 INDICATORS CONTRIBUTE
+    # Short signals - ALL 8 INDICATORS CONTRIBUTE + NEW TRIGGERS
     short_trigger = (
         bearish_cross
         or (allow_vwap_cross_entries and bearish_vwap_cross and ema_bear_trend)
         or (allow_vwap_retest_entries and vwap_retest_short)
         or (allow_trend_momentum_entries and trend_momentum_short)
         or (allow_trend_breakout_entries and trend_breakout_short)
+        or (allow_mean_reversion and mean_reversion_short)
+        or (allow_ema_pullback and ema_pullback_short)
+        or (allow_vwap_reclaim and vwap_reclaim_short)
     )
-    if short_trigger and price_below_vwap:
+    needs_vwap_filter_short = not (mean_reversion_short or vwap_reclaim_short)
+    if short_trigger and (price_below_vwap or not needs_vwap_filter_short):
         # Base confidence: EMA/VWAP trigger + VWAP position (2) = 0.5
         confidence = 0.50
         if bearish_cross:
@@ -1866,6 +1945,17 @@ def generate_signals(
         elif trend_breakout_short:
             entry_trigger = "trend_breakout"
             active_indicators = ["EMA_TREND", "TREND_BREAKOUT", "VWAP_BELOW"]
+        elif mean_reversion_short:
+            entry_trigger = "mean_reversion"
+            confidence = 0.55
+            active_indicators = ["RSI_OVERBOUGHT", "VWAP_STRETCHED"]
+        elif ema_pullback_short:
+            entry_trigger = "ema_pullback"
+            active_indicators = ["EMA_TREND", "EMA_PULLBACK", "VWAP_BELOW"]
+        elif vwap_reclaim_short:
+            entry_trigger = "vwap_reclaim"
+            confidence = 0.55
+            active_indicators = ["VWAP_RECLAIM", "VOL_CONFIRM"]
         else:
             entry_trigger = "trend_momentum"
             active_indicators = ["EMA_TREND", "TREND_MOMENTUM", "VWAP_BELOW"]
