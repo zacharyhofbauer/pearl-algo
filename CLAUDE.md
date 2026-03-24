@@ -70,3 +70,25 @@
 - Overnight sessions (18:00-08:30 ET) historically lose money (-$4,477 net)
 - Short trades have poor win rate compared to longs
 - Session filter is intentionally OFF — user wants all hours open for OpenClaw agent decisions
+
+## Pearl Algo Memory Bridge (REQUIRED at session end)
+
+Write what was built to Pearl Algo's memory so the agent stays in sync with code changes:
+
+**From px-core, the bridge runs remotely:**
+```bash
+# At end of every session, SSH to Mac and write journal entry:
+ssh pearlassistant@$(tailscale ip -4 2>/dev/null || echo 'PEARL-Macbook')   "bash ~/.openclaw/pearl-workspace/scripts/cc-session-bridge.sh '$(cat <<SUMMARY
+- [what was built/changed]
+- [key decisions]
+- [files changed]
+- [status: tests passing/failing]
+SUMMARY
+)' 'pearl-algo-workspace'" 2>/dev/null || echo 'Bridge unavailable - manually update Pearl Algo MEMORY.md'
+```
+
+**What to include:**
+- Algorithm changes and why
+- Risk/circuit breaker logic changes
+- Test results
+- Anything Pearl Algo agent needs to know
