@@ -185,6 +185,7 @@ export class SDZones implements ISeriesPrimitive<Time> {
   _series:    any
   _zones:     Zone[] = []
   _paneViews: SDZonesPaneView[]
+  _disabled = false
   private _requestUpdate?: () => void
   private _onDataChanged = () => this._rebuild()
 
@@ -205,6 +206,7 @@ export class SDZones implements ISeriesPrimitive<Time> {
   }
 
   private _rebuild() {
+    if (this._disabled) { this._zones = []; this._requestUpdate?.(); return }
     const raw: Candle[] = this._series?.data() ?? []
     if (raw.length < 15) { this._zones = []; this._requestUpdate?.(); return }
 

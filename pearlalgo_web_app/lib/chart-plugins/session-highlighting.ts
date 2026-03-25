@@ -213,6 +213,7 @@ export class SessionHighlighting implements ISeriesPrimitive<Time> {
   _series:    any
   _spans:     InternalSpan[] = []
   _paneViews: SessionPaneView[]
+  _disabled = false
   private _requestUpdate?: () => void
   private _onDataChanged = () => this._rebuild()
 
@@ -233,6 +234,7 @@ export class SessionHighlighting implements ISeriesPrimitive<Time> {
   }
 
   private _rebuild() {
+    if (this._disabled) { this._spans = []; this._requestUpdate?.(); return }
     const data = this._series?.data() ?? []
     if (data.length < 2) { this._spans = []; this._requestUpdate?.(); return }
 

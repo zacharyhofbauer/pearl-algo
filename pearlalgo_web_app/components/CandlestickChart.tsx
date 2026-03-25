@@ -1174,15 +1174,24 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         visible: indicatorSettings.vwap,
       })
     }
-    // TBT Trendlines: clear when disabled
+    // TBT Trendlines: set disabled flag so _rebuild() is suppressed
     if (tbtPluginRef.current) {
       const tbt = tbtPluginRef.current as any
-      if (!indicatorSettings.tbtTrendlines) {
+      tbt._disabled = !indicatorSettings.tbtTrendlines
+      if (tbt._disabled) {
         tbt._bands = []
         tbt._requestUpdate?.()
       } else {
         tbt._rebuild?.()
       }
+    }
+    // Sessions: set disabled flag
+    if (sessionPluginRef.current) {
+      (sessionPluginRef.current as any)._disabled = !indicatorSettings.sessions
+    }
+    // SD Zones: set disabled flag
+    if (sdZonesPluginRef.current) {
+      (sdZonesPluginRef.current as any)._disabled = !indicatorSettings.sdZones
     }
   }, [indicatorSettings.sessions, indicatorSettings.sdZones, indicatorSettings.volume, indicatorSettings.vwap, indicatorSettings.tbtTrendlines])
 

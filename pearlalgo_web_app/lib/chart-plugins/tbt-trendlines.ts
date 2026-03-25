@@ -161,6 +161,7 @@ export class TBTTrendlines implements ISeriesPrimitive<Time> {
   _series:    any
   _bands:     InternalBand[] = []
   _paneViews: TBTPaneView[]
+  _disabled = false
   private _requestUpdate?: () => void
   private _onDataChanged = () => this._rebuild()
 
@@ -181,6 +182,7 @@ export class TBTTrendlines implements ISeriesPrimitive<Time> {
   }
 
   private _rebuild() {
+    if (this._disabled) { this._bands = []; this._requestUpdate?.(); return }
     const raw: Candle[] = this._series?.data() ?? []
     if (raw.length < 20) { this._bands = []; this._requestUpdate?.(); return }
 
