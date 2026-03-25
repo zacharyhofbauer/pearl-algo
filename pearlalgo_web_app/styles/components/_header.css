@@ -909,3 +909,107 @@
 @keyframes account-gate-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ============================================================================
+ * Mobile-First Header — TradingView Mobile Quality
+ * ============================================================================ */
+
+@media (max-width: 640px) {
+  /* Compact header — single tight row */
+  .header-combined {
+    padding: 0 6px;
+  }
+
+  .header-row-single {
+    padding: 3px 0;
+    gap: 4px;
+  }
+
+  /* Timeframes — horizontal scroll, no wrap */
+  .header-timeframe {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .header-timeframe::-webkit-scrollbar { display: none; }
+
+  .tf-btn {
+    padding: 4px 7px !important;
+    font-size: 10px !important;
+    flex-shrink: 0;
+  }
+
+  /* Action buttons — compact */
+  .header-actions {
+    gap: 1px;
+    flex-shrink: 0;
+  }
+
+  .header-action-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  /* Badges — horizontal scroll */
+  .header-badges {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .header-badges::-webkit-scrollbar { display: none; }
+
+  .badge {
+    font-size: 9px !important;
+    padding: 2px 5px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Indicators dropdown — full width on mobile */
+  .indicators-dropdown {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    border-radius: 12px 12px 0 0 !important;
+    max-height: 60vh !important;
+    min-width: 100% !important;
+    z-index: 9999 !important;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.5) !important;
+  }
+
+  /* Badge tooltip — full width bar */
+  .badge-tooltip {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 400px) {
+  .tf-btn {
+    padding: 3px 5px !important;
+    font-size: 9px !important;
+  }
+
+  .badge {
+    font-size: 8px !important;
+    padding: 1px 4px !important;
+  }
+
+  .header-action-btn {
+    width: 26px;
+    height: 26px;
+  }
+
+  .header-action-btn svg {
+    width: 13px;
+    height: 13px;
+  }
+}

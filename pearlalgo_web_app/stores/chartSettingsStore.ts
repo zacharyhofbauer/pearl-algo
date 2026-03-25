@@ -111,11 +111,11 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   volume: true,
   vwapBands: false,
   keyLevels: true,
-  tbtTrendlines: true,
-  srPowerZones: true,
+  tbtTrendlines: false,
+  srPowerZones: false,
   rsi: true,
-  sessions: true,
-  sdZones: true,
+  sessions: false,
+  sdZones: false,
 }
 
 export const useChartSettingsStore = create<ChartSettingsStore>()(

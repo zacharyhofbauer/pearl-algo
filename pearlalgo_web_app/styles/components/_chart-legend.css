@@ -4,15 +4,7 @@
  * ============================================================================ */
 
 .chart-legend {
-  position: absolute;
-  top: 44px;  /* Below info bar + OHLC bar */
-  left: 4px;
-  z-index: var(--z-overlay, 100);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  pointer-events: auto;
-  max-width: min(320px, calc(100% - 8px));
+  display: none; /* Disabled — indicators managed via header dropdown */
 }
 
 /* Toggle button — always visible */

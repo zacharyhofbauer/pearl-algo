@@ -21,7 +21,8 @@
 .tv-layout .header-combined {
   padding: 0 12px !important;
   border-bottom: 1px solid #1e222d;
-  background: #131722 !important;
+  background: #161a25 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 @media (min-width: 641px) {
@@ -110,12 +111,12 @@
 .tv-panel-area .data-panel-header {
   padding: 6px 12px !important;
   background: transparent !important;
-  border-bottom: 1px solid #1e222d;
+  border-bottom: 1px solid rgba(42, 46, 57, 0.5) !important;
   min-height: 32px;
 }
 
 .tv-panel-area .data-panel-title {
-  font-size: 12px !important;
+  font-size: 13px !important;
   font-weight: 700;
   letter-spacing: 0.8px;
 }
@@ -268,43 +269,71 @@
 /* Indicators dropdown */
 .indicators-dropdown {
   position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-dropdown, 1000);
   background: #1e222d;
   border: 1px solid #2a2e39;
   border-radius: 6px;
-  padding: 6px 0;
-  min-width: 160px;
-  z-index: var(--z-overlay);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 220px;
+  padding: 4px 0;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.indicators-section-header {
+  padding: 6px 12px 4px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary, #5d6067);
+  border-top: 1px solid rgba(42, 46, 57, 0.5);
+  margin-top: 2px;
+}
+
+.indicators-section-header:first-child {
+  border-top: none;
+  margin-top: 0;
 }
 
 .indicator-toggle-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 7px 12px;
   font-size: 12px;
-  color: #d1d4dc;
+  color: var(--text-secondary, #787b86);
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.1s;
 }
 
 .indicator-toggle-item:hover {
   background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #d1d4dc);
 }
 
-.indicator-toggle-item .indicator-dot {
+.indicator-color-dot {
+  width: 10px;
+  height: 3px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.indicator-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #2a2e39;
-  transition: background 0.15s ease;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: background 0.15s, box-shadow 0.15s;
 }
 
-.indicator-toggle-item .indicator-dot.active {
-  background: var(--accent-cyan);
+.indicator-dot.active {
+  background: var(--accent-cyan, #2962ff);
+  box-shadow: 0 0 6px rgba(41, 98, 255, 0.4);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

@@ -760,7 +760,7 @@
 
 .chart-ohlc-bar {
   position: absolute;
-  top: 24px;
+  top: 28px;
   left: 0;
   right: 0;
   z-index: var(--z-overlay-low);
@@ -1502,6 +1502,66 @@
     right: 10px;
     left: 10px;
     max-width: none;
+  }
+}
+
+/* ============================================================================
+ * Mobile Chart — TradingView Mobile Quality
+ * ============================================================================ */
+
+@media (max-width: 640px) {
+  /* Marker tooltips as bottom sheet on mobile */
+  .marker-tooltip {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding: 16px !important;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5) !important;
+    z-index: 9999 !important;
+  }
+
+  .chart-info-bar {
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+
+  .chart-info-bar .info-price .price-value {
+    font-size: 14px;
+  }
+
+  .chart-ohlc-bar {
+    font-size: 9px;
+    top: 22px;
+    gap: 3px;
+  }
+
+  .chart-ohlc-bar .ohlc-range {
+    display: none;
+  }
+}
+
+@media (max-width: 400px) {
+  .chart-info-bar {
+    padding: 1px 4px;
+    font-size: 10px;
+  }
+
+  .chart-info-bar .info-price .price-value {
+    font-size: 12px;
+  }
+
+  .chart-ohlc-bar {
+    font-size: 8px;
+    top: 18px;
+  }
+
+  .chart-ohlc-bar .ohlc-volume {
+    display: none;
   }
 }
 

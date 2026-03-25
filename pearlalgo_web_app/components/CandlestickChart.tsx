@@ -11,7 +11,6 @@ import { TBTTrendlines }          from '@/lib/chart-plugins/tbt-trendlines'
 import { TradeZones, type TradeZone } from '@/lib/chart-plugins/trade-zones'
 import { KeyLevelsPlugin }      from '@/lib/chart-plugins/key-levels'
 import { SRPowerZones }         from '@/lib/chart-plugins/sr-power-zones'
-import ChartLegend from '@/components/chart/ChartLegend'
 
 interface PositionLine {
   price: number
@@ -983,8 +982,12 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const series = candleSeriesRef.current
     if (!series || !data?.length) return
 
+    // Clear existing key level lines
     keyLevelLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
     keyLevelLinesRef.current = []
+
+    // Skip rendering if key levels are disabled
+    if (!indicatorSettings.keyLevels) return
 
     const toET = (unix: number) => unix - 4 * 3600
     const nowET = toET(data[data.length - 1].time as number)
@@ -1125,7 +1128,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
       keyLevelLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
       keyLevelLinesRef.current = []
     }
-  }, [data])
+  }, [data, indicatorSettings.keyLevels])
 
   // Update S&R Power overlay when indicators change or toggle
   useEffect(() => {
@@ -1171,7 +1174,17 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         visible: indicatorSettings.vwap,
       })
     }
-  }, [indicatorSettings.sessions, indicatorSettings.sdZones, indicatorSettings.volume, indicatorSettings.vwap])
+    // TBT Trendlines: clear when disabled
+    if (tbtPluginRef.current) {
+      const tbt = tbtPluginRef.current as any
+      if (!indicatorSettings.tbtTrendlines) {
+        tbt._trendlines = []
+        tbt._requestUpdate?.()
+      } else {
+        tbt._rebuild?.()
+      }
+    }
+  }, [indicatorSettings.sessions, indicatorSettings.sdZones, indicatorSettings.volume, indicatorSettings.vwap, indicatorSettings.tbtTrendlines])
 
   // Format price
   const formatPrice = (price?: number) => {
@@ -1239,19 +1252,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           <span className="countdown-time">{candleCountdown}</span>
         </div>
 
-        {/* Legend Section */}
-        <div className="info-legend">
-          <span className="leg"><span className="line vwap" /> VWAP</span>
-          <span className="leg"><span className="line vwap"></span>V</span>
-          <span className="leg-sep"></span>
-          <span className="leg"><span className="line entry"></span>E</span>
-          <span className="leg"><span className="line sl"></span>SL</span>
-          <span className="leg"><span className="line tp"></span>TP</span>
-          <span className="leg-sep"></span>
-          <span className="leg"><span className="mkr entry">▲●</span>In</span>
-          <span className="leg"><span className="mkr win">●</span>W</span>
-          <span className="leg"><span className="mkr loss">●</span>L</span>
-        </div>
       </div>
 
       {/* OHLC Data Bar — crosshair or latest candle */}
@@ -1279,8 +1279,6 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
         )
       })()}
 
-      {/* TradingView-style indicator legend */}
-      <ChartLegend />
 
       {/* Marker Tooltip - Single Trade */}
       {tooltip.visible && tooltip.marker && !tooltip.groupedMarkers && (

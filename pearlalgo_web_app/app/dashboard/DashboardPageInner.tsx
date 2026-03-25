@@ -506,17 +506,35 @@ export default function DashboardPageInner() {
               </button>
               {showIndicatorsDropdown && (
                 <div className="indicators-dropdown" onClick={(e) => e.stopPropagation()}>
+                  <div className="indicators-section-header">Overlays</div>
                   {([
-                    { key: 'ema9' as const, label: 'EMA 9' },
-                    { key: 'ema21' as const, label: 'EMA 21' },
-                    { key: 'vwap' as const, label: 'VWAP' },
-                    { key: 'vwapBands' as const, label: 'VWAP Bands' },
-                    { key: 'keyLevels' as const, label: 'Key Levels' },
-                    { key: 'bollingerBands' as const, label: 'Bollinger Bands' },
-                    { key: 'atrBands' as const, label: 'ATR Bands' },
-                    { key: 'volume' as const, label: 'Volume' },
-                  ]).map(({ key, label }) => (
+                    { key: 'ema9' as const, label: 'EMA Crossover', color: '#00d4ff' },
+                    { key: 'vwap' as const, label: 'VWAP', color: 'rgba(100,181,246,0.85)' },
+                    { key: 'vwapBands' as const, label: 'VWAP Bands', color: 'rgba(76,175,80,0.5)' },
+                    { key: 'keyLevels' as const, label: 'Key Levels', color: '#08bcd4' },
+                    { key: 'sessions' as const, label: 'Sessions', color: 'rgba(8,153,129,0.5)' },
+                    { key: 'sdZones' as const, label: 'S/D Zones', color: 'rgba(255,193,7,0.4)' },
+                    { key: 'tbtTrendlines' as const, label: 'TBT Trendlines', color: '#ff9800' },
+                    { key: 'bollingerBands' as const, label: 'Bollinger Bands', color: 'rgba(41,98,255,0.7)' },
+                    { key: 'atrBands' as const, label: 'ATR Bands', color: 'rgba(255,152,0,0.5)' },
+                    { key: 'srPowerZones' as const, label: 'S&R Power', color: '#ab47bc' },
+                  ]).map(({ key, label, color }) => (
+                    <div key={key} className="indicator-toggle-item" onClick={() => {
+                      if (key === 'ema9') { toggleIndicator('ema9'); toggleIndicator('ema21') }
+                      else { toggleIndicator(key) }
+                    }}>
+                      <span className="indicator-color-dot" style={{ background: color }} />
+                      <span>{label}</span>
+                      <span className={`indicator-dot ${indicatorSettings[key] ? 'active' : ''}`} />
+                    </div>
+                  ))}
+                  <div className="indicators-section-header">Panes</div>
+                  {([
+                    { key: 'rsi' as const, label: 'RSI (14)', color: '#7c4dff' },
+                    { key: 'volume' as const, label: 'Volume', color: '#26a69a' },
+                  ]).map(({ key, label, color }) => (
                     <div key={key} className="indicator-toggle-item" onClick={() => toggleIndicator(key)}>
+                      <span className="indicator-color-dot" style={{ background: color }} />
                       <span>{label}</span>
                       <span className={`indicator-dot ${indicatorSettings[key] ? 'active' : ''}`} />
                     </div>

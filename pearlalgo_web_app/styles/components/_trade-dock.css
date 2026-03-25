@@ -142,9 +142,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
+  padding: 8px 12px;
   background: var(--bg-primary);
-  border-radius: 0;
+  border-radius: 3px;
 }
 
 .trade-left {
@@ -273,15 +273,26 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
+  padding: 8px 12px;
   background: var(--bg-primary);
-  border-radius: 0;
+  border-radius: 3px;
+  border: 1px solid rgba(42, 46, 57, 0.3);
+  border-left: 3px solid transparent;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, border-left-color 0.15s ease;
+}
+
+.recent-trade.trade-win {
+  border-left-color: var(--accent-green);
+}
+
+.recent-trade.trade-loss {
+  border-left-color: var(--accent-red);
 }
 
 .recent-trade:hover {
   background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .recent-trade.expanded {
@@ -309,7 +320,7 @@
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0;
-  padding: 10px;
+  padding: 12px;
 }
 
 .trade-detail-row {
@@ -402,7 +413,7 @@
 }
 
 .trade-stats-summary {
-  padding: 8px 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -553,7 +564,7 @@
 }
 
 .trade-dock-content {
-  padding: 8px 12px;
+  padding: 12px;
 }
 
 .trade-dock-header-stats {
@@ -568,37 +579,46 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-radius: 0;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(42, 46, 57, 0.35);
-  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
 }
 
 .trade-dock-header-stats .dock-stat-k {
-  font-size: 9px;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   color: var(--text-tertiary);
 }
 
 .trade-dock-header-stats .dock-stat-v {
   font-family: var(--font-mono);
-  font-weight: 900;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
+.trade-dock-header-stats .dock-stat.pnl {
+  font-size: 13px;
+}
+
+.trade-dock-header-stats .dock-stat.pnl .dock-stat-v {
+  font-weight: 800;
+  font-size: 14px;
+}
+
 .trade-dock-header-stats .dock-stat.pnl.positive {
-  background: rgba(38, 166, 154, 0.08);
-  border-color: rgba(38, 166, 154, 0.2);
+  background: rgba(38, 166, 154, 0.10);
+  border-color: rgba(38, 166, 154, 0.25);
 }
 
 .trade-dock-header-stats .dock-stat.pnl.negative {
-  background: rgba(239, 83, 80, 0.08);
-  border-color: rgba(239, 83, 80, 0.2);
+  background: rgba(239, 83, 80, 0.10);
+  border-color: rgba(239, 83, 80, 0.25);
 }
 
 .trade-dock-header-stats .dock-stat.pnl.positive .dock-stat-v { color: var(--accent-green); }
@@ -636,20 +656,31 @@
 .trade-perf-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
-  padding: 10px;
+  gap: 8px;
+  padding: 12px;
   border-top: 1px solid var(--border-color);
 }
 
 .trade-perf-pill {
   background: var(--bg-card);
-  border: 1px solid rgba(42, 46, 57, 0.35);
-  border-radius: 0;
-  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  transition: border-color 0.15s ease;
+}
+
+.trade-perf-pill.positive {
+  background: rgba(38, 166, 154, 0.06);
+  border-color: rgba(38, 166, 154, 0.18);
+}
+
+.trade-perf-pill.negative {
+  background: rgba(239, 83, 80, 0.06);
+  border-color: rgba(239, 83, 80, 0.18);
 }
 
 .trade-perf-label {
@@ -857,45 +888,46 @@
 .trade-dock-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(42, 46, 57, 0.35);
-  background: rgba(255, 255, 255, 0.02);
+  gap: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  font-size: 12px;
 }
 
 .trade-dock-tab {
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 900;
-  padding: 6px 10px;
+  font-weight: 500;
+  padding: 6px 14px;
   border-radius: 0;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-default),
-              border-color var(--duration-fast) var(--ease-default),
-              color var(--duration-fast) var(--ease-default);
+  transition: color var(--duration-fast) var(--ease-default),
+              border-color var(--duration-fast) var(--ease-default);
 }
 
 .trade-dock-tab:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: transparent;
 }
 
 .trade-dock-tab.active {
   color: var(--text-primary);
-  background: rgba(var(--accent-green-rgb), 0.14);
-  border-color: rgba(var(--accent-green-rgb), 0.25);
+  background: transparent;
+  border-bottom-color: var(--accent-cyan, #2962ff);
 }
 
 .trade-dock-count {
-  margin-left: 6px;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 0;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(42, 46, 57, 0.35);
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
   color: var(--text-tertiary);
 }
 
@@ -1032,8 +1064,8 @@
 
 @media (max-width: 480px) {
   .trade-dock-tabs {
-    padding: 6px 8px;
-    gap: 2px;
+    padding: 0 8px;
+    gap: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -1063,5 +1095,62 @@
   }
   .trade-dock-last {
     display: none;
+  }
+}
+
+/* ============================================================================
+ * Mobile Trade Dock — TradingView Mobile Quality
+ * ============================================================================ */
+
+@media (max-width: 640px) {
+  .trade-dock-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 2px 8px;
+    gap: 0;
+  }
+
+  .trade-dock-tabs::-webkit-scrollbar { display: none; }
+
+  .trade-dock-tab {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+
+  .trade-dock-content {
+    padding: 6px 8px;
+  }
+
+  .trade-dock-header-stats {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 6px;
+  }
+
+  .trade-dock-header-stats::-webkit-scrollbar { display: none; }
+
+  .dock-stat {
+    flex-shrink: 0;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 400px) {
+  .trade-dock-tab {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .dock-stat {
+    font-size: 9px;
+  }
+
+  .trade-dock-content {
+    padding: 4px 6px;
   }
 }
