@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts'
+import { LineSeries, AreaSeries } from 'lightweight-charts'
 import type { ATRBandsData } from '@/stores'
 
 interface ATRBandsOverlayProps {
@@ -32,7 +33,7 @@ export default function ATRBandsOverlay({
     if (!chart) return
 
     // Upper band fill (area)
-    const upperFill = chart.addAreaSeries({
+    const upperFill = chart.addSeries(AreaSeries, {
       topColor: ATR_COLORS.fill,
       bottomColor: 'transparent',
       lineColor: 'transparent',
@@ -43,7 +44,7 @@ export default function ATRBandsOverlay({
     })
 
     // Lower band fill (area)
-    const lowerFill = chart.addAreaSeries({
+    const lowerFill = chart.addSeries(AreaSeries, {
       topColor: 'transparent',
       bottomColor: ATR_COLORS.fill,
       lineColor: 'transparent',
@@ -54,7 +55,7 @@ export default function ATRBandsOverlay({
     })
 
     // Upper band line
-    const upperBand = chart.addLineSeries({
+    const upperBand = chart.addSeries(LineSeries, {
       color: ATR_COLORS.upper,
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -64,7 +65,7 @@ export default function ATRBandsOverlay({
     })
 
     // Lower band line
-    const lowerBand = chart.addLineSeries({
+    const lowerBand = chart.addSeries(LineSeries, {
       color: ATR_COLORS.lower,
       lineWidth: 1,
       lineStyle: 2, // dashed

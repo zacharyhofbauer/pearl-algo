@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef } from 'react'
-import { createChart, IChartApi, LineData } from 'lightweight-charts'
+import { createChart, IChartApi, LineData, LineSeries } from 'lightweight-charts'
 
 interface DataPoint {
   time: string
@@ -52,7 +52,7 @@ const EquityCurve = React.memo(function EquityCurve({ data, height = 280 }: Equi
       return true
     })
 
-    const series = chart.addLineSeries({
+    const series = chart.addSeries(LineSeries, {
       color: '#00d4ff',
       lineWidth: 2,
       crosshairMarkerVisible: true,

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts'
+import { LineSeries, AreaSeries } from 'lightweight-charts'
 import type { BollingerBandsData } from '@/stores'
 
 interface BollingerBandsOverlayProps {
@@ -37,7 +38,7 @@ export default function BollingerBandsOverlay({
     // Using area series for fill effect between bands
 
     // Upper band fill (area from middle to upper)
-    const upperFill = chart.addAreaSeries({
+    const upperFill = chart.addSeries(AreaSeries, {
       topColor: BB_COLORS.fill,
       bottomColor: 'transparent',
       lineColor: 'transparent',
@@ -48,7 +49,7 @@ export default function BollingerBandsOverlay({
     })
 
     // Lower band fill (area from lower to middle)
-    const lowerFill = chart.addAreaSeries({
+    const lowerFill = chart.addSeries(AreaSeries, {
       topColor: 'transparent',
       bottomColor: BB_COLORS.fill,
       lineColor: 'transparent',
@@ -59,7 +60,7 @@ export default function BollingerBandsOverlay({
     })
 
     // Upper band line
-    const upperBand = chart.addLineSeries({
+    const upperBand = chart.addSeries(LineSeries, {
       color: BB_COLORS.upper,
       lineWidth: 1,
       lineStyle: 0,
@@ -69,7 +70,7 @@ export default function BollingerBandsOverlay({
     })
 
     // Middle band (SMA)
-    const middleBand = chart.addLineSeries({
+    const middleBand = chart.addSeries(LineSeries, {
       color: BB_COLORS.middle,
       lineWidth: 1,
       lineStyle: 2, // dashed
@@ -79,7 +80,7 @@ export default function BollingerBandsOverlay({
     })
 
     // Lower band line
-    const lowerBand = chart.addLineSeries({
+    const lowerBand = chart.addSeries(LineSeries, {
       color: BB_COLORS.lower,
       lineWidth: 1,
       lineStyle: 0,

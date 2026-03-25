@@ -37,9 +37,7 @@ const mockUnsubscribeCrosshairMove = jest.fn()
 const mockChartRemove = jest.fn()
 
 const mockChartInstance = {
-  addCandlestickSeries: jest.fn(() => mockSeriesInstance),
-  addHistogramSeries: jest.fn(() => mockSeriesInstance),
-  addLineSeries: jest.fn(() => mockSeriesInstance),
+  addSeries: jest.fn(() => mockSeriesInstance),
   applyOptions: jest.fn(),
   timeScale: mockTimeScale,
   subscribeCrosshairMove: mockSubscribeCrosshairMove,
@@ -49,8 +47,12 @@ const mockChartInstance = {
 
 jest.mock('lightweight-charts', () => ({
   createChart: jest.fn(() => mockChartInstance),
+  createSeriesMarkers: jest.fn(() => ({ setMarkers: jest.fn(), markers: jest.fn(() => []) })),
   ColorType: { Solid: 'Solid' },
   CrosshairMode: { Normal: 0 },
+  LineSeries: {},
+  CandlestickSeries: {},
+  HistogramSeries: {},
 }))
 
 // Mock next/image – render a simple img
@@ -142,10 +144,8 @@ describe('CandlestickChart', () => {
     it('creates candlestick, volume, and indicator series', () => {
       render(<CandlestickChart data={makeSampleData()} />)
 
-      expect(mockChartInstance.addCandlestickSeries).toHaveBeenCalled()
-      expect(mockChartInstance.addHistogramSeries).toHaveBeenCalled()
-      // At least 3 line series: EMA9, EMA21, VWAP, BB(3), ATR(2), connection line
-      expect(mockChartInstance.addLineSeries).toHaveBeenCalled()
+      // v5: all series created via chart.addSeries(SeriesType, options)
+      expect(mockChartInstance.addSeries).toHaveBeenCalled()
     })
 
     it('renders the chart info bar with timeframe', () => {

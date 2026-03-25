@@ -11,6 +11,7 @@ import { TBTTrendlines }          from '@/lib/chart-plugins/tbt-trendlines'
 import { TradeZones, type TradeZone } from '@/lib/chart-plugins/trade-zones'
 import { KeyLevelsPlugin }      from '@/lib/chart-plugins/key-levels'
 import { SRPowerZones }         from '@/lib/chart-plugins/sr-power-zones'
+import ChartLegend from '@/components/chart/ChartLegend'
 
 interface PositionLine {
   price: number
@@ -1277,6 +1278,9 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
           </div>
         )
       })()}
+
+      {/* TradingView-style indicator legend */}
+      <ChartLegend />
 
       {/* Marker Tooltip - Single Trade */}
       {tooltip.visible && tooltip.marker && !tooltip.groupedMarkers && (

@@ -1,9 +1,9 @@
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -28,7 +28,7 @@ interface PixelLevel {
   rightX: number  // right edge of visible area
 }
 
-class KeyLevelsRenderer implements ISeriesPrimitivePaneRenderer {
+class KeyLevelsRenderer implements IPrimitivePaneRenderer {
   private _levels: PixelLevel[]
   constructor(levels: PixelLevel[]) { this._levels = levels }
 
@@ -66,12 +66,12 @@ class KeyLevelsRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class KeyLevelsPaneView implements ISeriesPrimitivePaneView {
+class KeyLevelsPaneView implements IPrimitivePaneView {
   private _plugin: KeyLevelsPlugin
   constructor(plugin: KeyLevelsPlugin) { this._plugin = plugin }
   update() {}
 
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const series = this._plugin._series
     if (!series) return new KeyLevelsRenderer([])
 
@@ -90,7 +90,7 @@ class KeyLevelsPaneView implements ISeriesPrimitivePaneView {
     return new KeyLevelsRenderer(pixelLevels)
   }
 
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 export class KeyLevelsPlugin implements ISeriesPrimitive<Time> {

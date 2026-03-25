@@ -2,10 +2,10 @@
 // @ts-nocheck — v4 API types
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -32,7 +32,7 @@ interface SessionSpan {
   label:     string
 }
 
-class SessionRenderer implements ISeriesPrimitivePaneRenderer {
+class SessionRenderer implements IPrimitivePaneRenderer {
   private _spans: SessionSpan[]
   constructor(spans: SessionSpan[]) { this._spans = spans }
 
@@ -127,12 +127,12 @@ class SessionRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class SessionPaneView implements ISeriesPrimitivePaneView {
+class SessionPaneView implements IPrimitivePaneView {
   private _plugin: SessionHighlighting
   constructor(plugin: SessionHighlighting) { this._plugin = plugin }
   update() {}
 
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const chart = this._plugin._chart
     const series = this._plugin._series
     if (!chart || !series) return new SessionRenderer([])
@@ -159,7 +159,7 @@ class SessionPaneView implements ISeriesPrimitivePaneView {
     return new SessionRenderer(spans)
   }
 
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 interface SessionInfo {

@@ -1,9 +1,9 @@
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -15,7 +15,7 @@ export interface Zone {
   kind:        'supply' | 'demand'
 }
 
-class SDZonesRenderer implements ISeriesPrimitivePaneRenderer {
+class SDZonesRenderer implements IPrimitivePaneRenderer {
   private _zones: Zone[]
   private _toX: (t: number) => number
   private _toY: (p: number) => number | null
@@ -122,11 +122,11 @@ class SDZonesRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class SDZonesPaneView implements ISeriesPrimitivePaneView {
+class SDZonesPaneView implements IPrimitivePaneView {
   private _plugin: SDZones
   constructor(plugin: SDZones) { this._plugin = plugin }
   update() {}
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const chart  = this._plugin._chart
     const series = this._plugin._series
     if (!chart || !series) return new SDZonesRenderer([], () => -1, () => null)
@@ -135,7 +135,7 @@ class SDZonesPaneView implements ISeriesPrimitivePaneView {
     const toY = (p: number) => series.priceToCoordinate(p) as number | null
     return new SDZonesRenderer(this._plugin._zones, toX, toY)
   }
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 interface Candle { time: number; high: number; low: number; close: number }

@@ -11,10 +11,10 @@
 
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -27,7 +27,7 @@ export interface TradeZone {
 
 // ─── Renderer ─────────────────────────────────────────────────────────────────
 
-class TradeZonesRenderer implements ISeriesPrimitivePaneRenderer {
+class TradeZonesRenderer implements IPrimitivePaneRenderer {
   private _zones:  TradeZone[]
   private _toY:    (p: number) => number | null
   private _width:  number
@@ -85,21 +85,21 @@ class TradeZonesRenderer implements ISeriesPrimitivePaneRenderer {
 
 // ─── Pane View ────────────────────────────────────────────────────────────────
 
-class TradeZonesPaneView implements ISeriesPrimitivePaneView {
+class TradeZonesPaneView implements IPrimitivePaneView {
   private _plugin: TradeZones
 
   constructor(plugin: TradeZones) { this._plugin = plugin }
 
   update() {}
 
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const series = this._plugin._series
     if (!series) return new TradeZonesRenderer([], () => null, 0)
     const toY = (p: number) => series.priceToCoordinate(p) as number | null
     return new TradeZonesRenderer(this._plugin._zones, toY, 0)
   }
 
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────

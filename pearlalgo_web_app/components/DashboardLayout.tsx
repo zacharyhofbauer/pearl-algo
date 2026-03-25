@@ -1,7 +1,8 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import type { RightPanelTab } from '@/stores/uiStore'
+import PaneDivider from '@/components/chart/PaneDivider'
 
 interface PullToRefreshProps {
   pullDistance: number
@@ -32,6 +33,21 @@ const DashboardLayout = React.memo(function DashboardLayout({
   onCloseRightPanel,
   rightPanelContent,
 }: DashboardLayoutProps) {
+  const DEFAULT_PANEL_HEIGHT = 280
+  const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT)
+  const mainRef = useRef<HTMLDivElement>(null)
+
+  const handlePaneResize = useCallback((deltaY: number) => {
+    setPanelHeight(prev => {
+      const next = prev - deltaY
+      return Math.max(60, Math.min(next, 600))
+    })
+  }, [])
+
+  const handlePaneReset = useCallback(() => {
+    setPanelHeight(DEFAULT_PANEL_HEIGHT)
+  }, [])
+
   return (
     <>
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -97,11 +113,15 @@ const DashboardLayout = React.memo(function DashboardLayout({
             </button>
           </aside>
 
-          <div className="tv-main">
+          <div className="tv-main" ref={mainRef}>
             <div className="tv-chart-area">
               {chart}
             </div>
-            <div className="tv-panel-area">
+            <PaneDivider onResize={handlePaneResize} onDoubleClick={handlePaneReset} />
+            <div
+              className="tv-panel-area"
+              style={{ flex: `0 0 ${panelHeight}px`, maxHeight: `${panelHeight}px` }}
+            >
               {panels}
             </div>
           </div>

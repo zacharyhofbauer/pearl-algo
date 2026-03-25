@@ -1,9 +1,9 @@
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -24,7 +24,7 @@ interface TrendBand {
   grayFill: string      // secondary fill (mid → bot)
 }
 
-class TBTRenderer implements ISeriesPrimitivePaneRenderer {
+class TBTRenderer implements IPrimitivePaneRenderer {
   private _bands: TrendBand[]
   constructor(bands: TrendBand[]) { this._bands = bands }
 
@@ -82,12 +82,12 @@ class TBTRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class TBTPaneView implements ISeriesPrimitivePaneView {
+class TBTPaneView implements IPrimitivePaneView {
   private _plugin: TBTTrendlines
   constructor(plugin: TBTTrendlines) { this._plugin = plugin }
   update() {}
 
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const chart  = this._plugin._chart
     const series = this._plugin._series
     if (!chart || !series) return new TBTRenderer([])
@@ -110,7 +110,7 @@ class TBTPaneView implements ISeriesPrimitivePaneView {
     )
   }
 
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 interface Candle { time: number; high: number; low: number; close: number }

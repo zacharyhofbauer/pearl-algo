@@ -1,9 +1,9 @@
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
   ISeriesApi,
 } from 'lightweight-charts'
@@ -13,7 +13,7 @@ import {
  * VWAP AA band series, matching TradingView's "Background" fill option.
  */
 
-class BandFillRenderer implements ISeriesPrimitivePaneRenderer {
+class BandFillRenderer implements IPrimitivePaneRenderer {
   private _points: Array<{ x: number; upperY: number; lowerY: number }>
   private _fillColor: string
 
@@ -51,12 +51,12 @@ class BandFillRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class BandFillPaneView implements ISeriesPrimitivePaneView {
+class BandFillPaneView implements IPrimitivePaneView {
   private _plugin: VWAPBandFill
   constructor(plugin: VWAPBandFill) { this._plugin = plugin }
   update() {}
 
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const chart = this._plugin._chart
     const upperSeries = this._plugin._upperSeries
     const lowerSeries = this._plugin._lowerSeries
@@ -93,7 +93,7 @@ class BandFillPaneView implements ISeriesPrimitivePaneView {
     return new BandFillRenderer(points, this._plugin._fillColor)
   }
 
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 export class VWAPBandFill implements ISeriesPrimitive<Time> {

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef } from 'react'
-import { createChart, IChartApi, HistogramData } from 'lightweight-charts'
+import { createChart, IChartApi, HistogramData, HistogramSeries } from 'lightweight-charts'
 
 interface DayData {
   day: string
@@ -46,7 +46,7 @@ const DailyPnLChart = React.memo(function DailyPnLChart({ data, height = 200 }: 
       color: d.pnl >= 0 ? 'rgba(0, 230, 118, 0.7)' : 'rgba(255, 82, 82, 0.7)',
     }))
 
-    const series = chart.addHistogramSeries({
+    const series = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'price', precision: 0, minMove: 1 },
     })
     series.setData(barData)

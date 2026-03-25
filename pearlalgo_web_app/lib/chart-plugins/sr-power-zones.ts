@@ -1,9 +1,9 @@
 import {
   ISeriesPrimitive,
-  ISeriesPrimitivePaneView,
-  ISeriesPrimitivePaneRenderer,
+  IPrimitivePaneView,
+  IPrimitivePaneRenderer,
   SeriesAttachedParameter,
-  SeriesPrimitivePaneViewZOrder,
+  PrimitivePaneViewZOrder,
   Time,
 } from 'lightweight-charts'
 
@@ -14,7 +14,7 @@ export interface SRPowerZoneData {
   sellPower: number
 }
 
-class SRPowerRenderer implements ISeriesPrimitivePaneRenderer {
+class SRPowerRenderer implements IPrimitivePaneRenderer {
   private _data: SRPowerZoneData | null
   private _toY: (p: number) => number | null
 
@@ -101,17 +101,17 @@ class SRPowerRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-class SRPowerPaneView implements ISeriesPrimitivePaneView {
+class SRPowerPaneView implements IPrimitivePaneView {
   private _plugin: SRPowerZones
   constructor(plugin: SRPowerZones) { this._plugin = plugin }
   update() {}
-  renderer(): ISeriesPrimitivePaneRenderer {
+  renderer(): IPrimitivePaneRenderer {
     const series = this._plugin._series
     if (!series) return new SRPowerRenderer(null, () => null)
     const toY = (p: number) => series.priceToCoordinate(p) as number | null
     return new SRPowerRenderer(this._plugin._data, toY)
   }
-  zOrder(): SeriesPrimitivePaneViewZOrder { return 'bottom' }
+  zOrder(): PrimitivePaneViewZOrder { return 'bottom' }
 }
 
 export class SRPowerZones implements ISeriesPrimitive<Time> {

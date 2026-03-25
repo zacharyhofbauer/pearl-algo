@@ -17,6 +17,7 @@
 @import '../styles/components/_navbar.css';
 @import '../styles/components/_header.css';
 @import '../styles/components/_chart.css';
+@import '../styles/components/_chart-legend.css';
 @import '../styles/components/_landing.css';
 @import '../styles/components/_archive.css';
 @import '../styles/components/_status-panel.css';

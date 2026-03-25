@@ -1,5 +1,56 @@
 /* CandlestickChart - Chart container, Info Bar, Tooltips, Annotations, Indicators */
 
+/* ============================================================================
+ * Pane Divider — resizable drag handle between chart and bottom panels
+ * ============================================================================ */
+
+.pane-divider {
+  flex: 0 0 6px;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: var(--z-above-base, 1);
+  border-top: 1px solid var(--border-color, #2a2e39);
+  transition: background var(--duration-fast, 150ms);
+  touch-action: none; /* Prevent scroll on touch */
+}
+
+.pane-divider:hover {
+  background: rgba(var(--accent-cyan-rgb, 41, 98, 255), 0.1);
+}
+
+.pane-divider:active {
+  background: rgba(var(--accent-cyan-rgb, 41, 98, 255), 0.2);
+}
+
+.pane-divider-handle {
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background var(--duration-fast, 150ms);
+}
+
+.pane-divider:hover .pane-divider-handle {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 640px) {
+  .pane-divider {
+    height: 10px; /* Larger touch target on mobile */
+    flex: 0 0 10px;
+  }
+
+  .pane-divider-handle {
+    width: 40px;
+    height: 4px;
+  }
+}
+
 /* Agent offline banner */
 .agent-offline-banner {
   background: rgba(var(--accent-red-rgb), 0.15);
