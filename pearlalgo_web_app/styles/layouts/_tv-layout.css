@@ -5,6 +5,11 @@
  * Matches TV proportions: 36px toolbar, 40px sidebars on all sides.
  * ============================================================================ */
 
+/* Hide navbar when inside dashboard layout */
+body:has(.tv-layout) .nav-bar {
+  display: none !important;
+}
+
 .tv-layout {
   display: flex;
   flex-direction: column;
@@ -35,6 +40,22 @@
   padding: 8px 0;
   gap: 4px;
   overflow: hidden;
+}
+
+.tv-sidebar-logo {
+  opacity: 1 !important;
+  margin-bottom: 2px;
+}
+
+.tv-sidebar-divider {
+  width: 24px;
+  height: 1px;
+  background: #2a2e39;
+  margin: 4px 0;
+}
+
+.tv-sidebar-spacer {
+  flex: 1;
 }
 
 .tv-sidebar-left {

@@ -540,37 +540,6 @@ export default function DashboardPageInner() {
               )}
             </div>
 
-            {/* Fullscreen */}
-            <button
-              className="header-action-btn"
-              title="Fullscreen"
-              onClick={() => {
-                if (document.fullscreenElement) {
-                  document.exitFullscreen()
-                } else {
-                  document.documentElement.requestFullscreen()
-                }
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="1,5 1,1 5,1" /><polyline points="11,1 15,1 15,5" /><polyline points="15,11 15,15 11,15" /><polyline points="5,15 1,15 1,11" />
-              </svg>
-            </button>
-
-            {/* Screenshot */}
-            <button
-              className="header-action-btn"
-              title="Screenshot"
-              onClick={() => {
-                if (mainChartApi) {
-                  mainChartApi.takeScreenshot()
-                }
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1" y="3" width="14" height="11" rx="2" /><circle cx="8" cy="9" r="3" /><path d="M5 3L6 1h4l1 2" />
-              </svg>
-            </button>
           </div>
 
           {/* Right: Status badges */}
@@ -854,6 +823,7 @@ export default function DashboardPageInner() {
         onToggleRightPanel={toggleRightPanel}
         onCloseRightPanel={() => setActiveRightPanel(null)}
         rightPanelContent={renderRightPanelContent()}
+        mainChartApi={mainChartApi}
         panels={
           <>
             <ErrorBoundary panelName="Trades">
