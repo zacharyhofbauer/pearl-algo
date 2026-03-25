@@ -1178,7 +1178,7 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     if (tbtPluginRef.current) {
       const tbt = tbtPluginRef.current as any
       if (!indicatorSettings.tbtTrendlines) {
-        tbt._trendlines = []
+        tbt._bands = []
         tbt._requestUpdate?.()
       } else {
         tbt._rebuild?.()

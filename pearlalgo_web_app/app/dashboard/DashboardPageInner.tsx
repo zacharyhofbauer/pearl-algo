@@ -515,9 +515,6 @@ export default function DashboardPageInner() {
                     { key: 'sessions' as const, label: 'Sessions', color: 'rgba(8,153,129,0.5)' },
                     { key: 'sdZones' as const, label: 'S/D Zones', color: 'rgba(255,193,7,0.4)' },
                     { key: 'tbtTrendlines' as const, label: 'TBT Trendlines', color: '#ff9800' },
-                    { key: 'bollingerBands' as const, label: 'Bollinger Bands', color: 'rgba(41,98,255,0.7)' },
-                    { key: 'atrBands' as const, label: 'ATR Bands', color: 'rgba(255,152,0,0.5)' },
-                    { key: 'srPowerZones' as const, label: 'S&R Power', color: '#ab47bc' },
                   ]).map(({ key, label, color }) => (
                     <div key={key} className="indicator-toggle-item" onClick={() => {
                       if (key === 'ema9') { toggleIndicator('ema9'); toggleIndicator('ema21') }
