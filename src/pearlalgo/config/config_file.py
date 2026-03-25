@@ -110,6 +110,41 @@ def load_config_yaml(
         env_path = os.getenv("PEARLALGO_CONFIG_PATH")
         if env_path:
             overlay_path = Path(env_path)
+        else:
+            # FIXED 2026-03-25: Auto-detect single account overlay so
+            # runtime callers of load_config_yaml() (API server, data_fetcher,
+            # etc.) get the same merged config as main.py --config.
+            accounts_dir = project_root / "config" / "accounts"
+            if accounts_dir.is_dir():
+                candidates = [
+                    p for p in accounts_dir.iterdir()
+                    if p.suffix in (".yaml", ".yml")
+                    and not p.name.startswith(".")
+                    and "backup" not in p.name
+                ]
+                if len(candidates) == 1:
+                    overlay_path = candidates[0]
+                elif len(candidates) > 1:
+                    try:
+                        from pearlalgo.utils.logger import logger
+                        logger.warning(
+                            "PEARLALGO_CONFIG_PATH not set and multiple account "
+                            "configs found in %s: %s — account overlay NOT loaded. "
+                            "Set PEARLALGO_CONFIG_PATH to pick one.",
+                            accounts_dir,
+                            [p.name for p in candidates],
+                        )
+                    except ImportError:
+                        pass
+            if overlay_path is None:
+                try:
+                    from pearlalgo.utils.logger import logger
+                    logger.warning(
+                        "PEARLALGO_CONFIG_PATH not set — running with base "
+                        "config only (no account overlay)."
+                    )
+                except ImportError:
+                    pass
     else:
         overlay_path = Path(config_path)
 

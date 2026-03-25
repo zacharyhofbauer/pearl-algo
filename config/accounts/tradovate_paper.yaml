@@ -25,7 +25,7 @@ execution:
   enforce_protection_guard: true
   max_positions: 5
   max_position_size_per_order: 1
-  max_orders_per_day: 500
+  max_orders_per_day: 50
   max_daily_loss: 99999.0
   cooldown_seconds: 30
   allow_reversal_on_opposite_signal: true
@@ -41,7 +41,7 @@ circuit_breaker:
   pause_on_connection_failures: false
 trading_circuit_breaker:
   enabled: true
-  mode: shadow
+  mode: enforce
   enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
@@ -50,7 +50,7 @@ trading_circuit_breaker:
   tv_paper_trading_end_minute_et: 0
   tv_paper_near_max_loss_buffer: 200.0
   tv_paper_enable_news_blackout: true
-  max_consecutive_losses: 5
+  max_consecutive_losses: 3
   max_session_drawdown: 1800.0
   max_daily_drawdown: 99999.0
   max_concurrent_positions: 5
@@ -62,10 +62,12 @@ trading_circuit_breaker:
   - midday
   - afternoon
   - closing
-  enable_direction_gating: false
+  enable_direction_gating: true
   direction_gating_min_confidence: 0.50
-  enable_regime_avoidance: false
-  blocked_regimes: []
+  enable_regime_avoidance: true
+  blocked_regimes:
+  - ranging
+  - volatile
   regime_avoidance_min_confidence: 0.7
 telegram:
   notification_tier: debug

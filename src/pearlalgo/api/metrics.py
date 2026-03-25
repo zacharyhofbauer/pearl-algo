@@ -197,7 +197,8 @@ def _parse_exit_time(
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        from pearlalgo.utils.paths import parse_trade_timestamp
+        return parse_trade_timestamp(str(ts))  # FIXED 2026-03-25: returns naive ET
     except (ValueError, TypeError):
         return None
 
@@ -223,7 +224,8 @@ def _group_pnls_by_day(
             daily[f"__no_ts_{id(trade)}"] = pnl
             continue
         try:
-            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            from pearlalgo.utils.paths import parse_trade_timestamp
+            dt = parse_trade_timestamp(str(ts))  # FIXED 2026-03-25: returns naive ET
             day_key = dt.strftime("%Y-%m-%d")
         except (ValueError, TypeError):
             day_key = f"__bad_ts_{id(trade)}"
@@ -306,7 +308,8 @@ def _estimate_trading_days(trades: List[Dict[str, Any]]) -> Optional[float]:
         if not ts:
             continue
         try:
-            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            from pearlalgo.utils.paths import parse_trade_timestamp
+            dt = parse_trade_timestamp(str(ts))  # FIXED 2026-03-25: returns naive ET
             days.add(dt.strftime("%Y-%m-%d"))
         except (ValueError, TypeError):
             continue

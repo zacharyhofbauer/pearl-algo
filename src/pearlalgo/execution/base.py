@@ -11,6 +11,10 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+import pytz
+
+_ET = pytz.timezone("America/New_York")
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -107,7 +111,7 @@ class ExecutionConfig:
             cooldown_seconds = defaults.COOLDOWN_SECONDS
 
         # Debug logging
-        enforce_guard_val = bool(config.get("enforce_protection_guard", False))
+        enforce_guard_val = bool(config.get("enforce_protection_guard", True))  # FIXED 2026-03-25: default True — always protect open positions
         logger.warning(f"🔍 ExecutionConfig.from_dict: enforce_protection_guard in config={('enforce_protection_guard' in config)}, value={config.get('enforce_protection_guard', 'NOT_FOUND')}, parsed={enforce_guard_val}")
         
         return cls(
@@ -240,7 +244,7 @@ class ExecutionResult:
     error_code: Optional[int] = None
     
     # Timing
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(_ET))  # FIXED 2026-03-25: store ET not UTC
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -254,10 +258,10 @@ class ExecutionResult:
             "take_profit_order_id": self.take_profit_order_id,
             "fill_price": self.fill_price,
             "fill_quantity": self.fill_quantity,
-            "fill_time": self.fill_time.isoformat() if self.fill_time else None,
+            "fill_time": self.fill_time.strftime('%Y-%m-%dT%H:%M:%S') if self.fill_time else None,  # FIXED 2026-03-25: ET
             "error_message": self.error_message,
             "error_code": self.error_code,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": self.timestamp.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: ET
         }
 
 

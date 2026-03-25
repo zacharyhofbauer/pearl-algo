@@ -280,7 +280,8 @@ def tradovate_performance_for_period(
         if not exit_ts:
             continue
         try:
-            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
+            from pearlalgo.utils.paths import parse_trade_timestamp
+            exit_dt = parse_trade_timestamp(exit_ts)  # FIXED 2026-03-25: ET timestamps
         except (ValueError, TypeError):
             continue
         if exit_dt < start_utc:

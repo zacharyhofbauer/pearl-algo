@@ -98,6 +98,7 @@ from pearlalgo.market_agent.stats_computation import (
     compute_daily_stats as _shared_compute_daily_stats,
     get_trading_day_start as _shared_get_trading_day_start,
 )
+from pearlalgo.utils.paths import parse_trade_timestamp as _parse_ts  # FIXED 2026-03-25: ET timestamps
 from pearlalgo.utils.state_io import (
     load_json_file as _load_json_file,
     load_jsonl_file as _load_jsonl_file,
@@ -139,6 +140,25 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
+
+import pytz
+_ET_TZ = pytz.timezone("America/New_York")
+
+
+def _now_et_naive() -> datetime:
+    """Current time as naive ET datetime — matches trade timestamp format.  # FIXED 2026-03-25: ET migration"""
+    return datetime.now(_ET_TZ).replace(tzinfo=None)
+
+
+def _now_et_iso() -> str:
+    """Current time as naive ET ISO string for JSON serialization.  # FIXED 2026-03-25: ET migration"""
+    return datetime.now(_ET_TZ).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def _et_to_unix(naive_et: datetime) -> float:
+    """Convert a naive ET datetime to a Unix timestamp (correct on any server TZ)."""
+    return _ET_TZ.localize(naive_et).timestamp()
+
 
 # ---------------------------------------------------------------------------
 # TTL Cache for expensive broadcast-loop helpers
@@ -528,7 +548,7 @@ def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(cache_path, {
             "candles": candles,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": _now_et_iso(),
         })
     except Exception as e:
         logger.debug(f"Cache write failures are not critical: {e}")
@@ -547,8 +567,8 @@ def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
         if cache_path.exists():
             data = json.loads(cache_path.read_text())
             # Check if cache is less than 24 hours old
-            cache_time = datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
+            cache_time = _parse_ts(data["timestamp"])
+            if _now_et_naive() - cache_time < timedelta(hours=24):
                 _candle_cache_set(key, data["candles"])
                 return data["candles"]
     except Exception as e:
@@ -617,7 +637,7 @@ async def _fetch_candles(
                 "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
             }.get(tf_lower, 5)
 
-            end = datetime.now(timezone.utc)
+            end = _now_et_naive()
             start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
 
             # Run blocking fetch_historical in thread pool with timeout
@@ -925,13 +945,13 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                 tv, fills = _get_tradovate_state(state_dir)
                 equity_stats = _tradovate_performance_summary(tv, fills, state_dir)
 
-                now = datetime.now(timezone.utc)
+                now = _now_et_naive()
                 td_start = _get_trading_day_start()
                 yday_start, yday_end = _get_previous_trading_day_bounds()
                 wtd_start = _get_trading_week_start(now)
                 mtd_start = _get_month_to_date_start(now)
                 ytd_start = _get_year_to_date_start(now)
-                all_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+                all_start = datetime(2020, 1, 1)
 
                 all_trades_raw = _tradovate_fills_to_trades(fills)
                 total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
@@ -974,18 +994,18 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
             if trades is None:
                 empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
                 return {
-                    "as_of": datetime.now(timezone.utc).isoformat(),
+                    "as_of": _now_et_iso(),
                     "td": empty, "yday": empty, "wtd": empty,
                     "mtd": empty, "ytd": empty, "all": empty,
                 }
 
-            now = datetime.now(timezone.utc)
+            now = _now_et_naive()
             td_start = _get_trading_day_start()
             yday_start, yday_end = _get_previous_trading_day_bounds()
             wtd_start = _get_trading_week_start(now)
             mtd_start = _get_month_to_date_start(now)
             ytd_start = _get_year_to_date_start(now)
-            all_time_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            all_time_start = datetime(2020, 1, 1)
 
             return {
                 "as_of": now.isoformat(),
@@ -1108,7 +1128,7 @@ class ConnectionManager:
                                 "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                 "futures_market_open": state.get("futures_market_open", False),
                                 "data_fresh": state.get("data_fresh", False),
-                                "last_updated": datetime.now(timezone.utc).isoformat(),
+                                "last_updated": _now_et_iso(),
                                 "ai_status": _get_ai_status(state),
                                 "cadence_metrics": _get_cadence_metrics_enhanced(state),
                                 "market_regime": _get_market_regime(state),
@@ -1263,7 +1283,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                         "futures_market_open": state.get("futures_market_open", False),
                         "data_fresh": state.get("data_fresh", False),
-                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                        "last_updated": _now_et_iso(),
                         "ai_status": _get_ai_status(state),
                         "challenge": _get_challenge_status(_state_dir),
                         "recent_exits": recent_exits,
@@ -1341,7 +1361,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                     "futures_market_open": state.get("futures_market_open", False),
                                     "data_fresh": state.get("data_fresh", False),
-                                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                                    "last_updated": _now_et_iso(),
                                     "ai_status": _get_ai_status(state),
                                     "challenge": _get_challenge_status(_state_dir),
                                     "recent_exits": recent_exits,
@@ -1481,9 +1501,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                             exit_time_str = t.get("exit_time") or ""
                             if exit_time_str:
                                 try:
-                                    exit_dt = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                                    if exit_dt.tzinfo is None:
-                                        exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                                    exit_dt = _parse_ts(exit_time_str)
                                     if exit_dt >= td_start:
                                         today_trades.append(t)
                                 except Exception:
@@ -1520,9 +1538,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     exit_ts = t.get("exit_time") or ""
                     if exit_ts:
                         try:
-                            exit_dt = datetime.fromisoformat(exit_ts.replace("Z", "+00:00"))
-                            if exit_dt.tzinfo is None:
-                                exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                            exit_dt = _parse_ts(exit_ts)
                             if exit_dt >= td_start:
                                 today_trades.append(t)
                         except Exception:
@@ -1649,7 +1665,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
         if _is_tv_paper_account(state_dir):
             _, tv_fills = _get_tradovate_state(state_dir)
             if tv_fills:
-                now_utc = datetime.now(timezone.utc)
+                now_utc = _now_et_naive()
                 prev_day_s, prev_day_e = _get_previous_trading_day_bounds()
                 fills_stats = {
                     "yesterday": _tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e),
@@ -1680,7 +1696,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
             logger.debug(f"Non-critical: {e}")
         return result
 
-    now = datetime.now(timezone.utc)
+    now = _now_et_naive()
     prev_day_start, prev_day_end = _get_previous_trading_day_bounds()
 
     cutoffs = {
@@ -1700,7 +1716,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
             if not exit_time_str:
                 continue
             try:
-                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                exit_time = _parse_ts(exit_time_str)
             except (ValueError, TypeError):
                 continue
 
@@ -1746,7 +1762,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 if not exit_time_str:
                     continue
                 try:
-                    exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                    exit_time = _parse_ts(exit_time_str)
                     if exit_time >= cutoff_24h:
                         recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
                 except (ValueError, TypeError):
@@ -1876,8 +1892,8 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
             exit_time = s.get("exit_time", "")
             if entry_time and exit_time:
                 try:
-                    entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
-                    exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                    entry_dt = _parse_ts(entry_time)
+                    exit_dt = _parse_ts(exit_time)
                     duration_seconds = int((exit_dt - entry_dt).total_seconds())
                 except Exception as e:
                     logger.debug(f"Non-critical: {e}")
@@ -2109,7 +2125,7 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
     if not data:
         return []
 
-    now = datetime.now(timezone.utc)
+    now = _now_et_naive()
     cutoff = now - timedelta(hours=hours)
 
     curve = []
@@ -2121,10 +2137,10 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
             if not exit_time_str:
                 continue
             try:
-                exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+                exit_time = _parse_ts(str(exit_time_str))
                 if exit_time >= cutoff:
                     trades.append({
-                        "time": int(exit_time.timestamp()),
+                        "time": int(_et_to_unix(exit_time)),
                         "pnl": trade.get("pnl", 0.0) or 0.0,
                     })
             except (ValueError, TypeError):
@@ -2198,13 +2214,13 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
 
                 if entry_time:
                     try:
-                        entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                        entry_dt = _parse_ts(entry_time)
                         events.append(("entry", entry_dt, stop_risk))
                     except (ValueError, TypeError):
                         pass
                 if exit_time:
                     try:
-                        exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                        exit_dt = _parse_ts(exit_time)
                         events.append(("exit", exit_dt, -stop_risk))
                     except (ValueError, TypeError):
                         pass
@@ -2261,25 +2277,80 @@ def _get_market_regime(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
-    """Get signal rejection counts from the last 24 hours."""
+    """Get signal rejection counts from the last 24 hours.
+
+    FIXED 2026-03-25: Capture ALL block reasons emitted by
+    TradingCircuitBreaker._record_block() so nothing is silently
+    miscategorized.  Previous version missed position_clustering,
+    drawdowns, volatility, regime_avoidance, trigger_filters,
+    ml_chop_shield, tv_paper_eval_gate, session_filtered, and
+    in_cooldown:* actual blocks.
+    """
     circuit_breaker = state.get("trading_circuit_breaker", {})
     blocks_by_reason = circuit_breaker.get("blocks_by_reason", {})
     would_block_by_reason = circuit_breaker.get("would_block_by_reason", {})
 
-    # Combine actual blocks and would-have-blocked counts
+    def _sum(keys):
+        """Sum counts across blocks + would_block for given reason keys."""
+        return sum(
+            blocks_by_reason.get(k, 0) + would_block_by_reason.get(k, 0)
+            for k in keys
+        )
+
+    # Also sum any in_cooldown:* keys (dynamic prefix)
+    cooldown_total = sum(
+        v for k, v in blocks_by_reason.items() if k.startswith("in_cooldown:")
+    ) + sum(
+        v for k, v in would_block_by_reason.items() if k.startswith("in_cooldown:")
+    )
+
+    # Known reason keys grouped by category
+    tracked_keys = set()
+
+    direction_keys = ["direction_gating", "direction_gating_unknown_direction"]
+    cb_keys = ["consecutive_losses", "rolling_win_rate"]
+    drawdown_keys = ["session_drawdown", "daily_drawdown"]
+    session_keys = ["session_filtered"]
+    position_keys = ["max_positions"]
+    clustering_keys = ["position_clustering"]
+    volatility_keys = ["low_volatility", "extreme_volatility", "chop_detected"]
+    regime_keys = ["regime_avoidance", "regime_avoidance_low_confidence"]
+    trigger_keys = ["trigger_ema_cross_no_volume", "trigger_low_regime_no_volume"]
+    ml_chop_keys = [
+        "ml_chop_shield", "ml_chop_shield_no_stats",
+        "ml_chop_shield_insufficient_data", "ml_chop_shield_insufficient_lift",
+    ]
+    tv_paper_keys = [
+        "tv_paper_outside_trading_hours", "tv_paper_max_contracts_exceeded",
+        "tv_paper_hedging_prohibited", "tv_paper_news_blackout",
+    ]
+
+    for group in (direction_keys, cb_keys, drawdown_keys, session_keys,
+                  position_keys, clustering_keys, volatility_keys, regime_keys,
+                  trigger_keys, ml_chop_keys, tv_paper_keys):
+        tracked_keys.update(group)
+
+    # Catch-all: any reason not in a known group (future-proofing)
+    all_reasons = set(blocks_by_reason.keys()) | set(would_block_by_reason.keys())
+    other_total = sum(
+        blocks_by_reason.get(k, 0) + would_block_by_reason.get(k, 0)
+        for k in all_reasons
+        if k not in tracked_keys and not k.startswith("in_cooldown:")
+    )
+
     return {
-        "direction_gating": blocks_by_reason.get("direction_gating", 0) + would_block_by_reason.get("direction_gating", 0),
-        "ml_filter": 0,  # ML filter tracks separately
-        "circuit_breaker": (
-            blocks_by_reason.get("consecutive_losses", 0) +
-            blocks_by_reason.get("rolling_win_rate", 0) +
-            would_block_by_reason.get("consecutive_losses", 0) +
-            would_block_by_reason.get("rolling_win_rate", 0) +
-            would_block_by_reason.get("in_cooldown:consecutive_losses", 0) +
-            would_block_by_reason.get("in_cooldown:rolling_win_rate", 0)
-        ),
-        "session_filter": 0,  # Track if session filter is enabled
-        "max_positions": blocks_by_reason.get("max_positions", 0) + would_block_by_reason.get("max_positions", 0),
+        "direction_gating": _sum(direction_keys),
+        "circuit_breaker": _sum(cb_keys) + cooldown_total,
+        "drawdown": _sum(drawdown_keys),
+        "session_filter": _sum(session_keys),
+        "max_positions": _sum(position_keys),
+        "position_clustering": _sum(clustering_keys),  # FIXED 2026-03-25: was missing, inflated direction_gating
+        "volatility_filter": _sum(volatility_keys),
+        "regime_avoidance": _sum(regime_keys),
+        "trigger_filters": _sum(trigger_keys),
+        "ml_chop_shield": _sum(ml_chop_keys),
+        "tv_paper_eval_gate": _sum(tv_paper_keys),
+        "other": other_total,
     }
 
 
@@ -2611,7 +2682,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "active_trades_unrealized_pnl": None,
             "futures_market_open": False,
             "data_fresh": False,
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "last_updated": _now_et_iso(),
             "ai_status": None,
             "challenge": _get_challenge_status(_state_dir),
             "recent_exits": recent_exits,
@@ -2641,7 +2712,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "futures_market_open": state.get("futures_market_open", False),
         "strategy_session_open": state.get("strategy_session_open"),
         "data_fresh": state.get("data_fresh", False),
-        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "last_updated": _now_et_iso(),
 
         # NEW: AI/ML Status
         "ai_status": _get_ai_status(state),
@@ -2786,7 +2857,7 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
         sd.mkdir(parents=True, exist_ok=True)
         kill_file = sd / "kill_request.flag"
         payload = {
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
             "source": "web",
         }
         kill_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2818,7 +2889,7 @@ async def resume_service(_: str = Depends(require_operator_or_api_key)):
         sd.mkdir(parents=True, exist_ok=True)
         flag_file = sd / "resume_request.flag"
         payload = {
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
             "source": "web",
         }
         flag_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2849,7 +2920,7 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
         sd.mkdir(parents=True, exist_ok=True)
         flag_file = sd / "close_all_request.flag"
         payload = {
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
             "source": "web",
         }
         flag_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2895,7 +2966,7 @@ async def close_trade(
         req_payload = {
             "action": "close_trade",
             "signal_id": signal_id,
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
             "source": "web",
         }
         out_path = _write_operator_request(sd, "close_trade", req_payload)
@@ -2968,7 +3039,7 @@ async def trailing_stop_override(
             "ttl_minutes": ttl,
             "source": str(payload.get("source", "api")),
             "reason": str(payload.get("reason", "")),
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
         }
         override_file.write_text(json.dumps(override_data, indent=2), encoding="utf-8")
         logger.info("trailing-stop-override: wrote %s", override_file)
@@ -3036,7 +3107,7 @@ async def clear_trailing_stop_override(_: str = Depends(require_operator_or_api_
         # Write a clear-override flag that the service will pick up
         clear_file = sd / "trailing_stop_clear_override.flag"
         clear_file.write_text(json.dumps({
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": _now_et_iso(),
             "source": "api",
         }), encoding="utf-8")
         logger.info("trailing-stop-clear: wrote %s", clear_file)
@@ -3091,6 +3162,11 @@ async def _wait_for_ack(flag_path: Path, timeout: float = 10.0) -> bool:
 
 def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime, end: datetime = None) -> Dict[str, Any]:
     """Aggregate performance from cutoff onwards, optionally bounded by end time."""
+    # Normalize to naive ET for comparison with trade timestamps  # FIXED 2026-03-25: ET migration
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.astimezone(_ET_TZ).replace(tzinfo=None)
+    if end is not None and end.tzinfo is not None:
+        end = end.astimezone(_ET_TZ).replace(tzinfo=None)
     pnl = 0.0
     wins = 0
     losses = 0
@@ -3101,7 +3177,7 @@ def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime,
         if not exit_time_str:
             continue
         try:
-            exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+            exit_time = _parse_ts(str(exit_time_str))
         except Exception:
             continue
         if exit_time < cutoff:
@@ -3134,49 +3210,46 @@ def _aggregate_performance_since(trades: List[Dict[str, Any]], cutoff: datetime,
     }
 
 
-def _get_trading_week_start(now_utc: datetime) -> datetime:
-    """Start of current futures trading week (Sunday 6pm ET), returned in UTC."""
-    et_tz = ZoneInfo("America/New_York")
-    now_et = now_utc.astimezone(et_tz)
+def _get_trading_week_start(now: datetime) -> datetime:
+    """Start of current futures trading week (Sunday 6pm ET), naive ET.
+    FIXED 2026-03-25: returns naive ET, not UTC.
+    """
+    now_et = _now_et_naive() if now.tzinfo is not None else now
 
     # Most recent Sunday
-    days_since_sunday = (now_et.weekday() + 1) % 7  # Mon=0 -> 1 day since Sunday, Sun=6 -> 0
+    days_since_sunday = (now_et.weekday() + 1) % 7
     sunday_date = (now_et - timedelta(days=days_since_sunday)).date()
     start_et = datetime(
         year=sunday_date.year,
         month=sunday_date.month,
         day=sunday_date.day,
         hour=18,
-        minute=0,
-        second=0,
-        microsecond=0,
-        tzinfo=et_tz,
     )
 
-    # If it's Sunday but before 6pm, the "current" trading week hasn't started yet
     if now_et < start_et:
         start_et = start_et - timedelta(days=7)
 
-    return start_et.astimezone(timezone.utc)
+    return start_et
 
 
-def _get_month_to_date_start(now_utc: datetime) -> datetime:
-    """Month-to-date start aligned to futures trading day boundary (6pm ET)."""
-    et_tz = ZoneInfo("America/New_York")
-    now_et = now_utc.astimezone(et_tz)
+def _get_month_to_date_start(now: datetime) -> datetime:
+    """Month-to-date start (6pm ET on last day of prior month), naive ET.
+    FIXED 2026-03-25: returns naive ET, not UTC.
+    """
+    now_et = _now_et_naive() if now.tzinfo is not None else now
     first_day = now_et.replace(day=1, hour=18, minute=0, second=0, microsecond=0)
-    # Include the trading day for the 1st (which begins 6pm ET on the prior calendar day)
     start_et = first_day - timedelta(days=1)
-    return start_et.astimezone(timezone.utc)
+    return start_et
 
 
-def _get_year_to_date_start(now_utc: datetime) -> datetime:
-    """Year-to-date start aligned to futures trading day boundary (6pm ET)."""
-    et_tz = ZoneInfo("America/New_York")
-    now_et = now_utc.astimezone(et_tz)
+def _get_year_to_date_start(now: datetime) -> datetime:
+    """Year-to-date start (Dec 31 6pm ET of prior year), naive ET.
+    FIXED 2026-03-25: returns naive ET, not UTC.
+    """
+    now_et = _now_et_naive() if now.tzinfo is not None else now
     jan1_6pm = now_et.replace(month=1, day=1, hour=18, minute=0, second=0, microsecond=0)
-    start_et = jan1_6pm - timedelta(days=1)  # include trading day that starts Dec 31 6pm ET
-    return start_et.astimezone(timezone.utc)
+    start_et = jan1_6pm - timedelta(days=1)
+    return start_et
 
 
 @app.get("/api/performance-summary")
@@ -3191,13 +3264,13 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         tv, fills = _get_tradovate_state(_state_dir)
         equity_stats = _tradovate_performance_summary(tv, fills, _state_dir)
 
-        now = datetime.now(timezone.utc)
+        now = _now_et_naive()
         td_start = _get_trading_day_start()
         yday_start, yday_end = _get_previous_trading_day_bounds()
         wtd_start = _get_trading_week_start(now)
         mtd_start = _get_month_to_date_start(now)
         ytd_start = _get_year_to_date_start(now)
-        all_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        all_start = datetime(2020, 1, 1)
 
         # Derive per-trade commission from equity vs fill P&L gap.
         # Tradovate fills don't include fees, but equity is the ground truth.
@@ -3237,18 +3310,18 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     if trades is None:
         empty = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
         return {
-            "as_of": datetime.now(timezone.utc).isoformat(),
+            "as_of": _now_et_iso(),
             "td": empty, "yday": empty, "wtd": empty,
             "mtd": empty, "ytd": empty, "all": empty,
         }
 
-    now = datetime.now(timezone.utc)
+    now = _now_et_naive()
     td_start = _get_trading_day_start()
     yday_start, yday_end = _get_previous_trading_day_bounds()
     wtd_start = _get_trading_week_start(now)
     mtd_start = _get_month_to_date_start(now)
     ytd_start = _get_year_to_date_start(now)
-    all_time_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    all_time_start = datetime(2020, 1, 1)
 
     return {
         "as_of": now.isoformat(),
@@ -3429,10 +3502,10 @@ async def get_markers(
     signals_file = _state_dir / "signals.jsonl"
     signals = _load_jsonl_file(signals_file, max_lines=2000)
     
-    now = datetime.now(timezone.utc)
+    now = _now_et_naive()
     cutoff = now - timedelta(hours=hours)
-    cutoff_ts = cutoff.timestamp()
-    
+    cutoff_ts = _et_to_unix(cutoff)
+
     markers = []
     for s in signals:
         signal_data = s.get("signal", {})
@@ -3445,7 +3518,7 @@ async def get_markers(
         entry_time = s.get("entry_time")
         if entry_time:
             try:
-                entry_ts = datetime.fromisoformat(entry_time.replace("Z", "+00:00")).timestamp()
+                entry_ts = _et_to_unix(_parse_ts(entry_time))
                 if entry_ts >= cutoff_ts:
                     # Snap to 5-minute bar boundary so marker aligns with candle
                     bar_time = _snap_to_bar(entry_ts, 300)
@@ -3471,7 +3544,7 @@ async def get_markers(
         exit_time = s.get("exit_time")
         if exit_time and s.get("status") == "exited":
             try:
-                exit_ts = datetime.fromisoformat(exit_time.replace("Z", "+00:00")).timestamp()
+                exit_ts = _et_to_unix(_parse_ts(exit_time))
                 if exit_ts >= cutoff_ts:
                     pnl = s.get("pnl", 0)
                     is_win = pnl > 0 if pnl else False
@@ -3542,7 +3615,7 @@ def _bars_to_levels(bars: List[Dict[str, Any]], now_utc: datetime) -> Dict[str, 
     daily: List[Dict[str, Any]] = []
     for b in bars:
         ts = b.get("time", 0)
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+        dt = datetime.fromtimestamp(ts, tz=_ET_TZ).replace(tzinfo=None) if ts else None  # FIXED 2026-03-25: ET
         if dt is None:
             continue
         daily.append({
@@ -3688,7 +3761,7 @@ async def get_key_levels(
             symbol=symbol, timeframe="1d", bars=45, use_cache_fallback=True
         )
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = _now_et_naive()
         levels = _bars_to_levels(candles, now_utc)
 
         # --- 4H levels: prev completed 4H bar's high/open/low ---

@@ -281,9 +281,7 @@ class VirtualPositionTracker:
                 entry_time: Optional[datetime] = None
                 if entry_time_str:
                     try:
-                        entry_time = parse_utc_timestamp(str(entry_time_str))
-                        if entry_time and entry_time.tzinfo is None:
-                            entry_time = entry_time.replace(tzinfo=timezone.utc)
+                        entry_time = parse_utc_timestamp(str(entry_time_str))  # FIXED 2026-03-25: returns naive ET
                     except Exception:
                         pass
 

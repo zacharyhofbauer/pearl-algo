@@ -24,7 +24,9 @@ from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_int
 from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.state_io import atomic_write_json
-from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
+from pearlalgo.utils.paths import get_utc_timestamp, get_et_timestamp, parse_utc_timestamp
+import pytz
+_ET = pytz.timezone("America/New_York")
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
 
 from pearlalgo.config.config_loader import load_service_config, parse_market_hours_overrides
@@ -297,8 +299,18 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             config_warnings = self.trading_circuit_breaker.validate_config()
             if config_warnings:
                 logger.warning(f"Trading circuit breaker config warnings: {config_warnings}")
+            # FIXED 2026-03-25: Log effective CB mode at startup so
+            # warn_only/shadow drift is never silently missed.
+            cb_mode = self.trading_circuit_breaker.config.mode
+            if cb_mode != "enforce":
+                logger.warning(
+                    "TRADING CIRCUIT BREAKER MODE IS '%s' — signals will "
+                    "NOT be blocked! Set mode=enforce for production.",
+                    cb_mode,
+                )
             logger.info(
                 f"Trading circuit breaker enabled: "
+                f"mode={cb_mode}, "
                 f"max_consecutive_losses={self.trading_circuit_breaker.config.max_consecutive_losses}, "
                 f"max_session_drawdown=${self.trading_circuit_breaker.config.max_session_drawdown}, "
                 f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}, "
@@ -914,7 +926,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     'direction': direction,
                     'max_price': current_price,
                     'min_price': current_price,
-                    'entry_time': datetime.now(timezone.utc),
+                    'entry_time': datetime.now(_ET).replace(tzinfo=None),  # FIXED 2026-03-25: store ET not UTC
                     'log_counter': 0,
                 }
                 # Register with trailing stop manager for new positions
@@ -1026,7 +1038,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     'mae_dollars': mae * 2.0,
                     'qty': abs(net_pos)
                 }
-                entry_time_dt = mon.get('entry_time', datetime.now(timezone.utc))
+                entry_time_dt = mon.get('entry_time', datetime.now(_ET).replace(tzinfo=None))  # FIXED 2026-03-25: naive ET
                 should_exit, reason = self._adv_exit_mgr.should_exit(pos_data, current_price, entry_time_dt)
                 
                 if should_exit:
@@ -1049,7 +1061,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                         logger.error(f"❌ Advanced exit failed: {e}")
             # === End Advanced Exit ===
             
-            hold_secs = (datetime.now(timezone.utc) - mon['entry_time']).total_seconds()
+            hold_secs = (datetime.now(_ET).replace(tzinfo=None) - mon['entry_time']).total_seconds()  # FIXED 2026-03-25: ET not UTC
             hold_min = hold_secs / 60.0
 
             # Log every 4th cycle (~60s at 15s cadence) to avoid spam
@@ -1294,7 +1306,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             return
 
         # Only run every 60 seconds to avoid API spam
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: store ET not UTC
         last_sync = getattr(self, '_last_virtual_trade_sync', None)
         if last_sync and (now - last_sync).total_seconds() < 60:
             return
@@ -1550,7 +1562,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 perf_trades = self.performance_tracker.load_performance_data()
 
                 # Today's trades
-                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                today_str = datetime.now(_ET).replace(tzinfo=None).strftime("%Y-%m-%d")  # FIXED 2026-03-25: ET not UTC
                 today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
 
                 # De-duplicate by signal_id to avoid double-counting
@@ -1597,7 +1609,10 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     if last_trade and last_trade.get("exit_time"):
                         try:
                             last_exit = datetime.fromisoformat(str(last_trade["exit_time"]).replace("Z", "+00:00"))
-                            mins_ago = (datetime.now(timezone.utc) - last_exit).total_seconds() / 60
+                            # FIXED 2026-03-25: timestamps are now naive ET
+                            if last_exit.tzinfo is not None:
+                                last_exit = last_exit.replace(tzinfo=None)
+                            mins_ago = (datetime.now(_ET).replace(tzinfo=None) - last_exit).total_seconds() / 60
                             if mins_ago > 60:
                                 hours = int(mins_ago / 60)
                                 time_since_trade = f"⏰ Last Trade: {hours}h ago"
@@ -2780,7 +2795,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         ask_px = prices.get("ask")
         price_source = prices.get("source")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: store ET not UTC
         closed_count = 0
         total_pnl = 0.0
 
@@ -2893,7 +2908,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         bid_px = prices.get("bid")
         ask_px = prices.get("ask")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: store ET not UTC
         closed_ids = []
         total_pnl = 0.0
 

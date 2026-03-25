@@ -1103,16 +1103,16 @@ class TestTradingWeekStart:
         now = datetime(2025, 6, 4, 12, 0, 0, tzinfo=timezone.utc)  # Wednesday
         result = server_mod._get_trading_week_start(now)
         assert isinstance(result, datetime)
-        assert result.tzinfo is not None
+        # FIXED 2026-03-25: returns naive ET after timezone migration
+        assert result.tzinfo is None
 
     def test_sunday_before_6pm(self):
         """On Sunday before 6pm ET, should return prior week's start."""
-        from zoneinfo import ZoneInfo
-        et = ZoneInfo("America/New_York")
-        sun_early = datetime(2025, 6, 1, 14, 0, 0, tzinfo=et).astimezone(timezone.utc)
-        result = server_mod._get_trading_week_start(sun_early)
+        # FIXED 2026-03-25: use naive ET for comparison after timezone migration
+        sun_early_et = datetime(2025, 6, 1, 14, 0, 0)  # Sunday 2pm ET (naive)
+        result = server_mod._get_trading_week_start(sun_early_et)
         # Should be a week before
-        assert result < sun_early
+        assert result < sun_early_et
 
 
 # ===========================================================================
@@ -1122,13 +1122,13 @@ class TestTradingWeekStart:
 
 class TestDateBoundaryHelpers:
     def test_mtd_start(self):
-        now = datetime(2025, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2025, 6, 15, 12, 0, 0)  # FIXED 2026-03-25: naive ET
         result = server_mod._get_month_to_date_start(now)
         assert isinstance(result, datetime)
         assert result < now
 
     def test_ytd_start(self):
-        now = datetime(2025, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2025, 6, 15, 12, 0, 0)  # FIXED 2026-03-25: naive ET
         result = server_mod._get_year_to_date_start(now)
         assert isinstance(result, datetime)
         assert result < now
@@ -1687,10 +1687,10 @@ class TestServerCorePrevTradingDay:
 
 
 class TestServerCoreTradingWeekStart:
-    def test_returns_utc(self):
+    def test_returns_naive_et(self):  # FIXED 2026-03-25: returns naive ET after tz migration
         now = datetime(2025, 6, 4, 12, 0, 0, tzinfo=timezone.utc)
         result = core_mod._get_trading_week_start(now)
-        assert result.tzinfo is not None
+        assert result.tzinfo is None
 
 
 # ===========================================================================

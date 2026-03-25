@@ -57,8 +57,9 @@ def _get_session_for_hour(hour: int) -> str:
 
 
 def _parse_iso(ts: str) -> datetime:
-    """Parse an ISO-8601 timestamp string (handles trailing ``Z``)."""
-    return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    """Parse a trade timestamp → naive ET datetime.  # FIXED 2026-03-25: ET timestamps"""
+    from pearlalgo.utils.paths import parse_trade_timestamp
+    return parse_trade_timestamp(str(ts))
 
 
 # ── public API ───────────────────────────────────────────────────────────
@@ -134,8 +135,8 @@ def compute_session_analytics(
                 if exit_time_str:
                     try:
                         exit_time = _parse_iso(exit_time_str)
-                        exit_time_et = exit_time.astimezone(et_tz)
-                        hour = exit_time_et.hour
+                        # FIXED 2026-03-25: timestamps are now stored as ET — no conversion needed
+                        hour = exit_time.hour if exit_time.tzinfo is None else exit_time.astimezone(et_tz).hour
 
                         # Session stats
                         session_key = _get_session_for_hour(hour)

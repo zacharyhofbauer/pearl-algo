@@ -2,6 +2,9 @@
 
 > Quick reference for daily operations. Most-used commands first.
 
+> **TIMEZONE (2026-03-25):** trades.db stores all timestamps as naive ET strings (no tz suffix). strftime(%H, exit_time) returns ET hour directly. Never convert UTC→ET on DB data.
+
+
 ---
 
 ## TEMP: IBKR Data + Tradovate Demo Execution (Hybrid Mode)

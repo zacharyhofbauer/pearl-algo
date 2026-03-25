@@ -146,6 +146,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 f"Tradovate connected: account={self._client.account_name}, "
                 f"contract={self._contract_symbol}"
             )
+
+            # FIXED 2026-03-25: Check for orphaned positions (open position with no exchange SL)
+            # This happens when agent restarts mid-trade. Place a hard stop immediately.
+            asyncio.create_task(self._reattach_orphaned_stop_on_connect())
+
             return True
 
         except TradovateAuthError as e:
@@ -154,6 +159,77 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         except Exception as e:
             logger.error(f"Tradovate connect failed: {e}", exc_info=True)
             return False
+
+    async def _reattach_orphaned_stop_on_connect(self) -> None:
+        """
+        FIXED 2026-03-25: After agent restart, detect positions with no exchange stop order
+        and place a hard stop immediately. Prevents naked positions after soft-restart.
+        """
+        import asyncio
+        await asyncio.sleep(5)  # Wait for WS and account data to settle
+        try:
+            summary = await self.get_account_summary()
+            if not isinstance(summary, dict):
+                return
+
+            positions = [p for p in (summary.get("positions") or []) if abs(float(p.get("net_pos", 0) or 0)) > 0]
+            if not positions:
+                return
+
+            working_orders = summary.get("working_orders") or []
+            # FIXED 2026-03-25: API returns stop_price=null even for valid stops.
+            # Detect protection via: stop_price set, OCO linkage, or opposite-side working order.
+            pos_side = "long" if float(positions[0].get("net_pos", 0)) > 0 else "short"
+            protective_action = "Sell" if pos_side == "long" else "Buy"
+            protective = [
+                o for o in working_orders
+                if (
+                    o.get("stop_price") is not None  # explicit stop price
+                    or str(o.get("order_type", "")).lower() == "stop"  # stop order type
+                    or (o.get("oco_id") is not None and o.get("action") == protective_action)  # OCO-linked exit
+                    or (o.get("parent_id") is not None and o.get("action") == protective_action)  # bracket child
+                )
+            ]
+
+            if protective:
+                logger.info(f"Orphaned stop check: {len(positions)} position(s), {len(protective)} protective order(s) found (OCO/bracket included) — OK")
+                return
+
+            # Orphaned position detected — place a hard stop
+            for pos in positions:
+                net_pos = float(pos.get("net_pos", 0) or 0)
+                entry_price = float(pos.get("net_price", 0) or 0)
+                if entry_price <= 0:
+                    logger.warning(f"Orphaned stop check: cannot place stop — no entry price for position {pos.get('contract_id')}")
+                    continue
+
+                # Stop at 1.5x ATR below (long) or above (short) entry — using 40pts as conservative ATR proxy
+                atr_proxy = 40.0
+                if net_pos > 0:  # long
+                    stop_price = round(entry_price - atr_proxy, 2)
+                    stop_action = "Sell"
+                else:  # short
+                    stop_price = round(entry_price + atr_proxy, 2)
+                    stop_action = "Buy"
+
+                logger.error(
+                    f"🚨 ORPHANED POSITION DETECTED after restart: {pos.get('contract_id')} "                    f"net_pos={net_pos} entry={entry_price} — placing emergency stop at {stop_price}"
+                )
+
+                try:
+                    result = await self._client.place_order(
+                        symbol=self._contract_symbol,
+                        action=stop_action,
+                        order_qty=int(abs(net_pos)),
+                        order_type="Stop",
+                        stop_price=stop_price,
+                    )
+                    logger.info(f"Emergency stop placed for orphaned position: result={result}")
+                except Exception as e:
+                    logger.error(f"Failed to place emergency stop for orphaned position: {e}")
+
+        except Exception as e:
+            logger.warning(f"Orphaned stop check failed (non-fatal): {e}")
 
     async def disconnect(self) -> None:
         """Disconnect from Tradovate."""

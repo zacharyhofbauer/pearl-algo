@@ -309,10 +309,9 @@ def build_incident_report(
     )[:10]
 
     report: Dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "window_start_utc": start_utc.isoformat(),
-        "window_start_et": start_utc.astimezone(ET).isoformat(),
-        "window_end_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: ET not UTC
+        "window_start": start_utc.isoformat(),  # FIXED 2026-03-25: now ET despite param name
+        "window_end": datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: ET not UTC
         "summary": {
             "total_trades": len(trades),
             "wins": wins,

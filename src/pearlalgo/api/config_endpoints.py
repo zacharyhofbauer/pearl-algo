@@ -329,7 +329,22 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     "trading_circuit_breaker.enable_direction_gating": {
         "type": "boolean",
-        "dangerous": False, "description": "Enable direction gating",
+        "dangerous": False, "description": "Enable direction gating (block longs in downtrends, shorts in uptrends)",
+        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+    },
+    "trading_circuit_breaker.direction_gating_min_confidence": {
+        "type": "number", "min": 0, "max": 1,
+        "dangerous": False, "description": "Regime confidence threshold for direction gating",
+        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+    },
+    "trading_circuit_breaker.enable_regime_avoidance": {
+        "type": "boolean",
+        "dangerous": False, "description": "Enable regime avoidance (block trades in choppy/volatile markets)",
+        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+    },
+    "trading_circuit_breaker.regime_avoidance_min_confidence": {
+        "type": "number", "min": 0, "max": 1,
+        "dangerous": False, "description": "Regime confidence threshold for regime avoidance",
         "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
     },
 

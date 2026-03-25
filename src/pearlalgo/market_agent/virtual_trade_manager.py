@@ -218,14 +218,12 @@ class VirtualTradeManager:
         """
         import numpy as _np
 
-        # Parse entry time (UTC)
+        # Parse entry time (naive ET)  # FIXED 2026-03-25: ET timezone migration
         entry_time_str = rec.get("entry_time")
         entry_time: Optional[datetime] = None
         if entry_time_str:
             try:
-                entry_time = parse_utc_timestamp(str(entry_time_str))
-                if entry_time and entry_time.tzinfo is None:
-                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                entry_time = parse_utc_timestamp(str(entry_time_str))  # FIXED 2026-03-25: returns naive ET
             except Exception as e:
                 logger.warning(f"Critical path error: {e}", exc_info=True)
 
@@ -389,7 +387,7 @@ class VirtualTradeManager:
                 self.trading_circuit_breaker.record_trade_result({
                     "is_win": is_win,
                     "pnl": pnl_value,
-                    "exit_time": exit_bar_ts.isoformat() if exit_bar_ts else None,
+                    "exit_time": exit_bar_ts.strftime('%Y-%m-%dT%H:%M:%S') if exit_bar_ts else None,  # FIXED 2026-03-25: naive ET
                     "exit_reason": exit_reason,
                 })
             except Exception as cb_err:

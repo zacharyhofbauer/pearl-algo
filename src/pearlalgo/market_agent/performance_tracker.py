@@ -13,6 +13,10 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone
+
+import pytz
+
+_ET = pytz.timezone("America/New_York")
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -202,7 +206,7 @@ class PerformanceTracker:
             # Fallback: direct file write (for backward compatibility)
             signal_record = {
                 "signal_id": signal_id,
-                "timestamp": get_utc_timestamp(),
+                "timestamp": datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                 "status": "generated",
                 "signal": _to_json_safe(signal),
             }
@@ -242,14 +246,14 @@ class PerformanceTracker:
             entry_time: Entry time (default: now)
         """
         if entry_time is None:
-            entry_time = datetime.now(timezone.utc)
+            entry_time = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: naive ET
 
         self._update_signal_status(
             signal_id,
             "entered",
             {
                 "entry_price": entry_price,
-                "entry_time": entry_time.isoformat(),
+                "entry_time": entry_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
             },
             preserve_signal=signal_data,
         )
@@ -275,7 +279,7 @@ class PerformanceTracker:
         if not self.signals_file.exists():
             return
         if updated_at is None:
-            updated_at = datetime.now(timezone.utc)
+            updated_at = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: naive ET
 
         # Acquire exclusive lock on the signals file during read-modify-write
         lock_path = Path(str(self.signals_file) + ".lock")
@@ -301,7 +305,7 @@ class PerformanceTracker:
                     if stop_loss is not None:
                         try:
                             sig["stop_loss"] = float(stop_loss)
-                            record["stop_loss_updated_at"] = updated_at.isoformat()
+                            record["stop_loss_updated_at"] = updated_at.strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: store ET not UTC
                         except Exception as e:
                             ErrorHandler.log_and_continue(
                                 "update_signal_prices stop_loss conversion", e,
@@ -310,7 +314,7 @@ class PerformanceTracker:
                     if take_profit is not None:
                         try:
                             sig["take_profit"] = float(take_profit)
-                            record["take_profit_updated_at"] = updated_at.isoformat()
+                            record["take_profit_updated_at"] = updated_at.strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: store ET not UTC
                         except Exception as e:
                             ErrorHandler.log_and_continue(
                                 "update_signal_prices take_profit conversion", e,
@@ -351,7 +355,7 @@ class PerformanceTracker:
             Performance record dictionary
         """
         if exit_time is None:
-            exit_time = datetime.now(timezone.utc)
+            exit_time = datetime.now(_ET).replace(tzinfo=None)  # FIXED 2026-03-25: naive ET
 
         # Get original signal
         signal_record = self._get_signal_record(signal_id)
@@ -425,7 +429,7 @@ class PerformanceTracker:
             "is_win": is_win,
             "exit_reason": exit_reason,
             "hold_duration_minutes": hold_duration,
-            "exit_time": exit_time.isoformat(),
+            "exit_time": exit_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
             "max_price": _exc.get("max_price"),
             "min_price": _exc.get("min_price"),
             "mfe_points": _exc.get("mfe_points"),
@@ -477,7 +481,7 @@ class PerformanceTracker:
                     "pnl": pnl,
                     "is_win": is_win,
                     "exit_reason": exit_reason,
-                    "exit_time": exit_time.isoformat(),
+                    "exit_time": exit_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                 })
                 c["recent_exits"] = c["recent_exits"][:10]
 
@@ -491,7 +495,7 @@ class PerformanceTracker:
             "exited",
             {
                 "exit_price": exit_price,
-                "exit_time": exit_time.isoformat(),
+                "exit_time": exit_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                 "exit_reason": exit_reason,
                 "pnl": pnl,
                 "is_win": is_win,
@@ -612,7 +616,7 @@ class PerformanceTracker:
                         pnl=float(pnl),
                         is_win=bool(is_win),
                         entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
-                        exit_time=str(exit_time.isoformat()),
+                        exit_time=exit_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                         stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
                         take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
                         exit_reason=str(exit_reason),
@@ -639,7 +643,7 @@ class PerformanceTracker:
                         pnl=float(pnl),
                         is_win=bool(is_win),
                         entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
-                        exit_time=str(exit_time.isoformat()),
+                        exit_time=exit_time.strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                         stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
                         take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
                         exit_reason=str(exit_reason),
@@ -690,7 +694,7 @@ class PerformanceTracker:
         ):
             return self._metrics_cache
 
-        cutoff_time = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
+        cutoff_time = datetime.now(_ET).timestamp() - (days * 24 * 60 * 60)  # FIXED 2026-03-25: ET not UTC
 
         # Load all signals
         signals = []
@@ -702,7 +706,8 @@ class PerformanceTracker:
                             record = json.loads(line.strip())
                             timestamp_str = record.get("timestamp", "")
                             if timestamp_str:
-                                timestamp = parse_utc_timestamp(timestamp_str).timestamp()
+                                ts_naive = parse_utc_timestamp(timestamp_str)
+                                timestamp = _ET.localize(ts_naive).timestamp() if ts_naive.tzinfo is None else ts_naive.timestamp()
                                 if timestamp >= cutoff_time:
                                     signals.append(record)
                         except (json.JSONDecodeError, ValueError):
@@ -894,7 +899,7 @@ class PerformanceTracker:
                 event_payload["status"] = status
                 event_payload.update(data or {})
 
-                event_ts = get_utc_timestamp()
+                event_ts = datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: store ET not UTC
 
                 self._trade_db.add_signal_event(
                     signal_id=str(signal_id),
@@ -915,7 +920,7 @@ class PerformanceTracker:
                         "signal_id": signal_id,
                         "status": status,
                         "event": "status_change",
-                        "timestamp": get_utc_timestamp(),
+                        "timestamp": datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                     }
                     event_line.update(data or {})
                     with open(self.signals_file, "a") as f:

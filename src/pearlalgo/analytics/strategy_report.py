@@ -18,11 +18,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
-    """Parse ISO format datetime string."""
+    """Parse trade timestamp → naive ET datetime.  # FIXED 2026-03-25: ET timestamps"""
     if not dt:
         return None
     try:
-        return datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        from pearlalgo.utils.paths import parse_trade_timestamp
+        return parse_trade_timestamp(dt)
     except Exception:
         return None
 

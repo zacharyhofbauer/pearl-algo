@@ -9,6 +9,25 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
+def _to_et(ts: str) -> str:
+    """Convert a UTC timestamp string to a naive ET string. FIXED 2026-03-25."""
+    if not ts:
+        return ts
+    try:
+        from datetime import datetime, timezone
+        import pytz
+        _ET = pytz.timezone("America/New_York")
+        # Parse: handles Z, +00:00, or already-naive strings
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            return ts  # already naive (ET), pass through
+        return dt.astimezone(_ET).strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return ts  # fallback: return as-is
+
+
 def tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert raw Tradovate fills into trade records using FIFO matching.
 
@@ -66,9 +85,9 @@ def tradovate_fills_to_trades(fills: List[Dict[str, Any]]) -> List[Dict[str, Any
                 "symbol": "MNQ",
                 "direction": direction,
                 "position_size": match_qty,
-                "entry_time": lot["time"],
+                "entry_time": _to_et(lot["time"]),   # FIXED 2026-03-25: convert UTC->ET
                 "entry_price": lot["price"],
-                "exit_time": ts,
+                "exit_time": _to_et(ts),                # FIXED 2026-03-25: convert UTC->ET
                 "exit_price": price,
                 "pnl": pnl,
                 "exit_reason": "take_profit" if pnl > 0 else "stop_loss",

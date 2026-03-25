@@ -41,6 +41,8 @@
 4. Do NOT enable virtual PnL
 5. Do NOT change session filter settings without user approval
 6. Do NOT restart the trading service without user approval
+7. Do NOT change circuit breaker mode back to shadow/warn_only without user approval
+8. Do NOT disable direction gating or regime avoidance without user approval
 
 ## Testing
 
@@ -65,11 +67,14 @@
 | `pearlalgo_web_app/` | Next.js web dashboard (standalone mode, port 3001) |
 | `src/pearlalgo/api/server.py` | FastAPI API server (port 8001) |
 
-## Data Insights (from 922-trade analysis)
+## Data Insights (from 1,617-trade backtest, 2026-02-17 to 2026-03-25)
 
-- Overnight sessions (18:00-08:30 ET) historically lose money (-$4,477 net)
-- Short trades have poor win rate compared to longs
+- Circuit breaker is in **enforce** mode — it will block trades that violate risk limits
+- Direction gating is ON — longs blocked in downtrends, shorts blocked in uptrends
+- Regime avoidance is ON — trades blocked in ranging/volatile regimes
+- 3-loss cooldown (30-min pause) is the most impactful filter (accounts for 70% of drawdown reduction)
 - Session filter is intentionally OFF — user wants all hours open for OpenClaw agent decisions
+- `min_confidence` stays at 0.40 — raising it interacts badly with regime multipliers
 
 ## Pearl Algo Memory Bridge (REQUIRED at session end)
 

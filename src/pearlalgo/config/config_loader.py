@@ -213,6 +213,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_data_fetch_errors": defaults.MAX_DATA_FETCH_ERRORS,
     },
     "trading_circuit_breaker": {
+        "mode": defaults.TCB_MODE,  # FIXED 2026-03-25: was missing — mode must be explicit in defaults
         "enabled": defaults.TCB_ENABLED,
         "max_consecutive_losses": defaults.TCB_MAX_CONSECUTIVE_LOSSES,
         "consecutive_loss_cooldown_minutes": defaults.TCB_CONSECUTIVE_LOSS_COOLDOWN_MINUTES,
@@ -233,6 +234,17 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "require_winning_trade_to_resume": defaults.TCB_REQUIRE_WINNING_TRADE_TO_RESUME,
         "enable_session_filter": defaults.TCB_ENABLE_SESSION_FILTER,
         "allowed_sessions": defaults.TCB_ALLOWED_SESSIONS.copy(),
+        # Phase 1: Direction gating
+        "enable_direction_gating": defaults.TCB_ENABLE_DIRECTION_GATING,
+        "direction_gating_min_confidence": defaults.TCB_DIRECTION_GATING_MIN_CONFIDENCE,
+        # Phase 2: Regime avoidance
+        "enable_regime_avoidance": defaults.TCB_ENABLE_REGIME_AVOIDANCE,
+        "blocked_regimes": defaults.TCB_BLOCKED_REGIMES.copy(),
+        "regime_avoidance_min_confidence": defaults.TCB_REGIME_AVOIDANCE_MIN_CONFIDENCE,
+        # Phase 3: Trigger filters
+        "enable_trigger_filters": defaults.TCB_ENABLE_TRIGGER_FILTERS,
+        # Phase 4: ML chop shield
+        "enable_ml_chop_shield": defaults.TCB_ENABLE_ML_CHOP_SHIELD,
     },
     "data": {
         "buffer_size": defaults.DATA_BUFFER_SIZE,
@@ -325,7 +337,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_position_size_per_order": 1,
         "symbol_whitelist": defaults.DEFAULT_SYMBOL_WHITELIST.copy(),
         "allow_reversal_on_opposite_signal": False,
-        "enforce_protection_guard": False,
+        "enforce_protection_guard": True,  # FIXED 2026-03-25: was False, overriding config.yaml setting
         "ibkr_trading_client_id": defaults.IBKR_TRADING_CLIENT_ID,
         "ibkr_host": defaults.IBKR_HOST,
         "ibkr_port": defaults.IBKR_PORT,

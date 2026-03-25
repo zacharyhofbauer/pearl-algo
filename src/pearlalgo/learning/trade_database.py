@@ -31,9 +31,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+import pytz
+
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir
+
+_ET = pytz.timezone("America/New_York")
 
 
 @dataclass
@@ -822,7 +826,7 @@ class TradeDatabase:
                 pnl, 1 if is_win else 0, exit_reason,
                 entry_time, exit_time, hold_duration_minutes,
                 regime, context_key, volatility_percentile, volume_percentile,
-                features_json, datetime.now(timezone.utc).isoformat(),
+                features_json, datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                 max_price, min_price, mfe_points, mae_points,
             ))
             
@@ -850,7 +854,7 @@ class TradeDatabase:
     ) -> None:
         """Add regime snapshot to history."""
         if timestamp is None:
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: store ET not UTC
         
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -967,7 +971,7 @@ class TradeDatabase:
         params: List[Any] = []
         
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             query += " WHERE entry_time >= ?"
             params.append(cutoff)
         
@@ -996,7 +1000,7 @@ class TradeDatabase:
         params: List[Any] = []
         
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             query += " AND entry_time >= ?"
             params.append(cutoff)
         
@@ -1030,7 +1034,7 @@ class TradeDatabase:
         params: List[Any] = []
         
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             query += " WHERE entry_time >= ?"
             params.append(cutoff)
         
@@ -1239,7 +1243,7 @@ class TradeDatabase:
         where_clauses = ["mfe_points IS NOT NULL"]
         params: list = []
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             where_clauses.append("exit_time >= ?")
             params.append(cutoff)
         if direction:
@@ -1326,7 +1330,7 @@ class TradeDatabase:
         where = "1=1"
         params: list = []
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             where = "exit_time >= ?"
             params.append(cutoff)
 
@@ -1375,7 +1379,7 @@ class TradeDatabase:
         where = "1=1"
         params: list = []
         if days:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (datetime.now(_ET) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')  # FIXED 2026-03-25: ET cutoff
             where = "exit_time >= ?"
             params.append(cutoff)
 

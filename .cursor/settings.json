@@ -4,5 +4,6 @@
   "git.enabled": true,
   "git.autoRepositoryDetection": true,
   "git.openRepositoryInParentFolders": "always",
-  "git.closedRepositories": []
+  "git.closedRepositories": [],
+  "chatgpt.openOnStartup": false
 }

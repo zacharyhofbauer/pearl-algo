@@ -123,6 +123,9 @@ MAX_DATA_FETCH_ERRORS: int = 5
 # TRADING CIRCUIT BREAKER DEFAULTS
 # =============================================================================
 
+# FIXED 2026-03-25: Explicit mode default so _SERVICE_DEFAULTS includes it
+# and startup validation can detect warn_only/shadow drift.
+TCB_MODE: str = "enforce"
 TCB_ENABLED: bool = True
 TCB_MAX_CONSECUTIVE_LOSSES: int = 5
 TCB_CONSECUTIVE_LOSS_COOLDOWN_MINUTES: int = 30
@@ -143,6 +146,21 @@ TCB_AUTO_RESUME_AFTER_COOLDOWN: bool = True
 TCB_REQUIRE_WINNING_TRADE_TO_RESUME: bool = False
 TCB_ENABLE_SESSION_FILTER: bool = True
 TCB_ALLOWED_SESSIONS: list[str] = ["overnight", "midday", "close"]
+
+# Phase 1: Direction gating
+TCB_ENABLE_DIRECTION_GATING: bool = True
+TCB_DIRECTION_GATING_MIN_CONFIDENCE: float = 0.70
+
+# Phase 2: Regime avoidance
+TCB_ENABLE_REGIME_AVOIDANCE: bool = False
+TCB_BLOCKED_REGIMES: list[str] = ["ranging", "volatile"]
+TCB_REGIME_AVOIDANCE_MIN_CONFIDENCE: float = 0.70
+
+# Phase 3: Trigger filters
+TCB_ENABLE_TRIGGER_FILTERS: bool = False
+
+# Phase 4: ML chop shield
+TCB_ENABLE_ML_CHOP_SHIELD: bool = False
 
 
 # =============================================================================

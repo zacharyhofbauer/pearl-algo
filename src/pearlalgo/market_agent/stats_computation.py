@@ -60,14 +60,11 @@ def get_trading_day_start() -> datetime:
     Example: Trading day "Jan 29" starts at 6pm ET on Jan 28.
 
     Returns:
-        datetime in UTC for comparison with trade timestamps
+        Naive datetime in ET for comparison with trade timestamps.
+        FIXED 2026-03-25: returns naive ET, not UTC — all timestamps are now ET.
     """
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo  # type: ignore
-
-    et_tz = ZoneInfo("America/New_York")
+    import pytz
+    et_tz = pytz.timezone("America/New_York")
     now_et = datetime.now(et_tz)
 
     if now_et.hour < 18:
@@ -81,7 +78,8 @@ def get_trading_day_start() -> datetime:
             hour=18, minute=0, second=0, microsecond=0
         )
 
-    return trading_day_start.astimezone(timezone.utc)
+    # Return naive ET (strip tzinfo) — all trade timestamps are naive ET
+    return trading_day_start.replace(tzinfo=None)
 
 
 # ---------------------------------------------------------------------------
@@ -150,10 +148,9 @@ def compute_daily_stats(
                 continue
 
             try:
-                # Parse ISO format timestamp
-                exit_time = datetime.fromisoformat(
-                    str(exit_time_str).replace("Z", "+00:00")
-                )
+                # Parse timestamp → naive ET  # FIXED 2026-03-25: store ET not UTC
+                from pearlalgo.utils.paths import parse_trade_timestamp
+                exit_time = parse_trade_timestamp(str(exit_time_str))
                 if exit_time < trading_day_start:
                     continue
             except (ValueError, AttributeError):
@@ -240,7 +237,9 @@ def compute_performance_stats(
         _set_cached(cache_key, result)
         return result
 
-    now = datetime.now(timezone.utc)
+    import pytz
+    _et = pytz.timezone("America/New_York")
+    now = datetime.now(_et).replace(tzinfo=None)  # FIXED 2026-03-25: naive ET for trade comparisons
     cutoffs = {
         "24h": now - timedelta(hours=24),
         "72h": now - timedelta(hours=72),
@@ -264,9 +263,8 @@ def compute_performance_stats(
             if not exit_time_str:
                 continue
             try:
-                exit_time = datetime.fromisoformat(
-                    str(exit_time_str).replace("Z", "+00:00")
-                )
+                from pearlalgo.utils.paths import parse_trade_timestamp
+                exit_time = parse_trade_timestamp(str(exit_time_str))  # FIXED 2026-03-25: naive ET
             except (ValueError, TypeError):
                 continue
 

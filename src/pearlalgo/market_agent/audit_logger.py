@@ -27,7 +27,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+import pytz
+
 from pearlalgo.utils.logger import logger
+
+_ET = pytz.timezone("America/New_York")
 
 
 # ---------------------------------------------------------------------------
@@ -414,9 +418,9 @@ class AuditLogger:
 
         Returns counts of deleted rows per category.
         """
-        now = datetime.now(timezone.utc)
-        general_cutoff = (now - timedelta(days=self._retention_days)).isoformat()
-        snapshot_cutoff = (now - timedelta(days=self._snapshot_retention_days)).isoformat()
+        now = datetime.now(_ET)  # FIXED 2026-03-25: store ET not UTC
+        general_cutoff = (now - timedelta(days=self._retention_days)).strftime('%Y-%m-%dT%H:%M:%S')
+        snapshot_cutoff = (now - timedelta(days=self._snapshot_retention_days)).strftime('%Y-%m-%dT%H:%M:%S')
 
         deleted_general = 0
         deleted_snapshots = 0
@@ -485,7 +489,7 @@ class AuditLogger:
             return
         try:
             event = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S'),  # FIXED 2026-03-25: store ET not UTC
                 "event_type": event_type,
                 "account": self.account,
                 "data_json": json.dumps(data, default=str),

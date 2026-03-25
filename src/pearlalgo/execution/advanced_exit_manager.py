@@ -7,6 +7,9 @@ Advanced Exit Manager - Implements 3 additional exit strategies:
 from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
+import pytz
+
+_ET = pytz.timezone("America/New_York")
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +54,12 @@ class AdvancedExitManager:
         """
         if not self.quick_exit_enabled:
             return False, ""
-        
-        # Calculate hold duration
-        duration_min = (datetime.now() - entry_time).total_seconds() / 60
-        
+
+        # Calculate hold duration — FIXED 2026-03-25: naive ET
+        now_et = datetime.now(_ET).replace(tzinfo=None)
+        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
+        duration_min = (now_et - et_naive).total_seconds() / 60
+
         if duration_min < self.quick_exit_min_duration_min:
             return False, ""
         
@@ -87,10 +92,12 @@ class AdvancedExitManager:
         """
         if not self.time_exit_enabled:
             return False, ""
-        
-        # Calculate hold duration
-        duration_min = (datetime.now() - entry_time).total_seconds() / 60
-        
+
+        # Calculate hold duration — FIXED 2026-03-25: naive ET
+        now_et = datetime.now(_ET).replace(tzinfo=None)
+        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
+        duration_min = (now_et - et_naive).total_seconds() / 60
+
         if duration_min < self.time_exit_min_duration_min:
             return False, ""
         

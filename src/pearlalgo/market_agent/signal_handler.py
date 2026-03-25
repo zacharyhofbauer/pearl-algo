@@ -13,10 +13,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import pandas as pd
+import pytz
 
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp
+
+_ET = pytz.timezone("America/New_York")
 
 if TYPE_CHECKING:
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
@@ -603,7 +606,7 @@ class SignalHandler:
                 self.performance_tracker.track_entry(
                     signal_id=signal_id,
                     entry_price=entry_price,
-                    entry_time=datetime.now(timezone.utc),
+                    entry_time=datetime.now(_ET).replace(tzinfo=None),  # FIXED 2026-03-25: naive ET
                     signal_data=signal if preserve_full_signal else None,
                 )
         except Exception as e:
@@ -707,8 +710,8 @@ class SignalHandler:
             try:
                 ts = signal.get("timestamp") or signal.get("_timestamp")
                 if ts:
-                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-                    hour = dt.hour
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00").replace("+00:00", ""))
+                    hour = dt.hour  # FIXED 2026-03-25: hour is now ET natively
                     if hour < 10:
                         time_bucket = "morning"
                     elif hour < 14:

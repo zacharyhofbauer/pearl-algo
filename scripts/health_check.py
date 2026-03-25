@@ -114,18 +114,20 @@ except Exception as e:
     print(f"Log check error: {e}")
 
 # 5. Long drought check (>90 min no trade during market hours)
-now_utc = datetime.now(timezone.utc)
-now_et_hour = (now_utc - timedelta(hours=4)).hour
+import pytz as _pytz  # FIXED 2026-03-25: ET timezone migration
+_ET_HCK = _pytz.timezone("America/New_York")
+now_et = datetime.now(_ET_HCK)
+now_et_hour = now_et.hour
 market_hours = now_et_hour >= 18 or now_et_hour < 16  # overnight + day session
 if market_hours and state.get("running"):
     conn = sqlite3.connect(str(DB))
     last = conn.execute(
-        "SELECT MAX(exit_time) FROM trades WHERE date(exit_time,'localtime') = date('now','localtime')"
+        "SELECT MAX(exit_time) FROM trades WHERE date(exit_time) = date('now')"  # FIXED 2026-03-25: times are naive ET
     ).fetchone()[0]
     conn.close()
     if last:
-        last_dt = datetime.fromisoformat(last.replace('Z','+00:00'))
-        mins = (now_utc - last_dt).total_seconds() / 60
+        last_dt = datetime.fromisoformat(last)  # FIXED 2026-03-25: naive ET, no tz conversion needed
+        mins = (now_et.replace(tzinfo=None) - last_dt).total_seconds() / 60
         if mins > 90:
             alert(f"No trades in {mins:.0f}min during market hours — investigate", "trade_drought")
         else:

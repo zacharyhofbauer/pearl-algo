@@ -377,7 +377,7 @@ class TradingCircuitBreaker:
         self._recent_trades.append({
             "is_win": is_win,
             "pnl": pnl,
-            "exit_time": trade.get("exit_time", datetime.now(timezone.utc).isoformat()),
+            "exit_time": trade.get("exit_time", datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S')),  # FIXED 2026-03-25: store ET not UTC
         })
         
         # Trim to rolling window

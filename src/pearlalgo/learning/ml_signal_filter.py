@@ -729,8 +729,8 @@ class MLSignalFilter:
             exit_time = trade.get("exit_time", "")
             if isinstance(exit_time, str) and exit_time:
                 try:
-                    dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
-                    features.append(float(dt.hour))
+                    dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00").replace("+00:00", ""))
+                    features.append(float(dt.hour))  # FIXED 2026-03-25: hour is now ET natively
                     features.append(float(dt.weekday()))
                 except Exception:
                     features.append(12.0)

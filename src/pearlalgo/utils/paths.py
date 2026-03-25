@@ -4,7 +4,7 @@ Path and timestamp utilities for consistent file and directory handling.
 This module provides centralized utilities for:
 - State directory initialization and management
 - Standard file path construction (signals, state, performance)
-- UTC timestamp formatting and parsing
+- ET timestamp formatting and parsing (America/New_York)
 
 All functions use consistent defaults and patterns to ensure maintainability.
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+import pytz
 from pathlib import Path
 from typing import Optional
 
@@ -93,38 +94,57 @@ def get_performance_file(state_dir: Path) -> Path:
     return state_dir / "performance.json"
 
 
-def get_utc_timestamp() -> str:
+_ET = pytz.timezone("America/New_York")
+
+
+def get_et_timestamp() -> str:  # FIXED 2026-03-25: store ET not UTC
     """
-    Get current UTC timestamp in ISO format.
-    
+    Get current ET timestamp as naive ISO string.
+
     Returns:
-        ISO format UTC timestamp string (e.g., "2025-12-16T10:30:45.123456+00:00")
+        Naive ISO format ET timestamp string (e.g., "2025-12-16T10:30:45")
     """
+    return datetime.now(_ET).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def get_utc_timestamp() -> str:
+    """Deprecated: use get_et_timestamp(). Kept for non-trade callers."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def parse_utc_timestamp(timestamp: str) -> datetime:
+    """Deprecated wrapper — calls parse_trade_timestamp()."""
+    return parse_trade_timestamp(timestamp)
+
+
+def parse_trade_timestamp(timestamp: str) -> datetime:
     """
-    Parse UTC timestamp from ISO format string.
-    
-    Handles both "Z" suffix and "+00:00" timezone formats.
-    
+    Parse a trade timestamp string and return a naive ET datetime.
+
+    Handles all formats:
+    - Naive ET strings (post-migration): '2026-03-25T14:28:00'
+    - UTC with +00:00 suffix (legacy): '2026-03-25T18:28:00+00:00'
+    - UTC with Z suffix (legacy): '2026-03-25T18:28:00Z'
+
+    Always returns a naive datetime in ET for consistent comparison.
+
     Args:
         timestamp: ISO format timestamp string
-        
+
     Returns:
-        datetime object with UTC timezone
-        
+        Naive datetime in America/New_York
+
     Raises:
         ValueError: If timestamp cannot be parsed
     """
-    # Handle "Z" suffix (replace with "+00:00" for fromisoformat)
     normalized = timestamp.replace("Z", "+00:00")
     dt = datetime.fromisoformat(normalized)
-    # Some persisted artifacts may omit tzinfo; treat as UTC for safety/consistency.
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+        # Already naive ET (post-migration)
+        return dt
+    # Legacy tz-aware timestamp — convert to naive ET
+    dt_et = dt.astimezone(_ET)
+    return dt_et.replace(tzinfo=None)
 
 
 

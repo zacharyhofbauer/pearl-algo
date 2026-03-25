@@ -46,7 +46,7 @@ circuit_breaker:
   pause_on_connection_failures: true
 trading_circuit_breaker:
   enabled: true
-  mode: warn_only
+  mode: enforce  # FIXED 2026-03-25: was warn_only — base config must default to enforce for safety
   max_consecutive_losses: 5
   max_session_drawdown: 500.0
   max_daily_drawdown: 1000.0
