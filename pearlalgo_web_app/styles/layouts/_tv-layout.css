@@ -123,14 +123,49 @@ body:has(.tv-layout) .nav-bar {
   .tv-right-panel-body { min-width: 280px; }
 }
 
-/* Small screens: hide right panel entirely */
+/* Small screens: right panel becomes full-screen overlay */
 @media (max-width: 768px) {
-  .tv-right-panel { display: none; }
+  .tv-right-panel[data-state="closed"] { display: none; }
+  .tv-right-panel[data-state="open"] {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    z-index: 9998;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+    background: #1e222d;
+  }
 }
 
-/* Mobile: hide sidebars */
+/* Mobile: hide sidebars, show mobile controls */
 @media (max-width: 640px) {
   .tv-sidebar { display: none; }
+
+  /* Show mobile logo in header */
+  .mobile-logo {
+    display: flex !important;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  /* Hide desktop timeframe row, show dropdown */
+  .header-timeframe { display: none !important; }
+  .mobile-tf-select { display: block !important; }
+
+  /* Show hamburger menu button */
+  .mobile-menu-btn { display: flex !important; }
+
+  /* Compact header height */
+  .header-combined {
+    padding: 3px 6px !important;
+    min-height: 34px !important;
+  }
+
+  .header-row-single {
+    gap: 6px !important;
+  }
 }
 
 @media (max-width: 480px) {

@@ -123,6 +123,10 @@
 
 .tv-panel-area .data-panel-header-right {
   gap: 8px;
+  flex-shrink: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .tv-panel-area .trade-dock-wrapper {

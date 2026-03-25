@@ -78,6 +78,8 @@ export default function DashboardPageInner() {
 
   // Indicators dropdown state
   const [showIndicatorsDropdown, setShowIndicatorsDropdown] = useState(false)
+  // Mobile menu state
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
   const indicatorSettings = useChartSettingsStore((s) => s.indicators)
   const toggleIndicator = useChartSettingsStore((s) => s.toggleIndicator)
 
@@ -478,7 +480,21 @@ export default function DashboardPageInner() {
     return (
       <header className="header-combined">
         <div className="header-row-single">
-          {/* Left: Timeframe buttons */}
+          {/* Mobile: logo + hamburger — only visible when sidebars hidden */}
+          <div className="mobile-logo">
+            <img src="/logo.png" alt="PEARL" width={20} height={20} />
+          </div>
+          <button
+            className="mobile-menu-btn"
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            title="Menu"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="3" y1="5" x2="15" y2="5"/><line x1="3" y1="9" x2="15" y2="9"/><line x1="3" y1="13" x2="15" y2="13"/>
+            </svg>
+          </button>
+
+          {/* Left: Timeframe buttons (desktop) + dropdown (mobile) */}
           <div className="header-timeframe">
             {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
               <button
@@ -490,6 +506,16 @@ export default function DashboardPageInner() {
               </button>
             ))}
           </div>
+          {/* Mobile timeframe dropdown */}
+          <select
+            className="mobile-tf-select"
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value as Timeframe)}
+          >
+            {(['1m', '5m', '15m', '30m', '1h', '4h', '1D'] as Timeframe[]).map((tf) => (
+              <option key={tf} value={tf}>{tf}</option>
+            ))}
+          </select>
 
           {/* Center: Action buttons */}
           <div className="header-actions">
@@ -667,6 +693,50 @@ export default function DashboardPageInner() {
             </div>
           )}
         </div>
+
+        {/* Mobile slide-out menu */}
+        {showMobileMenu && (
+          <div className="mobile-menu-overlay" onClick={() => setShowMobileMenu(false)}>
+            <div className="mobile-menu-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="mobile-menu-header">
+                <img src="/logo.png" alt="PEARL" width={20} height={20} />
+                <span>PEARL</span>
+                <button className="mobile-menu-close" onClick={() => setShowMobileMenu(false)}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
+                  </svg>
+                </button>
+              </div>
+              <nav className="mobile-menu-nav">
+                <a href="/dashboard?account=tv_paper" className="mobile-menu-item active">Dashboard</a>
+                <a href="/archive/ibkr" className="mobile-menu-item">Archive</a>
+                <a href="/settings" className="mobile-menu-item">Settings</a>
+              </nav>
+              <div className="mobile-menu-divider" />
+              <div className="mobile-menu-section-label">Panels</div>
+              <div className="mobile-menu-actions">
+                <button className={`mobile-menu-item ${activeRightPanel === 'watchlist' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('watchlist') }}>
+                  Watchlist
+                </button>
+                <button className={`mobile-menu-item ${activeRightPanel === 'activity' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('activity') }}>
+                  Activity Log
+                </button>
+                <button className={`mobile-menu-item ${activeRightPanel === 'logs' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('logs') }}>
+                  System Status
+                </button>
+              </div>
+              <div className="mobile-menu-divider" />
+              <div className="mobile-menu-actions">
+                <button className="mobile-menu-item" onClick={() => { setShowMobileMenu(false); document.documentElement.requestFullscreen() }}>
+                  Fullscreen
+                </button>
+                <button className="mobile-menu-item" onClick={() => { setShowMobileMenu(false); mainChartApi?.takeScreenshot() }}>
+                  Screenshot
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
     )
   }
@@ -852,6 +922,8 @@ export default function DashboardPageInner() {
                 accountEquity={agentState?.tradovate_account?.equity ?? performanceSummary?.all?.tradovate_equity ?? null}
                 accountTotalPnl={performanceSummary?.all?.pnl ?? null}
                 accountWinRate={performanceSummary?.all?.win_rate ?? null}
+                accountId={(agentState?.tradovate_account as any)?.account ?? null}
+                accountEnv={(agentState?.tradovate_account as any)?.env ?? null}
               />
             </ErrorBoundary>
           </>

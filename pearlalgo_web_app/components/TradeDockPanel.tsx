@@ -112,6 +112,10 @@ interface TradeDockPanelProps {
   accountTotalPnl?: number | null
   /** Account win rate for panel header */
   accountWinRate?: number | null
+  /** Tradovate account ID (e.g. "DEMO6315448") */
+  accountId?: string | null
+  /** Tradovate environment (e.g. "demo" or "live") */
+  accountEnv?: string | null
 }
 
 type Tab = 'positions' | 'history' | 'stats' | 'signals'
@@ -141,6 +145,8 @@ function TradeDockPanel({
   accountEquity,
   accountTotalPnl,
   accountWinRate,
+  accountId,
+  accountEnv,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -209,39 +215,15 @@ function TradeDockPanel({
 
   const headerStats = (
     <div className="trade-dock-header-stats" aria-label="Daily summary">
-      {/* Account data (merged from AccountStrip) */}
-      {(accountEquity != null || accountTotalPnl != null) && (
-        <div className="panel-account-data">
-          {accountEquity != null && (
-            <div className="panel-account-item">
-              <span className="panel-account-label">Equity</span>
-              <span className="panel-account-value">{fmtMoney(accountEquity)}</span>
-            </div>
-          )}
-          {accountTotalPnl != null && (
-            <>
-              <span className="panel-account-sep">|</span>
-              <div className="panel-account-item">
-                <span className="panel-account-label">Profit</span>
-                <span className={`panel-account-value ${accountTotalPnl >= 0 ? 'positive' : 'negative'}`}>{fmtSignedMoney(accountTotalPnl)}</span>
-              </div>
-            </>
-          )}
-          {accountWinRate != null && (
-            <>
-              <span className="panel-account-sep">|</span>
-              <div className="panel-account-item">
-                <span className="panel-account-label">Win</span>
-                <span className="panel-account-value">{accountWinRate.toFixed(1)}%</span>
-              </div>
-            </>
-          )}
+      {accountEquity != null && (
+        <div className="dock-stat equity">
+          <span className="dock-stat-k">Equity</span>
+          <span className="dock-stat-v">{fmtMoney(accountEquity)}</span>
         </div>
       )}
-
       {typeof dailyPnL === 'number' && (
         <div className={`dock-stat pnl ${dailyPnL >= 0 ? 'positive' : 'negative'}`}>
-          <span className="dock-stat-k">P&amp;L</span>
+          <span className="dock-stat-k">Day P&amp;L</span>
           <span className="dock-stat-v">{formatPnL(dailyPnL)}</span>
         </div>
       )}
@@ -254,14 +236,6 @@ function TradeDockPanel({
           </span>
         </div>
       )}
-      <div className="dock-stat pos">
-        <span className="dock-stat-k">POS</span>
-        <span className="dock-stat-v">{headerPosCount}</span>
-      </div>
-      <div className="dock-stat pos">
-        <span className="dock-stat-k">QTY</span>
-        <span className="dock-stat-v">{totalOpenContracts}</span>
-      </div>
     </div>
   )
 
@@ -399,7 +373,8 @@ function TradeDockPanel({
   return (
     <div className="trade-dock-wrapper">
       <DataPanel
-        title="Trades"
+        title={accountId || 'Tradovate'}
+        iconSrc="/tradovate-icon.png"
         padding="none"
         className="trade-dock-panel"
         headerRight={headerStats}

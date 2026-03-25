@@ -603,12 +603,12 @@
 }
 
 .trade-dock-header-stats .dock-stat.pnl {
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .trade-dock-header-stats .dock-stat.pnl .dock-stat-v {
-  font-weight: 800;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 12px;
 }
 
 .trade-dock-header-stats .dock-stat.pnl.positive {
@@ -1152,5 +1152,57 @@
 
   .trade-dock-content {
     padding: 4px 6px;
+  }
+}
+
+/* Tradovate branding in dock header */
+.trade-dock-panel .data-panel-icon-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.trade-dock-panel .data-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  text-transform: lowercase;
+}
+
+/* When sidebars hidden: hide account name, keep icon, fit one row */
+@media (max-width: 640px) {
+  .trade-dock-panel .data-panel-title {
+    display: none;
+  }
+  .trade-dock-panel .data-panel-icon-img {
+    width: 16px;
+    height: 16px;
+  }
+  .trade-dock-panel .data-panel-header {
+    padding: 4px 8px;
+    min-height: 28px;
+    gap: 4px;
+  }
+  .trade-dock-header-stats {
+    gap: 4px !important;
+  }
+  .dock-stat {
+    padding: 2px 5px !important;
+  }
+  .dock-stat-k {
+    font-size: 8px !important;
+  }
+  .dock-stat-v {
+    font-size: 10px !important;
+  }
+}
+
+/* Also hide when right sidebar is gone but left may still show */
+@media (max-width: 768px) {
+  .trade-dock-panel .data-panel-title {
+    display: none;
   }
 }

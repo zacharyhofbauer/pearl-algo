@@ -408,6 +408,10 @@ function CandlestickChart({ data, indicators, markers, barSpacing = 10, timefram
     const keyLevelsPlugin   = new KeyLevelsPlugin()
     const tbtPlugin         = new TBTTrendlines()
     const srPowerPlugin     = new SRPowerZones()
+    // Set disabled flags from current settings before attaching
+    ;(tbtPlugin as any)._disabled = !indicatorSettings.tbtTrendlines
+    ;(sessionPlugin as any)._disabled = !indicatorSettings.sessions
+    ;(sdZonesPlugin as any)._disabled = !indicatorSettings.sdZones
     candleSeries.attachPrimitive(tradeZonesPlugin)
     candleSeries.attachPrimitive(sessionPlugin)
     candleSeries.attachPrimitive(sdZonesPlugin)
