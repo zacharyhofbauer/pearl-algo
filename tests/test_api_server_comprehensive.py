@@ -32,7 +32,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient  # noqa: E402
 
 import pearlalgo.api.server as server_mod  # noqa: E402
-import pearlalgo.api.server_core as core_mod  # noqa: E402
+core_mod = server_mod  # server_core merged into server
 import pearlalgo.api.data_layer as data_layer_mod  # noqa: E402
 
 # ---------------------------------------------------------------------------

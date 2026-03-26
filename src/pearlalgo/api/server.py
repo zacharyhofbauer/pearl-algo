@@ -733,9 +733,17 @@ app.add_middleware(
     allow_headers=["X-API-Key", "X-PEARL-OPERATOR", "Content-Type", "Authorization"],
 )
 
-# Route modules (health; more to follow per plan 15A)
-from pearlalgo.api.routes.health import router as _health_router
-app.include_router(_health_router)
+# Health routes (inlined to avoid circular import with routes/health.py)
+@app.get("/health", tags=["health"])
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok", "market": _market}
+
+
+@app.get("/api/market-status", tags=["health"])
+async def get_market_status(_key: Optional[str] = Depends(verify_api_key)):
+    """Get current market open/closed status."""
+    return _get_market_status()
 
 
 # ---------------------------------------------------------------------------
@@ -1200,10 +1208,6 @@ async def startup_event():
         _state_dir = _resolve_state_dir(_market)
 
     _init_auth()
-    # Sync auth state to server_core so routes importing from there see the keys
-    import pearlalgo.api.server_core as _sc
-    _sc._api_keys = _api_keys
-    _sc._auth_enabled = _auth_enabled
     _init_accounts_config()
     asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
@@ -4167,7 +4171,6 @@ async def get_recent_logs(
 
 def main():
     global _market, _state_dir
-    import pearlalgo.api.server_core as _core
 
     parser = argparse.ArgumentParser(description="Pearl Algo Web App API Server")
     parser.add_argument("--market", default=os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET))
@@ -4186,9 +4189,6 @@ def main():
             _state_dir.mkdir(parents=True, exist_ok=True)
     else:
         _state_dir = _resolve_state_dir(_market)
-    # Sync globals into server_core so route modules (e.g. health) see them
-    _core._market = _market
-    _core._state_dir = _state_dir
 
     print(f"Starting Pearl Algo Web App API Server")
     print(f"  Market: {_market}")
