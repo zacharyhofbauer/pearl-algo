@@ -62,6 +62,7 @@ class TradingCircuitBreakerConfig:
     # Daily/session drawdown limits
     max_session_drawdown: float = 500.0  # USD
     max_daily_drawdown: float = 1000.0  # USD
+    max_daily_profit: float = 3000.0  # USD — stop trading after hitting profit target
     drawdown_cooldown_minutes: int = 60
     
     # Rolling win rate filter
@@ -266,6 +267,12 @@ class TradingCircuitBreaker:
         
         # Check daily drawdown
         decision = self._check_daily_drawdown()
+        if not decision.allowed:
+            self._record_block(decision.reason)
+            return decision
+
+        # Check daily profit cap (stop trading after hitting target)
+        decision = self._check_daily_profit_cap()
         if not decision.allowed:
             self._record_block(decision.reason)
             return decision
@@ -767,7 +774,43 @@ class TradingCircuitBreaker:
                 }
             )
         return CircuitBreakerDecision(allowed=True, reason="daily_drawdown_ok")
-    
+
+    def _check_daily_profit_cap(self) -> CircuitBreakerDecision:
+        """Check if daily realized P&L has reached the profit target."""
+        if self.config.max_daily_profit <= 0:
+            return CircuitBreakerDecision(allowed=True, reason="daily_profit_cap_disabled")
+
+        if self._daily_pnl >= self.config.max_daily_profit:
+            now = datetime.now(timezone.utc)
+            from pearlalgo.utils.market_hours import ET
+            now_et = now.astimezone(ET)
+            # Cooldown until next 6 PM ET session reset
+            if now_et.hour < 18:
+                next_reset_et = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+            else:
+                next_reset_et = (now_et + timedelta(days=1)).replace(
+                    hour=18, minute=0, second=0, microsecond=0)
+            remaining = max(60, (next_reset_et.astimezone(timezone.utc) - now).total_seconds() / 60)
+
+            self._activate_cooldown("daily_profit_cap", int(remaining))
+            logger.info(
+                "Daily profit cap reached: daily_pnl=$%.2f >= target=$%.2f. "
+                "Trading paused for %.0f min.",
+                self._daily_pnl, self.config.max_daily_profit, remaining,
+            )
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="daily_profit_cap",
+                severity="info",
+                details={
+                    "daily_pnl": self._daily_pnl,
+                    "max_daily_profit": self.config.max_daily_profit,
+                    "cooldown_minutes": remaining,
+                    "message": "Profit target reached for the day - preserving gains",
+                },
+            )
+        return CircuitBreakerDecision(allowed=True, reason="daily_profit_cap_ok")
+
     def _calculate_rolling_win_rate(self) -> float:
         """Calculate win rate over recent trades."""
         window = self.config.rolling_window_trades
@@ -1362,6 +1405,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         consecutive_loss_cooldown_minutes=config.get("consecutive_loss_cooldown_minutes", 30),
         max_session_drawdown=config.get("max_session_drawdown", 500.0),
         max_daily_drawdown=config.get("max_daily_drawdown", 1000.0),
+        max_daily_profit=config.get("max_daily_profit", 3000.0),
         drawdown_cooldown_minutes=config.get("drawdown_cooldown_minutes", 60),
         rolling_window_trades=config.get("rolling_window_trades", 20),
         min_rolling_win_rate=config.get("min_rolling_win_rate", 0.30),

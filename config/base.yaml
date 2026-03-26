@@ -51,6 +51,7 @@ trading_circuit_breaker:
   max_consecutive_losses: 5
   max_session_drawdown: 500.0
   max_daily_drawdown: 1000.0
+  max_daily_profit: 3000.0  # Stop trading after hitting profit target (MFF 50K rule)
   max_concurrent_positions: 5
   enable_session_filter: true
   allowed_sessions:
