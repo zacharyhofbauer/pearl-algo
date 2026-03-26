@@ -51,6 +51,9 @@ class TradingCircuitBreakerConfig:
 
     # Mode: enforce blocks signals, warn_only emits telemetry only
     mode: str = "enforce"
+
+    # Kill switch: block all short/sell signals when enabled
+    kill_switch_short: bool = False
     
     # Consecutive loss limits
     max_consecutive_losses: int = 5
@@ -230,6 +233,25 @@ class TradingCircuitBreaker:
                 }
             )
         
+        # Kill switch: block all short/sell signals
+        if self.config.kill_switch_short:
+            direction = str(signal.get("direction", "")).lower()
+            if direction in ("short", "sell"):
+                logger.warning(
+                    "Kill switch active: blocked short signal | "
+                    "direction=%s, type=%s", direction, signal.get("type", "unknown")
+                )
+                self._record_block("kill_switch_short")
+                return CircuitBreakerDecision(
+                    allowed=False,
+                    reason="kill_switch_short",
+                    severity="critical",
+                    details={
+                        "direction": direction,
+                        "message": "Short trade kill switch is active - all short/sell signals blocked",
+                    },
+                )
+
         # Check consecutive losses
         decision = self._check_consecutive_losses()
         if not decision.allowed:
@@ -1335,6 +1357,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
     
     cb_config = TradingCircuitBreakerConfig(
         mode=str(config.get("mode", "enforce") or "enforce"),
+        kill_switch_short=config.get("kill_switch_short", False),
         max_consecutive_losses=config.get("max_consecutive_losses", 5),
         consecutive_loss_cooldown_minutes=config.get("consecutive_loss_cooldown_minutes", 30),
         max_session_drawdown=config.get("max_session_drawdown", 500.0),
