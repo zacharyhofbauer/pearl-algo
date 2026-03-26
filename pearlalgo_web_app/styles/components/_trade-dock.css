@@ -715,7 +715,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  margin: 8px 0 10px;
+  margin: 4px 0 6px;
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(42, 46, 57, 0.35);
@@ -808,7 +808,7 @@
 }
 
 .trade-controls-note {
-  margin: 8px 0 10px;
+  margin: 4px 0 6px;
   font-size: 11px;
   color: var(--text-tertiary);
 }
@@ -824,7 +824,7 @@
 }
 
 .trade-controls-result {
-  margin: 8px 0 10px;
+  margin: 4px 0 6px;
   font-size: 12px;
   padding: 8px 10px;
   border-radius: 0;

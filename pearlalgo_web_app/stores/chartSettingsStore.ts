@@ -111,7 +111,7 @@ const DEFAULT_INDICATORS: IndicatorVisibility = {
   volume: true,
   vwapBands: false,
   keyLevels: true,
-  tbtTrendlines: false,
+  tbtTrendlines: true,
   srPowerZones: false,
   rsi: true,
   sessions: false,
