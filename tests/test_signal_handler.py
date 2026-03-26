@@ -28,6 +28,17 @@ from pearlalgo.market_agent.notification_queue import Priority
 from pearlalgo.market_agent.signal_handler import SignalHandler
 
 
+
+@pytest.fixture(autouse=True)
+def _mock_config_for_signal_type_gate():
+    """Ensure signal type gate allows test signal types (sr_bounce etc.)."""
+    fake_cfg = {"signals": {"enabled_signal_types": None}}  # None = allow all
+    with patch(
+        "pearlalgo.market_agent.signal_handler.SignalHandler._is_signal_type_allowed",
+        return_value=True,
+    ):
+        yield
+
 # ---------------------------------------------------------------------------
 # Helper factories
 # ---------------------------------------------------------------------------
