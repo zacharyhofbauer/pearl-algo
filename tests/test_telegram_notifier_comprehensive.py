@@ -1353,12 +1353,11 @@ class TestSendDashboard:
         mock_prefs.set = MagicMock()
 
         with patch.object(notifier, "_get_prefs", return_value=mock_prefs):
-            with patch("pearlalgo.market_agent.telegram_notifier._is_command_handler_running", return_value=False):
-                with patch("pearlalgo.market_agent.telegram_notifier.format_glanceable_card", return_value="Dashboard text"):
-                    result = await notifier.send_dashboard({
-                        "running": True,
-                        "symbol": "MNQ",
-                    })
+            with patch("pearlalgo.market_agent.telegram_notifier.format_glanceable_card", return_value="Dashboard text"):
+                result = await notifier.send_dashboard({
+                    "running": True,
+                    "symbol": "MNQ",
+                })
         assert result is True
 
 
@@ -1393,23 +1392,6 @@ class TestHelpers:
             result = notifier._format_status_message(basic_status)
             assert result == "status msg"
             mock_fn.assert_called_once_with(basic_status)
-
-
-class TestIsCommandHandlerRunning:
-    def test_no_pid_file(self, tmp_path):
-        from pearlalgo.market_agent.telegram_notifier import _is_command_handler_running
-        with patch("pearlalgo.market_agent.telegram_notifier.Path") as mock_path:
-            # Make pid_file.exists() return False
-            mock_path.return_value.parent.parent.parent.parent = tmp_path
-            result = _is_command_handler_running()
-        # Result depends on actual file system state; just ensure no crash
-        assert isinstance(result, bool)
-
-    def test_exception_returns_false(self):
-        from pearlalgo.market_agent.telegram_notifier import _is_command_handler_running
-        with patch("pearlalgo.market_agent.telegram_notifier.Path", side_effect=Exception("fail")):
-            result = _is_command_handler_running()
-            assert result is False
 
 
 class TestEdgeCases:

@@ -63,22 +63,6 @@ DEFAULT_SYMBOL_WHITELIST: list[str] = ["MNQ"]
 
 
 # =============================================================================
-# LEARNING LAYER DEFAULTS
-# =============================================================================
-
-LEARNING_ENABLED: bool = True
-LEARNING_MODE: str = "shadow"
-MIN_SAMPLES_PER_TYPE: int = 10
-EXPLORE_RATE: float = 0.1
-DECISION_THRESHOLD: float = 0.3
-MAX_SIZE_MULTIPLIER: float = 1.5
-MIN_SIZE_MULTIPLIER: float = 0.5
-PRIOR_ALPHA: float = 2.0
-PRIOR_BETA: float = 2.0
-DECAY_FACTOR: float = 0.0
-
-
-# =============================================================================
 # SERVICE DEFAULTS
 # =============================================================================
 
@@ -159,8 +143,6 @@ TCB_REGIME_AVOIDANCE_MIN_CONFIDENCE: float = 0.70
 # Phase 3: Trigger filters
 TCB_ENABLE_TRIGGER_FILTERS: bool = False
 
-# Phase 4: ML chop shield
-TCB_ENABLE_ML_CHOP_SHIELD: bool = False
 
 
 # =============================================================================
@@ -195,26 +177,6 @@ STORAGE_DB_PATH: str = "data/agent_state/NQ/trades.db"
 # Dual-write is DEPRECATED — kept only for transition.
 # Set to False to use SQLite-only mode (recommended).
 STORAGE_DUAL_WRITE_FILES: bool = False
-
-
-# =============================================================================
-# ML FILTER DEFAULTS
-# =============================================================================
-
-ML_FILTER_ENABLED: bool = False
-ML_FILTER_MODEL_PATH: str | None = None
-ML_FILTER_MODEL_VERSION: str = "v1.0.0"
-ML_FILTER_MIN_PROBABILITY: float = 0.55
-ML_FILTER_HIGH_PROBABILITY: float = 0.70
-ML_FILTER_ADJUST_SIZING: bool = False
-ML_FILTER_SIZE_MULTIPLIER_MIN: float = 1.0
-ML_FILTER_SIZE_MULTIPLIER_MAX: float = 1.5
-ML_FILTER_MIN_TRAINING_SAMPLES: int = 30
-ML_FILTER_RETRAIN_INTERVAL_DAYS: int = 7
-ML_FILTER_N_ESTIMATORS: int = 100
-ML_FILTER_MAX_DEPTH: int = 6
-ML_FILTER_LEARNING_RATE: float = 0.1
-ML_FILTER_CALIBRATE_PROBABILITIES: bool = True
 
 
 # =============================================================================
@@ -283,25 +245,15 @@ MARKET_HOURS_EARLY_CLOSES: dict = {}
 
 
 # =============================================================================
-# ORDER SIZING DEFAULTS — ML Opportunity Sizing (WS6 / Issue 12)
+# ORDER SIZING DEFAULTS
 # =============================================================================
-# Used by ``order_manager.py`` for ML-based opportunity sizing tiers.
 
-ML_HIGH_OPPORTUNITY_THRESHOLD: float = 0.8
-ML_HIGH_OPPORTUNITY_MULTIPLIER: float = 1.5
-ML_GOOD_OPPORTUNITY_THRESHOLD: float = 0.6
-ML_GOOD_OPPORTUNITY_MULTIPLIER: float = 1.25
-ML_NORMAL_OPPORTUNITY_MULTIPLIER: float = 1.0
-ML_LOW_OPPORTUNITY_THRESHOLD: float = 0.4
-ML_LOW_OPPORTUNITY_MULTIPLIER: float = 0.75
 DEFAULT_MARGIN_PER_CONTRACT: int = 5000
 
 
 # =============================================================================
-# CONFIDENCE TIER SIZING DEFAULTS (WS6)
+# CONFIDENCE TIER SIZING DEFAULTS
 # =============================================================================
-# Shared by ``contextual_bandit.py`` and ``ensemble_scorer.py`` for
-# confidence-based position-size adjustments.
 
 CONFIDENCE_HIGH_SIZE_MULTIPLIER: float = 1.3
 CONFIDENCE_MEDIUM_SIZE_MULTIPLIER: float = 1.0

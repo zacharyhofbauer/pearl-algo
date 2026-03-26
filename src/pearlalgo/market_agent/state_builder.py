@@ -358,29 +358,10 @@ class StateBuilder:
             # Override virtual trade counts with real broker data
             state["active_trades_count"] = self.service._tradovate_account.get("position_count", 0)
             state["active_trades_unrealized_pnl"] = self.service._tradovate_account.get("open_pnl", 0.0)
-        state["learning"] = (
-            self.service.bandit_policy.get_status()
-            if self.service.bandit_policy is not None
-            else {"enabled": False, "mode": "disabled"}
-        )
-        state["learning_contextual"] = (
-            self.service.contextual_policy.get_status()
-            if self.service.contextual_policy is not None
-            else {"enabled": False, "mode": "disabled"}
-        )
-        state["ml_filter"] = {
-            "enabled": bool(getattr(self.service, "_ml_filter_enabled", False)),
-            "mode": getattr(self.service, "_ml_filter_mode", "shadow"),
-            "trained": bool(getattr(getattr(self.service, "_ml_signal_filter", None), "is_ready", False)),
-            "require_lift_to_block": bool(getattr(self.service, "_ml_require_lift_to_block", True)),
-            "blocking_allowed": bool(getattr(self.service, "_ml_blocking_allowed", False)),
-            "lift": getattr(self.service, "_ml_lift_metrics", {}) or {},
-            "last_eval_at": (
-                self.service._ml_lift_last_eval_at.isoformat()
-                if getattr(self.service, "_ml_lift_last_eval_at", None) is not None
-                else None
-            ),
-        }
+        # ML/Learning removed — OpenClaw handles ML externally.
+        state["learning"] = {"enabled": False, "mode": "disabled"}
+        state["learning_contextual"] = {"enabled": False, "mode": "disabled"}
+        state["ml_filter"] = {"enabled": False, "mode": "disabled"}
 
         # ==========================================================================
         # Notification queue stats (async Telegram delivery observability)

@@ -43,42 +43,10 @@ from pearlalgo.market_agent.telegram_formatters import (
     format_signal_message as _canonical_format_signal_message,
     format_status_message as _canonical_format_status_message,
 )
-from pearlalgo.utils.telegram_ui_contract import (
-    callback_menu,
-    callback_action,
-    callback_confirm,
-    MENU_MAIN,
-    MENU_STATUS,
-    MENU_SYSTEM,
-    MENU_SETTINGS,
-    ACTION_REFRESH_DASHBOARD,
-    ACTION_DATA_QUALITY,
-    ACTION_GATEWAY_STATUS,
-)
 
 TELEGRAM_AVAILABLE = importlib.util.find_spec("telegram") is not None
 if not TELEGRAM_AVAILABLE:
     logger.warning("python-telegram-bot not installed, Telegram notifications disabled")
-
-
-def _is_command_handler_running() -> bool:
-    """
-    Check if the Telegram command handler service is running.
-    
-    This is used to determine whether to include deep-link buttons in push alerts.
-    """
-    try:
-        import os
-        project_root = Path(__file__).parent.parent.parent.parent
-        pid_file = project_root / "logs" / "telegram_handler.pid"
-        if not pid_file.exists():
-            return False
-        pid = int(pid_file.read_text().strip())
-        os.kill(pid, 0)  # Check if process exists
-        return True
-    except Exception as e:
-        logger.debug(f"Non-critical: {e}")
-        return False
 
 
 class MarketAgentTelegramNotifier:
@@ -95,23 +63,26 @@ class MarketAgentTelegramNotifier:
         state_dir: Optional[Path] = None,
         enabled: bool = True,
         account_label: Optional[str] = None,
+        message_thread_id: Optional[int] = None,
     ):
         """
         Initialize Telegram notifier.
-        
+
         Args:
             bot_token: Telegram bot token (required if enabled)
             chat_id: Telegram chat ID (required if enabled)
             enabled: Whether Telegram notifications are enabled
             account_label: Optional label prefix for multi-account setups (e.g. "Tradovate Paper")
+            message_thread_id: Telegram group topic thread ID (for sending to a specific topic)
         """
         self.enabled = enabled
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.account_label = account_label  # e.g. "Tradovate Paper"
+        self.message_thread_id = message_thread_id
         self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
-        
+
         # Initialize Telegram UI preferences
         self.prefs = TelegramPrefs(state_dir=self.state_dir)
 
@@ -122,6 +93,7 @@ class MarketAgentTelegramNotifier:
                     bot_token=bot_token,
                     chat_id=chat_id,
                     enabled=True,
+                    message_thread_id=message_thread_id,
                 )
                 logger.info(
                     f"MarketAgentTelegramNotifier initialized successfully: "
@@ -1449,45 +1421,7 @@ class MarketAgentTelegramNotifier:
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
             
-            # Build main menu buttons (only useful when the command handler is running).
             reply_markup = None
-            handler_running = _is_command_handler_running()
-            if handler_running:
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-                    # Activity label: include active count when meaningful.
-                    try:
-                        active_cnt = int(status.get("active_trades_count", 0) or 0)
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        active_cnt = 0
-                    activity_label = f"📊 Activity ({active_cnt})" if active_cnt > 0 else "📊 Activity"
-
-                    # System/Health dots (quick-glance; the card itself remains authoritative).
-                    system_dot = "🟢" if not gateway_uncertain else "🟡"
-                    system_label = f"🎛️ System {system_dot}"
-                    health_label = "🛡️ Health 🔴" if is_data_stale else "🛡️ Health 🟢"
-                    settings_label = "⚙️ Settings"
-
-                    keyboard = [
-                        [
-                            InlineKeyboardButton(activity_label, callback_data=callback_menu("activity")),
-                            InlineKeyboardButton(system_label, callback_data=callback_menu(MENU_SYSTEM)),
-                        ],
-                        [
-                            InlineKeyboardButton(health_label, callback_data=callback_menu(MENU_STATUS)),
-                            InlineKeyboardButton(settings_label, callback_data=callback_menu(MENU_SETTINGS)),
-                        ],
-                        [
-                            InlineKeyboardButton("🔄 Refresh", callback_data=callback_action(ACTION_REFRESH_DASHBOARD)),
-                            InlineKeyboardButton("🔄📈", callback_data="action:refresh_chart"),
-                        ],
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception as e:
-                    logger.debug(f"Could not build dashboard buttons: {e}")
-                    reply_markup = None
 
             # Dashboard persistence + pinned behavior.
             try:
@@ -1769,56 +1703,7 @@ class MarketAgentTelegramNotifier:
                 # Escape underscore in DATA_QUALITY to prevent Markdown italic parsing
                 msg += "\n*Status:* DATA\\_QUALITY"
 
-            # Tap-to-fix buttons (only if command handler is likely running)
             reply_markup = None
-            try:
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                from pathlib import Path
-                import os
-
-                project_root = Path(__file__).parent.parent.parent.parent
-                pid_file = project_root / "logs" / "telegram_handler.pid"
-                handler_running = False
-                if pid_file.exists():
-                    try:
-                        pid = int(pid_file.read_text().strip())
-                        os.kill(pid, 0)
-                        handler_running = True
-                    except Exception as e:
-                        logger.debug(f"Non-critical: {e}")
-                        handler_running = False
-
-                if handler_running:
-                    keyboard = []
-                    if is_recovery:
-                        keyboard.append([
-                            InlineKeyboardButton("🛡 Data Quality", callback_data=callback_action(ACTION_DATA_QUALITY)),
-                            InlineKeyboardButton("🛡 Health", callback_data=callback_menu(MENU_STATUS)),
-                        ])
-                    else:
-                        keyboard.append([
-                            InlineKeyboardButton("🛡 Data Quality", callback_data=callback_action(ACTION_DATA_QUALITY)),
-                            InlineKeyboardButton("🔁 Restart Agent", callback_data=callback_confirm("restart_agent")),
-                        ])
-                        if alert_type in ("stale_data", "fetch_failure", "data_gap"):
-                            keyboard.append([
-                                InlineKeyboardButton("🔁 Restart Gateway", callback_data=callback_confirm("restart_gateway")),
-                                InlineKeyboardButton("🔌 Gateway Status", callback_data=callback_action(ACTION_GATEWAY_STATUS)),
-                            ])
-                        # Allow one-tap snooze for non-critical alerts (prevents alert fatigue).
-                        if not is_critical:
-                            keyboard.append([
-                                InlineKeyboardButton(
-                                    "🔕 Snooze 1h",
-                                    callback_data=callback_action("toggle_pref", "snooze_noncritical_alerts"),
-                                ),
-                            ])
-
-                    keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN))])
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                reply_markup = None
 
             # Send using send_message (includes retry + dedupe)
             await self.telegram.send_message(msg, reply_markup=reply_markup)

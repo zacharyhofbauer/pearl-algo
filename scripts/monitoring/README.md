@@ -2,10 +2,9 @@
 
 ## Live log terminals (autostart)
 
-- **`start-live-logs-terminals.sh`** – Opens 3 terminals with live, colorized logs:
+- **`start-live-logs-terminals.sh`** – Opens 2 terminals with live, colorized logs:
   - **Agent** – `journalctl -u pearlalgo-agent -f`
   - **API** – `journalctl -u pearlalgo-api -f`
-  - **Telegram** – `journalctl -u pearlalgo-telegram -f`
 
 - **`run-journalctl-colored.sh`** – Wrapper: `run-journalctl-colored.sh <unit>` runs `journalctl -f -o cat -q` piped through the colorizer. Checks that the unit exists.
 

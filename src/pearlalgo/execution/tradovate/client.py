@@ -433,7 +433,13 @@ class TradovateClient:
             }
 
         url = f"{self.config.rest_url}/order/placeoso"
-        return await self._post(url, body)
+        # FIXED 2026-03-26: log full request body and response for bracket debugging
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        _log.info(f"place_oso REQUEST body: {body}")
+        result = await self._post(url, body)
+        _log.info(f"place_oso RESPONSE: {result}")
+        return result
 
     async def modify_order(
         self,

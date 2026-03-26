@@ -6,7 +6,7 @@ Target: chat_id=-1003676205983, thread_id=4 (Algo Logs)
 import sys, json, os
 import urllib.request, urllib.error
 
-BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8423504611:AAHFiYjFA5J2XgwUiuW3-rv3Z3_9GkhUFio')
+BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 CHAT_ID = '-1003676205983'
 THREAD_ID = 4
 

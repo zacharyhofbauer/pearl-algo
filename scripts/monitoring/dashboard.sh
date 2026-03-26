@@ -21,7 +21,6 @@ SERVICES=(
     pearlalgo-agent.service
     pearlalgo-api.service
     pearlalgo-webapp.service
-    pearlalgo-telegram.service
     pearlalgo-monitor.service
 )
 

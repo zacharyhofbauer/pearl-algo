@@ -5,6 +5,7 @@ import { DataPanel } from './DataPanelsContainer'
 import type { DirectionBreakdown, Position, StatusBreakdown, SignalRejections, LastSignalDecision } from '@/stores'
 import { apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
+import OperatorUnlockModal from '@/components/OperatorUnlockModal' // ADDED 2026-03-25
 import {
   getUsdPerPoint,
   formatPrice,
@@ -329,6 +330,13 @@ function TradeDockPanel({
   }
 
   const operatorUnlocked = useOperatorStore((s) => s.isUnlocked)
+  const [showUnlockModal, setShowUnlockModal] = useState(false) // ADDED 2026-03-25
+
+  // Gate helper: if locked, show unlock modal; if unlocked, call the action. ADDED 2026-03-25
+  const withOperatorUnlock = (action: () => void) => () => {
+    if (!operatorUnlocked) { setShowUnlockModal(true); return }
+    action()
+  }
 
   const requestCloseAll = async () => {
     if (closeBusy) return
@@ -707,15 +715,15 @@ function TradeDockPanel({
                         <button
                           type="button"
                           className="trade-action-btn trade-action-btn-danger"
-                          onClick={() => {
+                          onClick={withOperatorUnlock(() => {
                             setConfirmCloseAll(true)
                             setConfirmCloseId(null)
                             setCloseResult(null)
-                          }}
-                          disabled={closeBusy || !operatorUnlocked}
-                          title={!operatorUnlocked ? 'Read-only (operator locked)' : undefined}
+                          })}
+                          disabled={closeBusy}
+                          title={!operatorUnlocked ? 'Click to unlock' : undefined}
                         >
-                          Close All
+                          {!operatorUnlocked ? '🔒 Close All' : 'Close All'}
                         </button>
                       ) : (
                         <div className="trade-action-confirm">
@@ -840,12 +848,13 @@ function TradeDockPanel({
                                     className="trade-action-btn trade-action-btn-danger"
                                     onClick={(e) => {
                                       e.stopPropagation()
+                                      if (!operatorUnlocked) { setShowUnlockModal(true); return }
                                       setConfirmCloseId(id)
                                       setConfirmCloseAll(false)
                                       setCloseResult(null)
                                     }}
-                                    disabled={closeBusy || !operatorUnlocked}
-                                    title={!operatorUnlocked ? 'Read-only (operator locked)' : undefined}
+                                    disabled={closeBusy}
+                                    title={!operatorUnlocked ? 'Click to unlock' : undefined}
                                   >
                                     Close Trade
                                   </button>

@@ -33,7 +33,6 @@ UNITS=(
     pearlalgo-api-tv-paper.service
     pearlalgo-monitor.service
     pearlalgo-monitor.timer
-    pearlalgo-telegram.service
     pearlalgo-webapp.service
 )
 

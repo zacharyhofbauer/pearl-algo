@@ -44,8 +44,6 @@ class VirtualTradeManager:
         trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
         telegram_notifier: Optional[Any] = None,
         execution_adapter: Optional[Any] = None,
-        bandit_policy: Optional[Any] = None,
-        contextual_policy: Optional[Any] = None,
         tv_paper_tracker: Optional[Any] = None,
         # Config values
         virtual_pnl_enabled: bool = True,
@@ -64,8 +62,6 @@ class VirtualTradeManager:
         self.trading_circuit_breaker = trading_circuit_breaker
         self.telegram_notifier = telegram_notifier
         self.execution_adapter = execution_adapter
-        self.bandit_policy = bandit_policy
-        self.contextual_policy = contextual_policy
         self._tv_paper_tracker = tv_paper_tracker
         self._audit_logger = audit_logger
 
@@ -389,17 +385,13 @@ class VirtualTradeManager:
             except Exception:
                 pass  # non-fatal
 
-        # --- Circuit breaker ---
+        # --- Circuit breaker (shadow only — virtual trades must NOT affect consecutive loss count) ---
+        # FIXED 2026-03-26: Virtual trades were incorrectly calling record_trade_result(),
+        # which incremented consecutive_losses and triggered cooldowns based on simulated
+        # trades rather than real Tradovate fills. Only position_tracker.py should call
+        # record_trade_result() for real fills.
         if self.trading_circuit_breaker is not None:
-            try:
-                self.trading_circuit_breaker.record_trade_result({
-                    "is_win": is_win,
-                    "pnl": pnl_value,
-                    "exit_time": exit_bar_ts.strftime('%Y-%m-%dT%H:%M:%S') if exit_bar_ts else None,  # FIXED 2026-03-25: naive ET
-                    "exit_reason": exit_reason,
-                })
-            except Exception as cb_err:
-                logger.debug(f"Could not record circuit breaker trade: {cb_err}")
+            pass  # Virtual trades no longer feed record_trade_result — shadow_outcome only
             try:
                 was_would_block = bool(sig.get("_cb_would_block", False))
                 self.trading_circuit_breaker.record_shadow_outcome(
@@ -414,42 +406,6 @@ class VirtualTradeManager:
         # API server / service polling), not by virtual signal P&L.
         # Feeding virtual P&L here caused false pass/fail triggers.
         # See: api_server.py _get_challenge_status() for actual Tradovate Paper tracking.
-
-        # --- Bandit policy ---
-        if self.bandit_policy is not None:
-            try:
-                signal_type = str(sig.get("type") or "unknown")
-                self.bandit_policy.record_outcome(
-                    signal_id=sig_id, signal_type=signal_type,
-                    is_win=is_win, pnl=pnl_value,
-                )
-            except Exception as policy_err:
-                logger.debug(f"Could not record policy outcome: {policy_err}")
-
-        # --- Contextual policy ---
-        if self.contextual_policy is not None:
-            try:
-                from pearlalgo.learning.contextual_bandit import ContextFeatures
-                signal_type = str(sig.get("type") or "unknown")
-                raw_ctx = sig.get("_context_features")
-                if isinstance(raw_ctx, dict):
-                    ctx = ContextFeatures.from_dict(raw_ctx)
-                    self.contextual_policy.record_outcome(
-                        signal_id=sig_id, signal_type=signal_type,
-                        context=ctx, is_win=is_win, pnl=pnl_value,
-                    )
-                    try:
-                        expected_wr = self.contextual_policy.get_expected_win_rate(signal_type, ctx)
-                        logger.info(
-                            f"🧠 Learning: {signal_type} in {ctx.to_dict().get('context_key', 'unknown')} -> "
-                            f"{'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f}) | Expected WR: {expected_wr:.0%}"
-                        )
-                    except Exception:
-                        logger.info(
-                            f"🧠 Learning: {signal_type} -> {'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f})"
-                        )
-            except Exception as ctx_err:
-                logger.debug(f"Could not record contextual policy outcome: {ctx_err}")
 
         # --- Execution adapter daily PnL ---
         if self.execution_adapter is not None:

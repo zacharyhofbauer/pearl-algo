@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev -p 3001",
     "dev:fresh": "rm -rf .next && next dev -p 3001",
-    "build": "next build",
-    "build:clean": "rm -rf .next && next build",
+    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
+    "build:clean": "rm -rf .next && next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "next start",
     "lint": "next lint",
     "clean": "rm -rf .next node_modules/.cache",

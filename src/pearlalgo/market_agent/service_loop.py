@@ -414,8 +414,11 @@ class ServiceLoopMixin:
                     # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
                     df = market_data.get("df")
                     if df is not None and not df.empty:
+                        _df_5m = market_data.get("df_5m")
                         _analyze_fn = functools.partial(
-                            self.strategy.analyze, df, current_time=datetime.now(timezone.utc)
+                            self.strategy.analyze, df,
+                            current_time=datetime.now(timezone.utc),
+                            df_5m=_df_5m,
                         )
                         loop = asyncio.get_event_loop()
                         signals = await loop.run_in_executor(None, _analyze_fn)

@@ -23,7 +23,6 @@ from pearlalgo.market_agent.notification_queue import Priority
 if TYPE_CHECKING:
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-    pass  # AI shadow_tracker removed (Phase 2D)
 
 
 class OperatorHandler:
@@ -34,14 +33,12 @@ class OperatorHandler:
         *,
         state_manager: MarketAgentStateManager,
         notification_queue: NotificationQueue,
-        shadow_tracker: PearlShadowTracker,
-        bandit_policy: Optional[Any] = None,
+        shadow_tracker: Any = None,
         get_status_snapshot: Optional[Callable[[], Dict]] = None,
     ):
         self.state_manager = state_manager
         self.notification_queue = notification_queue
         self.shadow_tracker = shadow_tracker
-        self.bandit_policy = bandit_policy
         self._get_status_snapshot = get_status_snapshot or (lambda: {})
 
     # ------------------------------------------------------------------
@@ -80,20 +77,8 @@ class OperatorHandler:
             except Exception as e:
                 logger.warning(f"Failed to check signal exit status: {e}")
 
-            # Apply to learning if: not already exited, or force is True
+            # ML/Learning removed — grade feedback is logged but not applied.
             applied = False
-            if self.bandit_policy is not None:
-                if not already_exited or force:
-                    self.bandit_policy.record_outcome(
-                        signal_id=signal_id,
-                        signal_type=signal_type,
-                        is_win=is_win,
-                        pnl=pnl or 0.0,
-                    )
-                    applied = True
-                    logger.info(f"Grade applied to learning: {signal_type} {'win' if is_win else 'loss'}")
-                else:
-                    logger.info(f"Grade skipped (already exited, force=False): {signal_id}")
 
             # Update feedback.jsonl to mark as applied
             feedback_file = self.state_manager.state_dir / "feedback.jsonl"
@@ -112,25 +97,15 @@ class OperatorHandler:
 
             # Notify via Telegram
             try:
-                if applied:
-                    await self.notification_queue.enqueue_raw_message(
-                        f"\u2705 *Grade Applied*\n\n"
-                        f"Signal: `{signal_id[:25]}...`\n"
-                        f"Type: `{signal_type}`\n"
-                        f"Outcome: {'Win' if is_win else 'Loss'}\n"
-                        f"Applied to learning policy.",
-                        parse_mode="Markdown",
-                        priority=Priority.NORMAL,
-                    )
-                else:
-                    await self.notification_queue.enqueue_raw_message(
-                        f"\u2139\ufe0f *Grade Logged*\n\n"
-                        f"Signal: `{signal_id[:25]}...`\n"
-                        f"Already exited - feedback logged but not applied.\n"
-                        f"_Use `force` to override._",
-                        parse_mode="Markdown",
-                        priority=Priority.NORMAL,
-                    )
+                await self.notification_queue.enqueue_raw_message(
+                    f"\u2139\ufe0f *Grade Logged*\n\n"
+                    f"Signal: `{signal_id[:25]}...`\n"
+                    f"Type: `{signal_type}`\n"
+                    f"Outcome: {'Win' if is_win else 'Loss'}\n"
+                    f"Feedback recorded.",
+                    parse_mode="Markdown",
+                    priority=Priority.NORMAL,
+                )
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
 

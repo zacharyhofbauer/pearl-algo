@@ -267,3 +267,17 @@ confidence_scaling:
       contracts: 3
   max_contracts: 3        # hard ceiling, never exceed
   long_only_scaling: true # only scale longs until short edge proven
+
+composite_regime:
+  enabled: true
+  chop_zone_low: 4.0
+  chop_zone_high: 6.0
+  chop_zone_min_confidence: 0.75
+  volatile_stop_multiplier: 1.2
+
+runner_mode:
+  enabled: true
+  breakeven_trigger_atr: 1.5
+  runner_trigger_atr: 2.5
+  runner_trail_distance_atr: 1.0
+  breakeven_offset_points: 0.25

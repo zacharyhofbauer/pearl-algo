@@ -172,6 +172,8 @@ async def main():
     # Telegram config: env vars take precedence
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    telegram_thread_id_str = os.getenv("TELEGRAM_THREAD_ID")
+    telegram_thread_id = int(telegram_thread_id_str) if telegram_thread_id_str else None
 
     if not telegram_bot_token or not telegram_chat_id:
         telegram_config = config_data.get("telegram", {})
@@ -214,6 +216,7 @@ async def main():
         state_dir=state_dir,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
+        telegram_thread_id=telegram_thread_id,
         service_config=config_data,
     )
     service = MarketAgentService(deps=deps)

@@ -126,6 +126,7 @@ class ServiceDependencies:
     # ---- credentials (passed through for lazy construction) ----
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    telegram_thread_id: Optional[int] = None
 
     def resolve_defaults(self) -> "ServiceDependencies":
         """Fill in ``None`` fields with sensible production defaults.
@@ -168,6 +169,7 @@ class ServiceDependencies:
                 chat_id=self.telegram_chat_id,
                 state_dir=self.state_dir,
                 account_label=_get_account_label(self.service_config),
+                message_thread_id=self.telegram_thread_id,
             )
 
         if self.notification_queue is None:
@@ -197,6 +199,7 @@ def build_service_dependencies(
     state_dir: Optional[Path] = None,
     telegram_bot_token: Optional[str] = None,
     telegram_chat_id: Optional[str] = None,
+    telegram_thread_id: Optional[int] = None,
     service_config: Optional[Dict[str, Any]] = None,
 ) -> ServiceDependencies:
     """Construct a fully-populated :class:`ServiceDependencies`.
@@ -230,6 +233,7 @@ def build_service_dependencies(
         chat_id=telegram_chat_id,
         state_dir=state_dir,
         account_label=_get_account_label(service_config),
+        message_thread_id=telegram_thread_id,
     )
 
     notification_queue = _build_notification_queue(telegram_notifier, service_config)
@@ -261,4 +265,5 @@ def build_service_dependencies(
         audit_logger=audit_logger,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
+        telegram_thread_id=telegram_thread_id,
     )

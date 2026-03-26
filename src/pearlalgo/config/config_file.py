@@ -302,11 +302,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "strategy_variants",
     "swing_trading",
     "market_hours",
-    # ATS execution + learning layers (kept separate from strategy logic)
+    # ATS execution layer
     "execution",
-    "learning",
-    # ML filter / drift guard (observability + gating)
-    "ml_filter",
     # Repo knowledge index + RAG integration
     "knowledge",
     "challenge",

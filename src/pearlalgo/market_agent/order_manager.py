@@ -15,28 +15,10 @@ from pearlalgo.config.defaults import (
     CONFIDENCE_MEDIUM_SIZE_MULTIPLIER,
     CONFIDENCE_MEDIUM_THRESHOLD,
     DEFAULT_MARGIN_PER_CONTRACT,
-    ML_GOOD_OPPORTUNITY_MULTIPLIER,
-    ML_GOOD_OPPORTUNITY_THRESHOLD,
-    ML_HIGH_OPPORTUNITY_MULTIPLIER,
-    ML_HIGH_OPPORTUNITY_THRESHOLD,
-    ML_LOW_OPPORTUNITY_MULTIPLIER,
-    ML_LOW_OPPORTUNITY_THRESHOLD,
-    ML_NORMAL_OPPORTUNITY_MULTIPLIER,
 )
 from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_float, safe_get_int
 from pearlalgo.utils.logger import logger
 
-if TYPE_CHECKING:
-    from pearlalgo.learning.ml_signal_filter import MLSignalFilter
-
-# Re-export under private names for backward compatibility
-_ML_HIGH_OPPORTUNITY_THRESHOLD = ML_HIGH_OPPORTUNITY_THRESHOLD
-_ML_HIGH_OPPORTUNITY_MULTIPLIER = ML_HIGH_OPPORTUNITY_MULTIPLIER
-_ML_GOOD_OPPORTUNITY_THRESHOLD = ML_GOOD_OPPORTUNITY_THRESHOLD
-_ML_GOOD_OPPORTUNITY_MULTIPLIER = ML_GOOD_OPPORTUNITY_MULTIPLIER
-_ML_NORMAL_OPPORTUNITY_MULTIPLIER = ML_NORMAL_OPPORTUNITY_MULTIPLIER
-_ML_LOW_OPPORTUNITY_THRESHOLD = ML_LOW_OPPORTUNITY_THRESHOLD
-_ML_LOW_OPPORTUNITY_MULTIPLIER = ML_LOW_OPPORTUNITY_MULTIPLIER
 _DEFAULT_MARGIN_PER_CONTRACT = DEFAULT_MARGIN_PER_CONTRACT
 
 
@@ -46,7 +28,6 @@ class OrderManager:
 
     Responsibilities:
     - Base position size calculation
-    - ML-based opportunity sizing
     - Risk-adjusted sizing
     """
 
@@ -54,9 +35,6 @@ class OrderManager:
         self,
         risk_settings: Optional[Dict] = None,
         strategy_settings: Optional[Dict] = None,
-        *,
-        ml_signal_filter: Optional["MLSignalFilter"] = None,
-        ml_adjust_sizing: bool = False,
     ):
         """
         Initialize the order manager.
@@ -64,22 +42,9 @@ class OrderManager:
         Args:
             risk_settings: Risk configuration (min/max position size, etc.)
             strategy_settings: Strategy configuration (dynamic sizing, etc.)
-            ml_signal_filter: Optional ML filter for opportunity sizing
-            ml_adjust_sizing: Whether to use ML for sizing adjustments
         """
         self._risk_settings = risk_settings or {}
         self._strategy_settings = strategy_settings or {}
-        self._ml_signal_filter = ml_signal_filter
-        self._ml_adjust_sizing = ml_adjust_sizing
-
-    def configure_ml_sizing(
-        self,
-        ml_signal_filter: Optional["MLSignalFilter"],
-        ml_adjust_sizing: bool = False,
-    ) -> None:
-        """Configure ML-based sizing."""
-        self._ml_signal_filter = ml_signal_filter
-        self._ml_adjust_sizing = ml_adjust_sizing
 
     def validate_signal_financials(self, signal: Dict) -> bool:
         """
@@ -236,76 +201,6 @@ class OrderManager:
         size = max(min_size, min(max_size, size))
         return max(1, size)
 
-    def apply_ml_opportunity_sizing(self, signal: Dict) -> None:
-        """
-        Adjust size and priority based on ML opportunity signal.
-
-        This method modifies the signal in place, adding:
-        - _ml_opportunity_score: The ML opportunity score
-        - _ml_size_multiplier: Size adjustment multiplier
-        - _ml_priority: Priority level (critical/high/normal)
-
-        Args:
-            signal: Signal dictionary (modified in place)
-        """
-        if not self._ml_adjust_sizing:
-            return
-
-        if self._ml_signal_filter is None:
-            return
-
-        try:
-            opportunity_score = self._ml_signal_filter.get_opportunity_score(signal)
-            if opportunity_score is None:
-                return
-
-            signal["_ml_opportunity_score"] = opportunity_score
-
-            # Determine sizing multiplier based on opportunity score
-            if opportunity_score >= _ML_HIGH_OPPORTUNITY_THRESHOLD:
-                multiplier = _ML_HIGH_OPPORTUNITY_MULTIPLIER
-                priority = "critical"
-            elif opportunity_score >= _ML_GOOD_OPPORTUNITY_THRESHOLD:
-                multiplier = _ML_GOOD_OPPORTUNITY_MULTIPLIER
-                priority = "high"
-            elif opportunity_score >= _ML_LOW_OPPORTUNITY_THRESHOLD:
-                multiplier = _ML_NORMAL_OPPORTUNITY_MULTIPLIER
-                priority = "normal"
-            else:
-                multiplier = _ML_LOW_OPPORTUNITY_MULTIPLIER
-                priority = "normal"
-
-            signal["_ml_size_multiplier"] = multiplier
-            signal["_ml_priority"] = priority
-
-            # Apply multiplier to position size
-            current_size = signal.get("position_size", 1)
-            try:
-                current_size = int(current_size)
-            except (TypeError, ValueError) as e:
-                logger.debug("Order manager: position_size parse in ML sizing: %s", e)
-                current_size = 1
-
-            adjusted_size = max(1, int(round(current_size * multiplier)))
-
-            # Clamp to risk limits
-            try:
-                max_size = int(self._risk_settings.get("max_position_size", adjusted_size) or adjusted_size)
-                adjusted_size = min(adjusted_size, max_size)
-            except (TypeError, ValueError) as e:
-                logger.debug("Order manager: max_position_size parse in ML sizing: %s", e)
-
-            signal["position_size"] = adjusted_size
-
-            logger.debug(
-                f"ML opportunity sizing: score={opportunity_score:.2f}, "
-                f"multiplier={multiplier}, size={current_size}->{adjusted_size}, "
-                f"priority={priority}"
-            )
-
-        except Exception as e:
-            logger.debug(f"ML opportunity sizing failed (non-fatal): {e}")
-
     def validate_position_size(
         self,
         size: int,
@@ -390,5 +285,4 @@ class OrderManager:
             "max_conf_threshold": float(cfg.get("max_conf_threshold", 0.9) or 0.9),
             "min_position_size": int(self._risk_settings.get("min_position_size", 1) or 1),
             "max_position_size": self._risk_settings.get("max_position_size"),
-            "ml_adjust_sizing": self._ml_adjust_sizing,
         }

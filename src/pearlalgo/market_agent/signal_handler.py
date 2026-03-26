@@ -27,9 +27,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.trading_circuit_breaker import TradingCircuitBreaker
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.order_manager import OrderManager
-    from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig
-    from pearlalgo.learning.contextual_bandit import ContextualBanditPolicy, ContextFeatures
-    from pearlalgo.learning.ml_signal_filter import MLSignalFilter
 
 
 class SignalHandler:
@@ -38,8 +35,6 @@ class SignalHandler:
 
     Responsibilities:
     - Circuit breaker checks
-    - ML filter predictions (shadow mode)
-    - Policy decisions (bandit/contextual)
     - Execution coordination
     - Notification queuing
     """
@@ -52,13 +47,6 @@ class SignalHandler:
         order_manager: "OrderManager",
         *,
         trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
-        bandit_policy: Optional["BanditPolicy"] = None,
-        bandit_config: Optional["BanditConfig"] = None,
-        contextual_policy: Optional["ContextualBanditPolicy"] = None,
-        ml_signal_filter: Optional["MLSignalFilter"] = None,
-        ml_filter_enabled: bool = False,
-        ml_filter_mode: str = "shadow",
-        ml_shadow_threshold: Optional[float] = None,
         execution_adapter: Optional[Any] = None,
         telegram_notifier: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
@@ -72,13 +60,6 @@ class SignalHandler:
             notification_queue: For sending Telegram notifications
             order_manager: For position sizing
             trading_circuit_breaker: Optional circuit breaker for risk management
-            bandit_policy: Optional bandit policy for learning
-            bandit_config: Optional bandit configuration
-            contextual_policy: Optional contextual bandit for context-aware learning
-            ml_signal_filter: Optional ML filter for predictions
-            ml_filter_enabled: Whether ML filter is enabled
-            ml_filter_mode: ML filter mode ('shadow' or 'live')
-            ml_shadow_threshold: Optional shadow threshold for ML filter
             execution_adapter: Optional execution adapter for order placement
             telegram_notifier: Optional Telegram notifier
             audit_logger: Optional AuditLogger for persistent audit events
@@ -90,17 +71,6 @@ class SignalHandler:
 
         # Circuit breaker
         self.trading_circuit_breaker = trading_circuit_breaker
-
-        # Learning components
-        self.bandit_policy = bandit_policy
-        self._bandit_config = bandit_config
-        self.contextual_policy = contextual_policy
-
-        # ML filter
-        self._ml_signal_filter = ml_signal_filter
-        self._ml_filter_enabled = ml_filter_enabled
-        self._ml_filter_mode = ml_filter_mode
-        self._ml_shadow_threshold = ml_shadow_threshold
 
         # Execution
         self.execution_adapter = execution_adapter
@@ -123,27 +93,6 @@ class SignalHandler:
         self.last_signal_sent_at: Optional[str] = None
         self.last_signal_send_error: Optional[str] = None
         self.last_signal_id_prefix: Optional[str] = None
-
-        # For contextual learning
-        self._context_features_class: Optional[type] = None
-        try:
-            from pearlalgo.learning.contextual_bandit import ContextFeatures
-            self._context_features_class = ContextFeatures
-        except ImportError:
-            pass
-
-    def configure_ml_filter(
-        self,
-        ml_signal_filter: Optional["MLSignalFilter"],
-        enabled: bool = False,
-        mode: str = "shadow",
-        shadow_threshold: Optional[float] = None,
-    ) -> None:
-        """Configure ML filter settings."""
-        self._ml_signal_filter = ml_signal_filter
-        self._ml_filter_enabled = enabled
-        self._ml_filter_mode = mode
-        self._ml_shadow_threshold = shadow_threshold
 
     def _is_signal_type_allowed(self, signal: Dict) -> bool:
         """
@@ -216,21 +165,6 @@ class SignalHandler:
             # ==========================================================================
             self._ensure_position_size(signal)
 
-            # ==========================================================================
-            # ML FILTER (shadow): attach prediction for later analytics/lift measurement
-            # ==========================================================================
-            await self._apply_ml_filter(signal)
-
-            # ==========================================================================
-            # ML OPPORTUNITY SIZING (shadow-safe): adjust size/priority within risk gates
-            # ==========================================================================
-            try:
-                self.order_manager.apply_ml_opportunity_sizing(signal)
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "ML opportunity sizing adjustment", e, category="ml_filter",
-                )
-
             # Track signal generation
             signal_id = self.performance_tracker.track_signal_generated(signal)
             self.last_signal_generated_at = get_utc_timestamp()
@@ -270,19 +204,9 @@ class SignalHandler:
             self._log_trade_entry(signal_id, signal, entry_price, "virtual")
 
             # ==========================================================================
-            # BANDIT POLICY: Evaluate signal type and decide whether to execute
-            # ==========================================================================
-            policy_decision = self._apply_bandit_policy(signal)
-
-            # ==========================================================================
-            # CONTEXTUAL POLICY (optional): learn by session/regime/time bucket
-            # ==========================================================================
-            self._apply_contextual_policy(signal)
-
-            # ==========================================================================
             # EXECUTION: Place bracket order if execution adapter is enabled + armed
             # ==========================================================================
-            await self._execute_signal(signal, policy_decision)
+            await self._execute_signal(signal, policy_decision=None)
 
             # Queue entry alert to Telegram (non-blocking)
             await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data)
@@ -619,74 +543,6 @@ class SignalHandler:
 
         return True
 
-    async def _apply_ml_filter(self, signal: Dict) -> None:
-        """Apply ML filter prediction (shadow mode - never blocks)."""
-        try:
-            if not self._ml_filter_enabled or self._ml_signal_filter is None:
-                return
-
-            ctx: Dict[str, Any] = {}
-            # Best-effort regime mapping
-            try:
-                mr = signal.get("market_regime") or {}
-                if isinstance(mr, dict):
-                    regime_type = str(mr.get("regime") or "")
-                    vol_bucket = ""
-                    try:
-                        vr = mr.get("volatility_ratio")
-                        if vr is not None:
-                            v = float(vr)
-                            if v < 0.8:
-                                vol_bucket = "low"
-                            elif v > 1.5:
-                                vol_bucket = "high"
-                            else:
-                                vol_bucket = "normal"
-                    except Exception as e:
-                        ErrorHandler.log_and_continue(
-                            "ML filter volatility bucket", e, category="ml_filter",
-                        )
-                        vol_bucket = ""
-                    ctx["regime"] = {
-                        "regime": regime_type,
-                        "volatility": vol_bucket,
-                        "session": str(mr.get("session") or ""),
-                    }
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "ML filter regime mapping", e, category="ml_filter",
-                )
-                ctx = {}
-
-            _should_exec, pred = await self._ml_signal_filter.should_execute_async(signal, ctx)
-            try:
-                signal["_ml_prediction"] = pred.to_dict()
-                pass_for_lift = bool(_should_exec)
-                try:
-                    if (
-                        self._ml_filter_mode == "shadow"
-                        and self._ml_shadow_threshold is not None
-                    ):
-                        pass_for_lift = float(getattr(pred, "win_probability", 0.0) or 0.0) >= float(
-                            self._ml_shadow_threshold
-                        )
-                        signal["_ml_shadow_threshold"] = float(self._ml_shadow_threshold)
-                except Exception as e:
-                    ErrorHandler.log_and_continue(
-                        "ML shadow threshold evaluation", e, category="ml_filter",
-                    )
-                    pass_for_lift = bool(_should_exec)
-                signal["_ml_shadow_pass_filter"] = bool(pass_for_lift)
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "ML prediction serialization", e, category="ml_filter",
-                )
-                signal["_ml_prediction"] = None
-        except Exception as e:
-            ErrorHandler.log_and_continue(
-                "ML prediction (non-fatal)", e, category="ml_filter",
-            )
-
     def _track_virtual_entry(self, signal: Dict, signal_id: str, preserve_full_signal: bool = False) -> float:
         """Track virtual entry for the signal. Returns entry price."""
         entry_price = 0.0
@@ -709,141 +565,12 @@ class SignalHandler:
             logger.warning(f"Critical path error: {e}", exc_info=True)
         return entry_price
 
-    def _apply_bandit_policy(self, signal: Dict) -> Optional[Any]:
-        """Apply bandit policy decision. Returns policy decision if available."""
-        policy_decision = None
-        policy_status = "not_evaluated"
-
-        if self.bandit_policy is not None:
-            try:
-                policy_decision = self.bandit_policy.decide(signal)
-                policy_status = f"{policy_decision.mode}:{policy_decision.reason}"
-
-                logger.info(
-                    f"Policy decision: {signal.get('type')} -> "
-                    f"execute={policy_decision.execute} | "
-                    f"score={policy_decision.sampled_score:.2f} | "
-                    f"mode={policy_decision.mode}"
-                )
-            except Exception as policy_e:
-                policy_status = f"error:{str(policy_e)[:50]}"
-                logger.error(f"Policy evaluation error: {policy_e}", exc_info=True)
-
-        signal["_policy_status"] = policy_status
-        if policy_decision:
-            try:
-                signal["_policy"] = policy_decision.to_dict()
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "bandit policy serialization", e, category="ml_filter",
-                )
-                signal["_policy"] = None
-            signal["_policy_execute"] = policy_decision.execute
-            signal["_policy_score"] = policy_decision.sampled_score
-            signal["_policy_size_multiplier"] = policy_decision.size_multiplier
-
-        return policy_decision
-
-    def _apply_contextual_policy(self, signal: Dict) -> None:
-        """Apply contextual policy decision."""
-        if self.contextual_policy is None:
-            return
-
-        try:
-            ctx_features = self._build_context_features_for_signal(signal)
-            if ctx_features is not None:
-                ctx_decision = self.contextual_policy.decide(signal, ctx_features)
-                try:
-                    signal["_context_features"] = ctx_features.to_dict()
-                except Exception as e:
-                    ErrorHandler.log_and_continue(
-                        "contextual features serialization", e, category="ml_filter",
-                    )
-                    signal["_context_features"] = None
-                try:
-                    signal["_policy_ctx"] = ctx_decision.to_dict()
-                except Exception as e:
-                    ErrorHandler.log_and_continue(
-                        "contextual policy serialization", e, category="ml_filter",
-                    )
-                    signal["_policy_ctx"] = None
-        except Exception as e:
-            ErrorHandler.log_and_continue(
-                "contextual policy evaluation", e, level="warning", category="ml_filter",
-            )
-            signal["_policy_ctx"] = {"error": str(e)[:120]}
-
-    def _build_context_features_for_signal(self, signal: Dict) -> Optional[Any]:
-        """Build context features for contextual bandit."""
-        if self._context_features_class is None:
-            return None
-
-        try:
-            # Extract context from signal
-            session = "unknown"
-            regime = "unknown"
-            time_bucket = "unknown"
-
-            # Try to get session from signal
-            try:
-                session = str(signal.get("_session") or signal.get("session") or "unknown")
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "context features session extraction", e, category="ml_filter",
-                )
-
-            # Try to get regime from signal
-            try:
-                mr = signal.get("market_regime") or {}
-                if isinstance(mr, dict):
-                    regime = str(mr.get("regime") or "unknown")
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "context features regime extraction", e, category="ml_filter",
-                )
-
-            # Try to get time bucket from signal
-            try:
-                ts = signal.get("timestamp") or signal.get("_timestamp")
-                if ts:
-                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00").replace("+00:00", ""))
-                    hour = dt.hour  # FIXED 2026-03-25: hour is now ET natively
-                    if hour < 10:
-                        time_bucket = "morning"
-                    elif hour < 14:
-                        time_bucket = "midday"
-                    else:
-                        time_bucket = "afternoon"
-            except Exception as e:
-                ErrorHandler.log_and_continue(
-                    "context features time bucket extraction", e, category="ml_filter",
-                )
-
-            return self._context_features_class(
-                session=session,
-                regime=regime,
-                time_bucket=time_bucket,
-            )
-        except Exception as e:
-            logger.debug(f"Could not build context features: {e}")
-            return None
-
-    async def _execute_signal(self, signal: Dict, policy_decision: Optional[Any]) -> None:
+    async def _execute_signal(self, signal: Dict, policy_decision: Optional[Any] = None) -> None:
         """Execute signal via execution adapter if enabled."""
         execution_result = None
         execution_status = "not_attempted"
 
-        # Gate execution by policy decision (only in live mode)
-        should_execute = True
-        if (policy_decision is not None
-            and self._bandit_config is not None
-            and self._bandit_config.mode == "live"):
-            should_execute = policy_decision.execute
-            if not should_execute:
-                execution_status = f"policy_skip:{policy_decision.reason}"
-                logger.info(f"Execution blocked by policy (live mode): {policy_decision.reason}")
-
-        if should_execute and self.execution_adapter is not None:
+        if self.execution_adapter is not None:
             try:
                 guard_ok = await self._enforce_tradovate_protection_guard(signal)
                 if not guard_ok:
@@ -863,19 +590,6 @@ class SignalHandler:
                 decision = self.execution_adapter.check_preconditions(signal)
 
                 if decision.execute:
-                    # Apply size multiplier from policy
-                    if (policy_decision is not None
-                        and self._bandit_config is not None
-                        and self._bandit_config.mode == "live"):
-                        original_size = signal.get("position_size", 1)
-                        adjusted_size = int(original_size * policy_decision.size_multiplier)
-                        adjusted_size = max(1, adjusted_size)
-                        signal["position_size"] = adjusted_size
-                        logger.info(
-                            f"Position size adjusted by policy: {original_size} -> {adjusted_size} "
-                            f"(multiplier={policy_decision.size_multiplier})"
-                        )
-
                     # Place bracket order
                     execution_result = await self.execution_adapter.place_bracket(signal)
 
@@ -885,17 +599,28 @@ class SignalHandler:
                             execution_status = "placed"
                             logger.info(
                                 f"✅ Order placed: {signal.get('type')} {signal.get('direction')} | "
-                                f"order_id={execution_result.parent_order_id}"
+                                f"entry_order={execution_result.parent_order_id} "
+                                f"sl_order={execution_result.stop_order_id} "
+                                f"tp_order={execution_result.take_profit_order_id} | "
+                                f"entry={signal.get('entry_price')} "
+                                f"sl={signal.get('stop_loss')} tp={signal.get('take_profit')}"
                             )
                         else:
                             execution_status = "placed_no_id"
                             logger.warning(
                                 f"⚠️ Order entry filled but bracket MISSING: {signal.get('type')} {signal.get('direction')} | "
-                                f"order_id=None — Tradovate did not return an order ID"
+                                f"order_id=None — Tradovate did not return an order ID | "
+                                f"entry={signal.get('entry_price')} "
+                                f"sl={signal.get('stop_loss')} tp={signal.get('take_profit')}"
                             )
                     else:
                         execution_status = f"place_failed:{execution_result.error_message}"
-                        logger.warning(f"⚠️ Order placement failed: {execution_result.error_message}")
+                        logger.warning(
+                            f"⚠️ Order placement failed: {execution_result.error_message} | "
+                            f"{signal.get('type')} {signal.get('direction')} "
+                            f"entry={signal.get('entry_price')} "
+                            f"sl={signal.get('stop_loss')} tp={signal.get('take_profit')}"
+                        )
                 else:
                     execution_status = f"skipped:{decision.reason}"
                     logger.info(f"Order skipped: {decision.reason} | signal_id={signal.get('signal_id', '')[:16]}")
@@ -964,6 +689,22 @@ class SignalHandler:
                 f"enforce_guard={enforce_guard}, "
                 f"config.enforce_protection_guard={getattr(adapter.config, 'enforce_protection_guard', 'MISSING')}"
             )
+            # FIXED 2026-03-26: bracket detection - verify with Tradovate before auto-disarming
+            # Our internal tracking may have missed the SL order ID - check live orders first
+            if open_positions:
+                pos_direction = "long" if float(open_positions[0].get("net_pos", 0)) > 0 else "short"
+                if hasattr(adapter, "_has_existing_stop_for_position"):
+                    try:
+                        has_real_stop = await adapter._has_existing_stop_for_position(pos_direction)
+                        if has_real_stop:
+                            logger.info(
+                                f"✅ Protection guard: Tradovate confirms stop exists for {pos_direction} position — NOT disarming"
+                            )
+                            return True  # position is protected, don't block
+                        logger.error(f"🚨 Protection guard: confirmed no stop in Tradovate for {pos_direction} position")
+                    except Exception as e:
+                        logger.warning(f"Protection guard live-stop check failed: {e}")
+
             if enforce_guard:
                 if hasattr(adapter, "disarm"):
                     adapter.disarm()
@@ -972,6 +713,12 @@ class SignalHandler:
                     "no valid working protective orders; blocking new entries | signal_id=%s",
                     str(signal.get("signal_id", ""))[:16],
                 )
+
+                # ADDED 2026-03-26: Place emergency stop on naked positions
+                # The protection guard previously only blocked new entries but left
+                # existing positions unprotected. Now we attempt to place a hard stop.
+                await self._place_emergency_stop_on_naked_positions(adapter, open_positions)
+
                 return False
 
             logger.error(
@@ -985,6 +732,70 @@ class SignalHandler:
             # Non-fatal: do not block execution solely due to telemetry failure.
             logger.warning(f"Protective-order safety guard check failed (non-fatal): {e}")
             return True
+
+    async def _place_emergency_stop_on_naked_positions(
+        self, adapter: Any, open_positions: list
+    ) -> None:
+        """
+        ADDED 2026-03-26: Place emergency hard stop on any open position that has
+        no protective orders. Called by the protection guard when it detects a
+        naked position.
+
+        Uses a flag to avoid re-placing stops on every scan cycle (every 15s).
+        """
+        # Deduplicate: only attempt once per position until cleared
+        if not hasattr(self, "_emergency_stop_placed_for"):
+            self._emergency_stop_placed_for: set = set()
+
+        client = getattr(adapter, "_client", None)
+        if client is None or not hasattr(client, "place_order"):
+            logger.warning("Cannot place emergency stop: adapter has no client")
+            return
+
+        contract_symbol = getattr(adapter, "_contract_symbol", None)
+        if not contract_symbol:
+            logger.warning("Cannot place emergency stop: no contract symbol")
+            return
+
+        for pos in open_positions:
+            try:
+                net_pos = float(pos.get("net_pos", 0) or 0)
+                entry_price = float(pos.get("net_price", 0) or 0)
+                contract_id = str(pos.get("contract_id", ""))
+
+                if contract_id in self._emergency_stop_placed_for:
+                    continue  # Already attempted for this position
+
+                if entry_price <= 0 or net_pos == 0:
+                    continue
+
+                # 40-point hard stop (same conservative proxy as orphaned stop logic)
+                atr_proxy = 40.0
+                if net_pos > 0:  # long
+                    stop_price = round(entry_price - atr_proxy, 2)
+                    stop_action = "Sell"
+                else:  # short
+                    stop_price = round(entry_price + atr_proxy, 2)
+                    stop_action = "Buy"
+
+                logger.error(
+                    f"🚨 EMERGENCY STOP: placing hard stop for naked position "
+                    f"contract={contract_id} net_pos={net_pos} entry={entry_price} "
+                    f"stop_price={stop_price} action={stop_action}"
+                )
+
+                result = await client.place_order(
+                    symbol=contract_symbol,
+                    action=stop_action,
+                    order_qty=int(abs(net_pos)),
+                    order_type="Stop",
+                    stop_price=stop_price,
+                )
+                self._emergency_stop_placed_for.add(contract_id)
+                logger.info(f"Emergency stop placed: result={result}")
+
+            except Exception as e:
+                logger.error(f"Failed to place emergency stop for position {pos}: {e}")
 
     async def _queue_entry_notification(
         self,
@@ -1001,14 +812,6 @@ class SignalHandler:
         logger.info(f"Processing signal: {signal_type} {signal_direction}")
 
         entry_priority = Priority.HIGH
-        try:
-            if bool(signal.get("_ml_priority") == "critical"):
-                entry_priority = Priority.CRITICAL
-        except Exception as e:
-            ErrorHandler.log_and_continue(
-                "entry notification priority check", e, category="ml_filter",
-            )
-            entry_priority = Priority.HIGH
 
         queued = await self.notification_queue.enqueue_entry(
             signal_id=str(signal_id),

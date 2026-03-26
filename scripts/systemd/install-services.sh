@@ -24,7 +24,7 @@ fi
 
 # Copy service files (only those present in SCRIPT_DIR)
 echo "Installing service files..."
-for f in ibkr-gateway.service pearlalgo-agent.service pearlalgo-api.service pearlalgo-webapp.service pearlalgo-telegram.service; do
+for f in ibkr-gateway.service pearlalgo-agent.service pearlalgo-api.service pearlalgo-webapp.service ; do
     if [ -f "$SCRIPT_DIR/$f" ]; then
         cp "$SCRIPT_DIR/$f" "$SYSTEMD_DIR/"
     else
@@ -44,7 +44,6 @@ echo "  - ibkr-gateway       : IBKR Gateway (must start first)"
 echo "  - pearlalgo-agent    : Market Agent (use CONFIG_PATH for account)"
 echo "  - pearlalgo-api      : API Server (port 8001)"
 echo "  - pearlalgo-webapp   : Web App (port 3001)"
-echo "  - pearlalgo-telegram : Telegram Handler"
 echo ""
 echo "Commands:"
 echo "  Start all:     sudo systemctl start ibkr-gateway pearlalgo-agent pearlalgo-api pearlalgo-webapp pearlalgo-telegram"

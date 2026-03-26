@@ -71,12 +71,6 @@ trading_circuit_breaker:
   enable_trigger_filters: false
   ema_cross_require_volume: true
   low_regime_require_volume: true
-  enable_ml_chop_shield: false
-  ml_min_scored_trades: 50
-  ml_min_winrate_delta: 0.15
-  ml_chop_shield_regimes:
-  - ranging
-  - volatile
 data:
   buffer_size: 300
   buffer_size_5m: 300
@@ -152,6 +146,8 @@ pearl_bot_auto:
   trend_momentum_atr_mult: 0.5
   allow_trend_breakout_entries: true
   trend_breakout_lookback_bars: 5
+  tod_scaling:
+    enabled: false
 strategy:
   enabled_signals:
   - unified_strategy
@@ -186,63 +182,21 @@ auto_flat:
   friday_time: '16:55'
   weekend_enabled: true
   timezone: America/New_York
-learning:
-  enabled: false
-  mode: shadow
-  feature_engineer_enabled: true
-  features:
-    short_window: 5
-    medium_window: 20
-    long_window: 50
-    compute_price_action: true
-    compute_volume_profile: true
-    compute_microstructure: true
-    compute_time_features: true
-    compute_sequential: true
-    compute_cross_timeframe: true
-    normalize_features: true
-    clip_outliers: true
-    outlier_std: 3.0
-  min_samples_per_type: 10
-  explore_rate: 0.1
-  decision_threshold: 0.3
-  max_size_multiplier: 1.5
-  min_size_multiplier: 0.5
-  prior_alpha: 2.0
-  prior_beta: 2.0
-  decay_factor: 0.0
-  contextual:
-    enabled: true
-    mode: shadow
-    explore_rate: 0.1
-    min_samples_per_context: 5
-    decision_threshold: 0.3
-    fallback_to_global: true
-ml_filter:
-  enabled: true
-  mode: shadow
-  require_lift_to_block: true
-  lift_lookback_trades: 200
-  lift_min_trades: 5
-  lift_min_winrate_delta: 0.05
-  model_path: models/signal_filter_v1.joblib
-  model_version: v1.0.0
-  min_probability: 0.55
-  shadow_threshold: 0.8
-  high_probability: 0.7
-  adjust_sizing: false
-  size_multiplier_min: 1.0
-  size_multiplier_max: 1.0
-  training_max_samples: 2000
-  min_training_samples: 30
-  retrain_interval_days: 7
-  n_estimators: 100
-  max_depth: 6
-  learning_rate: 0.1
-  calibrate_probabilities: true
 audit:
   retention_days: 90
   snapshot_retention_days: 365
+composite_regime:
+  enabled: false
+  chop_zone_low: 4.0
+  chop_zone_high: 6.0
+  chop_zone_min_confidence: 0.75
+  volatile_stop_multiplier: 1.2
+runner_mode:
+  enabled: false
+  breakeven_trigger_atr: 1.5
+  runner_trigger_atr: 2.5
+  runner_trail_distance_atr: 1.0
+  breakeven_offset_points: 0.25
 execution:
   enabled: false
   armed: false

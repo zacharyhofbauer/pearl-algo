@@ -1204,7 +1204,7 @@ class TestMarkdownV2Conversion:
 
 
 # ===================================================================
-# 11. _get_prefs and _is_command_handler_running
+# 11. _get_prefs
 # ===================================================================
 
 class TestMiscHelpers:
@@ -1216,15 +1216,6 @@ class TestMiscHelpers:
         with patch("pearlalgo.market_agent.telegram_notifier.TelegramPrefs", side_effect=Exception("bad")):
             prefs = notifier._get_prefs()
         assert prefs is notifier.prefs
-
-    def test_is_command_handler_no_pid_file(self, tmp_path):
-        from pearlalgo.market_agent.telegram_notifier import _is_command_handler_running
-        with patch("pearlalgo.market_agent.telegram_notifier.Path") as mock_path:
-            mock_path.return_value.parent.parent.parent.parent = tmp_path
-            # No pid file exists
-            result = _is_command_handler_running()
-        # Should return False (no pid file or exception handled)
-        assert result is False or result is True  # depends on path mocking; key is no crash
 
     def test_shared_cb_cooldown_paths(self, notifier):
         data_dir, sent_file = notifier._shared_cb_telegram_cooldown_paths()
@@ -1252,13 +1243,12 @@ class TestDashboard:
     async def test_dashboard_text_only(self, notifier, mock_telegram):
         """Dashboard without chart sends text message."""
         mock_telegram.bot.send_message = AsyncMock(return_value=MagicMock(message_id=55))
-        with patch("pearlalgo.market_agent.telegram_notifier._is_command_handler_running", return_value=False):
-            with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
-                mock_mh.return_value.is_market_open.return_value = True
-                result = await notifier.send_dashboard({
-                    "symbol": "MNQ", "running": True,
-                    "futures_market_open": True, "strategy_session_open": True,
-                })
+        with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
+            mock_mh.return_value.is_market_open.return_value = True
+            result = await notifier.send_dashboard({
+                "symbol": "MNQ", "running": True,
+                "futures_market_open": True, "strategy_session_open": True,
+            })
         assert result is True
 
     @pytest.mark.asyncio
@@ -1267,24 +1257,22 @@ class TestDashboard:
         chart = tmp_path / "dashboard.png"
         chart.write_bytes(b"\x89PNG\r\n")
         mock_telegram.bot.send_photo = AsyncMock(return_value=MagicMock(message_id=56))
-        with patch("pearlalgo.market_agent.telegram_notifier._is_command_handler_running", return_value=False):
-            with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
-                mock_mh.return_value.is_market_open.return_value = True
-                result = await notifier.send_dashboard(
-                    {"symbol": "MNQ", "running": True, "futures_market_open": True},
-                    chart_path=chart,
-                )
+        with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
+            mock_mh.return_value.is_market_open.return_value = True
+            result = await notifier.send_dashboard(
+                {"symbol": "MNQ", "running": True, "futures_market_open": True},
+                chart_path=chart,
+            )
         assert result is True
 
     @pytest.mark.asyncio
     async def test_dashboard_api_failure(self, notifier, mock_telegram):
         mock_telegram.bot.send_message = AsyncMock(side_effect=Exception("fail"))
-        with patch("pearlalgo.market_agent.telegram_notifier._is_command_handler_running", return_value=False):
-            with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
-                mock_mh.return_value.is_market_open.return_value = True
-                result = await notifier.send_dashboard({
-                    "symbol": "MNQ", "running": True, "futures_market_open": True,
-                })
+        with patch("pearlalgo.market_agent.telegram_notifier.get_market_hours") as mock_mh:
+            mock_mh.return_value.is_market_open.return_value = True
+            result = await notifier.send_dashboard({
+                "symbol": "MNQ", "running": True, "futures_market_open": True,
+            })
         # Should handle gracefully (either False from error handler, or True if plain fallback works)
         assert isinstance(result, bool)
 

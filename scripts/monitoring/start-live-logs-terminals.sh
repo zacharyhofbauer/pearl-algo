@@ -21,14 +21,10 @@ if command -v xfce4-terminal >/dev/null 2>&1; then
   xfce4-terminal --disable-server --geometry="$G1" -T "PearlAlgo Agent"    --hold -e "${RUNNER} pearlalgo-agent"
   sleep 0.5
   xfce4-terminal --disable-server --geometry="$G2" -T "PearlAlgo API"      --hold -e "${RUNNER} pearlalgo-api"
-  sleep 0.5
-  xfce4-terminal --disable-server --geometry="$G3" -T "PearlAlgo Telegram" --hold -e "${RUNNER} pearlalgo-telegram"
 elif command -v gnome-terminal >/dev/null 2>&1; then
   gnome-terminal --geometry=90x30+0+0    --title "PearlAlgo Agent"    -- "${RUNNER} pearlalgo-agent"
   sleep 0.5
   gnome-terminal --geometry=90x30+640+0  --title "PearlAlgo API"      -- "${RUNNER} pearlalgo-api"
-  sleep 0.5
-  gnome-terminal --geometry=90x30+1280+0 --title "PearlAlgo Telegram" -- "${RUNNER} pearlalgo-telegram"
 else
   echo "No xfce4-terminal or gnome-terminal found."
   exit 1

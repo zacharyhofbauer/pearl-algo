@@ -1566,6 +1566,21 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Non-critical Tradovate fills fallback: {e}")
 
+    # Tradovate Paper: if both live equity and fills failed, return zeros
+    # rather than falling through to signals.jsonl which may contain virtual trades.
+    if _is_tv_paper_account(state_dir):
+        logger.warning("TV Paper: both live equity and fills unavailable — returning zero daily stats")
+        return {
+            "daily_pnl": 0.0,
+            "daily_trades": 0,
+            "daily_wins": 0,
+            "daily_losses": 0,
+            "tradovate_equity": 0.0,
+            "tradovate_open_pnl": 0.0,
+            "tradovate_positions": 0,
+            "pnl_source": "tradovate_fills",
+        }
+
     # Delegate to shared stats_computation module (single source of truth for
     # signals.jsonl parsing with built-in 5-second TTL cache).
     result = _shared_compute_daily_stats(state_dir)
@@ -1681,6 +1696,13 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 return fills_stats
     except Exception as e:
         logger.debug(f"Tradovate fills fallback failed: {e}")
+
+    # Tradovate Paper: if both live equity and fills failed, return zeros
+    # rather than falling through to performance.json which mixes virtual + real trades.
+    if _is_tv_paper_account(state_dir):
+        logger.warning("TV Paper: both live equity and fills unavailable — returning zero performance stats")
+        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
+        return {p: empty_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
 
     if perf_data is None:
         empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
@@ -3403,6 +3425,125 @@ async def get_signals(
     return _get_recent_signals(_state_dir, limit=limit)
 
 
+@app.get("/api/signals-panel")
+async def get_signals_panel(
+    limit: int = Query(default=20, ge=1, le=50, description="Max signals to return"),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Enriched signals endpoint for the Signals Panel.
+
+    Returns recent signals with status (TAKEN/BLOCKED/VIRTUAL), block reasons,
+    plus current regime score and opening range state.
+    """
+    _require_state_dir()
+
+    # 1. Get signal lifecycle events (generated/entered/exited/virtual)
+    raw_events = _get_recent_signals(_state_dir, limit=limit * 4)
+
+    # 2. Collapse per-signal: keep latest status per signal_id
+    signals_by_id: Dict[str, Dict[str, Any]] = {}
+    for ev in reversed(raw_events):  # oldest first so latest overwrites
+        sid = ev.get("signal_id", "")
+        if not sid:
+            continue
+        if sid not in signals_by_id:
+            signals_by_id[sid] = dict(ev)
+        else:
+            # Update with latest status info
+            prev = signals_by_id[sid]
+            prev["status"] = ev["status"]
+            if ev.get("pnl") is not None:
+                prev["pnl"] = ev["pnl"]
+            if ev.get("exit_reason"):
+                prev["exit_reason"] = ev["exit_reason"]
+
+    # 3. Read rejected signals from audit DB (trades.db) if available
+    rejected_by_signal: Dict[str, str] = {}
+    try:
+        db_path = _state_dir / "trades.db"
+        if db_path.exists():
+            import sqlite3
+            conn = sqlite3.connect(str(db_path), timeout=2)
+            conn.row_factory = sqlite3.Row
+            try:
+                cursor = conn.execute(
+                    "SELECT data_json FROM audit_events "
+                    "WHERE event_type = 'signal_rejected' "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (limit * 3,),
+                )
+                for row in cursor:
+                    try:
+                        data = json.loads(row["data_json"]) if isinstance(row["data_json"], str) else row["data_json"]
+                        sid = data.get("signal_id", "")
+                        reason = data.get("reason", "unknown")
+                        if sid:
+                            rejected_by_signal.setdefault(sid, reason)
+                    except Exception:
+                        pass
+            finally:
+                conn.close()
+    except Exception as e:
+        logger.debug(f"Non-critical: could not read audit DB for rejections: {e}")
+
+    # 4. Build panel signals with status mapping
+    panel_signals = []
+    for sid, sig in signals_by_id.items():
+        raw_status = sig.get("status", "unknown")
+        # Map to panel status: TAKEN, BLOCKED, VIRTUAL
+        if raw_status in ("entered", "exited"):
+            panel_status = "TAKEN"
+        elif raw_status == "virtual":
+            panel_status = "VIRTUAL"
+        else:
+            panel_status = "TAKEN"  # generated = in progress
+
+        block_reason = None
+        # Check if this signal was rejected
+        if sid in rejected_by_signal:
+            panel_status = "BLOCKED"
+            block_reason = rejected_by_signal[sid]
+
+        panel_signals.append({
+            "signal_id": sid,
+            "timestamp": sig.get("timestamp"),
+            "direction": sig.get("direction"),
+            "signal_type": sig.get("signal_type") or "unknown",
+            "confidence": sig.get("confidence"),
+            "status": panel_status,
+            "block_reason": block_reason,
+            "pnl": sig.get("pnl"),
+            "exit_reason": sig.get("exit_reason"),
+            "entry_price": sig.get("entry_price"),
+        })
+
+    # Sort newest first
+    panel_signals.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+    panel_signals = panel_signals[:limit]
+
+    # 5. Get regime + opening range from state
+    regime_info = {"regime": "unknown", "confidence": 0.0, "allowed_direction": "both"}
+    opening_range = None
+    try:
+        state = _read_state_safe()
+        if state:
+            regime_info = _get_market_regime(state)
+            # Extract opening range from key levels if available
+            key_levels = state.get("key_levels") or {}
+            or_high = key_levels.get("curr_day_high")
+            or_low = key_levels.get("curr_day_low")
+            if or_high is not None and or_low is not None:
+                opening_range = {"high": or_high, "low": or_low}
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+
+    return {
+        "signals": panel_signals,
+        "regime": regime_info,
+        "opening_range": opening_range,
+    }
+
+
 @app.get("/api/positions")
 async def get_positions(
     api_key: Optional[str] = Depends(verify_api_key),
@@ -3958,34 +4099,44 @@ async def stream_logs(
 
 def _parse_log_line(line: str) -> dict:
     """Parse a journalctl short-iso log line into structured data.
-    ADDED 2026-03-25: live log streaming for dashboard.
+    FIXED 2026-03-25: ET conversion, strip logger prefix, handle +00:00 format.
     """
     import re
 
-    level = "info"
+    # journalctl short-iso format: 2026-03-26T03:23:17+00:00 px-core python[PID]: MESSAGE
+    ts_match = re.match(r"^(\S+)\s+\S+\s+\S+:\s+(.*)", line)
+    if ts_match:
+        ts_raw = ts_match.group(1)
+        raw_message = ts_match.group(2)
+        # Strip logger prefix: "2026-03-26 03:23:17 | INFO | pearlalgo.utils.logger:info:107 | ACTUAL"
+        # Extract just the last segment after final " | "
+        if " | " in raw_message:
+            parts = raw_message.split(" | ")
+            message = parts[-1].strip()
+        else:
+            message = raw_message
+        # Convert timestamp to ET — format is 2026-03-26T03:23:17+00:00
+        try:
+            from datetime import datetime
+            import pytz
+            ET = pytz.timezone("America/New_York")
+            dt = datetime.fromisoformat(ts_raw)  # Python 3.7+ handles +00:00 natively
+            ts_et = dt.astimezone(ET).strftime("%H:%M:%S")
+        except Exception:
+            ts_et = ts_raw[11:19] if len(ts_raw) >= 19 else ts_raw
+    else:
+        ts_et = ""
+        message = line
+
+    # Detect level from full line (catches emojis and keywords)
     upper = line.upper()
+    level = "info"
     if "ERROR" in upper or "❌" in line or "🚨" in line:
         level = "error"
     elif "WARNING" in upper or "WARN" in upper or "⚠" in line or "🛑" in line:
         level = "warn"
     elif "DEBUG" in upper:
         level = "debug"
-
-    ts_match = re.match(r"^(\S+)\s+\S+\s+\S+:\s+(.*)", line)
-    if ts_match:
-        ts_raw = ts_match.group(1)
-        message = ts_match.group(2)
-        try:
-            from datetime import datetime
-            import pytz
-            ET = pytz.timezone("America/New_York")
-            dt = datetime.fromisoformat(ts_raw.replace("+0000", "+00:00"))
-            ts_et = dt.astimezone(ET).strftime("%H:%M:%S")
-        except Exception:
-            ts_et = ts_raw[-8:] if len(ts_raw) >= 8 else ts_raw
-    else:
-        ts_et = ""
-        message = line
 
     return {"ts": ts_et, "level": level, "message": message, "raw": line}
 

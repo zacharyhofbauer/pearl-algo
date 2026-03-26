@@ -45,7 +45,7 @@ from pearlalgo.market_agent.trading_circuit_breaker import (
 )
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceScheduler
-from pearlalgo.execution.advanced_exit_manager import AdvancedExitManager
+from pearlalgo.execution.advanced_exit_manager import AdvancedExitManager, PartialRunnerManager
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import configure_market_hours, get_market_hours
@@ -68,7 +68,6 @@ class SuggestionType:
     """No-op stub: AI suggestion types were removed."""
     RISK_WARNING = "risk_warning"
     STRATEGY_HINT = "strategy_hint"
-from pearlalgo.market_agent.ml_manager import MLManager
 from pearlalgo.market_agent.audit_logger import AuditLogger, AuditEventType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
@@ -99,48 +98,11 @@ except ImportError:
     TradovateExecutionAdapter = None  # type: ignore
     TradovateConfig = None  # type: ignore
 
-# Learning layer imports (optional - only used if learning.enabled)
-try:
-    from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig, BanditDecision
-    LEARNING_AVAILABLE = True
-except ImportError:
-    LEARNING_AVAILABLE = False
-    BanditPolicy = None  # type: ignore
-    BanditConfig = None  # type: ignore
-    BanditDecision = None  # type: ignore
-
-# SQLite "forever memory" (optional - enabled via storage.sqlite_enabled)
-try:
-    from pearlalgo.learning.trade_database import TradeDatabase
-    TRADE_DB_AVAILABLE = True
-except ImportError:
-    TRADE_DB_AVAILABLE = False
-    TradeDatabase = None  # type: ignore
-
-# Contextual learning (optional - used for richer "learn by session/regime" analytics)
-try:
-    from pearlalgo.learning.contextual_bandit import (
-        ContextualBanditPolicy,
-        ContextualBanditConfig,
-        ContextFeatures,
-        ContextualDecision,
-    )
-    CONTEXTUAL_BANDIT_AVAILABLE = True
-except ImportError:
-    CONTEXTUAL_BANDIT_AVAILABLE = False
-    ContextualBanditPolicy = None  # type: ignore
-    ContextualBanditConfig = None  # type: ignore
-    ContextFeatures = None  # type: ignore
-    ContextualDecision = None  # type: ignore
-
-# ML signal filter (optional - shadow measurement / lift evaluation)
-try:
-    from pearlalgo.learning.ml_signal_filter import get_ml_signal_filter, MLSignalFilter
-    ML_FILTER_AVAILABLE = True
-except ImportError:
-    ML_FILTER_AVAILABLE = False
-    get_ml_signal_filter = None  # type: ignore
-    MLSignalFilter = None  # type: ignore
+# ML/Learning layer removed — OpenClaw handles ML externally.
+# TradeDatabase (SQLite trade storage) was in learning/ but is infrastructure.
+# It will fail to import now that learning/ is deleted; SQLite features are disabled.
+TRADE_DB_AVAILABLE = False
+TradeDatabase = None  # type: ignore
 
 
 
@@ -233,8 +195,9 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             def __init__(self, config: ConfigView):
                 self.config = config
 
-            def analyze(self, df: pd.DataFrame, *, current_time: Optional[datetime] = None) -> list[dict]:
-                return generate_signals(df, config=self.config, current_time=current_time)
+            def analyze(self, df: pd.DataFrame, *, current_time: Optional[datetime] = None,
+                        df_5m: Optional[pd.DataFrame] = None) -> list[dict]:
+                return generate_signals(df, config=self.config, current_time=current_time, df_5m=df_5m)
 
         self.strategy = _StrategyAdapter(self.config)
 
@@ -386,15 +349,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
         # ==========================================================================
-        # ML / LEARNING (WS8: extracted to MLManager)
-        # ==========================================================================
-        self._ml_manager = MLManager(
-            service_config=service_config,
-            state_dir=self.state_manager.state_dir,
-            trade_db=self._trade_db,
-            sqlite_enabled=self._sqlite_enabled,
-            signals_file_path=getattr(self.state_manager, "signals_file", None),
-        )
+        # ML/Learning removed — OpenClaw handles ML externally.
 
         # ==========================================================================
         # AUTO-FLAT (Virtual trades) - Daily + Friday/Weekend safety
@@ -497,8 +452,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             trading_circuit_breaker=self.trading_circuit_breaker,
             telegram_notifier=self.telegram_notifier,
             execution_adapter=getattr(self, "execution_adapter", None),
-            bandit_policy=getattr(self, "bandit_policy", None),
-            contextual_policy=getattr(self, "contextual_policy", None),
             tv_paper_tracker=getattr(self, "_tv_paper_tracker", None),
             virtual_pnl_enabled=getattr(self.config, "virtual_pnl_enabled", True),
             virtual_pnl_tiebreak=getattr(self.config, "virtual_pnl_tiebreak", "stop_loss"),
@@ -533,8 +486,8 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # Initialize Pearl suggestion engine
         self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_manager.state_dir))
 
-        # Shadow tracker now lives in MLManager (WS8).
-        # self.shadow_tracker delegates via property below.
+        # Shadow tracker (stub — AI shadow tracker was removed in Phase 2D)
+        self.shadow_tracker = get_shadow_tracker()
 
         # ------------------------------------------------------------------
         # Extracted sub-modules (Phase 3: Arch-1B decomposition)
@@ -552,7 +505,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             state_manager=self.state_manager,
             notification_queue=self.notification_queue,
             shadow_tracker=self.shadow_tracker,
-            bandit_policy=getattr(self, "bandit_policy", None),
             get_status_snapshot=lambda: getattr(self, "_get_status_snapshot", lambda: {})(),
         )
 
@@ -665,6 +617,19 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             except Exception as e:
                 logger.debug(f"Trailing stop manager not available: {e}")
 
+        # Partial Profit Runner manager (runner_mode config)
+        self._runner_manager = None
+        runner_cfg = service_config.get("runner_mode", {})
+        if runner_cfg.get("enabled", False) and self.execution_adapter is not None:
+            try:
+                self._runner_manager = PartialRunnerManager({"runner_mode": runner_cfg})
+                if self._runner_manager.enabled:
+                    logger.info("Runner mode: ENABLED (breakeven→runner→tight trail)")
+                else:
+                    self._runner_manager = None
+            except Exception as e:
+                logger.debug(f"Runner mode not available: {e}")
+
         # Track last trading day for daily counter reset
         self._last_trading_day: Optional[date] = None
         
@@ -673,20 +638,12 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self._last_connection_alert_time: Optional[datetime] = None
         self._connection_alert_cooldown_seconds: int = 300  # 5 minutes between alerts
 
-        # ==========================================================================
-        # LEARNING (Adaptive Bandit Policy) -- now managed by MLManager (WS8)
-        # ==========================================================================
-        # bandit_policy, contextual_policy, and _bandit_config are accessed
-        # via backward-compatible properties that delegate to self._ml_manager.
-
         # ------------------------------------------------------------------
         # SignalHandler: extracted signal processing pipeline (Arch-1B)
         # ------------------------------------------------------------------
         self._order_manager = OrderManager(
             risk_settings=self._risk_settings,
             strategy_settings=self._strategy_settings,
-            ml_signal_filter=self._ml_manager.signal_filter,
-            ml_adjust_sizing=self._ml_manager.adjust_sizing,
         )
         self._signal_handler = SignalHandler(
             state_manager=self.state_manager,
@@ -694,13 +651,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             notification_queue=self.notification_queue,
             order_manager=self._order_manager,
             trading_circuit_breaker=self.trading_circuit_breaker,
-            bandit_policy=self._ml_manager.bandit_policy,
-            bandit_config=self._ml_manager.bandit_config,
-            contextual_policy=self._ml_manager.contextual_policy,
-            ml_signal_filter=self._ml_manager.signal_filter,
-            ml_filter_enabled=self._ml_manager.filter_enabled,
-            ml_filter_mode=self._ml_manager.filter_mode,
-            ml_shadow_threshold=self._ml_manager.shadow_threshold,
             execution_adapter=self.execution_adapter,
             telegram_notifier=self.telegram_notifier,
             audit_logger=self.audit_logger,
@@ -723,11 +673,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             signal_handler=self._signal_handler,
             order_manager=self._order_manager,
             state_manager=self.state_manager,
-            ml_signal_filter=self._ml_manager.signal_filter,
-            bandit_policy=self._ml_manager.bandit_policy,
-            ml_filter_enabled=self._ml_manager.filter_enabled,
-            ml_filter_mode=self._ml_manager.filter_mode,
-            ml_manager=self._ml_manager,
         )
         self.execution_orchestrator = ExecutionOrchestrator(
             virtual_trade_manager=self.virtual_trade_manager,
@@ -849,13 +794,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         size = max(min_size, min(max_size, size))
         return max(1, size)
 
-    def _apply_ml_opportunity_sizing(self, signal: Dict) -> None:
-        """Adjust size and priority based on ML opportunity signal (delegates to MLManager)."""
-        base_size = self._compute_base_position_size(signal)
-        self._ml_manager.apply_opportunity_sizing(
-            signal, base_size=base_size, risk_settings=self._risk_settings
-        )
-
     async def _monitor_open_position(self, market_data: Dict) -> None:
         """Log real-time metrics for open positions: unrealized P&L, distance to stop/TP, MFE/MAE.
         Also triggers trailing stop updates when enabled."""
@@ -900,7 +838,18 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         if not positions:
             # No open position — reset monitor state
             if getattr(self, '_pos_monitor', None):
+                # Clean up trailing stop state for the closed position
+                if self._trailing_stop_manager:
+                    for pid in list(self._trailing_stop_manager._states.keys()):
+                        self._trailing_stop_manager.remove_position(pid)
+                        logger.debug(f"Trailing stop: cleaned up state for closed position {pid}")
+                if self._runner_manager:
+                    for pid in list(self._runner_manager._states.keys()):
+                        self._runner_manager.remove_position(pid)
+                        logger.debug(f"Runner: cleaned up state for closed position {pid}")
                 self._pos_monitor = None
+                self._last_broker_stop = None
+                self._stop_order_miss_count = 0
             return
 
         # Get current price from market data
@@ -948,6 +897,21 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     else:
                         logger.warning(f"⚠️ Could not find stop price for position {_cid}, trailing stop not registered")
 
+                # Register with runner manager for new positions
+                if self._runner_manager and self._runner_manager.enabled:
+                    current_atr = self._get_current_atr(market_data)
+                    if current_atr > 0:
+                        self._runner_manager.register_position(
+                            position_id=str(_cid),
+                            entry_price=entry_price,
+                            direction=direction,
+                            atr=current_atr,
+                        )
+                        logger.info(
+                            f"Runner registered: pos={_cid} entry=${entry_price:.2f} "
+                            f"dir={direction} atr={current_atr:.2f}"
+                        )
+
             mon = self._pos_monitor
             mon['max_price'] = max(mon['max_price'], current_price)
             mon['min_price'] = min(mon['min_price'], current_price)
@@ -976,8 +940,46 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             except Exception:
                 pass
 
+            # === Runner Mode: progressive stop management (replaces trailing stop phases) ===
+            _runner_active = self._runner_manager and self._runner_manager.enabled
+            if _runner_active:
+                try:
+                    action, new_stop, cancel_tp = self._runner_manager.update_position(
+                        str(_cid), current_price
+                    )
+                    if action is not None:
+                        # Modify stop loss on broker
+                        if new_stop is not None:
+                            stop_order_id = await self._find_stop_order_id(direction)
+                            if stop_order_id:
+                                success = await self.execution_adapter.modify_stop_order(
+                                    stop_order_id, new_stop
+                                )
+                                if success:
+                                    self._last_broker_stop = new_stop
+                                    logger.info(f"Runner [{action}]: SL moved to {new_stop:.2f}")
+                                else:
+                                    logger.warning(f"Runner [{action}]: modify_stop_order failed for order {stop_order_id}")
+                            else:
+                                logger.warning(f"Runner [{action}]: could not find stop order to modify")
+
+                        # Cancel TP order if runner phase requires it
+                        if cancel_tp:
+                            tp_order_id = await self._find_tp_order_id(direction)
+                            if tp_order_id:
+                                result = await self.execution_adapter.cancel_order(str(tp_order_id))
+                                if result.success:
+                                    logger.info(f"Runner: TP order {tp_order_id} cancelled — letting winner run")
+                                else:
+                                    logger.warning(f"Runner: failed to cancel TP order {tp_order_id}")
+                            else:
+                                logger.debug("Runner: no TP order found to cancel (may already be cancelled)")
+                except Exception as e:
+                    logger.warning(f"Runner mode update failed: {e}")
+
             # Trailing stop check (with override file IPC + regime presets)
-            if self._trailing_stop_manager and self._trailing_stop_manager.enabled:
+            # Skipped when runner mode is active — runner manages SL progression
+            if not _runner_active and self._trailing_stop_manager and self._trailing_stop_manager.enabled:
                 try:
                     current_atr = self._get_current_atr(market_data)
                     if current_atr > 0:
@@ -1011,11 +1013,43 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                                 )
                                 if success:
                                     self._last_broker_stop = new_stop
+                                    self._stop_order_miss_count = 0
                                     logger.info(f"Trailing stop moved to {new_stop:.2f}")
                                 else:
                                     logger.warning(f"Trailing stop: modify_stop_order returned False for order {stop_order_id}")
                             else:
-                                logger.warning(f"Trailing stop: could not find stop order for {direction} position to move to {new_stop:.2f}")
+                                miss_count = getattr(self, '_stop_order_miss_count', 0) + 1
+                                self._stop_order_miss_count = miss_count
+                                if miss_count <= 3:
+                                    logger.warning(f"Trailing stop: could not find stop order for {direction} position to move to {new_stop:.2f} (miss {miss_count}/3)")
+                                if miss_count == 3:
+                                    # After 3 misses, attempt to re-place the stop order
+                                    logger.warning(f"Trailing stop: 3 consecutive misses — attempting to re-place stop at {new_stop:.2f}")
+                                    try:
+                                        qty = abs(net_pos)
+                                        stop_action = "Sell" if direction == "long" else "Buy"
+                                        placed = await self.execution_adapter.place_stop_order(
+                                            symbol=self.config.get("symbol", "MNQ"),
+                                            action=stop_action,
+                                            quantity=qty,
+                                            stop_price=new_stop,
+                                        )
+                                        if placed:
+                                            self._last_broker_stop = new_stop
+                                            self._stop_order_miss_count = 0
+                                            logger.info(f"✅ Trailing stop: re-placed stop order at {new_stop:.2f}")
+                                        else:
+                                            logger.error(f"Trailing stop: failed to re-place stop order at {new_stop:.2f}")
+                                    except Exception as e_place:
+                                        logger.error(f"Trailing stop: re-place attempt failed: {e_place}")
+                                elif miss_count >= 6:
+                                    # After 6 misses, deregister to stop the error loop
+                                    logger.error(
+                                        f"Trailing stop: 6 consecutive misses — deregistering position {_cid} "
+                                        f"to prevent auto-disarm lockout. Manual stop management required."
+                                    )
+                                    self._trailing_stop_manager.remove_position(str(_cid))
+                                    self._stop_order_miss_count = 0
                 except Exception as e:
                     logger.warning(f"Trailing stop update failed: {e}")
 
@@ -1081,7 +1115,11 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                         dist_tp = f" | dist_tp={current_price - tp_price:.2f}pts"
 
                 trail_info = ''
-                if self._trailing_stop_manager:
+                if self._runner_manager:
+                    runner_phase = self._runner_manager.get_phase(str(_cid))
+                    if runner_phase:
+                        trail_info = f" | runner={runner_phase}"
+                elif self._trailing_stop_manager:
                     ts = self._trailing_stop_manager.get_state(str(_cid))
                     if ts and ts.get('current_phase'):
                         trail_info = f" | trail={ts['current_phase']}"
@@ -1287,6 +1325,50 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 return best_candidate
         except Exception as e:
             logger.debug(f"Could not find stop order: {e}")
+        return None
+
+    async def _find_tp_order_id(self, direction: str) -> Optional[int]:
+        """Find the working take-profit (Limit) order ID for the current position.
+
+        For a long position, the TP is a Sell Limit; for short, a Buy Limit.
+        """
+        try:
+            orders = await self.execution_adapter._client.get_orders()
+            tp_action = "Sell" if direction == "long" else "Buy"
+            working_states = {"Working", "Accepted", "working", "accepted"}
+
+            for order in orders:
+                action = order.get("action", "")
+                if action != tp_action:
+                    continue
+
+                status = (
+                    order.get("ordStatus")
+                    or order.get("status")
+                    or ""
+                )
+                if status not in working_states:
+                    continue
+
+                order_type = str(
+                    order.get("orderType")
+                    or order.get("ordType")
+                    or order.get("type")
+                    or ""
+                ).strip().lower()
+
+                # TP orders are Limit orders (not Stop orders)
+                if order_type in ("limit", "limitorder"):
+                    return int(order["id"])
+
+                # Fallback: order has a price but no stopPrice (i.e. it's a limit/TP)
+                price = order.get("price") or order.get("limitPrice")
+                stop_px = order.get("stopPrice") or order.get("triggerPrice")
+                if price is not None and stop_px is None:
+                    return int(order["id"])
+
+        except Exception as e:
+            logger.debug(f"Could not find TP order: {e}")
         return None
 
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
@@ -2592,10 +2674,10 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 if self.execution_adapter is not None
                 else {"enabled": False, "armed": False, "mode": "disabled"}
             ),
-            # Learning/policy status (WS8: delegated to MLManager)
-            "learning": self._ml_manager.get_learning_status(),
-            "learning_contextual": self._ml_manager.get_contextual_status(),
-            "ml_filter": self._ml_manager.get_filter_status(),
+            # ML/Learning removed — OpenClaw handles ML externally.
+            "learning": {"enabled": False, "mode": "disabled"},
+            "learning_contextual": {"enabled": False, "mode": "disabled"},
+            "ml_filter": {"enabled": False, "mode": "disabled"},
         }
 
     def _persist_cycle_diagnostics(
@@ -3394,96 +3476,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 priority=Priority.NORMAL,
             )
             self.last_connection_failure_alert = now
-
-    # ------------------------------------------------------------------
-    # Backward-compatible delegation properties (WS8: MLManager extraction)
-    # ------------------------------------------------------------------
-    # These properties let existing code (and submodules that read via
-    # getattr(self, "_ml_*", default)) keep working without changes.
-
-    @property
-    def _ml_signal_filter(self):
-        return self._ml_manager.signal_filter
-
-    @property
-    def _ml_adjust_sizing(self):
-        return self._ml_manager.adjust_sizing
-
-    @property
-    def _ml_filter_enabled(self):
-        return self._ml_manager.filter_enabled
-
-    @property
-    def _ml_filter_mode(self):
-        return self._ml_manager.filter_mode
-
-    @property
-    def _ml_shadow_threshold(self):
-        return self._ml_manager.shadow_threshold
-
-    @property
-    def _ml_blocking_allowed(self):
-        return self._ml_manager.blocking_allowed
-
-    @property
-    def _ml_lift_metrics(self):
-        return self._ml_manager.lift_metrics
-
-    @property
-    def _ml_lift_last_eval_at(self):
-        return self._ml_manager.lift_last_eval_at
-
-    @property
-    def _ml_require_lift_to_block(self):
-        return self._ml_manager.require_lift_to_block
-
-    @property
-    def _ml_lift_lookback_trades(self):
-        return self._ml_manager.lift_lookback_trades
-
-    @property
-    def _ml_lift_min_trades(self):
-        return self._ml_manager.lift_min_trades
-
-    @property
-    def _ml_lift_min_winrate_delta(self):
-        return self._ml_manager.lift_min_winrate_delta
-
-    @property
-    def _ml_size_multiplier_min(self):
-        return self._ml_manager.size_multiplier_min
-
-    @property
-    def _ml_size_multiplier_max(self):
-        return self._ml_manager.size_multiplier_max
-
-    @property
-    def _ml_size_threshold(self):
-        return self._ml_manager.size_threshold
-
-    @property
-    def _ml_filter_init_status(self):
-        return self._ml_manager.filter_init_status
-
-    @property
-    def _bandit_config(self):
-        return self._ml_manager.bandit_config
-
-    @property
-    def bandit_policy(self):
-        return self._ml_manager.bandit_policy
-
-    @property
-    def contextual_policy(self):
-        return self._ml_manager.contextual_policy
-
-    @property
-    def _contextual_config(self):
-        return self._ml_manager.contextual_config
-
-    @property
-    def shadow_tracker(self):
-        return self._ml_manager.shadow_tracker
 
     def _os_signal_handler(self, signum, frame) -> None:
         """Handle OS shutdown signals (SIGINT/SIGTERM)."""

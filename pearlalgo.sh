@@ -3,7 +3,7 @@
 # PEARL Master Control Script
 # Purpose: Unified start/stop/restart/status for all PEARL services
 # Usage:
-#   ./pearl.sh start       Start all services (Gateway → Tradovate Paper → Telegram)
+#   ./pearl.sh start       Start all services (Gateway → Tradovate Paper → Chart)
 #   ./pearl.sh stop        Stop all services gracefully
 #   ./pearl.sh restart     Restart all services
 #   ./pearl.sh status      Show status of all services
@@ -12,11 +12,9 @@
 # Individual service control:
 #   ./pearl.sh gateway start|stop|status
 #   ./pearl.sh agent start|stop|status
-#   ./pearl.sh telegram start|stop|status
 #
 # Options:
 #   --market MNQ         Market to trade (default: MNQ)
-#   --no-telegram        Skip Telegram handler
 #   --foreground         Run agent in foreground (for debugging)
 # ============================================================================
 
@@ -27,7 +25,6 @@ cd "$SCRIPT_DIR"
 
 # Defaults
 MARKET="${PEARL_MARKET:-MNQ}"
-NO_TELEGRAM=false
 NO_CHART=false
 FOREGROUND=false
 
@@ -46,10 +43,6 @@ parse_options() {
             --market)
                 MARKET="${2:-MNQ}"
                 shift 2
-                ;;
-            --no-telegram)
-                NO_TELEGRAM=true
-                shift
                 ;;
             --no-chart)
                 NO_CHART=true
@@ -164,17 +157,6 @@ check_agent_status() {
     fi
 }
 
-check_telegram_status() {
-    local pidfile="$SCRIPT_DIR/logs/telegram_handler.pid"
-    if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-        local pid=$(cat "$pidfile")
-        echo -e "${GREEN}●${NC} Telegram - PID $pid"
-    else
-        echo -e "${RED}●${NC} Telegram"
-        return 1
-    fi
-}
-
 check_chart_status() {
     # Check if API server and Next.js are running (standalone or dev)
     local api_running=$(pgrep -f "api_server.py" &>/dev/null && echo "yes" || echo "no")
@@ -261,7 +243,6 @@ show_status() {
     echo -e "${CYAN}Services:${NC}"
     check_gateway_status || true
     check_tv_paper_status || true
-    check_telegram_status || true
     check_chart_status || true
     check_tunnel_status || true
     echo ""
@@ -276,14 +257,12 @@ show_quick_status() {
     activate_venv
     
     local gw_status=$(./scripts/gateway/gateway.sh api-ready &>/dev/null && echo "✅" || echo "❌")
-    local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
-    local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
     local tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
-    
-    echo -e "PEARL: GW $gw_status | TV-Paper $tv_paper_status | TG $tg_status | Chart $chart_status | Tunnel $tunnel_status"
+
+    echo -e "PEARL: GW $gw_status | TV-Paper $tv_paper_status | Chart $chart_status | Tunnel $tunnel_status"
 }
 
 # ============================================================================
@@ -308,13 +287,6 @@ start_agent() {
         ./scripts/lifecycle/agent.sh start --market "$MARKET" --background
     fi
     echo ""
-}
-
-start_telegram() {
-    # DISABLED 2026-03-18: OpenClaw gateway on Mac owns the Telegram bot token.
-    # Starting Telegram from px-core will conflict with the gateway. Do not re-enable.
-    echo -e "${YELLOW}⏭ Telegram disabled — OpenClaw Mac gateway owns the bot token${NC}"
-    return
 }
 
 start_chart() {
@@ -466,8 +438,6 @@ start_all() {
         echo ""
     fi
     sleep 1
-    start_telegram
-    sleep 1
     start_chart
     sleep 1
     start_tunnel
@@ -485,13 +455,6 @@ stop_agent() {
     echo -e "${CYAN}■ Stopping Market Agent ($MARKET)...${NC}"
     ./scripts/lifecycle/agent.sh stop --market "$MARKET" 2>/dev/null || true
     echo ""
-}
-
-stop_telegram() {
-    # DISABLED 2026-03-18: OpenClaw gateway on Mac owns the Telegram bot token.
-    # Do not stop Telegram from px-core. Managed by Mac OpenClaw gateway.
-    echo -e "${YELLOW}Telegram stop skipped -- managed by OpenClaw Mac gateway${NC}"
-    return
 }
 
 stop_chart() {
@@ -549,7 +512,6 @@ stop_all() {
         ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
         echo ""
     fi
-    stop_telegram
     stop_gateway
     
     echo -e "${GREEN}${BOLD}✅ PEARL System Stopped${NC}"
@@ -663,29 +625,6 @@ handle_agent() {
             ;;
         *)
             echo "Unknown agent command: $subcmd"
-            ;;
-    esac
-}
-
-handle_telegram() {
-    local subcmd="${1:-status}"
-    activate_venv
-    case "$subcmd" in
-        start)
-            start_telegram
-            ;;
-        stop)
-            stop_telegram
-            ;;
-        status)
-            check_telegram_status || echo "   Not running"
-            ;;
-        restart)
-            stop_telegram
-            start_telegram
-            ;;
-        *)
-            echo "Unknown telegram command: $subcmd"
             ;;
     esac
 }
@@ -823,7 +762,7 @@ show_help() {
     echo "Usage: ./pearl.sh <command> [options]"
     echo ""
     echo -e "${CYAN}Commands:${NC}"
-    echo "  start       Start all services (Gateway → Tradovate Paper → Telegram → Chart)"
+    echo "  start       Start all services (Gateway → Tradovate Paper → Chart)"
     echo "  stop        Stop all services gracefully"
     echo "  restart     Restart all services"
     echo "  status      Show detailed status of all services"
@@ -833,14 +772,11 @@ show_help() {
     echo "  gateway <start|stop|status>    Control IB Gateway"
     echo "  agent <start|stop|status>      Control market agent (optional)"
     echo "  tv-paper <start|stop|status|restart|api|logs>  Control Tradovate Paper Eval"
-    echo ""
-    echo "  telegram <start|stop|status>   Control Telegram Handler"
     echo "  chart <start|stop|status|build|deploy>  Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
     echo ""
     echo -e "${CYAN}Options:${NC}"
     echo "  --market MNQ         Market to trade (default: MNQ)"
-    echo "  --no-telegram        Skip Telegram handler"
     echo "  --no-chart           Skip Web App"
     echo "  --foreground         Run agent in foreground"
     echo ""
@@ -927,9 +863,6 @@ case "$COMMAND" in
         ;;
     agent)
         handle_agent "${1:-status}"
-        ;;
-    telegram)
-        handle_telegram "${1:-status}"
         ;;
     chart)
         handle_chart "${1:-status}"

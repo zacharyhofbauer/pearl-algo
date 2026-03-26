@@ -28,10 +28,12 @@ class TelegramAlerts:
         bot_token: str,
         chat_id: str,
         enabled: bool = True,
+        message_thread_id: Optional[int] = None,
     ):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.enabled = enabled
+        self.message_thread_id = message_thread_id
         self.last_error: Optional[str] = None
 
         self.bot = None
@@ -110,6 +112,7 @@ class TelegramAlerts:
                     text=message_markdown,
                     parse_mode=parse_mode,
                     reply_markup=reply_markup,
+                    message_thread_id=self.message_thread_id,
                 )
                 self._last_message_hash = message_hash
                 self._last_message_time = current_time
@@ -135,6 +138,7 @@ class TelegramAlerts:
                                 text=message_plain,
                                 parse_mode=None,
                                 reply_markup=reply_markup,
+                                message_thread_id=self.message_thread_id,
                             )
                             self._last_message_hash = message_hash
                             self._last_message_time = current_time
@@ -152,6 +156,7 @@ class TelegramAlerts:
                                 ),
                                 parse_mode=None,
                                 reply_markup=reply_markup,
+                                message_thread_id=self.message_thread_id,
                             )
                             self._last_message_hash = message_hash
                             self._last_message_time = current_time

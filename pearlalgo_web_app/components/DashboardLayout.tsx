@@ -19,7 +19,7 @@ interface DashboardLayoutProps {
   chart: React.ReactNode
   panels: React.ReactNode
   activeRightPanel: RightPanelTab
-  onToggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity') => void
+  onToggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity' | 'signals') => void
   onCloseRightPanel: () => void
   rightPanelContent: React.ReactNode
   mainChartApi?: any
@@ -164,7 +164,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
           >
             <div className="tv-right-panel-header">
               <span className="tv-right-panel-title">
-                {activeRightPanel === 'watchlist' ? 'Watchlist' : activeRightPanel === 'activity' ? 'Activity Log' : activeRightPanel === 'logs' ? 'System Status' : ''}
+                {activeRightPanel === 'watchlist' ? 'Watchlist' : activeRightPanel === 'activity' ? 'Activity Log' : activeRightPanel === 'logs' ? 'System Status' : activeRightPanel === 'signals' ? 'Signals' : ''}
               </span>
               <button className="tv-right-panel-close" onClick={onCloseRightPanel} title="Close panel">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -204,6 +204,15 @@ const DashboardLayout = React.memo(function DashboardLayout({
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <circle cx="9" cy="9" r="7"/><line x1="9" y1="5" x2="9" y2="9"/><line x1="9" y1="9" x2="12" y2="11"/>
+              </svg>
+            </button>
+            <button
+              className={`tv-sidebar-icon ${activeRightPanel === 'signals' ? 'active' : ''}`}
+              title="Signals"
+              onClick={() => onToggleRightPanel('signals')}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M2 9h3l2-5 3 10 2-5h4"/>
               </svg>
             </button>
             <button className="tv-sidebar-icon" title="Calendar">

@@ -1,7 +1,11 @@
 // @ts-check
 const withPWA = require('@ducanh2912/next-pwa').default({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development',
+  disable: true, // FIXED 2026-03-26: disabled PWA/SW — caused stale chunk errors on mobile
+  // FIXED 2026-03-26: force new SW to take over immediately, no stale chunk errors
+  skipWaiting: true,
+  clientsClaim: true,
+  cleanupOutdatedCaches: true,
   fallbacks: {
     document: '/~offline',
   },
@@ -14,11 +18,13 @@ const withPWA = require('@ducanh2912/next-pwa').default({
         options: { cacheName: 'api-requests' },
       },
       {
+        // FIXED 2026-03-26: NetworkFirst prevents stale chunk errors after rebuilds
         urlPattern: /^https?:\/\/.*\/_next\/static\/.*/,
-        handler: 'CacheFirst',
+        handler: 'NetworkFirst',
         options: {
           cacheName: 'static-assets',
-          expiration: { maxEntries: 64, maxAgeSeconds: 365 * 24 * 60 * 60 },
+          expiration: { maxEntries: 64, maxAgeSeconds: 24 * 60 * 60 },
+          networkTimeoutSeconds: 3,
         },
       },
       {

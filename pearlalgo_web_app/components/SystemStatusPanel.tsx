@@ -12,6 +12,7 @@ import type {
 } from '@/stores'
 import { apiFetch, apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
+import OperatorUnlockModal from '@/components/OperatorUnlockModal' // ADDED 2026-03-25
 import { formatTimeRemaining } from '@/lib/formatters'
 
 interface SystemStatusPanelProps {
@@ -93,6 +94,7 @@ export default function SystemStatusPanel({
   const errorTrend = getErrorTrend()
 
   const canUseKillSwitch = useOperatorStore((s) => s.isUnlocked)
+  const [showUnlockModal, setShowUnlockModal] = useState(false) // ADDED 2026-03-25
 
   const requestKillSwitch = async () => {
     setKillBusy(true)
@@ -133,6 +135,7 @@ export default function SystemStatusPanel({
 
   return (
     <DataPanel title="System Status" variant="status">
+      <OperatorUnlockModal isOpen={showUnlockModal} onClose={() => setShowUnlockModal(false)} />
       <div className="system-status-panel">
         {/* Main Readiness Indicator */}
         <div className="status-readiness">
@@ -260,10 +263,9 @@ export default function SystemStatusPanel({
             <button
               type="button"
               className="kill-switch-btn"
-              onClick={() => setConfirmKill(true)}
-              disabled={!canUseKillSwitch || killBusy}
-              aria-disabled={!canUseKillSwitch || killBusy}
-              title={!canUseKillSwitch ? 'Read-only (operator locked)' : undefined}
+              onClick={() => { if (!canUseKillSwitch) { setShowUnlockModal(true); return } setConfirmKill(true) }}
+              disabled={killBusy}
+              title={!canUseKillSwitch ? 'Click to unlock' : undefined}
             >
               🛑 Kill Switch
             </button>
@@ -289,11 +291,7 @@ export default function SystemStatusPanel({
             </div>
           )}
 
-          {!canUseKillSwitch && (
-            <div className="kill-switch-note">
-              Read-only mode. Unlock operator access in the Pearl AI panel to use the kill switch.
-            </div>
-          )}
+
 
           {killResult && (
             <div className={`kill-switch-result kill-switch-result-${killResult.type}`}>

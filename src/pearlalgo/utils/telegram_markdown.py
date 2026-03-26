@@ -2,9 +2,6 @@
 Telegram Markdown Utilities
 
 Pure utility functions for Telegram message formatting and markdown escaping.
-These are in utils/ to avoid architecture boundary violations.
-
-For callback data helpers, see: pearlalgo.utils.telegram_ui_contract
 """
 
 from __future__ import annotations

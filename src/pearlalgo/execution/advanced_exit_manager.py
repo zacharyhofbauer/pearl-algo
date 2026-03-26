@@ -1,17 +1,221 @@
 """
-Advanced Exit Manager - Implements 3 additional exit strategies:
+Advanced Exit Manager - Implements 4 exit strategies:
 1. Quick Exit (Stalled Trades) - Exit when no momentum develops
 2. Time-Based Exits - Take profit if holding profitable position too long
 3. Stop Optimization - Dynamic stop adjustment based on volatility
+4. Partial Profit Runner - Progressive stop management to let winners run
 """
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
+from enum import Enum
 import logging
 import pytz
 
 _ET = pytz.timezone("America/New_York")
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# PARTIAL PROFIT RUNNER (Upgrade 2)
+# ============================================================================
+
+class RunnerPhase(Enum):
+    """Phases of the partial profit runner strategy."""
+    INITIAL = "initial"       # Entry to 1.5x ATR: normal SL/TP bracket
+    BREAKEVEN = "breakeven"   # 1.5x ATR hit: cancel TP, move SL to BE+0.25
+    TIGHT_TRAIL = "tight_trail"  # 2.5x ATR hit: tighten trailing to 1.0x ATR, no TP
+
+
+class PartialRunnerState:
+    """Tracks the runner state for a single position."""
+
+    def __init__(
+        self,
+        entry_price: float,
+        direction: str,
+        atr: float,
+        breakeven_trigger_atr: float = 1.5,
+        tight_trail_trigger_atr: float = 2.5,
+        tight_trail_distance_atr: float = 1.0,
+        breakeven_offset: float = 0.25,
+    ):
+        self.entry_price = entry_price
+        self.direction = direction  # "long" or "short"
+        self.atr = atr
+        self.breakeven_trigger_atr = breakeven_trigger_atr
+        self.tight_trail_trigger_atr = tight_trail_trigger_atr
+        self.tight_trail_distance_atr = tight_trail_distance_atr
+        self.breakeven_offset = breakeven_offset
+        self.phase = RunnerPhase.INITIAL
+        self.best_price = entry_price
+        self.tp_cancelled = False
+
+    @property
+    def favorable_move(self) -> float:
+        """How far price has moved in favorable direction (in ATR multiples)."""
+        if self.direction == "long":
+            return (self.best_price - self.entry_price) / self.atr if self.atr > 0 else 0.0
+        else:
+            return (self.entry_price - self.best_price) / self.atr if self.atr > 0 else 0.0
+
+    def update(self, current_price: float) -> Tuple[Optional[str], Optional[float], bool]:
+        """Update runner state with current price.
+
+        Returns: (action, new_stop_price, should_cancel_tp)
+            action: None, "move_to_breakeven", or "tighten_trail"
+            new_stop_price: The new stop price if action is taken, else None
+            should_cancel_tp: True if the TP order should be cancelled
+        """
+        # Update best price
+        if self.direction == "long":
+            self.best_price = max(self.best_price, current_price)
+        else:
+            self.best_price = min(self.best_price, current_price)
+
+        fav_move = self.favorable_move
+
+        action = None
+        new_stop = None
+        cancel_tp = False
+
+        # Phase transitions
+        if self.phase == RunnerPhase.INITIAL and fav_move >= self.breakeven_trigger_atr:
+            # Phase 1 -> Phase 2: Move to breakeven + small offset
+            self.phase = RunnerPhase.BREAKEVEN
+            if self.direction == "long":
+                new_stop = self.entry_price + self.breakeven_offset
+            else:
+                new_stop = self.entry_price - self.breakeven_offset
+            cancel_tp = not self.tp_cancelled
+            self.tp_cancelled = True
+            action = "move_to_breakeven"
+            logger.info(
+                f"Runner Phase 2 (breakeven): {self.direction} entry={self.entry_price:.2f} "
+                f"best={self.best_price:.2f} fav={fav_move:.1f}x ATR → "
+                f"new_stop={new_stop:.2f}, cancel_tp={cancel_tp}"
+            )
+
+        if self.phase == RunnerPhase.BREAKEVEN and fav_move >= self.tight_trail_trigger_atr:
+            # Phase 2 -> Phase 3: Tight trailing stop
+            self.phase = RunnerPhase.TIGHT_TRAIL
+            trail_dist = self.atr * self.tight_trail_distance_atr
+            if self.direction == "long":
+                new_stop = self.best_price - trail_dist
+            else:
+                new_stop = self.best_price + trail_dist
+            action = "tighten_trail"
+            logger.info(
+                f"Runner Phase 3 (tight trail): {self.direction} "
+                f"best={self.best_price:.2f} fav={fav_move:.1f}x ATR → "
+                f"trail_stop={new_stop:.2f} (dist={trail_dist:.2f})"
+            )
+
+        elif self.phase == RunnerPhase.TIGHT_TRAIL:
+            # Continue tightening in Phase 3
+            trail_dist = self.atr * self.tight_trail_distance_atr
+            if self.direction == "long":
+                candidate = self.best_price - trail_dist
+                if new_stop is None or candidate > new_stop:
+                    new_stop = candidate
+                    action = "tighten_trail"
+            else:
+                candidate = self.best_price + trail_dist
+                if new_stop is None or candidate < new_stop:
+                    new_stop = candidate
+                    action = "tighten_trail"
+
+        return action, new_stop, cancel_tp
+
+
+class PartialRunnerManager:
+    """Manages partial profit runner states for all positions."""
+
+    def __init__(self, config: Dict):
+        # Support both 'partial_runner' (legacy) and 'runner_mode' (new) config keys
+        pr_cfg = config.get("runner_mode") or config.get("partial_runner", {})
+        self.enabled = bool(pr_cfg.get("enabled", False))
+        self.breakeven_trigger_atr = float(pr_cfg.get("breakeven_trigger_atr", 1.5))
+        # Support both key names: runner_trigger_atr (runner_mode) and tight_trail_trigger_atr (legacy)
+        self.tight_trail_trigger_atr = float(
+            pr_cfg.get("runner_trigger_atr", pr_cfg.get("tight_trail_trigger_atr", 2.5))
+        )
+        self.tight_trail_distance_atr = float(
+            pr_cfg.get("runner_trail_distance_atr", pr_cfg.get("tight_trail_distance_atr", 1.0))
+        )
+        self.remove_fixed_tp = bool(pr_cfg.get("remove_fixed_tp", True))
+        self.breakeven_offset = float(
+            pr_cfg.get("breakeven_offset_points", pr_cfg.get("breakeven_offset", 0.25))
+        )
+
+        # Active runner states: position_id -> PartialRunnerState
+        self._states: Dict[str, PartialRunnerState] = {}
+
+        if self.enabled:
+            logger.info(
+                f"PartialRunnerManager initialized: "
+                f"BE_trigger={self.breakeven_trigger_atr}x ATR, "
+                f"tight_trigger={self.tight_trail_trigger_atr}x ATR, "
+                f"tight_dist={self.tight_trail_distance_atr}x ATR, "
+                f"remove_tp={self.remove_fixed_tp}"
+            )
+
+    def register_position(
+        self,
+        position_id: str,
+        entry_price: float,
+        direction: str,
+        atr: float,
+    ) -> None:
+        """Register a new position for runner tracking."""
+        if not self.enabled:
+            return
+        self._states[position_id] = PartialRunnerState(
+            entry_price=entry_price,
+            direction=direction,
+            atr=atr,
+            breakeven_trigger_atr=self.breakeven_trigger_atr,
+            tight_trail_trigger_atr=self.tight_trail_trigger_atr,
+            tight_trail_distance_atr=self.tight_trail_distance_atr,
+            breakeven_offset=self.breakeven_offset,
+        )
+        logger.info(f"Runner registered: pos={position_id} entry={entry_price:.2f} dir={direction} atr={atr:.2f}")
+
+    def update_position(
+        self,
+        position_id: str,
+        current_price: float,
+    ) -> Tuple[Optional[str], Optional[float], bool]:
+        """Update a tracked position.
+
+        Returns: (action, new_stop_price, should_cancel_tp)
+        """
+        if not self.enabled or position_id not in self._states:
+            return None, None, False
+        return self._states[position_id].update(current_price)
+
+    def remove_position(self, position_id: str) -> None:
+        """Remove a closed position from tracking."""
+        self._states.pop(position_id, None)
+
+    def get_phase(self, position_id: str) -> Optional[str]:
+        """Get the current phase for a position."""
+        state = self._states.get(position_id)
+        return state.phase.value if state else None
+
+    def get_all_states(self) -> Dict[str, Dict]:
+        """Get summary of all tracked runner states."""
+        result = {}
+        for pid, state in self._states.items():
+            result[pid] = {
+                "phase": state.phase.value,
+                "entry_price": state.entry_price,
+                "direction": state.direction,
+                "best_price": state.best_price,
+                "favorable_move_atr": state.favorable_move,
+                "tp_cancelled": state.tp_cancelled,
+            }
+        return result
 
 
 class AdvancedExitManager:
@@ -35,9 +239,13 @@ class AdvancedExitManager:
         # Strategy 3: Stop Optimization
         self.stop_opt_enabled = config.get('stop_optimization', {}).get('enabled', False)
         self.stop_opt_mae_percentile = config.get('stop_optimization', {}).get('mae_percentile', 75)
-        
+
+        # Strategy 4: Partial Profit Runner
+        self.runner = PartialRunnerManager(config)
+
         logger.info(f"AdvancedExitManager initialized: quick_exit={self.quick_exit_enabled}, "
-                   f"time_based={self.time_exit_enabled}, stop_opt={self.stop_opt_enabled}")
+                   f"time_based={self.time_exit_enabled}, stop_opt={self.stop_opt_enabled}, "
+                   f"partial_runner={self.runner.enabled}")
     
     def check_quick_exit(self, position: Dict, current_price: float, entry_time: datetime) -> Tuple[bool, str]:
         """
@@ -167,5 +375,23 @@ class AdvancedExitManager:
         should_exit, reason = self.check_time_based_exit(position, current_price, entry_time)
         if should_exit:
             return True, reason
-        
+
         return False, ""
+
+    def check_runner_promotion(
+        self,
+        position_id: str,
+        current_price: float,
+    ) -> Tuple[Optional[str], Optional[float], bool]:
+        """Check if a tracked position should be promoted through runner phases.
+
+        Delegates to the PartialRunnerManager. Call this each monitoring cycle
+        for open positions.
+
+        Returns:
+            (action, new_stop_price, should_cancel_tp)
+            action: None, "move_to_breakeven", or "tighten_trail"
+            new_stop_price: new stop price if action taken
+            should_cancel_tp: True if TP order should be cancelled
+        """
+        return self.runner.update_position(position_id, current_price)

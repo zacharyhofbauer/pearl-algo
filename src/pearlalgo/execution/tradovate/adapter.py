@@ -196,6 +196,17 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 logger.info(f"Orphaned stop check: {len(positions)} position(s), {len(protective)} protective order(s) found (OCO/bracket included) — OK")
                 return
 
+            # FIXED 2026-03-26: bracket detection - also check live Tradovate stop orders before placing emergency stop
+            pos_direction = "long" if float(positions[0].get("net_pos", 0)) > 0 else "short"
+            has_live_stop = await self._has_existing_stop_for_position(pos_direction)
+            if has_live_stop:
+                logger.info(f"✅ Stop order already exists in Tradovate — skipping emergency stop placement")
+                # Clean up any duplicate stops that may have accumulated
+                cancelled = await self._cancel_duplicate_stops()
+                if cancelled:
+                    logger.info(f"Cleaned up {cancelled} duplicate stop(s) on reconnect")
+                return
+
             # Orphaned position detected — place a hard stop
             for pos in positions:
                 net_pos = float(pos.get("net_pos", 0) or 0)
@@ -544,14 +555,61 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     error_message=f"Stop loss {stop_loss} invalid for SHORT entry {entry_price}",
                 )
 
+        # ADDED 2026-03-26: Guard: take profit must be on the correct side of entry price
+        # Without this, a TP on the wrong side causes the TP limit to fill immediately
+        # after a market entry, which cancels the SL via OCO → naked position.
+        if take_profit > 0 and entry_price > 0:
+            if direction == "long" and take_profit <= entry_price:
+                logger.warning(
+                    f"🚨 Invalid take_profit for LONG: tp={take_profit} <= "
+                    f"entry_price={entry_price} for signal {signal_id}; skipping order"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"Take profit {take_profit} invalid for LONG entry {entry_price}",
+                )
+            elif direction == "short" and take_profit >= entry_price:
+                logger.warning(
+                    f"🚨 Invalid take_profit for SHORT: tp={take_profit} >= "
+                    f"entry_price={entry_price} for signal {signal_id}; skipping order"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"Take profit {take_profit} invalid for SHORT entry {entry_price}",
+                )
+
+        # ADDED 2026-03-26: Guard: minimum distance between entry and TP/SL
+        # Prevents bracket legs that are too close to entry (could fill on slippage).
+        # For Market orders, the actual fill price may differ from signal entry_price.
+        min_bracket_distance = 5.0  # 5 points minimum for MNQ
+        if take_profit > 0 and entry_price > 0:
+            tp_distance = abs(take_profit - entry_price)
+            if tp_distance < min_bracket_distance:
+                logger.warning(
+                    f"🚨 TP too close to entry: tp={take_profit} entry={entry_price} "
+                    f"distance={tp_distance:.2f} < min={min_bracket_distance} for signal {signal_id}; "
+                    f"skipping order to prevent instant TP fill"
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.REJECTED,
+                    signal_id=signal_id,
+                    error_message=f"TP distance {tp_distance:.1f} pts < minimum {min_bracket_distance}",
+                )
+
         # Map direction to Tradovate action
         action = "Buy" if direction == "long" else "Sell"
 
         # ── Structured order logging ─────────────────────────────────
         logger.info(
-            f"Tradovate place_oso request: signal={signal_id} "
+            f"📋 Tradovate place_oso request: signal={signal_id} "
             f"action={action} symbol={self._contract_symbol} qty={position_size} "
-            f"tp={take_profit} sl={stop_loss} entry={entry_price}"
+            f"tp={take_profit} sl={stop_loss} entry={entry_price} "
+            f"tp_distance={abs(take_profit - entry_price):.2f} sl_distance={abs(stop_loss - entry_price):.2f}"
         )
 
         pending_incremented = False
@@ -608,16 +666,51 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     "placed_at": datetime.now(timezone.utc).isoformat(),
                 }
 
+                # FIXED 2026-03-26: bracket detection - parse place_oso response correctly for both dict and list formats
+                sl_order_id = None
+                tp_order_id = None
+                if isinstance(result, list):
+                    # List format: [entry, tp, sl] or similar
+                    if len(result) > 1 and isinstance(result[1], dict):
+                        tp_order_id = str(result[1].get("orderId") or result[1].get("id") or "")
+                    if len(result) > 2 and isinstance(result[2], dict):
+                        sl_order_id = str(result[2].get("orderId") or result[2].get("id") or "")
+                elif isinstance(result, dict):
+                    # Dict format: {"orderId": X, "bracket1": {"orderId": Y}, "bracket2": {"orderId": Z}}
+                    # bracket1 = TP (limit), bracket2 = SL (stop) per place_oso request body construction
+                    b1 = result.get("bracket1") or {}
+                    b2 = result.get("bracket2") or {}
+                    if isinstance(b1, dict):
+                        tp_order_id = str(b1.get("orderId") or b1.get("id") or "")
+                    if isinstance(b2, dict):
+                        sl_order_id = str(b2.get("orderId") or b2.get("id") or "")
+
+                raw_keys = list(result.keys()) if isinstance(result, dict) else f"list[{len(result)}]"
                 logger.info(
-                    f"Tradovate bracket placed: order_id={order_id}, "
-                    f"signal={signal_id}, {action} {position_size}x {self._contract_symbol}"
+                    f"place_oso parsed: entry={order_id} sl={sl_order_id} tp={tp_order_id} raw_keys={raw_keys}"
                 )
+                logger.info(
+                    f"✅ Tradovate bracket placed: signal={signal_id} "
+                    f"{action} {position_size}x {self._contract_symbol} | "
+                    f"entry_order={order_id} tp_order={tp_order_id} sl_order={sl_order_id} | "
+                    f"tp={take_profit} sl={stop_loss} entry={entry_price}"
+                )
+
+                if not sl_order_id:
+                    logger.warning(
+                        f"⚠️ Bracket SL leg not in place_oso response: "
+                        f"signal={signal_id} raw_keys={raw_keys} - "
+                        f"Tradovate may still have created the stop via OCO; checking live orders"
+                    )
 
                 return ExecutionResult(
                     success=True,
                     status=OrderStatus.PLACED,
                     signal_id=signal_id,
                     order_id=str(order_id),
+                    parent_order_id=str(order_id),
+                    stop_order_id=sl_order_id or None,
+                    take_profit_order_id=tp_order_id or None,
                 )
             else:
                 error_text = result.get("errorText", "No order ID returned")
@@ -659,6 +752,72 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     self._pending_orders_count = max(0, self._pending_orders_count - 1)
 
     # ─latten ──────────────────────────────────────────────
+
+
+    # FIXED 2026-03-26: bracket detection - helpers to detect and cancel duplicate stops
+    async def _has_existing_stop_for_position(self, position_direction: str) -> bool:
+        """Check if Tradovate already has a working stop order for the current position."""
+        try:
+            orders = await self._client.get_orders()
+            if not orders:
+                return False
+            stop_action = "Sell" if position_direction == "long" else "Buy"
+            working_states = {"working", "open", "accepted", "pending", "held", "submitted"}
+            for order in orders:
+                order_type = (order.get("orderType") or "").lower()
+                action = order.get("action", "")
+                status = (order.get("ordStatus") or order.get("status") or "").lower()
+                if order_type == "stop" and action == stop_action and status in working_states:
+                    logger.info(f"Existing stop found: orderId={order.get('id')} price={order.get('stopPrice')}")
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Could not check existing stops: {e}")
+            return False  # assume no stop, be safe
+
+    async def _cancel_duplicate_stops(self, keep_best: bool = True) -> int:
+        """Cancel all but the best-priced stop order for current position."""
+        try:
+            orders = await self._client.get_orders()
+            if not orders:
+                return 0
+
+            positions = await self._client.get_positions()
+            if not positions:
+                return 0
+
+            pos = positions[0]
+            is_long = pos.get("netPos", 0) > 0
+            stop_action = "Sell" if is_long else "Buy"
+            working_states = {"working", "open", "accepted", "pending", "held", "submitted"}
+
+            stops = [o for o in orders
+                     if (o.get("orderType") or "").lower() == "stop"
+                     and o.get("action") == stop_action
+                     and (o.get("ordStatus") or o.get("status") or "").lower() in working_states]
+
+            if len(stops) <= 1:
+                return 0  # nothing to cancel
+
+            # Keep best stop: highest price for long (tightest), lowest for short
+            stops.sort(key=lambda o: o.get("stopPrice", 0), reverse=is_long)
+            keep = stops[0]
+            to_cancel = stops[1:]
+
+            cancelled = 0
+            for order in to_cancel:
+                try:
+                    await self._client.cancel_order(order["id"])
+                    logger.info(f"Cancelled duplicate stop: orderId={order['id']} price={order.get('stopPrice')}")
+                    cancelled += 1
+                except Exception as e:
+                    logger.warning(f"Failed to cancel duplicate stop {order['id']}: {e}")
+
+            logger.info(f"Kept stop: orderId={keep['id']} price={keep.get('stopPrice')} | cancelled {cancelled} duplicates")
+            return cancelled
+        except Exception as e:
+            logger.warning(f"_cancel_duplicate_stops error: {e}")
+            return 0
 
     async def cancel_order(self, order_id: str) -> ExecutionResult:
         """Cancel a specific order on Tradovate."""
@@ -702,6 +861,44 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             return True
         except Exception as e:
             logger.warning(f"Failed to modify stop order {order_id}: {e}")
+            return False
+
+    async def place_stop_order(
+        self,
+        symbol: str,
+        action: str,
+        quantity: int,
+        stop_price: float,
+    ) -> bool:
+        """Place a standalone protective stop order for an open position.
+
+        Used by the trailing stop recovery logic when the original stop order
+        goes missing (cancelled/rejected by broker).
+        """
+        if not self._connected:
+            logger.warning("Cannot place stop order: not connected")
+            return False
+        contract = self._contract_symbol
+        if not contract:
+            try:
+                contract = await self._client.resolve_front_month(symbol)
+            except Exception:
+                logger.error(f"Cannot resolve contract for {symbol}")
+                return False
+        try:
+            result = await self._client.place_order(
+                symbol=contract,
+                action=action,
+                order_qty=quantity,
+                order_type="Stop",
+                stop_price=stop_price,
+                time_in_force="GTC",
+            )
+            order_id = result.get("orderId") or result.get("id")
+            logger.info(f"✅ Placed protective stop order {order_id}: {action} {quantity}x @ stop {stop_price:.2f}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to place protective stop order: {e}")
             return False
 
     async def cancel_all(self) -> List[ExecutionResult]:

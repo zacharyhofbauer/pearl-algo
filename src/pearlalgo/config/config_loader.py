@@ -60,7 +60,7 @@ def build_strategy_config_from_yaml(base, config_data):
     result = dict(base)
     for section in ("strategy", "signals", "risk", "data", "service", "execution",
                     "session", "challenge", "performance", "virtual_pnl", "auto_flat",
-                    "learning", "ml_filter", "swing_trading", "trading_circuit_breaker",
+                    "swing_trading", "trading_circuit_breaker",
                     "circuit_breaker", "hud", "indicators", "telegram", "telegram_ui",
                     "storage", "audit", "accounts"):
         if section in config_data:
@@ -102,9 +102,6 @@ def _apply_execution_env_overrides(execution_config):
             except (ValueError, TypeError):
                 pass
 
-def _apply_learning_env_overrides(learning_config):
-    """No-op stub: learning env overrides removed."""
-    pass
 
 # Optional per-call override (used for experiments/backtests; never persisted).
 # ContextVar keeps this safe across async tasks. It does NOT affect other processes.
@@ -243,8 +240,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "regime_avoidance_min_confidence": defaults.TCB_REGIME_AVOIDANCE_MIN_CONFIDENCE,
         # Phase 3: Trigger filters
         "enable_trigger_filters": defaults.TCB_ENABLE_TRIGGER_FILTERS,
-        # Phase 4: ML chop shield
-        "enable_ml_chop_shield": defaults.TCB_ENABLE_ML_CHOP_SHIELD,
     },
     "data": {
         "buffer_size": defaults.DATA_BUFFER_SIZE,
@@ -267,22 +262,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "sqlite_enabled": defaults.STORAGE_SQLITE_ENABLED,
         "db_path": defaults.STORAGE_DB_PATH,
         "dual_write_files": defaults.STORAGE_DUAL_WRITE_FILES,
-    },
-    "ml_filter": {
-        "enabled": defaults.ML_FILTER_ENABLED,
-        "model_path": defaults.ML_FILTER_MODEL_PATH,
-        "model_version": defaults.ML_FILTER_MODEL_VERSION,
-        "min_probability": defaults.ML_FILTER_MIN_PROBABILITY,
-        "high_probability": defaults.ML_FILTER_HIGH_PROBABILITY,
-        "adjust_sizing": defaults.ML_FILTER_ADJUST_SIZING,
-        "size_multiplier_min": defaults.ML_FILTER_SIZE_MULTIPLIER_MIN,
-        "size_multiplier_max": defaults.ML_FILTER_SIZE_MULTIPLIER_MAX,
-        "min_training_samples": defaults.ML_FILTER_MIN_TRAINING_SAMPLES,
-        "retrain_interval_days": defaults.ML_FILTER_RETRAIN_INTERVAL_DAYS,
-        "n_estimators": defaults.ML_FILTER_N_ESTIMATORS,
-        "max_depth": defaults.ML_FILTER_MAX_DEPTH,
-        "learning_rate": defaults.ML_FILTER_LEARNING_RATE,
-        "calibrate_probabilities": defaults.ML_FILTER_CALIBRATE_PROBABILITIES,
     },
     "risk": {
         "max_risk_per_trade": defaults.MAX_RISK_PER_TRADE,
@@ -341,18 +320,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "ibkr_trading_client_id": defaults.IBKR_TRADING_CLIENT_ID,
         "ibkr_host": defaults.IBKR_HOST,
         "ibkr_port": defaults.IBKR_PORT,
-    },
-    "learning": {
-        "enabled": defaults.LEARNING_ENABLED,
-        "mode": defaults.LEARNING_MODE,
-        "min_samples_per_type": defaults.MIN_SAMPLES_PER_TYPE,
-        "explore_rate": defaults.EXPLORE_RATE,
-        "decision_threshold": defaults.DECISION_THRESHOLD,
-        "max_size_multiplier": defaults.MAX_SIZE_MULTIPLIER,
-        "min_size_multiplier": defaults.MIN_SIZE_MULTIPLIER,
-        "prior_alpha": defaults.PRIOR_ALPHA,
-        "prior_beta": defaults.PRIOR_BETA,
-        "decay_factor": defaults.DECAY_FACTOR,
     },
 }
 
@@ -429,11 +396,6 @@ def load_service_config(
         _apply_execution_env_overrides(result.get("execution", {}))
     except Exception as e:
         logger.warning(f"Could not apply execution env overrides: {e}")
-
-    try:
-        _apply_learning_env_overrides(result.get("learning", {}))
-    except Exception as e:
-        logger.warning(f"Could not apply learning env overrides: {e}")
 
     # Flatten virtual_pnl fields for legacy attribute access
     vp_cfg = result.get("virtual_pnl", {}) or {}

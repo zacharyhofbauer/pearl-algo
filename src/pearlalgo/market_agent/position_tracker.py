@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.trading_circuit_breaker import TradingCircuitBreaker
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
-    from pearlalgo.learning.bandit_policy import BanditPolicy
-    from pearlalgo.learning.contextual_bandit import ContextualBanditPolicy, ContextFeatures
 
 
 class VirtualPositionTracker:
@@ -49,8 +47,6 @@ class VirtualPositionTracker:
         config: Any,
         *,
         trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
-        bandit_policy: Optional["BanditPolicy"] = None,
-        contextual_policy: Optional["ContextualBanditPolicy"] = None,
         execution_adapter: Optional[Any] = None,
     ):
         """
@@ -63,8 +59,6 @@ class VirtualPositionTracker:
             telegram_notifier: Telegram notifier instance
             config: Service configuration
             trading_circuit_breaker: Optional circuit breaker for risk management
-            bandit_policy: Optional bandit policy for learning
-            contextual_policy: Optional contextual bandit for context-aware learning
             execution_adapter: Optional execution adapter for order management
         """
         self.state_manager = state_manager
@@ -75,8 +69,6 @@ class VirtualPositionTracker:
 
         # Optional components
         self.trading_circuit_breaker = trading_circuit_breaker
-        self.bandit_policy = bandit_policy
-        self.contextual_policy = contextual_policy
         self.execution_adapter = execution_adapter
 
         # Streak tracking
@@ -102,14 +94,6 @@ class VirtualPositionTracker:
         self._auto_flat_daily_time: tuple[int, int] = (15, 55)
         self._auto_flat_friday_time: tuple[int, int] = (15, 55)
         self._auto_flat_last_dates: Dict[str, Any] = {}
-
-        # For contextual learning
-        self._context_features_class: Optional[type] = None
-        try:
-            from pearlalgo.learning.contextual_bandit import ContextFeatures
-            self._context_features_class = ContextFeatures
-        except ImportError:
-            pass
 
     def configure_auto_flat(
         self,
@@ -443,36 +427,6 @@ class VirtualPositionTracker:
                 })
             except Exception as cb_err:
                 logger.debug(f"Could not record circuit breaker trade: {cb_err}")
-
-        # Bandit policy
-        if self.bandit_policy is not None:
-            try:
-                signal_type = str(sig.get("type") or "unknown")
-                self.bandit_policy.record_outcome(
-                    signal_id=sig_id,
-                    signal_type=signal_type,
-                    is_win=is_win,
-                    pnl=pnl_value,
-                )
-            except Exception as policy_err:
-                logger.debug(f"Could not record policy outcome: {policy_err}")
-
-        # Contextual policy
-        if self.contextual_policy is not None and self._context_features_class is not None:
-            try:
-                signal_type = str(sig.get("type") or "unknown")
-                raw_ctx = sig.get("_context_features")
-                if isinstance(raw_ctx, dict):
-                    ctx = self._context_features_class.from_dict(raw_ctx)
-                    self.contextual_policy.record_outcome(
-                        signal_id=sig_id,
-                        signal_type=signal_type,
-                        context=ctx,
-                        is_win=is_win,
-                        pnl=pnl_value,
-                    )
-            except Exception as ctx_err:
-                logger.debug(f"Could not record contextual policy outcome: {ctx_err}")
 
         # Execution adapter daily PnL
         if self.execution_adapter is not None:

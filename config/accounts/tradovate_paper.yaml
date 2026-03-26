@@ -106,6 +106,8 @@ trailing_stop:
   - name: tight_trail
     activation_atr: 3.0
     trail_atr: 1.0
+runner_mode:
+  enabled: true
 ml_filter:
   mode: shadow
 virtual_pnl:
@@ -124,6 +126,13 @@ advanced_exits:
   stop_optimization:
     enabled: true
     mae_percentile: 75
+  partial_runner:
+    enabled: true
+    breakeven_trigger_atr: 1.5
+    tight_trail_trigger_atr: 2.5
+    tight_trail_distance_atr: 1.0
+    breakeven_offset: 0.25
+    remove_fixed_tp: true
 pearl_bot_auto:
   min_confidence: 0.40
   min_confidence_long: 0.40
@@ -149,6 +158,15 @@ pearl_bot_auto:
   sd_threshold_pct: 10.0
   sd_resolution: 50
   vwap_std_dev: 1.0
+  # Time-of-day confidence scaling — penalizes signals during low-volume hours
+  tod_scaling:
+    enabled: true
+    overnight: 0.60       # 00:00-03:59 ET  (overnight chop)
+    premarket_early: 0.75 # 04:00-05:59 ET  (thin premarket)
+    premarket_late: 0.85  # 06:00-09:29 ET  (premarket ramp)
+    rth: 1.00             # 09:30-15:59 ET  (regular trading hours)
+    post_close: 0.85      # 16:00-17:59 ET  (post-close)
+    evening: 0.70         # 18:00-23:59 ET  (evening session)
   # New strategies (disabled by default — enable explicitly to test)
   allow_orb_entries: false
   allow_vwap_2sd_entries: false
@@ -156,6 +174,12 @@ pearl_bot_auto:
   adx_trending_threshold: 25.0
   adx_ranging_threshold: 20.0
 
+composite_regime:
+  enabled: true
+  chop_zone_low: 4.0
+  chop_zone_high: 6.0
+  chop_zone_min_confidence: 0.75
+  volatile_stop_multiplier: 1.2
 # Strategy params at top level (required by pearl_bot_auto.py indicator functions)
 volume_ma_length: 20
 sr_length: 130

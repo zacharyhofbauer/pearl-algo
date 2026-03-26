@@ -557,6 +557,184 @@
 .activity-pnl.negative { color: var(--color-loss); }
 
 /* ============================================================================
+ * Signals Panel
+ * ============================================================================ */
+
+.signals-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.signals-regime-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.signals-regime-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.signals-regime-label {
+  color: var(--text-secondary);
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.signals-regime-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.signals-regime-conf {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.signals-or-range {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.signals-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.signals-list::-webkit-scrollbar { width: 6px; }
+.signals-list::-webkit-scrollbar-track { background: transparent; }
+.signals-list::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+
+.signals-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(var(--border-color-rgb), 0.4);
+  flex-wrap: wrap;
+}
+
+.signals-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.signals-time {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  width: 38px;
+}
+
+.signals-dir {
+  font-size: 9px;
+  font-weight: 700;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.signals-dir.long {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.signals-dir.short {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.15);
+}
+
+.signals-type {
+  font-size: 10px;
+  color: var(--text-secondary);
+  max-width: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signals-conf {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.signals-status-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.signals-status-badge.taken {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.15);
+}
+
+.signals-status-badge.blocked {
+  color: var(--accent-red);
+  background: rgba(var(--accent-red-rgb), 0.15);
+}
+
+.signals-status-badge.virtual {
+  color: var(--text-secondary);
+  background: rgba(120, 123, 134, 0.15);
+}
+
+.signals-block-reason {
+  font-size: 9px;
+  color: #ffb74d;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-basis: 100%;
+  padding-left: 44px;
+}
+
+.signals-pnl {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.signals-pnl.positive { color: var(--color-profit); }
+.signals-pnl.negative { color: var(--color-loss); }
+
+.signals-panel-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 12px;
+}
+
+/* ============================================================================
  * Mobile — hide right panel (sidebars already hidden)
  * ============================================================================ */
 

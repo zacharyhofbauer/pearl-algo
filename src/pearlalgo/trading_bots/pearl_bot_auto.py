@@ -1547,6 +1547,241 @@ _orb_state: Dict[str, Any] = {
 _orb_state_lock = threading.Lock()
 
 
+# ============================================================================
+# OPENING RANGE REFERENCE STATE (Upgrade 1)
+# ============================================================================
+# Tracks opening range (first 15 bars) for both RTH and Overnight sessions.
+# Keyed by session date+type so it persists within a session but resets on new.
+
+_opening_range_state: Dict[str, Dict[str, Any]] = {}
+_opening_range_lock = threading.Lock()
+
+
+def _get_session_key(current_time: datetime) -> Tuple[str, str]:
+    """Determine session key (date+type) for opening range tracking.
+
+    Returns (session_key, session_type) where session_type is 'rth' or 'overnight'.
+    """
+    et = ZoneInfo("America/New_York")
+    ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+    hour = ct_et.hour
+    minute = ct_et.minute
+    date_str = ct_et.strftime("%Y-%m-%d")
+
+    # RTH: 09:30-16:00 ET
+    if (hour > 9 or (hour == 9 and minute >= 30)) and hour < 16:
+        return f"{date_str}_rth", "rth"
+    # Overnight: 18:00-09:29 ET (spans midnight)
+    if hour >= 18:
+        return f"{date_str}_overnight", "overnight"
+    # Before 09:30 — still overnight from previous day
+    prev_date = (ct_et - pd.Timedelta(hours=12)).strftime("%Y-%m-%d")
+    return f"{prev_date}_overnight", "overnight"
+
+
+def _get_session_open_time(current_time: datetime, session_type: str) -> datetime:
+    """Get the open time of the current session in ET."""
+    et = ZoneInfo("America/New_York")
+    ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+
+    if session_type == "rth":
+        return ct_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    else:  # overnight
+        if ct_et.hour >= 18:
+            return ct_et.replace(hour=18, minute=0, second=0, microsecond=0)
+        # Before midnight — overnight started previous calendar day
+        prev = ct_et - pd.Timedelta(days=1)
+        return prev.replace(hour=18, minute=0, second=0, microsecond=0).replace(tzinfo=et)
+
+
+def update_opening_range(
+    df: pd.DataFrame,
+    current_time: datetime,
+    or_bars: int = 15,
+) -> Dict[str, Any]:
+    """Track opening range for the current session.
+
+    Returns dict with keys: session_open_price, or_high, or_low, or_defined, bar_count.
+    """
+    global _opening_range_state
+
+    session_key, session_type = _get_session_key(current_time)
+    session_open = _get_session_open_time(current_time, session_type)
+
+    with _opening_range_lock:
+        if session_key not in _opening_range_state:
+            _opening_range_state[session_key] = {
+                "session_open_price": None,
+                "or_high": None,
+                "or_low": None,
+                "or_defined": False,
+                "bar_count": 0,
+            }
+            # Prune old sessions (keep last 4)
+            if len(_opening_range_state) > 4:
+                keys = sorted(_opening_range_state.keys())
+                for k in keys[:-4]:
+                    del _opening_range_state[k]
+
+        state = _opening_range_state[session_key]
+
+        if state["or_defined"]:
+            return dict(state)
+
+    # Filter bars within the session window
+    if "timestamp" in df.columns:
+        ts_col = pd.to_datetime(df["timestamp"], utc=True)
+        et = ZoneInfo("America/New_York")
+        # session_open already has tzinfo — don't re-specify tz
+        session_start_ts = pd.Timestamp(session_open)
+        or_end_ts = session_start_ts + pd.Timedelta(minutes=or_bars)
+        mask = (ts_col >= session_start_ts) & (ts_col <= or_end_ts)
+        range_bars = df.loc[mask]
+    else:
+        # Fallback: use last N bars
+        range_bars = df.tail(or_bars)
+
+    bar_count = len(range_bars)
+
+    with _opening_range_lock:
+        state = _opening_range_state[session_key]
+
+        if not range_bars.empty:
+            if state["session_open_price"] is None:
+                state["session_open_price"] = float(range_bars["open"].iloc[0])
+            state["or_high"] = float(range_bars["high"].max())
+            state["or_low"] = float(range_bars["low"].min())
+            state["bar_count"] = bar_count
+
+        # Check if OR is complete: past the OR window
+        et = ZoneInfo("America/New_York")
+        ct_et = current_time.astimezone(et) if current_time.tzinfo else current_time.replace(tzinfo=et)
+        or_end_time = session_open + pd.Timedelta(minutes=or_bars)
+        if ct_et > or_end_time and state["or_high"] is not None:
+            state["or_defined"] = True
+
+        return dict(state)
+
+
+def get_opening_range_adjustments(
+    close: float,
+    atr: float,
+    direction: str,
+    or_state: Dict[str, Any],
+) -> Tuple[float, List[str]]:
+    """Compute confidence adjustments based on opening range position.
+
+    Returns (confidence_adjustment, list_of_notes).
+    """
+    if not or_state.get("or_defined"):
+        return 0.0, []
+
+    or_high = or_state["or_high"]
+    or_low = or_state["or_low"]
+    session_open = or_state.get("session_open_price")
+
+    if or_high is None or or_low is None:
+        return 0.0, []
+
+    adj = 0.0
+    notes: List[str] = []
+
+    # Breakout/breakdown confirmation
+    if close > or_high and direction == "long":
+        adj += 0.10
+        notes.append("OR_BREAKOUT_CONFIRM")
+    elif close < or_low and direction == "short":
+        adj += 0.10
+        notes.append("OR_BREAKDOWN_CONFIRM")
+    elif or_low < close < or_high:
+        # Inside the opening range — chop
+        adj -= 0.05
+        notes.append("OR_INSIDE_CHOP")
+
+    # Near session open check
+    if session_open is not None and atr > 0:
+        if abs(close - session_open) < 0.25 * atr:
+            notes.append("near_session_open")
+
+    return adj, notes
+
+
+# ============================================================================
+# COMPOSITE REGIME SCORE (Upgrade 3)
+# ============================================================================
+
+def compute_composite_regime_score(df_5m: pd.DataFrame, lookback: int = 50) -> float:
+    """Compute composite regime score 1-10.
+
+    1-3 = Strong trend (trade freely)
+    4-6 = Chop zone (block most signals)
+    7-10 = Volatile trend (trade with wider stops)
+
+    Components (each 0-2.5):
+    1. ATR Percentile — U-shaped: extremes good, middle is chop
+    2. EMA Slope — steeper = higher score
+    3. Bollinger Band Width — narrow = chop, wide = trending/volatile
+    4. Volume Ratio — higher volume = more conviction
+    """
+    if df_5m is None or df_5m.empty or len(df_5m) < max(lookback, 20):
+        return 5.0  # Default to middle (chop zone) when insufficient data
+
+    try:
+        recent = df_5m.tail(lookback)
+
+        # Component 1: ATR Percentile (0-2.5)
+        high_low = recent["high"] - recent["low"]
+        tr = pd.concat([
+            high_low,
+            (recent["high"] - recent["close"].shift(1)).abs(),
+            (recent["low"] - recent["close"].shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        atr_14 = tr.rolling(14).mean()
+        atr_values = atr_14.dropna()
+        if len(atr_values) < 5:
+            return 5.0
+        current_atr = atr_values.iloc[-1]
+        from scipy.stats import percentileofscore
+        atr_pctile = percentileofscore(atr_values.values, current_atr) / 100.0
+        # U-shaped: extremes are good (trending or volatile), middle is chop
+        atr_score = abs(atr_pctile - 0.5) * 5.0  # 0-2.5
+
+        # Component 2: EMA Slope (0-2.5)
+        ema_13 = recent["close"].ewm(span=13, adjust=False).mean()
+        if len(ema_13) >= 5 and ema_13.iloc[-5] != 0:
+            slope = (ema_13.iloc[-1] - ema_13.iloc[-5]) / ema_13.iloc[-5] * 100
+        else:
+            slope = 0.0
+        slope_score = min(2.5, abs(slope) * 10)
+
+        # Component 3: Bollinger Band Width (0-2.5)
+        bb_sma = recent["close"].rolling(20).mean()
+        bb_std = recent["close"].rolling(20).std()
+        if bb_sma.iloc[-1] and bb_sma.iloc[-1] != 0 and not pd.isna(bb_std.iloc[-1]):
+            bb_width = (bb_std.iloc[-1] * 2) / bb_sma.iloc[-1] * 100
+        else:
+            bb_width = 0.0
+        bb_score = min(2.5, bb_width * 5)
+
+        # Component 4: Volume Ratio (0-2.5)
+        if "volume" in recent.columns and recent["volume"].sum() > 0:
+            vol_avg = recent["volume"].rolling(20).mean()
+            if vol_avg.iloc[-1] and vol_avg.iloc[-1] > 0:
+                vol_ratio = recent["volume"].iloc[-1] / vol_avg.iloc[-1]
+            else:
+                vol_ratio = 1.0
+        else:
+            vol_ratio = 1.0
+        vol_score = min(2.5, max(0.0, (vol_ratio - 0.5) * 2.5))
+
+        total = atr_score + slope_score + bb_score + vol_score
+        return max(1.0, min(10.0, total))
+
+    except Exception as e:
+        logger.warning(f"compute_composite_regime_score failed: {e}")
+        return 5.0
+
+
 def _update_orb_range(
     df: pd.DataFrame,
     current_time: datetime,
@@ -1906,10 +2141,78 @@ def _apply_filters(
     return filtered
 
 
+# ============================================================================
+# TIME-OF-DAY CONFIDENCE SCALING
+# ============================================================================
+
+_ET = ZoneInfo("America/New_York")
+
+# Default multipliers keyed by session name
+_TOD_DEFAULTS = {
+    "overnight": 0.60,       # 00:00-03:59 ET
+    "premarket_early": 0.75, # 04:00-05:59 ET
+    "premarket_late": 0.85,  # 06:00-09:29 ET
+    "rth": 1.00,             # 09:30-15:59 ET
+    "post_close": 0.85,      # 16:00-17:59 ET
+    "evening": 0.70,         # 18:00-23:59 ET
+}
+
+
+def _get_time_of_day_multiplier(
+    current_time: Optional[datetime], config: Dict
+) -> float:
+    """Return a confidence multiplier based on the current ET hour.
+
+    Controlled by ``pearl_bot_auto.tod_scaling`` in config.  When disabled
+    (the default in base.yaml) returns 1.0 so behaviour is unchanged.
+    """
+    pba = config.get("pearl_bot_auto", {})
+    if isinstance(pba, ConfigView):
+        tod_cfg = pba.get("tod_scaling", {})
+    else:
+        tod_cfg = pba.get("tod_scaling", {}) if isinstance(pba, dict) else {}
+
+    # Also check top-level for flat config layout
+    if not tod_cfg:
+        tod_cfg = config.get("tod_scaling", {})
+
+    if not tod_cfg or not tod_cfg.get("enabled", False):
+        return 1.0
+
+    if current_time is None:
+        return 1.0
+
+    # Convert to ET
+    if current_time.tzinfo is None:
+        et_time = current_time.replace(tzinfo=_ET)
+    else:
+        et_time = current_time.astimezone(_ET)
+
+    hour = et_time.hour
+    minute = et_time.minute
+
+    # Determine session bucket
+    if 0 <= hour < 4:
+        key = "overnight"
+    elif 4 <= hour < 6:
+        key = "premarket_early"
+    elif 6 <= hour < 9 or (hour == 9 and minute < 30):
+        key = "premarket_late"
+    elif (hour == 9 and minute >= 30) or (10 <= hour < 16):
+        key = "rth"
+    elif 16 <= hour < 18:
+        key = "post_close"
+    else:  # 18-23
+        key = "evening"
+
+    return float(tod_cfg.get(key, _TOD_DEFAULTS.get(key, 1.0)))
+
+
 def generate_signals(
     df: pd.DataFrame,
     config: Optional[Dict] = None,
-    current_time: Optional[datetime] = None
+    current_time: Optional[datetime] = None,
+    df_5m: Optional[pd.DataFrame] = None,
 ) -> List[Dict]:
     """
     Main signal generation function - combines all Pine Script strategies.
@@ -1956,12 +2259,37 @@ def generate_signals(
     # Time filter
     if not check_trading_session(current_time, config):
         return signals
-    
-    # Stage 1: Calculate all indicators
+
+    # =====================================================================
+    # OPENING RANGE REFERENCE (Upgrade 1)
+    # Track OR for current session. During first 15 bars, suppress signals.
+    # =====================================================================
+    or_state = update_opening_range(df, current_time, or_bars=15)
+    or_forming = not or_state.get("or_defined", False) and or_state.get("bar_count", 0) > 0
+    if or_forming and or_state.get("bar_count", 0) <= 15:
+        logger.debug(
+            f"Opening range forming (bar {or_state.get('bar_count', 0)}/15) — suppressing signals"
+        )
+        return signals
+
+    # Stage 1: Calculate all indicators (on 1m bars for signal generation)
     ind = _calculate_indicators(df, params, config)
     if ind is None:
         return signals  # ATR invalid or zero
-    
+
+    # Stage 1b: Override regime with 5m-based detection when available.
+    # 5m regime is more stable and catches trend changes faster than
+    # 50-bar lookback on 1m (which is only ~50 min of noisy data).
+    if df_5m is not None and not df_5m.empty and len(df_5m) >= 30:
+        regime_5m = detect_market_regime(df_5m, lookback=min(50, len(df_5m)))
+        old_regime = ind.regime
+        ind.regime = regime_5m
+        if regime_5m.regime != old_regime.regime:
+            logger.info(
+                f"MTF regime override: 1m={old_regime.regime}({old_regime.confidence:.2f}) "
+                f"→ 5m={regime_5m.regime}({regime_5m.confidence:.2f})"
+            )
+
     # ------------------------------------------------------------------
     # Extract core indicators from ind (already computed by
     # _calculate_indicators) to avoid redundant ATR / EMA / VWAP work.
@@ -2182,9 +2510,28 @@ def generate_signals(
         dynamic_sl_mult = base_sl_mult
         dynamic_tp_mult = base_tp_mult
     
+    # =====================================================================
+    # COMPOSITE REGIME SCORE (Upgrade 3)
+    # =====================================================================
+    composite_regime_cfg = config.get("composite_regime", {})
+    composite_regime_enabled = bool(composite_regime_cfg.get("enabled", False))
+    regime_score = 5.0  # Default mid-range
+    chop_low = float(composite_regime_cfg.get("chop_zone_low", 4.0))
+    chop_high = float(composite_regime_cfg.get("chop_zone_high", 6.0))
+    chop_min_conf = float(composite_regime_cfg.get("chop_zone_min_confidence", 0.75))
+    if composite_regime_enabled and df_5m is not None:
+        regime_score = compute_composite_regime_score(df_5m, lookback=50)
+        logger.debug(f"Composite regime score: {regime_score:.1f}")
+
+        # Volatile trend: widen stops
+        volatile_stop_mult = float(composite_regime_cfg.get("volatile_stop_multiplier", 1.2))
+        if regime_score >= 7.0:
+            dynamic_sl_mult *= volatile_stop_mult
+            logger.debug(f"Volatile regime score {regime_score:.1f} — widened SL mult to {dynamic_sl_mult:.2f}")
+
     # Combine signals with confidence scoring
     signal_candidates = []
-    
+
     # Long signals - ALL 8 INDICATORS CONTRIBUTE + NEW TRIGGERS
     long_trigger = (
         bullish_cross
@@ -2311,8 +2658,20 @@ def generate_signals(
                     confidence -= 0.07
                     active_indicators.append("PWH_CAUTION")
         
+        # Opening Range Reference adjustments (Upgrade 1)
+        or_adj, or_notes = get_opening_range_adjustments(close, atr, "long", or_state)
+        if or_adj != 0:
+            confidence += or_adj
+            active_indicators.extend(or_notes)
+
+        # Composite Regime Score chop filter (Upgrade 3)
+        _chop_blocked_long = False
+        if composite_regime_enabled and chop_low <= regime_score <= chop_high and confidence < chop_min_conf:
+            logger.debug(f"LONG blocked by composite regime chop zone (score={regime_score:.1f}, conf={confidence:.2f})")
+            _chop_blocked_long = True
+
         _min_conf_long = config.get("min_confidence_long", config.get("min_confidence", 0.55))
-        if confidence >= _min_conf_long:
+        if confidence >= _min_conf_long and not _chop_blocked_long:
             entry_price = close
             # Use dynamic regime-adaptive parameters
             sl_mult = dynamic_sl_mult
@@ -2481,8 +2840,20 @@ def generate_signals(
                     confidence -= 0.07
                     active_indicators.append("PWL_CAUTION")
         
+        # Opening Range Reference adjustments (Upgrade 1)
+        or_adj, or_notes = get_opening_range_adjustments(close, atr, "short", or_state)
+        if or_adj != 0:
+            confidence += or_adj
+            active_indicators.extend(or_notes)
+
+        # Composite Regime Score chop filter (Upgrade 3)
+        _chop_blocked_short = False
+        if composite_regime_enabled and chop_low <= regime_score <= chop_high and confidence < chop_min_conf:
+            logger.debug(f"SHORT blocked by composite regime chop zone (score={regime_score:.1f}, conf={confidence:.2f})")
+            _chop_blocked_short = True
+
         _min_conf_short = config.get("min_confidence_short", 0.78)
-        if confidence >= _min_conf_short:
+        if confidence >= _min_conf_short and not _chop_blocked_short:
             entry_price = close
             # Use dynamic regime-adaptive parameters
             sl_mult = dynamic_sl_mult
@@ -2558,13 +2929,28 @@ def generate_signals(
         # Apply regime-based confidence adjustment
         original_confidence = signal.get("confidence", 0.5)
         adjusted_confidence = original_confidence * regime_multiplier
+
+        # Apply time-of-day confidence scaling
+        tod_multiplier = _get_time_of_day_multiplier(current_time, config)
+        adjusted_confidence = adjusted_confidence * tod_multiplier
+
         signal["confidence"] = float(min(adjusted_confidence, 0.99))
-        
+
+        if tod_multiplier < 1.0:
+            et_hour = current_time.astimezone(_ET).strftime("%H:%M") if current_time else "?"
+            logger.info(
+                f"TOD scaling: {et_hour} ET → {tod_multiplier}x confidence "
+                f"({original_confidence:.2f} → {signal['confidence']:.2f})"
+            )
+
         # Add regime information for transparency
         signal["market_regime"] = market_regime.to_dict()
+        signal["composite_regime_score"] = regime_score
+        signal["opening_range"] = or_state
         signal["regime_adjustment"] = {
             "original_confidence": original_confidence,
             "multiplier": regime_multiplier,
+            "tod_multiplier": tod_multiplier,
             "adjusted_confidence": signal["confidence"],
         }
     

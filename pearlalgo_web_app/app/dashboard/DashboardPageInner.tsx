@@ -10,6 +10,7 @@ import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import WatchlistPanel from '@/components/WatchlistPanel'
 import SystemLogsPanel from '@/components/SystemLogsPanel'
 import LiveLogsPanel from '@/components/LiveLogsPanel' // ADDED 2026-03-25: live log streaming
+import SignalsPanel from '@/components/SignalsPanel'
 import ActivityLogPanel from '@/components/ActivityLogPanel'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
@@ -725,6 +726,9 @@ export default function DashboardPageInner() {
                 <button className={`mobile-menu-item ${activeRightPanel === 'logs' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('logs') }}>
                   System Status
                 </button>
+                <button className={`mobile-menu-item ${activeRightPanel === 'signals' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('signals') }}>
+                  Signals
+                </button>
               </div>
               <div className="mobile-menu-divider" />
               <div className="mobile-menu-actions">
@@ -871,6 +875,9 @@ export default function DashboardPageInner() {
     }
     if (activeRightPanel === 'activity') {
       return <ActivityLogPanel recentSignals={recentSignals} />
+    }
+    if (activeRightPanel === 'signals') {
+      return <SignalsPanel />
     }
     return null
   }
