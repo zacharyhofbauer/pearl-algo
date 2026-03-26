@@ -145,6 +145,45 @@ class SignalHandler:
         self._ml_filter_mode = mode
         self._ml_shadow_threshold = shadow_threshold
 
+    def _is_signal_type_allowed(self, signal: Dict) -> bool:
+        """
+        Check if the signal type is in the enabled whitelist.
+
+        Reads signals.enabled_signal_types from config. If the list is
+        non-empty, only signals whose 'type' field matches an entry are
+        allowed. Unknown or missing types are rejected (secure-by-default).
+
+        Returns:
+            True if signal type is allowed, False otherwise.
+        """
+        try:
+            from pearlalgo.config.config_loader import load_config_yaml
+            cfg = load_config_yaml()
+            signals_cfg = cfg.get("signals", {}) or {}
+            whitelist = signals_cfg.get("enabled_signal_types", None)
+        except Exception as e:
+            logger.debug("_is_signal_type_allowed: config load failed, allowing: %s", e)
+            return True
+
+        if not whitelist:
+            return True  # No whitelist configured = allow all
+
+        signal_type = str(signal.get("type", "")).strip()
+        if not signal_type:
+            logger.warning(
+                "Signal rejected: missing 'type' field (whitelist active: %s)", whitelist
+            )
+            return False
+
+        if signal_type not in whitelist:
+            logger.warning(
+                "Signal rejected: type '%s' not in enabled_signal_types %s",
+                signal_type, whitelist,
+            )
+            return False
+
+        return True
+
     async def process_signal(
         self,
         signal: Dict,
@@ -160,6 +199,12 @@ class SignalHandler:
         from pearlalgo.market_agent.notification_queue import Priority
 
         try:
+            # ==========================================================================
+            # SIGNAL TYPE GATE: Reject signals not in the enabled whitelist
+            # ==========================================================================
+            if not self._is_signal_type_allowed(signal):
+                return  # Signal type not whitelisted
+
             # ==========================================================================
             # TRADING CIRCUIT BREAKER: Check if signal should be allowed
             # ==========================================================================
@@ -315,6 +360,53 @@ class SignalHandler:
     # Shared helpers (eliminate duplication between process_signal & follower_execute)
     # ------------------------------------------------------------------
 
+    def _get_scaled_contracts(self, signal: dict) -> int:
+        """
+        Confidence-based contract scaling. GATED: only active when
+        confidence_scaling.enabled = True in config.
+        # ADDED 2026-03-25: confidence scaling
+        """
+        base = 1  # always safe default
+
+        try:
+            from pearlalgo.config.config_loader import load_config_yaml
+            cfg = load_config_yaml()
+            cs = cfg.get("confidence_scaling", {}) or {}
+        except Exception as e:
+            logger.debug(f"_get_scaled_contracts: config load failed, returning base: {e}")
+            return base
+
+        if not cs.get("enabled", False):
+            return base
+
+        confidence = float(signal.get("confidence", 0) or 0)
+        direction = signal.get("direction", "long") or "long"
+
+        # long_only_scaling: don't scale shorts until edge is proven
+        if cs.get("long_only_scaling", True) and direction != "long":
+            return base
+
+        # Walk tiers, find matching
+        contracts = base
+        tiers = cs.get("tiers", []) or []
+        for tier in tiers:
+            try:
+                if tier["min_confidence"] <= confidence <= tier["max_confidence"]:
+                    contracts = int(tier["contracts"])
+                    break
+            except (KeyError, TypeError):
+                continue
+
+        # Never exceed hard ceiling or MFF max (5)
+        max_c = min(int(cs.get("max_contracts", 3) or 3), 5)
+        result = min(contracts, max_c)
+        if result != base:
+            logger.info(
+                f"_get_scaled_contracts: confidence={confidence:.3f} direction={direction} -> {result} contracts"
+                " # ADDED 2026-03-25: confidence scaling"
+            )
+        return result
+
     def _ensure_position_size(self, signal: Dict) -> None:
         """Compute and set position_size on the signal if not already present.
 
@@ -341,6 +433,10 @@ class SignalHandler:
 
         try:
             size = self.order_manager.compute_base_position_size(signal)
+            # ADDED 2026-03-25: confidence scaling
+            scaled = self._get_scaled_contracts(signal)
+            if scaled > size:
+                size = scaled
             signal["position_size"] = size
             logger.debug(
                 f"Position size computed: {size} contracts "
@@ -784,11 +880,19 @@ class SignalHandler:
                     execution_result = await self.execution_adapter.place_bracket(signal)
 
                     if execution_result.success:
-                        execution_status = "placed"
-                        logger.info(
-                            f"✅ Order placed: {signal.get('type')} {signal.get('direction')} | "
-                            f"order_id={execution_result.parent_order_id}"
-                        )
+                        # FIXED 2026-03-25: warn if order_id is None (bracket may be missing)
+                        if execution_result.parent_order_id:
+                            execution_status = "placed"
+                            logger.info(
+                                f"✅ Order placed: {signal.get('type')} {signal.get('direction')} | "
+                                f"order_id={execution_result.parent_order_id}"
+                            )
+                        else:
+                            execution_status = "placed_no_id"
+                            logger.warning(
+                                f"⚠️ Order entry filled but bracket MISSING: {signal.get('type')} {signal.get('direction')} | "
+                                f"order_id=None — Tradovate did not return an order ID"
+                            )
                     else:
                         execution_status = f"place_failed:{execution_result.error_message}"
                         logger.warning(f"⚠️ Order placement failed: {execution_result.error_message}")
