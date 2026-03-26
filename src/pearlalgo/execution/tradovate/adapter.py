@@ -149,7 +149,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
             # FIXED 2026-03-25: Check for orphaned positions (open position with no exchange SL)
             # This happens when agent restarts mid-trade. Place a hard stop immediately.
-            asyncio.create_task(self._reattach_orphaned_stop_on_connect())
+            # FIXED 2026-03-25: use retry wrapper to handle Tradovate maintenance window
+            asyncio.create_task(self._reattach_orphaned_stop_on_connect_with_retry())
 
             return True
 
@@ -230,6 +231,59 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         except Exception as e:
             logger.warning(f"Orphaned stop check failed (non-fatal): {e}")
+
+    async def _reattach_orphaned_stop_on_connect_with_retry(self, max_attempts: int = 10, base_delay: float = 30.0) -> bool:
+        """
+        FIXED 2026-03-25: retry orphaned stop placement during maintenance window.
+        Wraps _reattach_orphaned_stop_on_connect with exponential backoff.
+        """
+        for attempt in range(max_attempts):
+            try:
+                await self._reattach_orphaned_stop_on_connect()
+                if attempt > 0:
+                    logger.info(f"✅ Orphaned stop reattach completed on attempt {attempt + 1}")
+                return True
+            except TradovateAPIError as e:
+                if "503" in str(e) or "Service error" in str(e) or "Service Unavailable" in str(e):
+                    delay = base_delay * (2 ** min(attempt, 3))  # 30, 60, 120, 120...
+                    logger.warning(
+                        f"⏸ Tradovate maintenance — orphaned stop retry in {delay:.0f}s "
+                        f"(attempt {attempt + 1}/{max_attempts})"
+                    )
+                    # ADDED 2026-03-25: alert on naked position during maintenance
+                    logger.error(
+                        "🚨 NAKED POSITION ALERT: open position with no bracket during Tradovate maintenance "
+                        "— manual intervention may be needed"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(f"Orphaned stop reattach failed (non-503 error): {e}")
+                return False
+            except Exception as e:
+                logger.warning(f"Orphaned stop reattach attempt {attempt + 1} failed: {e}")
+                return False
+        logger.error("❌ Failed to reattach orphaned stop after max attempts — ALERT NEEDED")
+        return False
+
+    async def _verify_bracket_placed(self, order_id: str, signal_id: str) -> bool:
+        """
+        ADDED 2026-03-25: verify bracket was actually placed.
+        Checks that order_id exists in Tradovate open orders within ~2 seconds.
+        """
+        await asyncio.sleep(2.0)
+        try:
+            orders = await self._client.get_orders()
+            order_ids = [str(o.get("id", "")) for o in (orders or [])]
+            if str(order_id) in order_ids:
+                return True
+            logger.error(
+                f"⚠️ BRACKET VERIFICATION FAILED: order {order_id} not found in Tradovate orders "
+                f"after placement! signal={signal_id}"
+            )
+            return False
+        except Exception as e:
+            logger.warning(f"Bracket verification error: {e}")
+            return False
 
     async def disconnect(self) -> None:
         """Disconnect from Tradovate."""
@@ -514,11 +568,27 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 sl_price=stop_loss if stop_loss > 0 else None,
             )
 
-            # Guard: verify response is a dict with expected structure
-            if not isinstance(result, dict):
+            # ADDED 2026-03-25: log raw response for debugging bracket issues
+            import json as _json
+            logger.info(
+                f"place_oso raw response: "
+                f"{_json.dumps(result) if isinstance(result, dict) else str(result)[:500]}"
+            )  # ADDED 2026-03-25: debug bracket response
+
+            # FIXED 2026-03-25: handle list response from place_oso (Tradovate bracket returns list)
+            if isinstance(result, list):
+                # Tradovate OSO returns list: [entry_order, tp_order, sl_order]
+                entry_order = result[0] if result else {}
+                order_id = entry_order.get("orderId") or entry_order.get("id")
+            elif isinstance(result, dict):
+                order_id = result.get("orderId") or result.get("id")
+                # Also check nested: {"d": {"orderId": ...}}
+                if not order_id and "d" in result:
+                    order_id = result["d"].get("orderId") or result["d"].get("id")
+            else:
                 logger.warning(
                     f"Unexpected response type from place_oso: {type(result).__name__} "
-                    f"for signal {signal_id}; expected dict"
+                    f"for signal {signal_id}; expected dict or list"
                 )
                 return ExecutionResult(
                     success=False,
@@ -526,8 +596,6 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     signal_id=signal_id,
                     error_message=f"Unexpected place_oso response type: {type(result).__name__}",
                 )
-
-            order_id = result.get("orderId") or result.get("id")
             if order_id:
                 self.increment_order_count(signal.get("type", "unknown"))
 
@@ -756,10 +824,26 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 self._rate_limit_backoff = min((self._rate_limit_backoff or 30) * 2, 300)
                 self._rate_limit_until = time.monotonic() + self._rate_limit_backoff
                 logger.warning(f"Tradovate 429 rate limit on get_positions, backoff={self._rate_limit_backoff:.0f}s")
+            elif "503" in str(e) or "Service error" in str(e) or "Service Unavailable" in str(e):
+                # FIXED 2026-03-25: handle Tradovate 503 maintenance window gracefully
+                self._consecutive_503_count += 1
+                logger.warning(
+                    f"Tradovate maintenance window — get_positions returned 503 "
+                    f"(consecutive={self._consecutive_503_count})"
+                )
+                if self._consecutive_503_count >= self._MAINTENANCE_503_THRESHOLD and not self._tradovate_maintenance_mode:
+                    self._tradovate_maintenance_mode = True
+                    logger.warning("⏸ Tradovate maintenance window detected — pausing trading, polling every 60s")
             else:
                 logger.error(f"Failed to get Tradovate positions: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to get Tradovate positions: {e}", exc_info=True)
+        else:
+            # FIXED 2026-03-25: clear maintenance mode on success
+            if self._tradovate_maintenance_mode or self._consecutive_503_count > 0:
+                logger.info("✅ Tradovate responding normally — clearing maintenance mode")
+                self._tradovate_maintenance_mode = False
+                self._consecutive_503_count = 0
 
         # Fallback: use WebSocket live position cache when REST returned empty
         if not positions and self._live_positions:
@@ -1366,7 +1450,15 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         async def _fetch_positions():
             try:
-                return await self._client.get_positions()
+                result = await self._client.get_positions()
+                return result
+            except TradovateAPIError as e:
+                # FIXED 2026-03-25: handle Tradovate 503 maintenance window gracefully
+                if "503" in str(e) or "Service error" in str(e) or "Service Unavailable" in str(e):
+                    logger.warning(f"Tradovate maintenance window — get_positions returned 503, skipping cycle")
+                    return []
+                logger.warning(f"get_positions failed: {e}", exc_info=True)
+                return None
             except Exception as e:
                 logger.warning(f"get_positions failed: {e}", exc_info=True)
                 return None
@@ -1380,7 +1472,15 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
         async def _fetch_orders():
             try:
-                return await self._client.get_orders()
+                result = await self._client.get_orders()
+                return result
+            except TradovateAPIError as e:
+                # FIXED 2026-03-25: handle Tradovate 503 maintenance window gracefully
+                if "503" in str(e) or "Service error" in str(e) or "Service Unavailable" in str(e):
+                    logger.warning(f"Tradovate maintenance window — get_orders returned 503, skipping cycle")
+                    return []
+                logger.warning(f"get_orders failed: {e}", exc_info=True)
+                return None
             except Exception as e:
                 logger.warning(f"get_orders failed: {e}", exc_info=True)
                 return None

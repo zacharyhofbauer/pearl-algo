@@ -334,6 +334,54 @@ class PerformanceTracker:
                 "update_signal_prices", e, level="warning", category="file_io",
             )
 
+
+    def _match_fill_to_signal(
+        self,
+        signal_id: str,
+        direction: str,
+        entry_price: float,
+        entry_time: str,
+    ) -> Optional[Dict]:
+        """
+        Best-effort matching of a signal to its Tradovate fill.
+        Match criteria: same direction, entry price within 2 points, entry time within 60 seconds.
+        Returns the matched fill entry dict or None if no match.
+        ADDED 2026-03-25: fill attribution for concurrent position tracking.
+        """
+        try:
+            import json as _json
+            fills_path = self.state_dir / "tradovate_fills.json"
+            if not fills_path.exists():
+                return None
+            fills = _json.loads(fills_path.read_text())
+            signal_action = "Buy" if direction == "long" else "Sell"
+            candidates = []
+            for fill in fills:
+                fill_action = fill.get("action", "")
+                if fill_action != signal_action:
+                    continue
+                try:
+                    fill_price = float(fill.get("price", 0))
+                except (TypeError, ValueError):
+                    continue
+                if abs(fill_price - entry_price) > 2.0:
+                    continue
+                fill_time_str = fill.get("timestamp", "")
+                if not fill_time_str:
+                    continue
+                try:
+                    from datetime import datetime as _dt
+                    sig_dt = _dt.fromisoformat(str(entry_time).replace("Z", "").replace("+00:00", ""))
+                    fill_dt = _dt.fromisoformat(str(fill_time_str).replace("Z", "").replace("+00:00", ""))
+                    if abs((sig_dt - fill_dt).total_seconds()) <= 60:
+                        candidates.append(fill)
+                except Exception:
+                    continue
+            return candidates[0] if candidates else None
+        except Exception as e:
+            logger.debug(f"_match_fill_to_signal error (non-critical): {e}")
+            return None
+
     def track_exit(
         self,
         signal_id: str,
@@ -419,6 +467,15 @@ class PerformanceTracker:
         # Resolve excursion data (MFE/MAE)
         _exc = excursion_data or {}
 
+        # FIXED 2026-03-25: best-effort fill attribution for concurrent position tracking
+        _fill_match = self._match_fill_to_signal(
+            signal_id=signal_id,
+            direction=direction,
+            entry_price=entry_price,
+            entry_time=str(signal_record.get("entry_time") or ""),
+        )
+        _pnl_source = "fill_matched" if _fill_match else "estimated"
+
         performance = {
             "signal_id": signal_id,
             "signal_type": signal.get("type"),
@@ -434,6 +491,7 @@ class PerformanceTracker:
             "min_price": _exc.get("min_price"),
             "mfe_points": _exc.get("mfe_points"),
             "mae_points": _exc.get("mae_points"),
+            "pnl_source": _pnl_source,  # FIXED 2026-03-25: fill attribution
         }
 
         # Update running aggregates incrementally (O(1) — no file scan).

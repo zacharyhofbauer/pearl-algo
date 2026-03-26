@@ -409,9 +409,14 @@ class IBKRProvider(DataProvider):
                 df = df.set_index("timestamp")
 
             # Filter by start/end if needed (IB may return more data)
+            # Ensure start/end are tz-aware to match the index dtype
             if start:
+                if start.tzinfo is None and df.index.tz is not None:
+                    start = pd.Timestamp(start).tz_localize(df.index.tz)
                 df = df[df.index >= start]
             if end:
+                if end.tzinfo is None and df.index.tz is not None:
+                    end = pd.Timestamp(end).tz_localize(df.index.tz)
                 df = df[df.index <= end]
 
             logger.info(

@@ -1123,6 +1123,7 @@ class ConnectionManager:
                                 "daily_trades": daily_stats["daily_trades"],
                                 "daily_wins": daily_stats["daily_wins"],
                                 "daily_losses": daily_stats["daily_losses"],
+                                "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
                                 # For Tradovate Paper: use Tradovate position count & open PnL
                                 "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                                 "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
@@ -1279,6 +1280,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                         "daily_trades": daily_stats["daily_trades"],
                         "daily_wins": daily_stats["daily_wins"],
                         "daily_losses": daily_stats["daily_losses"],
+                        "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
                         "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                         "futures_market_open": state.get("futures_market_open", False),
@@ -1357,6 +1359,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                                     "daily_trades": daily_stats["daily_trades"],
                                     "daily_wins": daily_stats["daily_wins"],
                                     "daily_losses": daily_stats["daily_losses"],
+                                    "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
                                     "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
                                     "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
                                     "futures_market_open": state.get("futures_market_open", False),
@@ -1522,6 +1525,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     "tradovate_equity": round(equity, 2),
                     "tradovate_open_pnl": open_pnl,
                     "tradovate_positions": pos_count,
+                    "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
                 }
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
@@ -1557,6 +1561,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     "tradovate_equity": round(start_balance + total_fill_pnl, 2),
                     "tradovate_open_pnl": 0.0,
                     "tradovate_positions": 0,
+                    "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
                 }
         except Exception as e:
             logger.warning(f"Non-critical Tradovate fills fallback: {e}")
@@ -2678,6 +2683,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "daily_trades": daily_stats["daily_trades"],
             "daily_wins": daily_stats["daily_wins"],
             "daily_losses": daily_stats["daily_losses"],
+            "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
             "active_trades_count": 0,
             "active_trades_unrealized_pnl": None,
             "futures_market_open": False,
@@ -2706,6 +2712,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "daily_trades": daily_stats["daily_trades"],
         "daily_wins": daily_stats["daily_wins"],
         "daily_losses": daily_stats["daily_losses"],
+        "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
         # For Tradovate Paper: use Tradovate position count & open PnL when available
         "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
         "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
@@ -3302,6 +3309,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
             "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt),
             "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt),
             "all": all_fill_stats,
+            "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
         }
 
     # IBKR Virtual: existing performance.json logic (cached read)
@@ -3797,6 +3805,209 @@ async def get_key_levels(
     except Exception as e:
         logger.exception("key-levels error")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# ---------------------------------------------------------------------------
+# Confidence Scaling endpoints — ADDED 2026-03-25: confidence scaling
+# ---------------------------------------------------------------------------
+
+@app.get("/api/confidence-scaling")
+async def get_confidence_scaling(api_key: Optional[str] = Depends(verify_api_key)):
+    """Return current confidence_scaling config. # ADDED 2026-03-25: confidence scaling"""
+    from pearlalgo.config.config_loader import load_config_yaml
+    cfg = load_config_yaml()
+    cs = cfg.get("confidence_scaling", {}) or {}
+    return {
+        "enabled": bool(cs.get("enabled", False)),
+        "tiers": cs.get("tiers", []),
+        "max_contracts": int(cs.get("max_contracts", 3) or 3),
+        "long_only_scaling": bool(cs.get("long_only_scaling", True)),
+    }
+
+
+@app.post("/api/confidence-scaling")
+async def update_confidence_scaling(
+    body: dict,
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Toggle confidence_scaling.enabled. Uses sed, never yaml.dump(). # ADDED 2026-03-25: confidence scaling"""
+    import subprocess, shlex
+    from pearlalgo.config.config_loader import load_config_yaml
+    from pearlalgo.utils.paths import PROJECT_ROOT
+
+    if "enabled" not in body:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Missing 'enabled' in request body")
+
+    enabled = bool(body["enabled"])
+    value = "true" if enabled else "false"
+
+    config_path = PROJECT_ROOT / "config" / "config.yaml"
+
+    # Use sed to toggle confidence_scaling.enabled (safe, no yaml.dump)
+    # sed in-place: find line with '  enabled:' inside confidence_scaling block.
+    # Strategy: use awk to only replace within the confidence_scaling section.
+    # Build awk replacement line; value is "true" or "false"
+    replacement = f"  enabled: {value}          # GATED: enable only after 200+ clean baseline trades"
+    awk_script = (
+        "/^confidence_scaling:/{found=1} "
+        f"found && /^  enabled:/{{sub(/enabled:.*/, {repr(replacement[2:])}); found=0}} "
+        "{print}"
+    )
+    result = subprocess.run(
+        ["awk", awk_script, str(config_path)],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"awk failed: {result.stderr}")
+
+    with open(str(config_path), "w") as f:
+        f.write(result.stdout)
+
+    # Return updated config
+    cfg = load_config_yaml()
+    cs = cfg.get("confidence_scaling", {}) or {}
+    return {
+        "enabled": bool(cs.get("enabled", False)),
+        "tiers": cs.get("tiers", []),
+        "max_contracts": int(cs.get("max_contracts", 3) or 3),
+        "long_only_scaling": bool(cs.get("long_only_scaling", True)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Live Log Streaming
+# ---------------------------------------------------------------------------
+
+@app.get("/api/logs/stream")
+async def stream_logs(
+    request: Request,
+    api_key: str = "",
+    lines: int = 100,
+    level: str = "all",
+    _auth: Optional[str] = require_auth(),
+):
+    """
+    Stream live agent logs via SSE (Server-Sent Events).
+    Tails journalctl -u pearlalgo-agent in real time.
+    ADDED 2026-03-25: live log streaming for dashboard.
+    """
+    from fastapi.responses import StreamingResponse as _StreamingResponse
+
+    async def event_generator():
+        # First: send last N lines as history
+        proc_history = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", "pearlalgo-agent", "--no-pager",
+            "-n", str(lines), "--output=short-iso",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc_history.communicate()
+        for raw_line in stdout.decode(errors="replace").splitlines():
+            if not raw_line.strip():
+                continue
+            parsed = _parse_log_line(raw_line)
+            if level != "all" and parsed["level"] != level:
+                continue
+            yield f"data: {json.dumps(parsed)}\n\n"
+
+        # Then: tail -f live
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", "pearlalgo-agent", "-f", "--no-pager",
+            "--output=short-iso",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=25.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if not line:
+                    break
+                decoded = line.decode(errors="replace").strip()
+                if not decoded:
+                    yield ": keepalive\n\n"
+                    continue
+                parsed = _parse_log_line(decoded)
+                if level != "all" and parsed["level"] != level:
+                    continue
+                yield f"data: {json.dumps(parsed)}\n\n"
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    return _StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _parse_log_line(line: str) -> dict:
+    """Parse a journalctl short-iso log line into structured data.
+    ADDED 2026-03-25: live log streaming for dashboard.
+    """
+    import re
+
+    level = "info"
+    upper = line.upper()
+    if "ERROR" in upper or "❌" in line or "🚨" in line:
+        level = "error"
+    elif "WARNING" in upper or "WARN" in upper or "⚠" in line or "🛑" in line:
+        level = "warn"
+    elif "DEBUG" in upper:
+        level = "debug"
+
+    ts_match = re.match(r"^(\S+)\s+\S+\s+\S+:\s+(.*)", line)
+    if ts_match:
+        ts_raw = ts_match.group(1)
+        message = ts_match.group(2)
+        try:
+            from datetime import datetime
+            import pytz
+            ET = pytz.timezone("America/New_York")
+            dt = datetime.fromisoformat(ts_raw.replace("+0000", "+00:00"))
+            ts_et = dt.astimezone(ET).strftime("%H:%M:%S")
+        except Exception:
+            ts_et = ts_raw[-8:] if len(ts_raw) >= 8 else ts_raw
+    else:
+        ts_et = ""
+        message = line
+
+    return {"ts": ts_et, "level": level, "message": message, "raw": line}
+
+
+@app.get("/api/logs/recent")
+async def get_recent_logs(
+    lines: int = 200,
+    _auth: Optional[str] = require_auth(),
+):
+    """Return last N agent log lines as JSON. ADDED 2026-03-25: live log streaming for dashboard."""
+    proc = await asyncio.create_subprocess_exec(
+        "journalctl", "-u", "pearlalgo-agent", "--no-pager",
+        "-n", str(lines), "--output=short-iso",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    lines_out = []
+    for raw_line in stdout.decode(errors="replace").splitlines():
+        if raw_line.strip():
+            lines_out.append(_parse_log_line(raw_line))
+    return {"logs": lines_out, "count": len(lines_out)}
 
 
 # ---------------------------------------------------------------------------

@@ -25,12 +25,15 @@ def test_ensure_state_dir_uses_market(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_parse_utc_timestamp_handles_z_suffix() -> None:
+    """Legacy UTC Z-suffix timestamps are converted to naive ET."""
     dt = parse_utc_timestamp("2026-01-01T12:34:56Z")
-    assert dt.tzinfo is not None
-    assert dt.isoformat().endswith("+00:00")
+    # Z-suffix (UTC) is converted to naive ET (UTC-5 in EST)
+    assert dt.tzinfo is None
+    assert dt.hour == 7  # 12:34 UTC = 07:34 EST
 
 
-def test_parse_utc_timestamp_treats_naive_as_utc() -> None:
+def test_parse_utc_timestamp_treats_naive_as_et() -> None:
+    """Naive timestamps are now ET (post-migration) — returned as-is."""
     dt = parse_utc_timestamp("2026-01-01T12:34:56")
-    assert dt.tzinfo is not None
-    assert dt.isoformat().endswith("+00:00")
+    assert dt.tzinfo is None
+    assert dt.hour == 12  # Already ET, no conversion

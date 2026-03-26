@@ -575,32 +575,29 @@ class TestAggregatePerformanceSince:
 class TestDateRangeHelpers:
     def test_trading_week_start_on_wednesday(self):
         """Wednesday 2026-03-11 should map back to Sunday 2026-03-08 6pm ET."""
-        wed = datetime(2026, 3, 11, 15, 0, tzinfo=timezone.utc)
+        # FIXED 2026-03-25: naive ET after tz migration
+        wed = datetime(2026, 3, 11, 15, 0)  # naive ET
         result = srv._get_trading_week_start(wed)
-        assert result.tzinfo is not None
+        assert result.tzinfo is None  # returns naive ET
         assert result < wed
 
     def test_trading_week_start_on_sunday_before_6pm(self):
         """Sunday before 6pm ET: the current week hasn't started, should go back a week."""
-        from zoneinfo import ZoneInfo
-        et = ZoneInfo("America/New_York")
-        # Sunday 2026-03-08 at 10am ET = before 6pm
-        sun_early_et = datetime(2026, 3, 8, 10, 0, tzinfo=et)
-        sun_early_utc = sun_early_et.astimezone(timezone.utc)
-        result = srv._get_trading_week_start(sun_early_utc)
+        # FIXED 2026-03-25: naive ET after tz migration
+        sun_early_et = datetime(2026, 3, 8, 10, 0)  # 10am ET Sunday (naive)
+        result = srv._get_trading_week_start(sun_early_et)
         # Result should be 7 days before what would be this Sunday's 6pm
-        assert result < sun_early_utc
+        assert result < sun_early_et
 
     def test_month_to_date_start(self):
-        now = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 3, 15, 12, 0)  # FIXED 2026-03-25: naive ET
         result = srv._get_month_to_date_start(now)
         assert result.month in (2, 3)  # Feb 28 or Mar 1 boundary
         assert result < now
 
     def test_year_to_date_start(self):
-        now = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 3, 15, 12, 0)  # FIXED 2026-03-25: naive ET
         result = srv._get_year_to_date_start(now)
-        # Should be around Dec 31 of prior year (6pm ET) in UTC
         assert result.year in (2025, 2026)
         assert result < now
 

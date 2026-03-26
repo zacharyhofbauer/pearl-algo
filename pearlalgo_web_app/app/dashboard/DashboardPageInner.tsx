@@ -9,6 +9,7 @@ import DashboardLayout from '@/components/DashboardLayout'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import WatchlistPanel from '@/components/WatchlistPanel'
 import SystemLogsPanel from '@/components/SystemLogsPanel'
+import LiveLogsPanel from '@/components/LiveLogsPanel' // ADDED 2026-03-25: live log streaming
 import ActivityLogPanel from '@/components/ActivityLogPanel'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
@@ -866,15 +867,7 @@ export default function DashboardPageInner() {
       )
     }
     if (activeRightPanel === 'logs') {
-      return (
-        <SystemLogsPanel
-          recentSignals={recentSignals}
-          pearlFeed={agentState?.pearl_feed || []}
-          signalRejections={agentState?.signal_rejections_24h || null}
-          lastSignalDecision={agentState?.last_signal_decision || null}
-          agentState={agentState}
-        />
-      )
+      return <LiveLogsPanel />  // ADDED 2026-03-25: live journalctl streaming
     }
     if (activeRightPanel === 'activity') {
       return <ActivityLogPanel recentSignals={recentSignals} />

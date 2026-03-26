@@ -17,7 +17,7 @@ import pytz
 ET = pytz.timezone("America/New_York")
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "tradovate" / "paper"
-DB_PATH = DATA_DIR / "trades.db.migration-source"  # Operate on clean backup copy
+DB_PATH = DATA_DIR / "trades.db"
 
 TIME_COLUMNS = [
     ("entry_time", "trades"),

@@ -87,6 +87,8 @@ def load_trades(
     start_utc: datetime,
 ) -> Tuple[List[IncidentTradeRecord], List[Dict[str, Any]]]:
     """Load closed trades from *signals_file* that exited after *start_utc*."""
+    # Strip tzinfo for comparison with naive ET timestamps (post-migration)
+    start_naive = start_utc.replace(tzinfo=None) if start_utc.tzinfo else start_utc
     trades: List[IncidentTradeRecord] = []
     raw_records: List[Dict[str, Any]] = []
     if not signals_file.exists():
@@ -111,7 +113,7 @@ def load_trades(
             except Exception:
                 continue
 
-            if exit_time < start_utc:
+            if exit_time < start_naive:
                 continue
 
             sig = record.get("signal", {}) or {}
@@ -181,6 +183,7 @@ def load_events(
     start_utc: datetime,
 ) -> Dict[str, int]:
     """Load event counts from *events_file* since *start_utc*."""
+    start_naive = start_utc.replace(tzinfo=None) if start_utc.tzinfo else start_utc
     counts: Dict[str, int] = defaultdict(int)
     if not events_file.exists():
         return counts
@@ -200,7 +203,7 @@ def load_events(
                 event_time = parse_utc_timestamp(ts)
             except Exception:
                 continue
-            if event_time < start_utc:
+            if event_time < start_naive:
                 continue
             event_type = str(record.get("type", "unknown") or "unknown")
             counts[event_type] += 1

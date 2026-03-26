@@ -596,6 +596,14 @@ restart_services_only() {
     # Restarts: agent, api, webapp
     # Use this for: code changes, config updates, agent issues, bar staleness
     # Use ./pearl.sh restart ONLY when gateway itself is down (triggers 2FA)
+
+    # ADDED 2026-03-25: guard against restarting with open positions
+    open_pos=$(curl -s "http://localhost:8001/api/state?api_key=EL0lFv7oAVPhLwkqLTXCNvALmGVWBmoyb_pDKSOeKZ4" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); pos=d.get('tradovate_account',{}).get('positions',[]); print(len(pos))" 2>/dev/null || echo "0")
+    if [ "$open_pos" -gt "0" ]; then
+        echo -e "${RED}SOFT-RESTART BLOCKED: $open_pos open position(s) detected. Close positions before restarting.${NC}"
+        exit 1
+    fi
+
     echo ""
     echo -e "${BOLD}Restarting Services (no gateway, no 2FA)...${NC}"
     echo ""

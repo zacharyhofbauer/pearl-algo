@@ -248,12 +248,14 @@ class VirtualTradeManager:
             sl_mask = bar_lows <= stop
 
         # Mask for bars strictly after entry time
+        # FIXED 2026-03-25: entry_time is now naive ET; localize as ET then convert to UTC for bar comparison
         if entry_time:
+            import pytz as _pytz
+            _et_tz = _pytz.timezone("America/New_York")
             entry_ts = pd.Timestamp(entry_time)
             if entry_ts.tzinfo is None:
-                entry_ts = entry_ts.tz_localize("UTC")
-            else:
-                entry_ts = entry_ts.tz_convert("UTC")
+                entry_ts = entry_ts.tz_localize(_et_tz)  # naive ET → aware ET
+            entry_ts = entry_ts.tz_convert("UTC")
             entry_ts_np = entry_ts.tz_localize(None).to_datetime64()
             after_entry_mask = bar_times_arr > entry_ts_np
         else:
@@ -291,8 +293,14 @@ class VirtualTradeManager:
         exit_bar_ts: Optional[datetime] = None
         try:
             exit_bar_ts = pd.Timestamp(exit_bar_ts_raw).to_pydatetime()
-            if exit_bar_ts and exit_bar_ts.tzinfo is None:
-                exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
+            # FIXED 2026-03-25: convert bar timestamp to naive ET (not UTC)
+            import pytz
+            _et = pytz.timezone("America/New_York")
+            if exit_bar_ts and exit_bar_ts.tzinfo is not None:
+                exit_bar_ts = exit_bar_ts.astimezone(_et).replace(tzinfo=None)
+            # If naive, assume already UTC from data feed — convert to ET
+            elif exit_bar_ts:
+                exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc).astimezone(_et).replace(tzinfo=None)
         except Exception as e:
             logger.warning(f"Critical path error: {e}", exc_info=True)
 
