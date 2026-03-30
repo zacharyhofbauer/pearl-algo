@@ -243,9 +243,15 @@ class AdvancedExitManager:
         # Strategy 4: Partial Profit Runner
         self.runner = PartialRunnerManager(config)
 
+        # Strategy 5: Max Hold Exit — force exit after max duration
+        max_hold_cfg = config.get('max_hold_exit', {})
+        self.max_hold_enabled = max_hold_cfg.get('enabled', False)
+        self.max_hold_duration_min = max_hold_cfg.get('max_duration_minutes', 180)
+
         logger.info(f"AdvancedExitManager initialized: quick_exit={self.quick_exit_enabled}, "
                    f"time_based={self.time_exit_enabled}, stop_opt={self.stop_opt_enabled}, "
-                   f"partial_runner={self.runner.enabled}")
+                   f"partial_runner={self.runner.enabled}, "
+                   f"max_hold={self.max_hold_enabled} ({self.max_hold_duration_min}min)")
     
     def check_quick_exit(self, position: Dict, current_price: float, entry_time: datetime) -> Tuple[bool, str]:
         """
@@ -355,23 +361,53 @@ class AdvancedExitManager:
         
         return optimized_stop
     
+    def check_max_hold_exit(self, position: Dict, entry_time: datetime) -> Tuple[bool, str]:
+        """
+        Strategy 5: Max Hold Duration Exit
+
+        Force exit if trade has been held longer than max_duration_minutes.
+        Trades held too long tend to be losers (27% WR beyond 3 hours).
+
+        Returns: (should_exit, reason)
+        """
+        if not self.max_hold_enabled:
+            return False, ""
+
+        now_et = datetime.now(_ET).replace(tzinfo=None)
+        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
+        duration_min = (now_et - et_naive).total_seconds() / 60
+
+        if duration_min >= self.max_hold_duration_min:
+            reason = (f"Max hold exit: trade held {duration_min:.0f} min "
+                     f"(limit {self.max_hold_duration_min} min)")
+            logger.info(f"⏱️ {reason}")
+            return True, reason
+
+        return False, ""
+
     def should_exit(self, position: Dict, current_price: float, entry_time: datetime) -> Tuple[bool, str]:
         """
         Check all exit strategies and return first one that triggers.
-        
+
         Priority order:
-        1. Quick Exit (highest priority - save losses)
-        2. Time-Based Exit (medium - lock profits)
-        3. Stop Optimization (passive - better stop placement)
-        
+        1. Max Hold Exit (highest - hard time limit)
+        2. Quick Exit (save losses)
+        3. Time-Based Exit (lock profits)
+        4. Stop Optimization (passive - better stop placement)
+
         Returns: (should_exit, reason)
         """
-        # Check quick exit first (most important - saves losses)
+        # Check max hold first (hard time limit)
+        should_exit, reason = self.check_max_hold_exit(position, entry_time)
+        if should_exit:
+            return True, reason
+
+        # Check quick exit (saves losses)
         should_exit, reason = self.check_quick_exit(position, current_price, entry_time)
         if should_exit:
             return True, reason
-        
-        # Check time-based exit second (locks profits)
+
+        # Check time-based exit (locks profits)
         should_exit, reason = self.check_time_based_exit(position, current_price, entry_time)
         if should_exit:
             return True, reason

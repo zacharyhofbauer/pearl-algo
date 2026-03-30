@@ -42,6 +42,23 @@ circuit_breaker:
 trading_circuit_breaker:
   enabled: true
   mode: enforce
+  kill_switch_short: false
+  enable_hour_filter: true
+  allowed_trading_hours_et:
+  - 1
+  - 3
+  - 4
+  - 9
+  - 10
+  - 11
+  - 12
+  - 15
+  - 16
+  - 18
+  - 19
+  - 20
+  blocked_weekdays:
+  - 4
   enable_tv_paper_eval_gate: false
   tv_paper_max_contracts_mini: 5
   tv_paper_max_contracts_micro: 1
@@ -63,12 +80,17 @@ trading_circuit_breaker:
   - afternoon
   - closing
   enable_direction_gating: true
-  direction_gating_min_confidence: 0.50
+  direction_gating_min_confidence: 0.5
   enable_regime_avoidance: true
   blocked_regimes:
   - ranging
   - volatile
   regime_avoidance_min_confidence: 0.7
+  allowed_short_hours_et:
+  - 3
+  - 4
+  - 18
+  - 21
 telegram:
   notification_tier: debug
 auto_flat:
@@ -82,9 +104,9 @@ risk:
   min_position_size: 1
   max_position_size: 5
 session:
-  start_time: "18:00"
-  end_time: "17:00"
-  timezone: "America/New_York"
+  start_time: '18:00'
+  end_time: '17:00'
+  timezone: America/New_York
 service:
   dashboard_chart_enabled: false
 trailing_stop:
@@ -94,8 +116,12 @@ trailing_stop:
   max_override_ttl_minutes: 120
   regime_adaptive: true
   override_bounds:
-    trail_atr_multiplier: [0.5, 2.0]
-    activation_atr_multiplier: [0.5, 2.0]
+    trail_atr_multiplier:
+    - 0.5
+    - 2.0
+    activation_atr_multiplier:
+    - 0.5
+    - 2.0
   phases:
   - name: breakeven
     activation_atr: 1.0
@@ -133,13 +159,15 @@ advanced_exits:
     tight_trail_distance_atr: 1.0
     breakeven_offset: 0.25
     remove_fixed_tp: true
+  max_hold_exit:
+    enabled: true
+    max_duration_minutes: 180
 pearl_bot_auto:
-  min_confidence: 0.40
-  min_confidence_long: 0.40
-  min_confidence_short: 0.40
+  min_confidence: 0.4
+  min_confidence_long: 0.4
+  min_confidence_short: 0.4
   ema_fast: 9
   ema_slow: 21
-  # SL/TP ATR multipliers (scalp-tuned for paper)
   stop_loss_atr_mult: 1.5
   take_profit_atr_mult: 2.5
   volatile_sl_mult: 1.3
@@ -158,29 +186,25 @@ pearl_bot_auto:
   sd_threshold_pct: 10.0
   sd_resolution: 50
   vwap_std_dev: 1.0
-  # Time-of-day confidence scaling — penalizes signals during low-volume hours
   tod_scaling:
     enabled: true
-    overnight: 0.60       # 00:00-03:59 ET  (overnight chop)
-    premarket_early: 0.75 # 04:00-05:59 ET  (thin premarket)
-    premarket_late: 0.85  # 06:00-09:29 ET  (premarket ramp)
-    rth: 1.00             # 09:30-15:59 ET  (regular trading hours)
-    post_close: 0.85      # 16:00-17:59 ET  (post-close)
-    evening: 0.70         # 18:00-23:59 ET  (evening session)
-  # New strategies (disabled by default — enable explicitly to test)
+    overnight: 0.6
+    premarket_early: 0.75
+    premarket_late: 0.85
+    rth: 1.0
+    post_close: 0.85
+    evening: 0.7
   allow_orb_entries: false
   allow_vwap_2sd_entries: false
   adx_period: 14
   adx_trending_threshold: 25.0
   adx_ranging_threshold: 20.0
-
 composite_regime:
   enabled: true
   chop_zone_low: 4.0
   chop_zone_high: 6.0
   chop_zone_min_confidence: 0.75
   volatile_stop_multiplier: 1.2
-# Strategy params at top level (required by pearl_bot_auto.py indicator functions)
 volume_ma_length: 20
 sr_length: 130
 sr_atr_mult: 0.5
@@ -189,6 +213,6 @@ tbt_trend_type: wicks
 sd_threshold_pct: 10.0
 sd_resolution: 50
 vwap_std_dev: 1.0
-min_confidence: 0.40
-min_confidence_long: 0.40
-min_confidence_short: 0.40
+min_confidence: 0.4
+min_confidence_long: 0.4
+min_confidence_short: 0.4

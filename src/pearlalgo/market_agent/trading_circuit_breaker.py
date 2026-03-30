@@ -95,6 +95,20 @@ class TradingCircuitBreakerConfig:
     # overnight: 18-4 (6PM-4AM), premarket: 4-6, morning: 6-10, midday: 10-14, afternoon: 14-17, close: 17-18
     
     # =========================================================================
+    # Hour-level filter — block signals outside profitable hours (ET)
+    # =========================================================================
+    enable_hour_filter: bool = False
+    allowed_trading_hours_et: List[int] = field(default_factory=lambda: list(range(24)))
+    # Hours when SHORT signals are allowed (ET). Empty list + kill_switch_short=false = all hours.
+    # Non-empty list = shorts only allowed at these hours. Based on data: [3, 4, 18, 21]
+    allowed_short_hours_et: List[int] = field(default_factory=list)
+
+    # =========================================================================
+    # Weekday filter — block signals on historically unprofitable days
+    # =========================================================================
+    blocked_weekdays: List[int] = field(default_factory=list)  # Python weekday: Mon=0 ... Sun=6
+
+    # =========================================================================
     # Phase 1: Direction gating by market regime
     # Based on data: shorts underperform longs (40% vs 47% WR), shorts are 0W/2L today
     # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
@@ -234,10 +248,37 @@ class TradingCircuitBreaker:
                 }
             )
         
-        # Kill switch: block all short/sell signals
-        if self.config.kill_switch_short:
-            direction = str(signal.get("direction", "")).lower()
-            if direction in ("short", "sell"):
+        # Short signal filtering: hour-restricted shorts OR full kill switch
+        direction = str(signal.get("direction", "")).lower()
+        if direction in ("short", "sell"):
+            if self.config.allowed_short_hours_et:
+                # Hour-restricted shorts: only allow during data-proven profitable hours
+                try:
+                    from zoneinfo import ZoneInfo
+                    current_hour = datetime.now(ZoneInfo("America/New_York")).hour
+                except Exception:
+                    current_hour = (datetime.now(timezone.utc).hour - 5) % 24
+                if current_hour not in self.config.allowed_short_hours_et:
+                    logger.info(
+                        "Short hour filter: blocked short at hour %d ET (allowed: %s)",
+                        current_hour, self.config.allowed_short_hours_et
+                    )
+                    self._record_block("short_hour_filter")
+                    return CircuitBreakerDecision(
+                        allowed=False,
+                        reason="short_hour_filter",
+                        severity="warning",
+                        details={
+                            "direction": direction,
+                            "current_hour_et": current_hour,
+                            "allowed_short_hours": self.config.allowed_short_hours_et,
+                            "message": f"Short signals only allowed at hours {self.config.allowed_short_hours_et} ET",
+                        },
+                    )
+                else:
+                    logger.info("Short allowed at hour %d ET (in allowed_short_hours_et)", current_hour)
+            elif self.config.kill_switch_short:
+                # Full kill switch fallback (when no short hours defined)
                 logger.warning(
                     "Kill switch active: blocked short signal | "
                     "direction=%s, type=%s", direction, signal.get("type", "unknown")
@@ -252,6 +293,20 @@ class TradingCircuitBreaker:
                         "message": "Short trade kill switch is active - all short/sell signals blocked",
                     },
                 )
+
+        # Hour-level filter: block signals outside allowed hours (ET)
+        if self.config.enable_hour_filter:
+            decision = self._check_hour_filter()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+
+        # Weekday filter: block signals on bad days
+        if self.config.blocked_weekdays:
+            decision = self._check_weekday_filter()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
 
         # Check consecutive losses
         decision = self._check_consecutive_losses()
@@ -973,6 +1028,51 @@ class TradingCircuitBreaker:
         
         return 'other', et_hour
     
+    def _check_hour_filter(self) -> CircuitBreakerDecision:
+        """Block signals outside allowed trading hours (ET)."""
+        now_et = datetime.now(ET)
+        current_hour = now_et.hour
+        if current_hour not in self.config.allowed_trading_hours_et:
+            logger.info(
+                "Hour filter: blocked signal at hour %d ET (allowed: %s)",
+                current_hour, self.config.allowed_trading_hours_et,
+            )
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="hour_filter",
+                severity="info",
+                details={
+                    "current_hour_et": current_hour,
+                    "allowed_hours": self.config.allowed_trading_hours_et,
+                    "message": f"Hour {current_hour} ET is not in the allowed trading hours",
+                },
+            )
+        return CircuitBreakerDecision(allowed=True, reason="hour_filter_passed")
+
+    def _check_weekday_filter(self) -> CircuitBreakerDecision:
+        """Block signals on historically unprofitable weekdays."""
+        now_et = datetime.now(ET)
+        current_weekday = now_et.weekday()  # Mon=0, Sun=6
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        if current_weekday in self.config.blocked_weekdays:
+            day_name = day_names[current_weekday]
+            logger.info(
+                "Weekday filter: blocked signal on %s (weekday=%d)",
+                day_name, current_weekday,
+            )
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="weekday_filter",
+                severity="info",
+                details={
+                    "current_weekday": current_weekday,
+                    "day_name": day_name,
+                    "blocked_weekdays": self.config.blocked_weekdays,
+                    "message": f"Trading is blocked on {day_name}",
+                },
+            )
+        return CircuitBreakerDecision(allowed=True, reason="weekday_filter_passed")
+
     def _check_session_filter(self) -> CircuitBreakerDecision:
         """
         Check if current session is allowed for trading.
@@ -1422,6 +1522,12 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         # Session filter settings
         enable_session_filter=config.get("enable_session_filter", True),
         allowed_sessions=config.get("allowed_sessions", ["overnight", "midday", "close"]),
+        # Hour-level filter
+        enable_hour_filter=config.get("enable_hour_filter", False),
+        allowed_short_hours_et=config.get("allowed_short_hours_et", []),
+        allowed_trading_hours_et=config.get("allowed_trading_hours_et", list(range(24))),
+        # Weekday filter
+        blocked_weekdays=config.get("blocked_weekdays", []),
         # Phase 1: Direction gating
         enable_direction_gating=config.get("enable_direction_gating", True),
         direction_gating_min_confidence=config.get("direction_gating_min_confidence", 0.70),
