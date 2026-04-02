@@ -12,9 +12,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import pytz
+from zoneinfo import ZoneInfo
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 from enum import Enum
 from typing import Any, Dict, List, Optional
 

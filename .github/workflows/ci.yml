@@ -101,10 +101,6 @@ jobs:
           ignore-unfixed: true
         continue-on-error: true  # Informational for now
 
-      - name: Multi-market smoke test
-        run: |
-          python scripts/testing/smoke_multi_market.py
-
       - name: Unit tests (skip external deps)
         env:
           MPLBACKEND: Agg

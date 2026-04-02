@@ -167,24 +167,6 @@ class ScheduledTasks:
                 pnl_sign = "+" if pnl_to_show >= 0 else ""
                 msg_parts.append(f"Session P&L: {pnl_sign}${pnl_to_show:.0f}")
 
-            try:
-                # AI chat removed (restructure Phase 2D)
-                if False:
-                    context = {
-                        "daily_pnl": daily_pnl,
-                        "session_pnl": session_pnl,
-                        "overnight_trades": len(overnight_trades),
-                        "recent_trades": [
-                            {"pnl": t.get("pnl", 0), "direction": t.get("direction", "")}
-                            for t in overnight_trades[-5:]
-                        ],
-                    }
-                    insight = await ai_chat.generate_insight("morning_briefing", context)
-                    if insight:
-                        msg_parts.append(f"\n{insight}")
-            except Exception as e:
-                logger.debug(f"Could not generate morning AI insight: {e}")
-
             msg = "\n".join(msg_parts)
             asyncio.create_task(
                 self.notification_queue.enqueue_raw_message(
@@ -208,8 +190,8 @@ class ScheduledTasks:
         try:
             now_utc = datetime.now(timezone.utc)
             try:
-                import pytz
-                et_tz = pytz.timezone("US/Eastern")
+                from zoneinfo import ZoneInfo
+                et_tz = ZoneInfo("America/New_York")
                 now_et = now_utc.astimezone(et_tz)
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
@@ -285,33 +267,6 @@ class ScheduledTasks:
                     msg_parts.append(
                         f"\u2197\ufe0f Longs: {long_sign}${long_pnl:.0f} \u2022 \u2198\ufe0f Shorts: {short_sign}${short_pnl:.0f}"
                     )
-
-                try:
-                    briefing_config = self._service_config.get("ai_briefings", {})
-                    if False:  # AI briefings removed (Phase 2D)
-                        if False:
-                            context = {
-                                "daily_pnl": total_pnl,
-                                "wins_today": wins,
-                                "losses_today": losses,
-                                "win_rate": win_rate,
-                                "long_pnl": long_pnl,
-                                "short_pnl": short_pnl,
-                                "recent_trades": [
-                                    {
-                                        "pnl": t.get("pnl", 0),
-                                        "direction": t.get("direction", ""),
-                                        "type": t.get("type", ""),
-                                        "is_win": t.get("is_win", False),
-                                    }
-                                    for t in today_trades
-                                ],
-                            }
-                            insight = await ai_chat.generate_insight("eod_summary", context)
-                            if insight:
-                                msg_parts.append(f"\n\U0001f4a1 {insight}")
-                except Exception as e:
-                    logger.debug(f"Could not generate EOD AI insight: {e}")
 
                 msg_parts.append("\n_Session safety close at 3:55 PM ET_")
                 msg = "\n".join(msg_parts)

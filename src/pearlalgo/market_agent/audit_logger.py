@@ -27,11 +27,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
-import pytz
+from zoneinfo import ZoneInfo
 
 from pearlalgo.utils.logger import logger
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 
 
 # ---------------------------------------------------------------------------

@@ -340,8 +340,8 @@ class PearlSuggestionEngine:
         
         # Get current time in ET
         try:
-            import pytz
-            et_tz = pytz.timezone('US/Eastern')
+            from zoneinfo import ZoneInfo
+            et_tz = ZoneInfo('America/New_York')
             now_et = datetime.now(et_tz)
             today_str = now_et.strftime("%Y-%m-%d")
             hour = now_et.hour
@@ -387,8 +387,8 @@ class PearlSuggestionEngine:
         """Check if it's end of day (Priority 2)."""
         
         try:
-            import pytz
-            et_tz = pytz.timezone('US/Eastern')
+            from zoneinfo import ZoneInfo
+            et_tz = ZoneInfo('America/New_York')
             now_et = datetime.now(et_tz)
             hour = now_et.hour
             minute = now_et.minute

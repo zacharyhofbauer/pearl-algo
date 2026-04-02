@@ -5,7 +5,6 @@ pearlalgo.execution
 pearlalgo.execution.tradovate
 pearlalgo.notifications
 pearlalgo.storage
-pearlalgo.storage.trade_database
 pearlalgo.strategies.composite_intraday.orb
 pearlalgo.strategies.composite_intraday.smc
 pearlalgo.strategies.composite_intraday.vwap_2sd

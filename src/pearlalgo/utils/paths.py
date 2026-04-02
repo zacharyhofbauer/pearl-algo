@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
-import pytz
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 
@@ -94,7 +94,7 @@ def get_performance_file(state_dir: Path) -> Path:
     return state_dir / "performance.json"
 
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 
 
 def get_et_timestamp() -> str:  # FIXED 2026-03-25: store ET not UTC

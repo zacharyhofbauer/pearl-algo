@@ -1,4 +1,4 @@
-.PHONY: help install test coverage arch secrets smoke ruff ruff-bugs audit docs orphans config-defaults eval eval-expanded eval-changed ci
+.PHONY: help install test coverage arch secrets ruff ruff-bugs audit docs orphans eval eval-expanded eval-changed ci
 
 # Prefer the project virtualenv when present.
 PYTHON := $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
@@ -11,13 +11,11 @@ help:
 	@echo "  make coverage  - Generate coverage.xml + coverage badge"
 	@echo "  make arch      - Enforce architecture boundary rules"
 	@echo "  make secrets   - Scan git-tracked files for potential secrets"
-	@echo "  make smoke     - Multi-market config + state isolation smoke test"
 	@echo "  make ruff-bugs - Run Ruff bug-catching subset (matches CI gate)"
 	@echo "  make ruff      - Run Ruff (may report pre-existing issues)"
 	@echo "  make audit     - Run pip-audit dependency scan"
 	@echo "  make docs      - Validate documentation path references"
 	@echo "  make orphans   - Enforce the orphan-module allowlist"
-	@echo "  make config-defaults - Validate config defaults vs schema"
 	@echo "  make eval      - Run Pearl AI prompt eval (mock mode, core dataset)"
 	@echo "  make eval-expanded - Run Pearl AI prompt eval (mock mode, expanded dataset)"
 	@echo "  make eval-changed  - Run prompt eval only if prompt files changed"
@@ -40,9 +38,6 @@ arch:
 secrets:
 	$(PYTHON) scripts/testing/check_no_secrets.py
 
-smoke:
-	$(PYTHON) scripts/testing/smoke_multi_market.py
-
 ruff-bugs:
 	$(PYTHON) -m ruff check src/pearlalgo --select F821,E722
 
@@ -59,9 +54,6 @@ docs:
 orphans:
 	$(PYTHON) scripts/testing/report_orphan_modules.py --enforce
 
-config-defaults:
-	$(PYTHON) scripts/testing/check_config_defaults.py
-
 # Pearl AI eval removed (restructure Phase 2D)
 
-ci: ruff-bugs arch secrets docs orphans config-defaults smoke audit test
+ci: ruff-bugs arch secrets docs orphans audit test

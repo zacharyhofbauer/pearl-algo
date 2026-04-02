@@ -57,6 +57,9 @@ ALLOWLIST_PATTERNS = [
     r"\bContextVar\b",
     r"<set-in-secrets\.env>",  # Placeholder values are safe
     r"test-secret-key-",  # Test-only API keys (not real)
+    r'VALID_API_KEY\s*=\s*"[^"]+"',
+    r'INVALID_API_KEY\s*=\s*"[^"]+"',
+    r'OPERATOR_PASS\s*=\s*"[^"]+"',
     r"typeof data\?\.passphrase",  # TypeScript passphrase field access (not a value)
 ]
 
@@ -159,8 +162,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

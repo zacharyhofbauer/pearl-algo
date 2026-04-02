@@ -63,8 +63,8 @@ def get_trading_day_start() -> datetime:
         Naive datetime in ET for comparison with trade timestamps.
         FIXED 2026-03-25: returns naive ET, not UTC — all timestamps are now ET.
     """
-    import pytz
-    et_tz = pytz.timezone("America/New_York")
+    from zoneinfo import ZoneInfo
+    et_tz = ZoneInfo("America/New_York")
     now_et = datetime.now(et_tz)
 
     if now_et.hour < 18:
@@ -237,8 +237,8 @@ def compute_performance_stats(
         _set_cached(cache_key, result)
         return result
 
-    import pytz
-    _et = pytz.timezone("America/New_York")
+    from zoneinfo import ZoneInfo
+    _et = ZoneInfo("America/New_York")
     now = datetime.now(_et).replace(tzinfo=None)  # FIXED 2026-03-25: naive ET for trade comparisons
     cutoffs = {
         "24h": now - timedelta(hours=24),

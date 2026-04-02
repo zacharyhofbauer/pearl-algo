@@ -18,16 +18,9 @@ from pearlalgo.utils.logger import logger
 # Timezone handling - use Any to support ZoneInfo, pytz, or None
 from typing import Any as TimezoneType
 
-_ET_TZ: TimezoneType = None
-try:
-    from zoneinfo import ZoneInfo
-    _ET_TZ = ZoneInfo("America/New_York")
-except ImportError:
-    try:
-        import pytz
-        _ET_TZ = pytz.timezone("America/New_York")
-    except ImportError:
-        pass
+from zoneinfo import ZoneInfo
+
+_ET_TZ: TimezoneType = ZoneInfo("America/New_York")
 
 ET_TIMEZONE: TimezoneType = _ET_TZ
 

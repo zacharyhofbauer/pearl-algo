@@ -14,9 +14,9 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-import pytz
+from zoneinfo import ZoneInfo
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 

@@ -11,10 +11,13 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$PROJECT_DIR"
 
+PYTHON_BIN="python3"
+
 # Activate virtual environment if it exists
 if [ -f .venv/bin/activate ]; then
     echo "Activating virtual environment..."
     source .venv/bin/activate
+    PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
     echo "✅ Virtual environment activated"
     echo ""
 else
@@ -24,9 +27,9 @@ else
 fi
 
 # Check if package is installed
-if ! python3 -c "import pearlalgo" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import pearlalgo" 2>/dev/null; then
     echo "📦 Installing package in development mode..."
-    pip install -e . > /dev/null 2>&1
+    "$PYTHON_BIN" -m pip install -e . > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo "✅ Package installed"
         echo ""
@@ -38,7 +41,7 @@ if ! python3 -c "import pearlalgo" 2>/dev/null; then
 fi
 
 # Ensure pytest is available
-if ! python3 -c "import pytest" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import pytest" 2>/dev/null; then
     echo "❌ pytest is not installed in this Python environment."
     echo "   Install dev dependencies (recommended inside .venv):"
     echo "     pip install -e '.[dev]'"
@@ -58,9 +61,9 @@ echo "  python3 scripts/testing/test_all.py [mode]"
 echo ""
 
 # Ensure package is installed in development mode so tests can import actual code
-if ! python3 -c "import pearlalgo" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import pearlalgo" 2>/dev/null; then
     echo "📦 Installing package in development mode for tests..."
-    pip install -e . > /dev/null 2>&1
+    "$PYTHON_BIN" -m pip install -e . > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo "✅ Package installed - tests will use actual code"
         echo ""
@@ -71,7 +74,5 @@ fi
 # - Uses conftest.py for shared fixtures
 # - Tests import actual code from src/pearlalgo/
 # - No file duplication needed
-python3 -m pytest "$@"
-
-
+"$PYTHON_BIN" -m pytest "$@"
 

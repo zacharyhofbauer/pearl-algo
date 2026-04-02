@@ -246,8 +246,8 @@ class VirtualTradeManager:
         # Mask for bars strictly after entry time
         # FIXED 2026-03-25: entry_time is now naive ET; localize as ET then convert to UTC for bar comparison
         if entry_time:
-            import pytz as _pytz
-            _et_tz = _pytz.timezone("America/New_York")
+            from zoneinfo import ZoneInfo as _ZoneInfo
+            _et_tz = _ZoneInfo("America/New_York")
             entry_ts = pd.Timestamp(entry_time)
             if entry_ts.tzinfo is None:
                 entry_ts = entry_ts.tz_localize(_et_tz)  # naive ET → aware ET
@@ -290,8 +290,8 @@ class VirtualTradeManager:
         try:
             exit_bar_ts = pd.Timestamp(exit_bar_ts_raw).to_pydatetime()
             # FIXED 2026-03-25: convert bar timestamp to naive ET (not UTC)
-            import pytz
-            _et = pytz.timezone("America/New_York")
+            from zoneinfo import ZoneInfo
+            _et = ZoneInfo("America/New_York")
             if exit_bar_ts and exit_bar_ts.tzinfo is not None:
                 exit_bar_ts = exit_bar_ts.astimezone(_et).replace(tzinfo=None)
             # If naive, assume already UTC from data feed — convert to ET

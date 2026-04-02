@@ -24,11 +24,22 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv(PROJECT_ROOT / ".env", override=False)
-    load_dotenv(Path.home() / ".config" / "pearlalgo" / "secrets.env", override=False)
+    load_dotenv(Path.home() / ".config" / "pearlalgo" / "secrets.env", override=True)
 except Exception:
     pass
 
 API_KEY = os.getenv("PEARL_API_KEY", "").strip()
+if not API_KEY:
+    key_file = os.getenv("PEARL_API_KEY_FILE", "").strip()
+    if key_file:
+        try:
+            for line in Path(key_file).read_text(encoding="utf-8").splitlines():
+                candidate = line.strip()
+                if candidate and not candidate.startswith("#"):
+                    API_KEY = candidate
+                    break
+        except Exception:
+            pass
 
 def get_cooldowns():
     try: return json.loads(ALERT_COOLDOWN_FILE.read_text())

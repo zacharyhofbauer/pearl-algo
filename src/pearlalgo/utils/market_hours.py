@@ -11,13 +11,14 @@ import calendar
 from datetime import datetime, time, timedelta, date
 from typing import Iterable, Mapping, Optional, Set, Dict, Tuple
 
-import pytz
+from datetime import timezone as _dt_timezone
+from zoneinfo import ZoneInfo
 
 from pearlalgo.utils.logger import logger
 
 # Market timezones
-ET = pytz.timezone("America/New_York")
-UTC = pytz.UTC
+ET = ZoneInfo("America/New_York")
+UTC = _dt_timezone.utc
 
 
 # ============================================================================
@@ -263,7 +264,7 @@ class MarketHours:
             use_calculated_holidays: If True, automatically calculate variable holidays
                                      and early closes for the current year.
         """
-        self.tz = pytz.timezone(timezone_str)
+        self.tz = ZoneInfo(timezone_str)
         self.holiday_overrides = set(holiday_overrides or [])
         self.early_closes = dict(early_closes or {})
         

@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
-import pytz
+from zoneinfo import ZoneInfo
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 
 logger = logging.getLogger(__name__)
 

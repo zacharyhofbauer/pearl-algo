@@ -56,8 +56,10 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Documentation reference audit; verifies doc paths exist in repo.
 - `report_orphan_modules.py`
   - **Role**: Orphan-module report; lists src modules not reachable from entry points/tests/scripts.
-- `check_config_defaults.py`
-  - **Role**: Validates consistency between config defaults and schema (run via `make ci` or manually).
+- `compare_data_quality.py`
+  - **Role**: IBKR vs Tradovate data quality comparison; prints recommendation for data source.
+- `generate_coverage_badge.py`
+  - **Role**: Generates a coverage badge from pytest coverage output.
 
 ## Maintenance (`scripts/maintenance/`)
 

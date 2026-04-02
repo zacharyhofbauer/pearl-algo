@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
-import pytz
+from zoneinfo import ZoneInfo
 
 from pearlalgo.strategies.composite_intraday import check_trading_session
 from pearlalgo.utils.formatting import fmt_currency
@@ -19,7 +19,7 @@ from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import get_market_hours
 
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)

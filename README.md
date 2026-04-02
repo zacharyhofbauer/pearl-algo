@@ -98,14 +98,12 @@ GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs:
 - Unit tests (skipping IBKR / Telegram-credential tests)
 - Architecture boundary enforcement
 - Secret scan on tracked files
-- Multi-market config + state isolation smoke test
-
 CI runs tests, linting, type checking, and architecture boundary checks via `.github/workflows/ci.yml`.
 
 ## Docs (start here)
 
 - `docs/START_HERE.md`
-- `docs/CURRENT_OPERATING_MODEL.md`
+- `docs/PATH_TRUTH_TABLE.md`
 - `docs/PATH_TRUTH_TABLE.md`
 - `docs/COMPATIBILITY_SURFACES.md`
 - `docs/GATEWAY.md`

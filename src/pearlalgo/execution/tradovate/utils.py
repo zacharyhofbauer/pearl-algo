@@ -15,8 +15,8 @@ def _to_et(ts: str) -> str:
         return ts
     try:
         from datetime import datetime, timezone
-        import pytz
-        _ET = pytz.timezone("America/New_York")
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
         # Parse: handles Z, +00:00, or already-naive strings
         if ts.endswith("Z"):
             ts = ts[:-1] + "+00:00"

@@ -8,7 +8,7 @@ import math
 import re
 from typing import Optional
 
-import pytz
+from zoneinfo import ZoneInfo
 
 from pearlalgo.utils.formatting import (
     fmt_currency,
@@ -542,7 +542,7 @@ def format_next_session_time(
     try:
         from datetime import datetime, timedelta
 
-        et_tz = pytz.timezone("US/Eastern")
+        et_tz = ZoneInfo("America/New_York")
         now = datetime.now(et_tz)
         
         # Parse session start time (HH:MM format)

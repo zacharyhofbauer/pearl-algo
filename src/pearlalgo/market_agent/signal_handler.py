@@ -13,14 +13,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import pandas as pd
-import pytz
+from zoneinfo import ZoneInfo
 
 from pearlalgo.strategies.composite_intraday import calculate_atr
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp
 
-_ET = pytz.timezone("America/New_York")
+_ET = ZoneInfo("America/New_York")
 
 if TYPE_CHECKING:
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager

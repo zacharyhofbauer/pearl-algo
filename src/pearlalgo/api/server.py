@@ -133,6 +133,8 @@ from pearlalgo.api.metrics import (
     DEFAULT_RISK_METRICS,
 )
 from pearlalgo.analytics import compute_session_analytics as _compute_session_analytics
+from pearlalgo.api.performance_stats import compute_performance_stats as _compute_performance_stats_impl
+from pearlalgo.api.levels_computation import bars_to_levels as _bars_to_levels_impl
 
 import pandas as pd
 
@@ -1698,205 +1700,22 @@ def _get_previous_trading_day_bounds() -> tuple:
 def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     """Compute performance stats for yesterday, 24h, 72h, and 30d periods.
 
-    When Tradovate live account data is available (Tradovate Paper), use the broker's
-    equity-based P&L as the single source of truth for ALL periods.  This
-    avoids the mismatch between virtual exit grading and real fills.
+    Delegates to :func:`pearlalgo.api.performance_stats.compute_performance_stats`.
     """
-    # --- Read performance.json once for all code paths below ---
-    performance_file = state_dir / "performance.json"
-    perf_data: Optional[list] = None  # None = missing or invalid
-    try:
-        _raw = _read_json_sync(performance_file)
-        if isinstance(_raw, list):
-            perf_data = _raw
-    except Exception:
-        logger.debug("Failed to read/parse performance.json", exc_info=True)
-
-    # Priority 1: Tradovate live data (Tradovate Paper accounts)
-    try:
-        _sd = _read_state_for_dir(state_dir)
-        if _sd:
-            tv = _sd.get("tradovate_account")
-            if tv and isinstance(tv, dict) and tv.get("equity"):
-                start_balance = _get_start_balance(state_dir)
-                equity = float(tv.get("equity", 0))
-                open_pnl = float(tv.get("open_pnl", 0))
-                pnl = round(equity - start_balance, 2)
-                # Build a single stat block used for every period
-                tv_stats = {"pnl": pnl, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
-                            "tradovate_equity": round(equity, 2), "tradovate_open_pnl": round(open_pnl, 2)}
-                # Use Tradovate fills for trade counts (not performance.json which has virtual data)
-                try:
-                    _, tv_fills = _get_tradovate_state(state_dir)
-                    if tv_fills:
-                        paired = _get_paired_tradovate_trades(state_dir, tv_fills)
-                        tv_stats["trades"] = len(paired)
-                        tv_stats["wins"] = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
-                        tv_stats["losses"] = len(paired) - tv_stats["wins"]
-                        tv_stats["win_rate"] = round(tv_stats["wins"] / len(paired) * 100, 1) if paired else 0.0
-                except Exception as e:
-                    logger.debug(f"Tradovate fills unavailable for trade counts, falling back to performance.json: {e}")
-                    # Fallback to performance.json if Tradovate fills unavailable
-                    if tv_stats["trades"] == 0 and perf_data:
-                        tv_stats["trades"] = len(perf_data)
-                        tv_stats["wins"] = sum(1 for t in perf_data if (t.get("pnl") or 0) > 0)
-                        tv_stats["losses"] = len(perf_data) - tv_stats["wins"]
-                        tv_stats["win_rate"] = round(tv_stats["wins"] / len(perf_data) * 100, 1)
-                return {p: tv_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
-    except Exception as e:
-        logger.debug(f"Non-critical: {e}")
-
-    # Priority 2: Tradovate fills (TV Paper accounts without live equity)
-    # This avoids falling through to performance.json which may contain
-    # duplicated/corrupted virtual exit data.
-    try:
-        if _is_tv_paper_account(state_dir):
-            _, tv_fills = _get_tradovate_state(state_dir)
-            if tv_fills:
-                paired = _get_paired_tradovate_trades(state_dir, tv_fills)
-                now_utc = _now_et_naive()
-                prev_day_s, prev_day_e = _get_previous_trading_day_bounds()
-                fills_stats = {
-                    "yesterday": _tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e, paired_trades=paired),
-                    "24h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=24), paired_trades=paired),
-                    "72h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=72), paired_trades=paired),
-                    "30d": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(days=30), paired_trades=paired),
-                }
-                return fills_stats
-    except Exception as e:
-        logger.debug(f"Tradovate fills fallback failed: {e}")
-
-    # Tradovate Paper: if both live equity and fills failed, return zeros
-    # rather than falling through to performance.json which mixes virtual + real trades.
-    if _is_tv_paper_account(state_dir):
-        logger.warning("TV Paper: both live equity and fills unavailable — returning zero performance stats")
-        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
-        return {p: empty_stats.copy() for p in ("yesterday", "24h", "72h", "30d")}
-
-    if perf_data is None:
-        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
-        result = {"yesterday": empty_stats.copy(), "24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
-        # Fallback: populate from challenge_state.json when performance.json is missing
-        try:
-            challenge = _get_challenge_status(state_dir)
-            if challenge and challenge.get("trades", 0) > 0:
-                ch_pnl = round(challenge.get("pnl", 0.0), 2)
-                ch_trades = challenge.get("trades", 0)
-                ch_wins = challenge.get("wins", 0)
-                ch_losses = ch_trades - ch_wins
-                ch_wr = round(ch_wins / ch_trades * 100, 1) if ch_trades > 0 else 0.0
-                ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
-                for period in result:
-                    result[period] = ch_stats.copy()
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-        return result
-
-    now = _now_et_naive()
-    prev_day_start, prev_day_end = _get_previous_trading_day_bounds()
-
-    cutoffs = {
-        "24h": now - timedelta(hours=24),
-        "72h": now - timedelta(hours=72),
-        "30d": now - timedelta(days=30),
-    }
-
-    stats = {period: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0} for period in cutoffs}
-    stats["yesterday"] = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
-
-    try:
-        data = perf_data if perf_data is not None else []
-
-        for trade in data:
-            exit_time_str = trade.get("exit_time")
-            if not exit_time_str:
-                continue
-            try:
-                exit_time = _parse_ts(exit_time_str)
-            except (ValueError, TypeError):
-                continue
-
-            pnl = trade.get("pnl", 0.0) or 0.0
-            is_win = trade.get("is_win", pnl > 0)
-
-            # Check rolling periods (24h, 72h, 30d)
-            for period, cutoff in cutoffs.items():
-                if exit_time >= cutoff:
-                    stats[period]["pnl"] += pnl
-                    stats[period]["trades"] += 1
-                    if is_win:
-                        stats[period]["wins"] += 1
-                    else:
-                        stats[period]["losses"] += 1
-
-            # Check yesterday (previous complete trading day window)
-            if prev_day_start <= exit_time < prev_day_end:
-                stats["yesterday"]["pnl"] += pnl
-                stats["yesterday"]["trades"] += 1
-                if is_win:
-                    stats["yesterday"]["wins"] += 1
-                else:
-                    stats["yesterday"]["losses"] += 1
-    except Exception as e:
-        logger.warning(f"Non-critical: {e}")
-
-    # Calculate win rates and compute streaks for 24h
-    for period in stats:
-        total = stats[period]["trades"]
-        stats[period]["pnl"] = round(stats[period]["pnl"], 2)
-        stats[period]["win_rate"] = round(stats[period]["wins"] / total * 100, 1) if total > 0 else 0.0
-
-    # Compute current streak for 24h
-    stats["24h"]["streak"] = 0
-    stats["24h"]["streak_type"] = "none"
-    try:
-        if perf_data:
-            cutoff_24h = cutoffs["24h"]
-            recent_trades = []
-            for trade in perf_data:
-                exit_time_str = trade.get("exit_time")
-                if not exit_time_str:
-                    continue
-                try:
-                    exit_time = _parse_ts(exit_time_str)
-                    if exit_time >= cutoff_24h:
-                        recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
-                except (ValueError, TypeError):
-                    continue
-            # Sort by exit time descending
-            recent_trades.sort(key=lambda x: x[0], reverse=True)
-            if recent_trades:
-                streak = 0
-                streak_type = "win" if recent_trades[0][1] else "loss"
-                for _, is_win in recent_trades:
-                    if (streak_type == "win" and is_win) or (streak_type == "loss" and not is_win):
-                        streak += 1
-                    else:
-                        break
-                stats["24h"]["streak"] = streak
-                stats["24h"]["streak_type"] = streak_type
-    except Exception as e:
-        logger.warning(f"Non-critical: {e}")
-
-    # Fallback: if performance.json had zero trades but challenge has data,
-    # populate all periods from the challenge so the PERFORMANCE panel isn't blank.
-    total_trades = sum(stats[p]["trades"] for p in ("24h", "72h", "30d"))
-    if total_trades == 0:
-        try:
-            challenge = _get_challenge_status(state_dir)
-            if challenge and challenge.get("trades", 0) > 0:
-                ch_pnl = round(challenge.get("pnl", 0.0), 2)
-                ch_trades = challenge.get("trades", 0)
-                ch_wins = challenge.get("wins", 0)
-                ch_losses = ch_trades - ch_wins
-                ch_wr = round(ch_wins / ch_trades * 100, 1) if ch_trades > 0 else 0.0
-                ch_stats = {"pnl": ch_pnl, "trades": ch_trades, "wins": ch_wins, "losses": ch_losses, "win_rate": ch_wr}
-                for period in ("yesterday", "24h", "72h", "30d"):
-                    stats[period] = {**stats[period], **ch_stats}
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-    return stats
+    return _compute_performance_stats_impl(
+        state_dir,
+        read_json_sync=_read_json_sync,
+        read_state_for_dir=_read_state_for_dir,
+        get_start_balance=_get_start_balance,
+        get_tradovate_state=_get_tradovate_state,
+        get_paired_tradovate_trades=_get_paired_tradovate_trades,
+        is_tv_paper_account=_is_tv_paper_account,
+        now_et_naive=_now_et_naive,
+        parse_ts=_parse_ts,
+        get_challenge_status=_get_challenge_status,
+        get_previous_trading_day_bounds=_get_previous_trading_day_bounds,
+        tradovate_performance_for_period=_tradovate_performance_for_period,
+    )
 
 
 # ==========================================================================
@@ -3739,149 +3558,12 @@ _key_levels_cache_time: float = 0.0
 _KEY_LEVELS_CACHE_TTL = 60  # seconds
 
 
-def _calc_mid(high: Optional[float], low: Optional[float]) -> Optional[float]:
-    """Calculate midpoint of high and low, returning None if either is None."""
-    if high is not None and low is not None:
-        return round((high + low) / 2, 2)
-    return None
-
-
 def _bars_to_levels(bars: List[Dict[str, Any]], now_utc: datetime) -> Dict[str, Any]:
+    """Compute key price levels from daily OHLC bars.
+
+    Delegates to :func:`pearlalgo.api.levels_computation.bars_to_levels`.
     """
-    Compute key price levels from daily OHLC bars.
-
-    Expects bars sorted ascending by time with keys: time, open, high, low, close.
-    """
-    if not bars:
-        return {k: None for k in [
-            "daily_open", "prev_day_high", "prev_day_low", "prev_day_mid",
-            "monday_high", "monday_low", "monday_mid",
-            "weekly_open", "prev_week_high", "prev_week_low", "prev_week_mid",
-            "monthly_open", "prev_month_high", "prev_month_low", "prev_month_mid",
-        ]}
-
-    from datetime import date as _date
-
-    # Convert bar timestamps to date-keyed dicts
-    daily: List[Dict[str, Any]] = []
-    for b in bars:
-        ts = b.get("time", 0)
-        dt = datetime.fromtimestamp(ts, tz=_ET_TZ).replace(tzinfo=None) if ts else None  # FIXED 2026-03-25: ET
-        if dt is None:
-            continue
-        daily.append({
-            "date": dt.date(),
-            "weekday": dt.weekday(),  # 0=Monday
-            "open": b.get("open"),
-            "high": b.get("high"),
-            "low": b.get("low"),
-            "close": b.get("close"),
-        })
-
-    daily.sort(key=lambda x: x["date"])
-    result: Dict[str, Any] = {}
-
-    # --- Daily levels ---
-    if len(daily) >= 1:
-        today_bar = daily[-1]
-        result["daily_open"] = today_bar["open"]
-    else:
-        result["daily_open"] = None
-
-    if len(daily) >= 2:
-        prev_bar = daily[-2]
-        result["prev_day_high"] = prev_bar["high"]
-        result["prev_day_low"] = prev_bar["low"]
-        result["prev_day_mid"] = _calc_mid(prev_bar["high"], prev_bar["low"])
-    else:
-        result["prev_day_high"] = None
-        result["prev_day_low"] = None
-        result["prev_day_mid"] = None
-
-    # --- Monday range (current week) ---
-    today = now_utc.date()
-    # Find the Monday of the current ISO week
-    days_since_monday = today.weekday()  # 0=Mon
-    this_monday = today - timedelta(days=days_since_monday)
-
-    monday_bar = None
-    for d in daily:
-        if d["date"] == this_monday:
-            monday_bar = d
-            break
-
-    if monday_bar:
-        result["monday_high"] = monday_bar["high"]
-        result["monday_low"] = monday_bar["low"]
-        result["monday_mid"] = _calc_mid(monday_bar["high"], monday_bar["low"])
-    else:
-        result["monday_high"] = None
-        result["monday_low"] = None
-        result["monday_mid"] = None
-
-    # --- Weekly levels ---
-    # Group bars by ISO week
-    from collections import defaultdict
-    weeks: Dict[tuple, List[Dict]] = defaultdict(list)
-    for d in daily:
-        iso = d["date"].isocalendar()
-        weeks[(iso[0], iso[1])].append(d)
-
-    sorted_weeks = sorted(weeks.keys())
-    if sorted_weeks:
-        current_week_key = sorted_weeks[-1]
-        current_week_bars = weeks[current_week_key]
-        # Weekly open = open of first bar of the week
-        result["weekly_open"] = current_week_bars[0]["open"]
-
-        if len(sorted_weeks) >= 2:
-            prev_week_key = sorted_weeks[-2]
-            prev_week_bars = weeks[prev_week_key]
-            pw_high = max(b["high"] for b in prev_week_bars if b["high"] is not None)
-            pw_low = min(b["low"] for b in prev_week_bars if b["low"] is not None)
-            result["prev_week_high"] = pw_high
-            result["prev_week_low"] = pw_low
-            result["prev_week_mid"] = _calc_mid(pw_high, pw_low)
-        else:
-            result["prev_week_high"] = None
-            result["prev_week_low"] = None
-            result["prev_week_mid"] = None
-    else:
-        result["weekly_open"] = None
-        result["prev_week_high"] = None
-        result["prev_week_low"] = None
-        result["prev_week_mid"] = None
-
-    # --- Monthly levels ---
-    months: Dict[tuple, List[Dict]] = defaultdict(list)
-    for d in daily:
-        months[(d["date"].year, d["date"].month)].append(d)
-
-    sorted_months = sorted(months.keys())
-    if sorted_months:
-        current_month_key = sorted_months[-1]
-        current_month_bars = months[current_month_key]
-        result["monthly_open"] = current_month_bars[0]["open"]
-
-        if len(sorted_months) >= 2:
-            prev_month_key = sorted_months[-2]
-            prev_month_bars = months[prev_month_key]
-            pm_high = max(b["high"] for b in prev_month_bars if b["high"] is not None)
-            pm_low = min(b["low"] for b in prev_month_bars if b["low"] is not None)
-            result["prev_month_high"] = pm_high
-            result["prev_month_low"] = pm_low
-            result["prev_month_mid"] = _calc_mid(pm_high, pm_low)
-        else:
-            result["prev_month_high"] = None
-            result["prev_month_low"] = None
-            result["prev_month_mid"] = None
-    else:
-        result["monthly_open"] = None
-        result["prev_month_high"] = None
-        result["prev_month_low"] = None
-        result["prev_month_mid"] = None
-
-    return result
+    return _bars_to_levels_impl(bars, now_utc, et_tz=_ET_TZ)
 
 
 @app.get("/api/key-levels")

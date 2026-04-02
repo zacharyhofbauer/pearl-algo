@@ -2312,9 +2312,9 @@ def generate_signals(
         try:
             prev_close_val = float(df["close"].iloc[-2])
             # Long: previous bar closed below VWAP, current closes above
-            vwap_reclaim_long = bool(prev_close_val < vwap_curr and close > vwap_curr and volume_confirmed)
+            vwap_reclaim_long = bool(prev_close_val < vwap_curr and close > vwap_curr and ind.volume_confirmed)
             # Short: previous bar closed above VWAP, current closes below
-            vwap_reclaim_short = bool(prev_close_val > vwap_curr and close < vwap_curr and volume_confirmed)
+            vwap_reclaim_short = bool(prev_close_val > vwap_curr and close < vwap_curr and ind.volume_confirmed)
         except Exception as e:
             logger.debug(f"VWAP reclaim check failed: {e}")
 
