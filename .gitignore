@@ -22,16 +22,20 @@ legacy/
 *.egg-info/
 
 # Data and outputs
-data/
-logs/
-signals/
-journal/
-telemetry/
-reports/
-eval-reports/
-pearl_ai/eval/reports/
-state_cache/
-tests/artifacts/
+# Ignore both real directories and the repo-local symlink entries that point to
+# the canonical runtime location under ~/var/pearl-algo/.
+/data
+/logs
+/data/
+/logs/
+/journal/
+/telemetry/
+/reports/
+/eval-reports/
+/pearl_ai/eval/reports/
+/state_cache/
+/tests/artifacts/
+/signals/
 
 # Temporary debug/test images
 tmp_debug_*.png
@@ -50,6 +54,7 @@ ibgateway-latest-standalone-linux-x64.sh
 # Node.js (live-chart dashboard)
 node_modules/
 .next/
+.swc/
 live-chart/.next/
 live-chart/node_modules/
 *.tsbuildinfo
@@ -58,6 +63,7 @@ live-chart/node_modules/
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 *.swp
 secrets.env
 # Auto-generated API spec
