@@ -151,7 +151,7 @@ Official references:
 
 This prevents “9-hour rollback” situations.
 
-1. **Work on a branch** (avoid direct edits on `master` during market hours):
+1. **Work on a branch** (avoid direct edits on `main` during market hours):
 
 ```bash
 git switch -c ui/webapp-$(date -u +%Y-%m-%d)
