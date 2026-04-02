@@ -95,7 +95,10 @@ def get_tradovate_state(state_dir: Path) -> tuple:
 # ---------------------------------------------------------------------------
 
 
-def get_paired_tradovate_trades(state_dir: Path) -> List[Dict[str, Any]]:
+def get_paired_tradovate_trades(
+    state_dir: Path,
+    fills: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """Load fills and pair them into trades with a short TTL cache.
 
     This is the single call site for ``tradovate_fills_to_trades`` in the
@@ -103,11 +106,71 @@ def get_paired_tradovate_trades(state_dir: Path) -> List[Dict[str, Any]]:
     calling the raw pairing function directly.
     """
     def _pair() -> List[Dict[str, Any]]:
-        _, fills = get_tradovate_state(state_dir)
-        return _raw_fills_to_trades(fills)
+        active_fills = fills
+        if active_fills is None:
+            _, active_fills = get_tradovate_state(state_dir)
+        else:
+            active_fills = [normalize_fill(f) for f in active_fills]
+        return _raw_fills_to_trades(active_fills)
 
     # TTL of 10s is safe — fills arrive at most every 30s (cooldown_seconds).
     return cached(f"tv_paired_trades:{state_dir}", 10.0, _pair)
+
+
+def estimate_commission_per_trade(
+    trades: List[Dict[str, Any]],
+    *,
+    equity: float,
+    start_balance: float,
+) -> float:
+    """Estimate round-turn commission from fill P&L vs live equity delta."""
+    if equity <= 0 or not trades:
+        return 0.0
+
+    total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in trades)
+    equity_pnl = equity - start_balance
+    if total_fill_pnl <= equity_pnl:
+        return 0.0
+    return (total_fill_pnl - equity_pnl) / len(trades)
+
+
+def summarize_paired_trades_for_period(
+    trades: List[Dict[str, Any]],
+    start_utc: datetime,
+    end_utc: Optional[datetime] = None,
+    commission_per_trade: float = 0.0,
+) -> Dict[str, Any]:
+    """Build period stats from an already-paired Tradovate trade list."""
+    filtered = []
+    for t in trades:
+        exit_ts = t.get("exit_time", "")
+        if not exit_ts:
+            continue
+        try:
+            from pearlalgo.utils.paths import parse_trade_timestamp
+            exit_dt = parse_trade_timestamp(exit_ts)  # FIXED 2026-03-25: ET timestamps
+        except (ValueError, TypeError):
+            continue
+        if exit_dt < start_utc:
+            continue
+        if end_utc and exit_dt >= end_utc:
+            continue
+        filtered.append(t)
+
+    total = len(filtered)
+    wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
+    losses = total - wins
+    raw_pnl = sum(t.get("pnl") or 0 for t in filtered)
+    pnl = round(raw_pnl - (total * commission_per_trade), 2)
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+
+    return {
+        "pnl": pnl,
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +291,8 @@ def tradovate_performance_summary(
     tv: Dict[str, Any],
     fills: List[Dict[str, Any]],
     state_dir: Path,
+    *,
+    paired_trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build overall performance summary from Tradovate data.
 
@@ -237,7 +302,7 @@ def tradovate_performance_summary(
     """
     start_balance = get_start_balance(state_dir)
 
-    trades = _raw_fills_to_trades(fills)
+    trades = paired_trades if paired_trades is not None else _raw_fills_to_trades(fills)
     total = len(trades)
     wins = sum(1 for t in trades if (t.get("pnl") or 0) > 0)
     losses = total - wins
@@ -266,6 +331,8 @@ def tradovate_performance_for_period(
     start_utc: datetime,
     end_utc: Optional[datetime] = None,
     commission_per_trade: float = 0.0,
+    *,
+    paired_trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build performance stats from Tradovate fills filtered to a time range.
 
@@ -273,34 +340,10 @@ def tradovate_performance_for_period(
     ``commission_per_trade``: estimated round-turn commission to deduct per trade
     (derived from equity vs fill P&L gap).
     """
-    trades = _raw_fills_to_trades(fills)
-    filtered = []
-    for t in trades:
-        exit_ts = t.get("exit_time", "")
-        if not exit_ts:
-            continue
-        try:
-            from pearlalgo.utils.paths import parse_trade_timestamp
-            exit_dt = parse_trade_timestamp(exit_ts)  # FIXED 2026-03-25: ET timestamps
-        except (ValueError, TypeError):
-            continue
-        if exit_dt < start_utc:
-            continue
-        if end_utc and exit_dt >= end_utc:
-            continue
-        filtered.append(t)
-
-    total = len(filtered)
-    wins = sum(1 for t in filtered if (t.get("pnl") or 0) > 0)
-    losses = total - wins
-    raw_pnl = sum(t.get("pnl") or 0 for t in filtered)
-    pnl = round(raw_pnl - (total * commission_per_trade), 2)
-    win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
-
-    return {
-        "pnl": pnl,
-        "trades": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-    }
+    trades = paired_trades if paired_trades is not None else _raw_fills_to_trades(fills)
+    return summarize_paired_trades_for_period(
+        trades,
+        start_utc,
+        end_utc=end_utc,
+        commission_per_trade=commission_per_trade,
+    )

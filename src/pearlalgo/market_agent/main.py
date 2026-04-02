@@ -2,13 +2,13 @@
 Market Agent Main Entry Point
 
 Supports two modes:
-  1. Legacy: python -m pearlalgo.market_agent.main
-     Uses config/config.yaml + PEARLALGO_CONFIG_OVERLAY environment variable.
+  1. Canonical live runtime: python -m pearlalgo.market_agent.main
+     Uses config/live/tradovate_paper.yaml by default.
 
-  2. New (parameterized): python -m pearlalgo.market_agent.main \
-       --config config/accounts/tradovate_paper.yaml \
-       --data-dir data/tradovate/paper
-     Loads config/base.yaml merged with the account config.
+  2. Parameterized override: python -m pearlalgo.market_agent.main \
+       --config config/live/tradovate_paper.yaml \
+       --data-dir data/agent_state/MNQ
+     Loads the specified runtime config directly.
 """
 
 from __future__ import annotations
@@ -21,15 +21,20 @@ import os
 import sys
 from pathlib import Path
 
-import yaml
-
+from pearlalgo.config.config_file import (
+    _canonical_live_config_path,
+    _legacy_base_config_path,
+    _load_legacy_merged_config,
+    _load_yaml_file,
+)
+from pearlalgo.config.migration import migrate_legacy_runtime_config
 from pearlalgo.utils.logger import logger
 from pearlalgo.config.config_loader import build_strategy_config
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.market_agent.service_factory import build_service_dependencies
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.strategies.registry import get_strategy_defaults
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
 from pearlalgo.utils.paths import ensure_state_dir
 
@@ -68,33 +73,28 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _load_new_config(config_path: str) -> dict:
-    """Load config/base.yaml merged with the account-specific config file.
-
-    The account config only needs to contain keys that differ from base.yaml.
-    """
+    """Load a runtime config path, with legacy account overlays supported as a compatibility input."""
     config_file = Path(config_path)
+    if not config_file.is_absolute():
+        config_file = (project_root / config_file).resolve()
     if not config_file.exists():
-        raise FileNotFoundError(f"Account config not found: {config_file}")
+        raise FileNotFoundError(f"Runtime config not found: {config_file}")
 
-    # Resolve base.yaml relative to the account config (../base.yaml)
-    base_path = config_file.parent.parent / "base.yaml"
-    if not base_path.exists():
-        # Fallback: project root config/base.yaml
-        base_path = project_root / "config" / "base.yaml"
+    if config_file.parent.name == "accounts":
+        base_path = _legacy_base_config_path(project_root)
+        merged = _load_legacy_merged_config(project_root, config_file)
+        logger.warning(
+            "Loading legacy compatibility config path: %s + %s",
+            base_path,
+            config_file,
+        )
+    else:
+        merged = _load_yaml_file(config_file)
+        logger.info(f"Loaded runtime config: {config_file}")
 
-    base_config: dict = {}
-    if base_path.exists():
-        with open(base_path) as f:
-            base_config = yaml.safe_load(f) or {}
-        logger.info(f"Loaded base config: {base_path}")
-
-    with open(config_file) as f:
-        account_config = yaml.safe_load(f) or {}
-    logger.info(f"Loaded account config: {config_file}")
-
-    merged = _deep_merge(base_config, account_config)
+    merged = migrate_legacy_runtime_config(merged)
     account_name = merged.get("account", {}).get("name", config_file.stem)
-    logger.info(f"Config merged: account={account_name}")
+    logger.info(f"Runtime config ready: account={account_name}, active_strategy={merged.get('strategy', {}).get('active')}")
     return merged
 
 
@@ -103,15 +103,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=str,
-        default=None,
-        help="Path to account config YAML (e.g., config/accounts/tradovate_paper.yaml). "
-             "If not provided, falls back to legacy config.yaml loading.",
+        default=str(_canonical_live_config_path(project_root)),
+        help="Path to runtime config YAML (default: config/live/tradovate_paper.yaml).",
     )
     parser.add_argument(
         "--data-dir",
         type=str,
         default=None,
-        help="Path to data directory for this agent (e.g., data/tradovate/paper). "
+        help="Path to data directory for this agent (e.g., data/agent_state/MNQ). "
              "If not provided, uses PEARLALGO_STATE_DIR or default.",
     )
     return parser.parse_args()
@@ -152,19 +151,14 @@ async def main():
     args = _parse_args()
 
     # ---------------------------------------------------------------
-    # Config loading: --config required (base.yaml + account overlay)
+    # Config loading: canonical live runtime by default
     # ---------------------------------------------------------------
-    if not args.config:
-        logger.error(
-            "Missing --config. Example: --config config/accounts/tradovate_paper.yaml"
-        )
-        return
     logger.info(f"Starting Market Agent Service | run_id={run_id}")
     config_data = _load_new_config(args.config)
     try:
-        from pearlalgo.config.schema_v2 import validate_config
-        config_data = validate_config(config_data)
-        logger.info("Config validated (schema_v2)")
+        from pearlalgo.config.runtime_validation import validate_runtime_config
+        config_data = validate_runtime_config(config_data, strict_non_enforced=True)
+        logger.info("Config validated (runtime_validation)")
     except Exception as e:
         logger.error(f"Config validation failed: {e}")
         return
@@ -182,7 +176,7 @@ async def main():
             telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
 
     # Build strategy config
-    strategy_config = build_strategy_config(PEARL_BOT_CONFIG.copy(), config_data)
+    strategy_config = build_strategy_config(get_strategy_defaults(), config_data)
     config = ConfigView(strategy_config)
 
     # Data provider

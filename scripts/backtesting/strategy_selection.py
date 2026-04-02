@@ -7,7 +7,7 @@ Business logic is in: src/pearlalgo/analytics/strategy_report.py
 
 Usage:
     python scripts/backtesting/strategy_selection.py
-    python scripts/backtesting/strategy_selection.py --signals-path data/agent_state/NQ/signals.jsonl
+    python scripts/backtesting/strategy_selection.py --signals-path data/agent_state/MNQ/signals.jsonl
     python scripts/backtesting/strategy_selection.py --out-dir data/exports
 """
 
@@ -31,13 +31,13 @@ def main() -> int:
     parser.add_argument(
         "--signals-path",
         type=Path,
-        default=Path("data/agent_state/NQ/signals.jsonl"),
+        default=Path("data/agent_state/MNQ/signals.jsonl"),
         help="Path to signals.jsonl with exited trades",
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("data/agent_state/NQ/exports"),
+        default=Path("data/agent_state/MNQ/exports"),
         help="Output directory for report JSON",
     )
     parser.add_argument(

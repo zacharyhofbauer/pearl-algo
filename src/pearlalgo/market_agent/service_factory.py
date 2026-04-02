@@ -46,6 +46,7 @@ from pearlalgo.market_agent.notification_queue import NotificationQueue
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
+from pearlalgo.strategies.registry import get_strategy_defaults
 from pearlalgo.utils.logger import logger
 
 
@@ -141,8 +142,7 @@ class ServiceDependencies:
             self.service_config = load_service_config()
 
         if self.config is None:
-            from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
-            self.config = ConfigView(PEARL_BOT_CONFIG.copy())
+            self.config = ConfigView(get_strategy_defaults())
 
         symbol = str(self.config.get("symbol", "MNQ"))
         timeframe = str(self.config.get("timeframe", "5m"))

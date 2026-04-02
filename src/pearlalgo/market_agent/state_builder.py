@@ -23,6 +23,7 @@ from pearlalgo.utils.volume_pressure import (
     format_volume_pressure,
     timeframe_to_minutes,
 )
+from pearlalgo.strategies.composite_intraday import check_trading_session, detect_market_regime
 
 if TYPE_CHECKING:
     from pearlalgo.market_agent.service import MarketAgentService
@@ -265,7 +266,6 @@ class StateBuilder:
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open
         try:
-            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             state["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.service.config)
         except Exception as e:
             logger.warning(f"Failed to determine strategy session state: {e}")
@@ -277,7 +277,6 @@ class StateBuilder:
             last_market_data = getattr(self.service.data_fetcher, "_last_market_data", None) or {}
             df_for_regime = last_market_data.get("df")
             if isinstance(df_for_regime, pd.DataFrame) and not df_for_regime.empty and len(df_for_regime) >= 50:
-                from pearlalgo.trading_bots.pearl_bot_auto import detect_market_regime
                 regime_result = detect_market_regime(df_for_regime, lookback=50)
                 state["regime"] = regime_result.regime
                 state["regime_confidence"] = regime_result.confidence

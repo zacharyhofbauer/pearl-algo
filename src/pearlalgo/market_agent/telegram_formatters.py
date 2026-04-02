@@ -32,6 +32,8 @@ from pearlalgo.utils.formatting import (
 )
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.telegram_alerts import (
+    LABEL_SCANS,
+    _format_uptime,
     sanitize_telegram_markdown,
     format_pnl,
     format_signal_direction,
@@ -41,6 +43,7 @@ from pearlalgo.utils.telegram_alerts import (
     safe_label,
 )
 from pearlalgo.utils.paths import parse_utc_timestamp
+from pearlalgo.utils.market_hours import get_market_hours
 
 if TYPE_CHECKING:
     pass
@@ -394,6 +397,217 @@ def format_status_message(status: Dict) -> str:
         Formatted message string.
     """
     return f"📊 *NQ Agent Status*\n\n{status.get('message', 'No status available')}"
+
+
+def _resolve_futures_market_open(status: Dict) -> bool | None:
+    """Resolve futures-market state from status, falling back to market-hours service."""
+    futures_market_open = status.get("futures_market_open")
+    if futures_market_open is not None:
+        return futures_market_open
+    try:
+        return bool(get_market_hours().is_market_open())
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+        return None
+
+
+def _safe_optional_int(value: Any) -> int | None:
+    """Best-effort optional int coercion."""
+    try:
+        return int(value) if value is not None else None
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+        return None
+
+
+def format_enhanced_status_message(
+    status: Dict,
+    *,
+    account_label: str | None = None,
+) -> str:
+    """Build the enhanced Telegram status message."""
+    acct_tag = f"[{account_label}] " if account_label else ""
+    message = f"📊 *{acct_tag}Status*\n"
+
+    status_emoji = "🟢" if status.get("running") else "🔴"
+    pause_status = " ⏸️ PAUSED" if status.get("paused") else ""
+    uptime_str = ""
+    if status.get("uptime"):
+        uptime_str = f" ({_format_uptime(status['uptime'])})"
+
+    futures_market_open = _resolve_futures_market_open(status)
+    futures_emoji = gate_emoji(futures_market_open)
+    futures_text = gate_label(futures_market_open)
+
+    strategy_session_open = status.get("strategy_session_open")
+    strat_emoji = gate_emoji(strategy_session_open)
+    strat_text = gate_label(strategy_session_open)
+
+    message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
+    message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
+    message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
+
+    connection_status = status.get("connection_status", "unknown")
+    connection_failures = int(status.get("connection_failures", 0) or 0)
+    if connection_status == "disconnected" or connection_failures > 0:
+        conn_emoji = "🔴" if connection_status == "disconnected" else "🟡"
+        message += f"{conn_emoji} *Connection:* {str(connection_status).upper()}"
+        if connection_failures > 0:
+            message += f" ({connection_failures} failures)"
+        message += "\n"
+
+    scans_total = int(status.get("cycle_count", 0) or 0)
+    scans_session = _safe_optional_int(status.get("cycle_count_session"))
+    errors = int(status.get("error_count", 0) or 0)
+    buffer = int(status.get("buffer_size", 0) or 0)
+    buffer_target = _safe_optional_int(status.get("buffer_size_target"))
+
+    scans_label = (
+        f"{scans_session:,} {LABEL_SCANS} (session) / {scans_total:,} (total)"
+        if scans_session is not None
+        else f"{scans_total:,} {LABEL_SCANS}"
+    )
+    buffer_label = (
+        f"{buffer}/{buffer_target} bars (rolling)"
+        if buffer_target is not None
+        else f"{buffer} bars (rolling)"
+    )
+    message += f"📊 *Activity:* {scans_label} • {buffer_label} • {errors} errors\n"
+
+    signals_generated = int(status.get("signal_count", 0) or 0)
+    signals_sent = int(status.get("signals_sent", 0) or 0)
+    signals_failed = int(status.get("signals_send_failures", 0) or 0)
+    message += (
+        f"🔔 *Signals:* {signals_generated} generated • "
+        f"{signals_sent} sent • {signals_failed} failed\n"
+    )
+
+    last_err = status.get("last_signal_send_error")
+    if last_err:
+        msg_err = str(last_err)
+        if len(msg_err) > 140:
+            msg_err = msg_err[:140] + "…"
+        message += f"⚠️ *Last send error:* {msg_err}\n"
+
+    latest_bar = status.get("latest_bar")
+    if latest_bar:
+        data_level = latest_bar.get("_data_level", "unknown")
+        if data_level == "level2":
+            data_text = "Level 2"
+            imbalance = latest_bar.get("imbalance", 0.0)
+            if imbalance is not None:
+                imbalance_pct = imbalance * 100
+                if imbalance > 0.1:
+                    data_text += f" • 🟢 Bid {imbalance_pct:+.1f}%"
+                elif imbalance < -0.1:
+                    data_text += f" • 🔴 Ask {imbalance_pct:+.1f}%"
+                else:
+                    data_text += " • ⚪ Balanced"
+            message += f"📊 *Data:* {data_text}\n"
+        elif data_level == "level1":
+            message += "📈 *Data:* Level 1\n"
+        else:
+            is_eth = latest_bar.get("_historical_eth", False)
+            data_emoji = "📊"
+            data_age_minutes = None
+            if latest_bar.get("timestamp"):
+                try:
+                    bar_time = parse_utc_timestamp(latest_bar["timestamp"])
+                    if bar_time:
+                        age_delta = datetime.now(timezone.utc) - bar_time
+                        data_age_minutes = age_delta.total_seconds() / 60
+                except Exception as e:
+                    logger.debug(f"Non-critical: {e}")
+            if is_eth:
+                if data_age_minutes is not None and data_age_minutes > 10:
+                    data_text = f"Delayed (ETH - {data_age_minutes:.0f}m)"
+                    data_emoji = "📉"
+                else:
+                    data_text = "Live (ETH)"
+            else:
+                if data_age_minutes is not None and data_age_minutes > 10:
+                    data_text = f"Delayed ({data_age_minutes:.0f}m)"
+                else:
+                    data_text = "Live"
+            message += f"{data_emoji} *Data:* {data_text}\n"
+
+    performance = status.get("performance", {})
+    if performance:
+        exited = performance.get("exited_signals", 0)
+        if exited > 0:
+            wins = performance.get("wins", 0)
+            losses = performance.get("losses", 0)
+            win_rate = performance.get("win_rate", 0) * 100
+            total_pnl = performance.get("total_pnl", 0)
+            avg_pnl = performance.get("avg_pnl", 0)
+            message += (
+                f"📈 *Performance (7d):* {wins}W/{losses}L • "
+                f"{fmt_pct_direct(win_rate)} WR • {fmt_currency(total_pnl)} • "
+                f"{fmt_currency(avg_pnl)} avg\n"
+            )
+        else:
+            message += "📈 *Performance (7d):* No completed trades yet\n"
+
+    return message
+
+
+def format_heartbeat_message(status: Dict) -> str:
+    """Build the compact heartbeat message."""
+    futures_market_open = _resolve_futures_market_open(status)
+    strategy_session_open = status.get("strategy_session_open")
+
+    latest_price = status.get("latest_price")
+    current_time = status.get("current_time")
+    symbol = status.get("symbol", "NQ")
+
+    time_str = ""
+    if current_time:
+        try:
+            if isinstance(current_time, str):
+                current_time = parse_utc_timestamp(current_time)
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
+            time_str = fmt_time_et(current_time, fallback=current_time.strftime("%H:%M UTC"))
+        except Exception as e:
+            logger.debug(f"Non-critical: {e}")
+
+    futures_emoji = gate_emoji(futures_market_open)
+    futures_text = gate_label(futures_market_open)
+    strat_emoji = gate_emoji(strategy_session_open)
+    strat_text = gate_label(strategy_session_open)
+    message = f"💓 *Heartbeat* {time_str}\n\n"
+
+    if latest_price:
+        message += f"💰 {fmt_currency(latest_price)} ({symbol})\n"
+    else:
+        message += f"📊 *Symbol:* {symbol}\n"
+
+    message += (
+        f"{futures_emoji} *FuturesMarketOpen:* {futures_text}  •  "
+        f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
+    )
+
+    scans_total = int(status.get("cycle_count", 0) or 0)
+    scans_session = _safe_optional_int(status.get("cycle_count_session"))
+    signals_generated = int(status.get("signal_count", 0) or 0)
+    signals_sent = int(status.get("signals_sent", 0) or 0)
+    signals_failed = int(status.get("signals_send_failures", 0) or 0)
+    errors = int(status.get("error_count", 0) or 0)
+    buffer = int(status.get("buffer_size", 0) or 0)
+    buffer_target = _safe_optional_int(status.get("buffer_size_target"))
+
+    scans_part = (
+        f"{scans_session:,}/{scans_total:,} {LABEL_SCANS}"
+        if scans_session is not None
+        else f"{scans_total:,} {LABEL_SCANS}"
+    )
+    buf_part = f"{buffer}/{buffer_target} bars" if buffer_target is not None else f"{buffer} bars"
+    message += (
+        f"📊 {scans_part} • {signals_generated} gen / {signals_sent} sent / "
+        f"{signals_failed} fail • {buf_part} • {errors} errors\n"
+    )
+
+    return message
 
 
 def format_support_footer_line(

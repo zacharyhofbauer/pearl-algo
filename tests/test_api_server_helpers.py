@@ -14,6 +14,7 @@ _snap_to_bar.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
 import math
 import time
@@ -149,6 +150,38 @@ class TestGetRecentExits:
         result = srv._get_recent_exits(tmp_path, limit=3)
         assert len(result) == 3
 
+    @patch.object(srv, "_is_tv_paper_account_new", return_value=True)
+    def test_tv_paper_uses_paired_trades_helper(self, _mock, tmp_path: Path):
+        paired_trades = [
+            {
+                "signal_id": "tv-1",
+                "direction": "short",
+                "pnl": 42.5,
+                "exit_reason": "target",
+                "exit_time": "2026-03-10T11:00:00",
+                "entry_time": "2026-03-10T10:30:00",
+                "entry_price": 20100.0,
+                "exit_price": 20070.0,
+            }
+        ]
+        with patch.object(srv, "_get_paired_tradovate_trades", return_value=paired_trades) as paired_mock:
+            result = srv._get_recent_exits(tmp_path, limit=5)
+        paired_mock.assert_called_once_with(tmp_path)
+        assert result == [
+            {
+                "signal_id": "tv-1",
+                "direction": "short",
+                "pnl": 42.5,
+                "exit_reason": "target",
+                "exit_time": "2026-03-10T11:00:00",
+                "entry_time": "2026-03-10T10:30:00",
+                "entry_price": 20100.0,
+                "exit_price": 20070.0,
+                "entry_reason": "",
+                "duration_seconds": None,
+            }
+        ]
+
 
 # ---------------------------------------------------------------------------
 # 4. _get_recent_signals
@@ -263,6 +296,48 @@ class TestGetChallengeStatus:
         assert result["pnl"] == 500.0
         assert result["drawdown_risk_pct"] == 15.0
 
+    @patch.object(srv, "_is_tv_paper_account_new", return_value=True)
+    def test_tv_paper_uses_paired_trades_for_live_metrics(self, _mock, tmp_path: Path):
+        p = tmp_path / "challenge_state.json"
+        p.write_text(json.dumps({
+            "config": {
+                "enabled": True,
+                "start_balance": 50000.0,
+                "profit_target": 3000.0,
+                "max_drawdown": 2000.0,
+            },
+            "current_attempt": {
+                "pnl": 0.0,
+                "trades": 0,
+                "wins": 0,
+                "win_rate": 0.0,
+                "max_drawdown_hit": 0.0,
+                "outcome": "active",
+                "attempt_id": 2,
+            },
+            "tv_paper": {
+                "stage": "evaluation",
+                "current_drawdown_floor": 49500.0,
+            },
+        }))
+        paired_trades = [
+            {"pnl": 80.0},
+            {"pnl": -20.0},
+        ]
+        with (
+            patch.object(srv, "_get_tradovate_state", return_value=({"equity": 50060.0}, [{"ignored": True}])),
+            patch.object(srv, "_get_paired_tradovate_trades", return_value=paired_trades) as paired_mock,
+        ):
+            result = srv._get_challenge_status(tmp_path)
+
+        paired_mock.assert_called_once()
+        assert result is not None
+        assert result["current_balance"] == 50060.0
+        assert result["pnl"] == 60.0
+        assert result["trades"] == 2
+        assert result["wins"] == 1
+        assert result["win_rate"] == 50.0
+
 
 # ---------------------------------------------------------------------------
 # 7. _json_sanitize
@@ -337,9 +412,106 @@ class TestGetEquityCurve:
             result = srv._get_equity_curve(tmp_path, hours=24)
         assert result == []
 
+    @patch.object(srv, "_is_tv_paper_account_new", return_value=True)
+    def test_tv_paper_uses_paired_trades(self, _mock, tmp_path: Path):
+        now = datetime.now(timezone.utc)
+        paired_trades = [
+            {"exit_time": (now - timedelta(hours=2)).isoformat(), "pnl": 20.0},
+            {"exit_time": (now - timedelta(hours=1)).isoformat(), "pnl": -5.0},
+        ]
+        with (
+            patch.object(srv, "_get_tradovate_state", return_value=({}, [{"ignored": True}])),
+            patch.object(srv, "_get_paired_tradovate_trades", return_value=paired_trades) as paired_mock,
+        ):
+            result = srv._get_equity_curve(tmp_path, hours=24)
+
+        paired_mock.assert_called_once_with(tmp_path, [{"ignored": True}])
+        assert [point["value"] for point in result] == [20.0, 15.0]
+
 
 # ---------------------------------------------------------------------------
-# 9. _get_risk_metrics (IBKR Virtual path)
+# 9. _build_ws_state_payload
+# ---------------------------------------------------------------------------
+
+class TestBuildWsStatePayload:
+    def test_builds_shared_payload_from_helper_outputs(self, tmp_path: Path):
+        state = {
+            "running": True,
+            "paused": False,
+            "futures_market_open": True,
+            "data_fresh": True,
+            "active_trades_count": 1,
+            "active_trades_unrealized_pnl": 12.5,
+            "buy_sell_pressure_raw": {"buy": 0.6, "sell": 0.4},
+            "execution_state": {"mode": "live"},
+            "tradovate_account": {"equity": 50010.0},
+            "circuit_breaker": {"armed": False},
+            "ml_filter_performance": {"lift": 1.2},
+            "session_context": {"session": "ny"},
+            "signal_activity": {"generated": 3},
+        }
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(srv, "_cached", side_effect=lambda _key, _ttl, fn, *args, **kwargs: fn(*args, **kwargs))
+            )
+            stack.enter_context(patch.object(srv, "_compute_daily_stats", return_value={
+                "daily_pnl": 42.0,
+                "daily_trades": 3,
+                "daily_wins": 2,
+                "daily_losses": 1,
+                "pnl_source": "tradovate_fills",
+                "tradovate_positions": 2,
+                "tradovate_open_pnl": 15.5,
+            }))
+            stack.enter_context(patch.object(srv, "_get_challenge_status", return_value={"enabled": True}))
+            stack.enter_context(patch.object(srv, "_get_recent_exits", return_value=[{"signal_id": "x"}]))
+            stack.enter_context(patch.object(srv, "_compute_performance_stats", return_value={"24h": {"pnl": 10.0}}))
+            stack.enter_context(patch.object(srv, "_get_equity_curve", return_value=[{"time": 1, "value": 5.0}]))
+            stack.enter_context(patch.object(srv, "_get_risk_metrics", return_value={"max_drawdown": -5.0}))
+            stack.enter_context(patch.object(srv, "_get_positions_for_broadcast", return_value=[{"signal_id": "pos-1"}]))
+            stack.enter_context(patch.object(srv, "_get_trades_for_broadcast", return_value=[{"signal_id": "trade-1"}]))
+            stack.enter_context(
+                patch.object(srv, "_get_performance_summary_for_broadcast", return_value={"all": {"pnl": 42.0}})
+            )
+            stack.enter_context(patch.object(srv, "_get_cadence_metrics_enhanced", return_value={"cycles": 9}))
+            stack.enter_context(
+                patch.object(srv, "_get_market_regime", return_value={"regime": "ranging", "confidence": 0.8})
+            )
+            rejections_mock = stack.enter_context(
+                patch.object(srv, "_get_signal_rejections_24h", return_value={"direction_gating": 2})
+            )
+            decision_mock = stack.enter_context(
+                patch.object(srv, "_get_last_signal_decision", return_value={"allowed": True})
+            )
+            shadow_mock = stack.enter_context(
+                patch.object(srv, "_get_shadow_counters", return_value={"generated": 1})
+            )
+            stack.enter_context(patch.object(srv, "_get_gateway_status", return_value={"connected": True}))
+            stack.enter_context(patch.object(srv, "_get_connection_health", return_value={"status": "healthy"}))
+            stack.enter_context(patch.object(srv, "_get_error_summary", return_value={"recent_errors": 0}))
+            stack.enter_context(patch.object(srv, "_get_config", return_value={"symbol": "MNQ"}))
+            stack.enter_context(patch.object(srv, "_get_data_quality", return_value={"freshness": "good"}))
+            stack.enter_context(patch.object(srv, "_operator_enabled", True))
+            payload = srv._build_ws_state_payload(tmp_path, state)
+
+        assert payload["daily_pnl"] == 42.0
+        assert payload["active_trades_count"] == 2
+        assert payload["active_trades_unrealized_pnl"] == 15.5
+        assert payload["challenge"] == {"enabled": True}
+        assert payload["positions"] == [{"signal_id": "pos-1"}]
+        assert payload["recent_trades"] == [{"signal_id": "trade-1"}]
+        assert payload["performance_summary"] == {"all": {"pnl": 42.0}}
+        assert payload["signal_rejections_24h"] == {"direction_gating": 2}
+        assert payload["last_signal_decision"] == {"allowed": True}
+        assert payload["shadow_counters"] == {"generated": 1}
+        assert payload["operator_lock_enabled"] is True
+        rejections_mock.assert_called_once_with(state)
+        decision_mock.assert_called_once_with(state)
+        shadow_mock.assert_called_once_with(state)
+
+
+# ---------------------------------------------------------------------------
+# 10. _get_risk_metrics (IBKR Virtual path)
 # ---------------------------------------------------------------------------
 
 class TestGetRiskMetrics:
@@ -366,7 +538,7 @@ class TestGetRiskMetrics:
 
 
 # ---------------------------------------------------------------------------
-# 10. _get_market_regime
+# 11. _get_market_regime
 # ---------------------------------------------------------------------------
 
 class TestGetMarketRegime:

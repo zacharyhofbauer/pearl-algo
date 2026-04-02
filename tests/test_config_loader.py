@@ -1,8 +1,8 @@
 """
-Tests for the consolidated config loading path (base.yaml + account overlay).
+Tests for the canonical runtime config loading path.
 
 Covers:
-  - main._load_new_config: file discovery, base + overlay merge, missing file
+  - main._load_new_config: canonical runtime load, legacy fallback, missing file
   - schema_v2.validate_config: integration with merged config
   - config_file.load_config_yaml: env substitution, missing file handling
   - config_loader.build_strategy_config: merge behavior with new config shape
@@ -17,6 +17,10 @@ import pytest
 import yaml
 
 from pearlalgo.market_agent.main import _load_new_config, _deep_merge
+from pearlalgo.config.config_file import (
+    _load_legacy_merged_config,
+    _resolve_default_config_source,
+)
 from pearlalgo.config.schema_v2 import validate_config
 from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.config.config_loader import build_strategy_config, clear_config_cache
@@ -27,30 +31,31 @@ PROJECT_ROOT = Path(__file__).parent.parent
 class TestLoadNewConfig:
     """Tests for _load_new_config (new --config path)."""
 
-    def test_missing_account_config_raises(self):
-        """Missing account config file should raise FileNotFoundError."""
-        with pytest.raises(FileNotFoundError, match="Account config not found"):
+    def test_missing_runtime_config_raises(self):
+        """Missing runtime config file should raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="Runtime config not found"):
             _load_new_config("config/accounts/nonexistent.yaml")
 
-    def test_missing_account_config_absolute_path(self, tmp_path):
+    def test_missing_runtime_config_absolute_path(self, tmp_path):
         """Absolute path to missing file raises."""
         bad_path = tmp_path / "no_such.yaml"
         with pytest.raises(FileNotFoundError, match="not found"):
             _load_new_config(str(bad_path))
 
-    def test_load_tradovate_paper_config_if_present(self):
-        """When config/accounts/tradovate_paper.yaml exists, load and merge with base."""
-        p = PROJECT_ROOT / "config" / "accounts" / "tradovate_paper.yaml"
+    def test_load_tradovate_paper_live_config_if_present(self):
+        """When config/live/tradovate_paper.yaml exists, load it as the canonical runtime."""
+        p = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
         if not p.exists():
-            pytest.skip("config/accounts/tradovate_paper.yaml not found")
+            pytest.skip("config/live/tradovate_paper.yaml not found")
         c = _load_new_config(str(p))
         assert isinstance(c, dict)
         assert c.get("symbol") == "MNQ"
         assert c.get("account", {}).get("name") == "tradovate_paper"
+        assert c.get("strategy", {}).get("active") == "composite_intraday"
 
     def test_merged_config_has_base_defaults(self):
-        """Merged config should include keys from base.yaml when present."""
-        p = PROJECT_ROOT / "config" / "accounts" / "tradovate_paper.yaml"
+        """Canonical runtime config should include the expected core sections."""
+        p = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
         if not p.exists():
             pytest.skip("config not found")
         c = _load_new_config(str(p))
@@ -63,13 +68,14 @@ class TestValidateConfigIntegration:
 
     def test_validated_config_has_correct_types(self):
         """Validated config should have execution.adapter and symbol."""
-        p = PROJECT_ROOT / "config" / "accounts" / "tradovate_paper.yaml"
+        p = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
         if not p.exists():
             pytest.skip("config not found")
         raw = _load_new_config(str(p))
         v = validate_config(raw)
         assert v["symbol"] == "MNQ"
         assert v["execution"]["adapter"] == "tradovate"
+        assert v["strategy"]["active"] == "composite_intraday"
 
     def test_empty_symbol_rejected(self):
         """Schema validation rejects empty symbol."""
@@ -106,21 +112,57 @@ class TestConfigFileEnvSubstitution:
     def test_load_config_yaml_missing_returns_empty(self):
         """When base and overlay don't exist, load_config_yaml returns empty dict."""
         clear_config_cache()
-        # Use a path that doesn't exist; no PEARLALGO_CONFIG_PATH so base is config/config.yaml
-        # If config/config.yaml doesn't exist, we get {}
+        # Use a path that doesn't exist. When nothing exists, we get {}.
         result = load_config_yaml(config_path=Path("/nonexistent/config.yaml"))
         assert isinstance(result, dict)
-        # When path doesn't exist, overlay is empty; base may or may not exist
-        if not (PROJECT_ROOT / "config" / "config.yaml").exists():
-            assert result == {} or "symbol" in result  # base might be loaded from project
+        assert result == {}
+
+    def test_resolve_default_config_source_prefers_canonical_live_config(self, tmp_path):
+        """Default resolution should prefer the canonical live config when present."""
+        live_path = tmp_path / "config" / "live"
+        live_path.mkdir(parents=True)
+        canonical = live_path / "tradovate_paper.yaml"
+        canonical.write_text("symbol: MNQ\n")
+
+        target_path, legacy_overlay_path = _resolve_default_config_source(tmp_path)
+        assert target_path == canonical
+        assert legacy_overlay_path is None
+
+    def test_resolve_default_config_source_uses_single_legacy_overlay(self, tmp_path):
+        """Default resolution should fall back to one legacy overlay when no live config exists."""
+        accounts_dir = tmp_path / "config" / "accounts"
+        accounts_dir.mkdir(parents=True)
+        overlay = accounts_dir / "tradovate_paper.yaml"
+        overlay.write_text("symbol: ES\n")
+
+        target_path, legacy_overlay_path = _resolve_default_config_source(tmp_path)
+        assert target_path is None
+        assert legacy_overlay_path == overlay
+
+    def test_load_legacy_merged_config_merges_base_and_overlay(self, tmp_path):
+        """Legacy compatibility loading should deep-merge base.yaml with the overlay."""
+        config_dir = tmp_path / "config"
+        accounts_dir = config_dir / "accounts"
+        accounts_dir.mkdir(parents=True)
+        (config_dir / "base.yaml").write_text(
+            "symbol: MNQ\nrisk:\n  max_risk_per_trade: 0.015\nstrategy:\n  active: composite_intraday\n"
+        )
+        overlay = accounts_dir / "tradovate_paper.yaml"
+        overlay.write_text("risk:\n  max_risk_per_trade: 0.02\nexecution:\n  mode: dry_run\n")
+
+        result = _load_legacy_merged_config(tmp_path, overlay)
+        assert result["symbol"] == "MNQ"
+        assert result["strategy"]["active"] == "composite_intraday"
+        assert result["risk"]["max_risk_per_trade"] == 0.02
+        assert result["execution"]["mode"] == "dry_run"
 
 
 class TestBuildStrategyConfig:
     """build_strategy_config with new config shape."""
 
     def test_build_strategy_config_merges_overlay(self):
-        """build_strategy_config merges account overlay into base strategy."""
-        p = PROJECT_ROOT / "config" / "accounts" / "tradovate_paper.yaml"
+        """build_strategy_config merges canonical runtime config into base strategy."""
+        p = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
         if not p.exists():
             pytest.skip("config not found")
         config_data = _load_new_config(str(p))
@@ -129,16 +171,19 @@ class TestBuildStrategyConfig:
         assert result["symbol"] == "MNQ"
         assert result["timeframe"] == "1m"
 
-    def test_pearl_bot_auto_keys_flattened_to_top_level(self):
-        """pearl_bot_auto section should be flattened to top-level strategy keys."""
+    def test_active_strategy_keys_flattened_to_top_level(self):
+        """Active strategy section should be flattened to top-level runtime keys."""
         config_data = {
             "symbol": "MNQ",
             "timeframe": "1m",
-            "pearl_bot_auto": {
-                "ema_fast": 5,
-                "ema_slow": 13,
-                "min_confidence": 0.40,
-                "allow_trend_breakout_entries": True,
+            "strategy": {"active": "composite_intraday"},
+            "strategies": {
+                "composite_intraday": {
+                    "ema_fast": 5,
+                    "ema_slow": 13,
+                    "min_confidence": 0.40,
+                    "allow_trend_breakout_entries": True,
+                },
             },
         }
         result = build_strategy_config({}, config_data)
@@ -147,8 +192,8 @@ class TestBuildStrategyConfig:
         assert result["min_confidence"] == 0.40
         assert result["allow_trend_breakout_entries"] is True
 
-    def test_pearl_bot_auto_non_strategy_keys_ignored(self):
-        """Keys in pearl_bot_auto that are not StrategyParams fields should not clobber base."""
+    def test_legacy_pearl_bot_auto_keys_still_migrate(self):
+        """Legacy pearl_bot_auto keys still migrate through the compatibility fallback."""
         config_data = {
             "symbol": "MNQ",
             "pearl_bot_auto": {"symbol": "ES", "ema_fast": 5},

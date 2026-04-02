@@ -1,19 +1,13 @@
-"""
-Lightweight Pydantic config schema (v2) for the new base.yaml + account overlay system.
-
-Validates types, provides defaults, and fails fast at startup with clear error messages.
-Replaces the old 6-file config system for the new --config code path.
-
-Usage:
-    from pearlalgo.config.schema_v2 import validate_config
-    config_dict = validate_config(merged_yaml_dict)
-"""
+"""Lightweight Pydantic schema for the canonical PEARL runtime config."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field, field_validator
+
+from pearlalgo.config.migration import migrate_legacy_runtime_config
+from pearlalgo.strategies.registry import ACTIVE_STRATEGY
 
 
 class AccountConfig(BaseModel):
@@ -74,12 +68,56 @@ class SignalsConfig(BaseModel):
 
 
 class StrategyConfig(BaseModel):
-    """Strategy configuration."""
-    enabled_signals: List[str] = Field(default_factory=lambda: ["unified_strategy"])
+    """Top-level strategy runtime configuration."""
+    active: str = ACTIVE_STRATEGY
+    enforce_session_window: bool = False
+    enabled_signals: List[str] = Field(default_factory=lambda: [ACTIVE_STRATEGY])
     enable_dynamic_sizing: bool = True
     base_contracts: int = 3
     high_conf_contracts: int = 5
     max_conf_contracts: int = 8
+
+
+class CompositeIntradayConfig(BaseModel):
+    """Canonical live strategy parameters for the composite intraday bundle."""
+
+    model_config = {"extra": "allow"}
+
+    ema_fast: int = 9
+    ema_slow: int = 21
+    min_confidence: float = 0.4
+    min_confidence_long: float = 0.4
+    min_confidence_short: float = 0.4
+    stop_loss_atr_mult: float = 1.5
+    take_profit_atr_mult: float = 2.5
+    volatile_sl_mult: float = 1.3
+    volatile_tp_mult: float = 1.3
+    ranging_sl_mult: float = 0.8
+    ranging_tp_mult: float = 0.7
+    allow_vwap_cross_entries: bool = True
+    allow_vwap_retest_entries: bool = True
+    allow_trend_momentum_entries: bool = True
+    allow_trend_breakout_entries: bool = True
+    allow_orb_entries: bool = True
+    allow_vwap_2sd_entries: bool = True
+    allow_smc_entries: bool = True
+
+
+class StrategiesConfig(BaseModel):
+    """Strategy bundle registry config."""
+
+    model_config = {"extra": "allow"}
+
+    composite_intraday: CompositeIntradayConfig = Field(default_factory=CompositeIntradayConfig)
+
+
+class GuardrailsConfig(BaseModel):
+    """Minimal live safety model; execution remains the primary protection surface."""
+
+    signal_gate_enabled: bool = False
+    max_consecutive_losses: int = 3
+    max_session_drawdown: float = 1800.0
+    max_daily_drawdown: float = 99999.0
 
 
 class AgentConfigSchema(BaseModel):
@@ -102,6 +140,8 @@ class AgentConfigSchema(BaseModel):
     challenge: ChallengeConfig = Field(default_factory=ChallengeConfig)
     signals: SignalsConfig = Field(default_factory=SignalsConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
+    strategies: StrategiesConfig = Field(default_factory=StrategiesConfig)
+    guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
 
     @field_validator("symbol")
     @classmethod
@@ -134,11 +174,12 @@ def validate_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         The validated config as a plain dict (compatible with ConfigView).
     """
-    schema = AgentConfigSchema(**raw)
+    normalized = migrate_legacy_runtime_config(raw)
+    schema = AgentConfigSchema(**normalized)
     # Convert back to dict, keeping extra keys that aren't in the schema
     validated = schema.model_dump()
     # Merge back any extra top-level keys from raw that pydantic stored
-    for key, value in raw.items():
+    for key, value in normalized.items():
         if key not in validated:
             validated[key] = value
     return validated

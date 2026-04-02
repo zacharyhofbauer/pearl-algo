@@ -539,7 +539,7 @@ class TestErrorWarning:
         mock_telegram.notify_risk_warning.assert_awaited_once()
         msg = mock_telegram.notify_risk_warning.call_args[0][0]
         assert "Circuit Breaker" in msg
-        assert "max_errors_exceeded" in msg
+        assert "max errors exceeded" in msg.lower()
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_cooldown_dedup(self, notifier, mock_telegram):
@@ -1033,6 +1033,59 @@ class TestEnhancedStatusHeartbeat:
         assert result is True
         msg = mock_telegram.send_message.call_args[0][0]
         assert "NQ" in msg
+
+
+class TestPureStatusFormatters:
+    def test_format_enhanced_status_message_preserves_account_label_and_perf(self):
+        from pearlalgo.market_agent.telegram_formatters import format_enhanced_status_message
+
+        status = {
+            "running": True,
+            "paused": False,
+            "futures_market_open": True,
+            "strategy_session_open": False,
+            "cycle_count": 120,
+            "signal_count": 4,
+            "signals_sent": 3,
+            "signals_send_failures": 1,
+            "error_count": 2,
+            "buffer_size": 300,
+            "performance": {
+                "exited_signals": 5,
+                "wins": 3,
+                "losses": 2,
+                "win_rate": 0.6,
+                "total_pnl": 150.0,
+                "avg_pnl": 30.0,
+            },
+        }
+
+        msg = format_enhanced_status_message(status, account_label="TV-PAPER")
+        assert "[TV-PAPER]" in msg
+        assert "RUNNING" in msg
+        assert "3W/2L" in msg
+        assert "Signals" in msg
+
+    def test_format_heartbeat_message_formats_price_and_counts(self):
+        from pearlalgo.market_agent.telegram_formatters import format_heartbeat_message
+
+        status = {
+            "symbol": "NQ",
+            "latest_price": 18500.0,
+            "futures_market_open": True,
+            "strategy_session_open": True,
+            "cycle_count": 10,
+            "signal_count": 2,
+            "signals_sent": 2,
+            "signals_send_failures": 0,
+            "error_count": 1,
+            "buffer_size": 250,
+        }
+
+        msg = format_heartbeat_message(status)
+        assert "Heartbeat" in msg
+        assert "18,500.00" in msg or "$18,500.00" in msg
+        assert "2 gen / 2 sent / 0 fail" in msg
 
 
 # ===================================================================

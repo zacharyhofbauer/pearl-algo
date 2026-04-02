@@ -20,142 +20,30 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import ET, is_within_trading_window
 
+# Shared types (extracted to break circular imports)
+from pearlalgo.market_agent.circuit_breaker_types import (
+    CircuitBreakerDecision,
+    TradingCircuitBreakerConfig,
+)
 
-@dataclass
-class CircuitBreakerDecision:
-    """Result of circuit breaker evaluation."""
-    allowed: bool
-    reason: str
-    severity: str = "info"  # info, warning, critical
-    details: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "allowed": self.allowed,
-            "reason": self.reason,
-            "severity": self.severity,
-            "details": self.details,
-        }
-
-
-@dataclass
-class TradingCircuitBreakerConfig:
-    """Configuration for the trading circuit breaker."""
-
-    # Mode: enforce blocks signals, warn_only emits telemetry only
-    mode: str = "enforce"
-
-    # Kill switch: block all short/sell signals when enabled
-    kill_switch_short: bool = False
-    
-    # Consecutive loss limits
-    max_consecutive_losses: int = 5
-    consecutive_loss_cooldown_minutes: int = 30
-    
-    # Daily/session drawdown limits
-    max_session_drawdown: float = 500.0  # USD
-    max_daily_drawdown: float = 1000.0  # USD
-    max_daily_profit: float = 3000.0  # USD — stop trading after hitting profit target
-    drawdown_cooldown_minutes: int = 60
-    
-    # Rolling win rate filter
-    rolling_window_trades: int = 20
-    min_rolling_win_rate: float = 0.30  # 30%
-    win_rate_cooldown_minutes: int = 30
-    
-    # Position limits
-    max_concurrent_positions: int = 5
-    min_price_distance_pct: float = 0.5  # Don't enter within 0.5% of existing position
-    
-    # Volatility/chop filter
-    enable_volatility_filter: bool = True
-    min_atr_ratio: float = 0.8  # ATR must be >= 80% of recent average
-    max_atr_ratio: float = 2.5  # ATR must be <= 250% of recent average (avoid extreme volatility)
-    chop_detection_window: int = 10  # Number of recent trades to check
-    chop_win_rate_threshold: float = 0.35  # If win rate in window < 35%, market is choppy
-    
-    # Auto-recovery
-    auto_resume_after_cooldown: bool = True
-    require_winning_trade_to_resume: bool = False
-    
-    # Session filter - skip signals during historically poor-performing sessions (ET hours)
-    # Based on data analysis: overnight/close/midday perform well, morning/afternoon/premarket perform poorly
-    enable_session_filter: bool = True
-    # Sessions to ALLOW (all others blocked when filter is enabled)
-    # Default: overnight (6PM-4AM), midday (10AM-2PM), close (5PM-6PM)
-    allowed_sessions: List[str] = field(default_factory=lambda: ["overnight", "midday", "close"])
-    # Session definitions (start_hour, end_hour) in ET (Eastern Time, UTC-5)
-    # overnight: 18-4 (6PM-4AM), premarket: 4-6, morning: 6-10, midday: 10-14, afternoon: 14-17, close: 17-18
-    
-    # =========================================================================
-    # Hour-level filter — block signals outside profitable hours (ET)
-    # =========================================================================
-    enable_hour_filter: bool = False
-    allowed_trading_hours_et: List[int] = field(default_factory=lambda: list(range(24)))
-    # Hours when SHORT signals are allowed (ET). Empty list + kill_switch_short=false = all hours.
-    # Non-empty list = shorts only allowed at these hours. Based on data: [3, 4, 18, 21]
-    allowed_short_hours_et: List[int] = field(default_factory=list)
-
-    # =========================================================================
-    # Weekday filter — block signals on historically unprofitable days
-    # =========================================================================
-    blocked_weekdays: List[int] = field(default_factory=list)  # Python weekday: Mon=0 ... Sun=6
-
-    # =========================================================================
-    # Phase 1: Direction gating by market regime
-    # Based on data: shorts underperform longs (40% vs 47% WR), shorts are 0W/2L today
-    # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
-    # =========================================================================
-    enable_direction_gating: bool = True
-    direction_gating_min_confidence: float = 0.70  # Only apply strict gating if regime confidence >= this
-    # Direction rules per regime (when confidence is met):
-    # - trending_up -> long only
-    # - trending_down -> short only
-    # - ranging/volatile/unknown -> long only (conservative given short-side leak)
-    
-    # =========================================================================
-    # Phase 2: Optional regime avoidance (default OFF for observation)
-    # =========================================================================
-    enable_regime_avoidance: bool = False  # Start with logging "would-have-blocked"
-    blocked_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
-    regime_avoidance_min_confidence: float = 0.70
-    
-    # =========================================================================
-    # Phase 3: Trigger-based de-risking filters
-    # =========================================================================
-    enable_trigger_filters: bool = False  # Start OFF
-    # ema_cross trigger requires volume confirmation when enabled
-    ema_cross_require_volume: bool = True
-    # In ranging/volatile regimes, require volume confirmation for all entries
-    low_regime_require_volume: bool = True
-    
-    # =========================================================================
-    # Phase 4: ML chop shield (adaptive blocking)
-    # Only enable after sufficient data proves lift
-    # =========================================================================
-    enable_ml_chop_shield: bool = False  # Requires external validation
-    ml_min_scored_trades: int = 50  # Minimum trades for lift validation
-    ml_min_winrate_delta: float = 0.15  # PASS vs FAIL must differ by 15+ percentage points
-    ml_chop_shield_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
-
-    # =========================================================================
-    # Tradovate Paper Evaluation Gate (prop firm rule enforcement)
-    # =========================================================================
-    enable_tv_paper_eval_gate: bool = False  # Enable for Tradovate Paper prop firm accounts
-    tv_paper_max_contracts_mini: int = 5
-    tv_paper_max_contracts_micro: int = 50
-    tv_paper_trading_start_hour_et: int = 18  # 6 PM ET (session open)
-    tv_paper_trading_end_hour_et: int = 16    # 4 PM ET
-    tv_paper_trading_end_minute_et: int = 10  # 4:10 PM ET (session close)
-    tv_paper_near_max_loss_buffer: float = 200.0  # Block new entries within $200 of floor
-    tv_paper_enable_news_blackout: bool = True
+# Extracted filter functions (Phase 2a refactor)
+from pearlalgo.market_agent.circuit_breaker_filters import (
+    check_hour_filter as _check_hour_filter_fn,
+    check_weekday_filter as _check_weekday_filter_fn,
+    check_session_filter as _check_session_filter_fn,
+    check_direction_gating as _check_direction_gating_fn,
+    check_regime_avoidance as _check_regime_avoidance_fn,
+    check_trigger_filters as _check_trigger_filters_fn,
+    check_ml_chop_shield as _check_ml_chop_shield_fn,
+    check_tv_paper_eval_gate as _check_tv_paper_eval_gate_fn,
+    get_current_session as _get_current_session_fn,
+)
 
 
 class TradingCircuitBreaker:
@@ -253,11 +141,7 @@ class TradingCircuitBreaker:
         if direction in ("short", "sell"):
             if self.config.allowed_short_hours_et:
                 # Hour-restricted shorts: only allow during data-proven profitable hours
-                try:
-                    from zoneinfo import ZoneInfo
-                    current_hour = datetime.now(ZoneInfo("America/New_York")).hour
-                except Exception:
-                    current_hour = (datetime.now(timezone.utc).hour - 5) % 24
+                current_hour = datetime.now(ET).hour
                 if current_hour not in self.config.allowed_short_hours_et:
                     logger.info(
                         "Short hour filter: blocked short at hour %d ET (allowed: %s)",
@@ -999,383 +883,38 @@ class TradingCircuitBreaker:
         return CircuitBreakerDecision(allowed=True, reason="volatility_ok")
     
     def _get_current_session(self, now: Optional[datetime] = None) -> Tuple[str, int]:
-        """
-        Get the current trading session based on Eastern Time.
-        
-        Returns:
-            Tuple of (session_name, et_hour)
-        """
-        now = now or datetime.now(timezone.utc)
-        et_dt = now.astimezone(ET)
-        et_hour = et_dt.hour
-        
-        # Session definitions (in ET hours)
-        sessions = {
-            'overnight': (18, 4),      # 6PM - 4AM ET
-            'premarket': (4, 6),       # 4AM - 6AM ET
-            'morning': (6, 10),        # 6AM - 10AM ET (morning open)
-            'midday': (10, 14),        # 10AM - 2PM ET
-            'afternoon': (14, 17),     # 2PM - 5PM ET
-            'close': (17, 18),         # 5PM - 6PM ET
-        }
-        
-        for session_name, (start, end) in sessions.items():
-            if start > end:  # overnight wraps around midnight
-                if et_hour >= start or et_hour < end:
-                    return session_name, et_hour
-            elif start <= et_hour < end:
-                return session_name, et_hour
-        
-        return 'other', et_hour
+        """Get the current trading session based on Eastern Time."""
+        return _get_current_session_fn(now)
     
     def _check_hour_filter(self) -> CircuitBreakerDecision:
         """Block signals outside allowed trading hours (ET)."""
-        now_et = datetime.now(ET)
-        current_hour = now_et.hour
-        if current_hour not in self.config.allowed_trading_hours_et:
-            logger.info(
-                "Hour filter: blocked signal at hour %d ET (allowed: %s)",
-                current_hour, self.config.allowed_trading_hours_et,
-            )
-            return CircuitBreakerDecision(
-                allowed=False,
-                reason="hour_filter",
-                severity="info",
-                details={
-                    "current_hour_et": current_hour,
-                    "allowed_hours": self.config.allowed_trading_hours_et,
-                    "message": f"Hour {current_hour} ET is not in the allowed trading hours",
-                },
-            )
-        return CircuitBreakerDecision(allowed=True, reason="hour_filter_passed")
+        return _check_hour_filter_fn(self.config)
 
     def _check_weekday_filter(self) -> CircuitBreakerDecision:
         """Block signals on historically unprofitable weekdays."""
-        now_et = datetime.now(ET)
-        current_weekday = now_et.weekday()  # Mon=0, Sun=6
-        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        if current_weekday in self.config.blocked_weekdays:
-            day_name = day_names[current_weekday]
-            logger.info(
-                "Weekday filter: blocked signal on %s (weekday=%d)",
-                day_name, current_weekday,
-            )
-            return CircuitBreakerDecision(
-                allowed=False,
-                reason="weekday_filter",
-                severity="info",
-                details={
-                    "current_weekday": current_weekday,
-                    "day_name": day_name,
-                    "blocked_weekdays": self.config.blocked_weekdays,
-                    "message": f"Trading is blocked on {day_name}",
-                },
-            )
-        return CircuitBreakerDecision(allowed=True, reason="weekday_filter_passed")
+        return _check_weekday_filter_fn(self.config)
 
     def _check_session_filter(self) -> CircuitBreakerDecision:
-        """
-        Check if current session is allowed for trading.
-        
-        Based on historical data analysis:
-        - Good sessions: overnight (63% WR), close (78% WR), midday (45% WR)
-        - Bad sessions: morning (19% WR), afternoon (19% WR), premarket (22% WR)
-        """
-        current_session, et_hour = self._get_current_session()
-        
-        if current_session in self.config.allowed_sessions:
-            return CircuitBreakerDecision(
-                allowed=True, 
-                reason="session_allowed",
-                details={
-                    "current_session": current_session,
-                    "et_hour": et_hour,
-                    "allowed_sessions": self.config.allowed_sessions,
-                }
-            )
-        
-        return CircuitBreakerDecision(
-            allowed=False,
-            reason="session_filtered",
-            severity="info",
-            details={
-                "current_session": current_session,
-                "et_hour": et_hour,
-                "allowed_sessions": self.config.allowed_sessions,
-                "message": f"Session '{current_session}' historically underperforms - signal skipped",
-            }
-        )
+        """Check if current session is allowed for trading."""
+        return _check_session_filter_fn(self.config)
     
     def _check_direction_gating(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
-        """
-        Phase 1: Check if signal direction is allowed for the current market regime.
-        
-        Rules (when regime confidence >= threshold):
-        - trending_up -> allow long only
-        - trending_down -> allow short only
-        - ranging/volatile/unknown -> allow long only (conservative)
-        
-        Data basis:
-        - Shorts all-time: 40% WR vs Longs 47% WR
-        - trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR
-        """
-        direction = str(signal.get("direction", "")).lower()
-        if direction not in ("long", "short"):
-            # Unknown direction - allow (shouldn't happen in practice)
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="direction_gating_unknown_direction",
-                details={"direction": direction},
-            )
-        
-        # Extract market regime from signal
-        market_regime = signal.get("market_regime") or {}
-        if not isinstance(market_regime, dict):
-            market_regime = {}
-        
-        regime_type = str(market_regime.get("regime", "unknown")).lower()
-        regime_confidence = 0.0
-        try:
-            regime_confidence = float(market_regime.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            regime_confidence = 0.0
-        
-        # If confidence is below threshold, treat regime as "unknown"
-        effective_regime = regime_type
-        if regime_confidence < self.config.direction_gating_min_confidence:
-            effective_regime = "unknown"
-        
-        # Direction rules by regime
-        allowed_direction = "long"  # Default conservative
-        if effective_regime == "trending_up":
-            allowed_direction = "long"
-        elif effective_regime == "trending_down":
-            allowed_direction = "short"
-        else:
-            # ranging, volatile, unknown -> long only (conservative given short-side leak)
-            allowed_direction = "long"
-        
-        if direction == allowed_direction:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="direction_gating_ok",
-                details={
-                    "direction": direction,
-                    "regime": regime_type,
-                    "effective_regime": effective_regime,
-                    "regime_confidence": regime_confidence,
-                    "allowed_direction": allowed_direction,
-                },
-            )
-        
-        return CircuitBreakerDecision(
-            allowed=False,
-            reason="direction_gating",
-            severity="info",
-            details={
-                "direction": direction,
-                "regime": regime_type,
-                "effective_regime": effective_regime,
-                "regime_confidence": regime_confidence,
-                "allowed_direction": allowed_direction,
-                "message": f"Direction '{direction}' not allowed in regime '{effective_regime}' (only '{allowed_direction}' permitted)",
-            },
-        )
+        """Phase 1: Check if signal direction is allowed for the current market regime."""
+        return _check_direction_gating_fn(self.config, signal)
     
     def _check_regime_avoidance(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
-        """
-        Phase 2: Optionally block signals in historically poor-performing regimes.
-        
-        Blocked regimes by default: ranging (0W/12L), volatile (0W/2L)
-        """
-        market_regime = signal.get("market_regime") or {}
-        if not isinstance(market_regime, dict):
-            market_regime = {}
-        
-        regime_type = str(market_regime.get("regime", "unknown")).lower()
-        regime_confidence = 0.0
-        try:
-            regime_confidence = float(market_regime.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            regime_confidence = 0.0
-        
-        # Only apply if confidence meets threshold
-        if regime_confidence < self.config.regime_avoidance_min_confidence:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="regime_avoidance_low_confidence",
-                details={
-                    "regime": regime_type,
-                    "regime_confidence": regime_confidence,
-                    "min_confidence": self.config.regime_avoidance_min_confidence,
-                },
-            )
-        
-        # Check if regime is in blocked list
-        blocked_regimes_lower = [r.lower() for r in self.config.blocked_regimes]
-        if regime_type in blocked_regimes_lower:
-            return CircuitBreakerDecision(
-                allowed=False,
-                reason="regime_avoidance",
-                severity="info",
-                details={
-                    "regime": regime_type,
-                    "regime_confidence": regime_confidence,
-                    "blocked_regimes": self.config.blocked_regimes,
-                    "message": f"Regime '{regime_type}' is historically poor-performing - signal skipped",
-                },
-            )
-        
-        return CircuitBreakerDecision(
-            allowed=True,
-            reason="regime_avoidance_ok",
-            details={"regime": regime_type, "regime_confidence": regime_confidence},
-        )
+        """Phase 2: Optionally block signals in historically poor-performing regimes."""
+        return _check_regime_avoidance_fn(self.config, signal)
     
     def _check_trigger_filters(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
-        """
-        Phase 3: De-risk low-quality trigger types.
-        
-        Rules:
-        - ema_cross requires volume_confirmed=true (39% WR vs better triggers)
-        - In ranging/volatile regimes, require volume confirmation for all entries
-        """
-        entry_trigger = str(signal.get("entry_trigger", signal.get("type", ""))).lower()
-        volume_confirmed = bool(signal.get("volume_confirmed", False))
-        
-        market_regime = signal.get("market_regime") or {}
-        if not isinstance(market_regime, dict):
-            market_regime = {}
-        regime_type = str(market_regime.get("regime", "unknown")).lower()
-        
-        # Check ema_cross volume requirement
-        if self.config.ema_cross_require_volume and entry_trigger == "ema_cross":
-            if not volume_confirmed:
-                return CircuitBreakerDecision(
-                    allowed=False,
-                    reason="trigger_ema_cross_no_volume",
-                    severity="info",
-                    details={
-                        "entry_trigger": entry_trigger,
-                        "volume_confirmed": volume_confirmed,
-                        "message": "ema_cross trigger requires volume confirmation",
-                    },
-                )
-        
-        # Check volume requirement in poor regimes
-        if self.config.low_regime_require_volume and regime_type in ("ranging", "volatile"):
-            if not volume_confirmed:
-                return CircuitBreakerDecision(
-                    allowed=False,
-                    reason="trigger_low_regime_no_volume",
-                    severity="info",
-                    details={
-                        "regime": regime_type,
-                        "entry_trigger": entry_trigger,
-                        "volume_confirmed": volume_confirmed,
-                        "message": f"Entries in '{regime_type}' regime require volume confirmation",
-                    },
-                )
-        
-        return CircuitBreakerDecision(
-            allowed=True,
-            reason="trigger_filters_ok",
-            details={
-                "entry_trigger": entry_trigger,
-                "volume_confirmed": volume_confirmed,
-                "regime": regime_type,
-            },
-        )
+        """Phase 3: De-risk low-quality trigger types."""
+        return _check_trigger_filters_fn(self.config, signal)
     
     def _check_ml_chop_shield(
         self, signal: Dict[str, Any], ml_stats: Optional[Dict[str, Any]] = None
     ) -> CircuitBreakerDecision:
-        """
-        Phase 4: Block ML FAIL signals in poor regimes when lift is proven.
-        
-        Preconditions (must all be met):
-        1. ML stats provided with sufficient scored trades (>= ml_min_scored_trades)
-        2. PASS vs FAIL win-rate delta >= ml_min_winrate_delta
-        3. Signal marked as ML FAIL
-        4. Current regime is in ml_chop_shield_regimes
-        """
-        if ml_stats is None:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="ml_chop_shield_no_stats",
-            )
-        
-        # Check if enough trades have been scored
-        scored_trades = int(ml_stats.get("scored_trades", 0))
-        if scored_trades < self.config.ml_min_scored_trades:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="ml_chop_shield_insufficient_data",
-                details={
-                    "scored_trades": scored_trades,
-                    "required": self.config.ml_min_scored_trades,
-                },
-            )
-        
-        # Check lift (PASS vs FAIL win-rate delta)
-        pass_win_rate = float(ml_stats.get("pass_win_rate", 0.0))
-        fail_win_rate = float(ml_stats.get("fail_win_rate", 0.0))
-        win_rate_delta = pass_win_rate - fail_win_rate
-        
-        if win_rate_delta < self.config.ml_min_winrate_delta:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="ml_chop_shield_insufficient_lift",
-                details={
-                    "pass_win_rate": pass_win_rate,
-                    "fail_win_rate": fail_win_rate,
-                    "win_rate_delta": win_rate_delta,
-                    "required_delta": self.config.ml_min_winrate_delta,
-                },
-            )
-        
-        # Check if signal is ML FAIL
-        ml_prediction = signal.get("_ml_prediction") or {}
-        ml_pass = ml_prediction.get("pass_filter", True)  # Default to pass if no data
-        if ml_pass:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="ml_chop_shield_signal_passed",
-                details={"ml_pass": ml_pass},
-            )
-        
-        # Check if current regime is in chop shield regimes
-        market_regime = signal.get("market_regime") or {}
-        if not isinstance(market_regime, dict):
-            market_regime = {}
-        regime_type = str(market_regime.get("regime", "unknown")).lower()
-        
-        shield_regimes_lower = [r.lower() for r in self.config.ml_chop_shield_regimes]
-        if regime_type not in shield_regimes_lower:
-            return CircuitBreakerDecision(
-                allowed=True,
-                reason="ml_chop_shield_regime_not_targeted",
-                details={
-                    "regime": regime_type,
-                    "shield_regimes": self.config.ml_chop_shield_regimes,
-                },
-            )
-        
-        # All conditions met - block the signal
-        return CircuitBreakerDecision(
-            allowed=False,
-            reason="ml_chop_shield",
-            severity="info",
-            details={
-                "regime": regime_type,
-                "ml_pass": ml_pass,
-                "pass_win_rate": pass_win_rate,
-                "fail_win_rate": fail_win_rate,
-                "win_rate_delta": win_rate_delta,
-                "scored_trades": scored_trades,
-                "message": f"ML FAIL signal blocked in '{regime_type}' regime (lift validated: {win_rate_delta:.1%})",
-            },
-        )
+        """Phase 4: Block ML FAIL signals in poor regimes when lift is proven."""
+        return _check_ml_chop_shield_fn(self.config, signal, ml_stats)
 
 
     def _check_tv_paper_eval_gate(
@@ -1383,106 +922,8 @@ class TradingCircuitBreaker:
         signal: Dict[str, Any],
         active_positions: Optional[List[Dict[str, Any]]] = None,
     ) -> CircuitBreakerDecision:
-        """
-        Tradovate Paper Evaluation Gate: enforce prop firm rules before order placement.
-
-        Checks:
-        1. Max contracts (5 mini / 50 micro)
-        2. Trading hours (6 PM ET - 4:10 PM ET)
-        3. No hedging (no opposite direction on same underlying)
-        4. News blackout (2 min before/after any release)
-        """
-        from datetime import time as _time_cls
-        now_utc = datetime.now(timezone.utc)
-        in_session = is_within_trading_window(
-            now_utc,
-            start_hour_et=self.config.tv_paper_trading_start_hour_et,
-            start_minute_et=0,
-            end_hour_et=self.config.tv_paper_trading_end_hour_et,
-            end_minute_et=self.config.tv_paper_trading_end_minute_et,
-        )
-        if not in_session:
-            try:
-                now_et = now_utc.astimezone(ET)
-                et_time = now_et.time()
-            except Exception:
-                et_time = now_utc.time()
-            session_open = _time_cls(self.config.tv_paper_trading_start_hour_et, 0)
-            session_close = _time_cls(
-                self.config.tv_paper_trading_end_hour_et,
-                self.config.tv_paper_trading_end_minute_et,
-            )
-            return CircuitBreakerDecision(
-                allowed=False,
-                reason="tv_paper_outside_trading_hours",
-                severity="warning",
-                details={
-                    "current_time_et": str(et_time),
-                    "session_open": str(session_open),
-                    "session_close": str(session_close),
-                },
-            )
-
-        # ── Check 2: Max contracts ────────────────────────────────────
-        if active_positions:
-            total_qty = sum(
-                abs(int(p.get("position_size", 0) or p.get("quantity", 0) or 1))
-                for p in active_positions
-            )
-            new_qty = int(signal.get("position_size", 1))
-            if total_qty + new_qty > self.config.tv_paper_max_contracts_mini:
-                return CircuitBreakerDecision(
-                    allowed=False,
-                    reason="tv_paper_max_contracts_exceeded",
-                    severity="critical",
-                    details={
-                        "current_contracts": total_qty,
-                        "new_contracts": new_qty,
-                        "max_allowed": self.config.tv_paper_max_contracts_mini,
-                    },
-                )
-
-        # ── Check 3: No hedging ───────────────────────────────────────
-        if active_positions:
-            signal_direction = str(signal.get("direction", "")).lower()
-            for pos in active_positions:
-                pos_direction = str(pos.get("direction", "")).lower()
-                if pos_direction and signal_direction and pos_direction != signal_direction:
-                    return CircuitBreakerDecision(
-                        allowed=False,
-                        reason="tv_paper_hedging_prohibited",
-                        severity="critical",
-                        details={
-                            "signal_direction": signal_direction,
-                            "existing_direction": pos_direction,
-                            "message": "Tradovate Paper prohibits hedging (simultaneous long + short on same underlying)",
-                        },
-                    )
-
-        # ── Check 4: News blackout ────────────────────────────────────
-        if self.config.tv_paper_enable_news_blackout:
-            try:
-                from pearlalgo.utils.news_calendar import get_news_calendar
-                calendar = get_news_calendar()
-                in_blackout, event_name = calendar.is_in_blackout(now_utc)
-                if in_blackout:
-                    return CircuitBreakerDecision(
-                        allowed=False,
-                        reason="tv_paper_news_blackout",
-                        severity="warning",
-                        details={
-                            "event": event_name,
-                            "message": f"News blackout: {event_name} (2 min before/after)",
-                        },
-                    )
-            except Exception as e:
-                logger.debug(f"News calendar check failed (allowing trade): {e}")
-
-        return CircuitBreakerDecision(
-            allowed=True,
-            reason="tv_paper_eval_gate_passed",
-            severity="info",
-        )
+        """Tradovate Paper Evaluation Gate: enforce prop firm rules before order placement."""
+        return _check_tv_paper_eval_gate_fn(self.config, signal, active_positions)
 
 
 def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> TradingCircuitBreaker:

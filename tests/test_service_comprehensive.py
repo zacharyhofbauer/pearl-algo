@@ -291,21 +291,7 @@ class TestComputeBasePositionSize:
 
 
 # ===========================================================================
-# 2. _apply_ml_opportunity_sizing (line 838-843)
-# ===========================================================================
-
-class TestApplyMLOpportunitySizing:
-    def test_delegates_to_ml_manager(self, service):
-        service._ml_manager.apply_opportunity_sizing = MagicMock()
-        sig = _make_signal()
-        service._apply_ml_opportunity_sizing(sig)
-        service._ml_manager.apply_opportunity_sizing.assert_called_once()
-        args = service._ml_manager.apply_opportunity_sizing.call_args
-        assert args[0][0] is sig
-
-
-# ===========================================================================
-# 3. _find_initial_stop_price (lines 1060-1070)
+# 2. _find_initial_stop_price (lines 1060-1070)
 # ===========================================================================
 
 class TestFindInitialStopPrice:
@@ -704,6 +690,93 @@ class TestBuildPearlReviewMessage:
         result = service._build_pearl_review_message(state)
         # Might return None or a partial message
         assert result is None or isinstance(result, str)
+
+
+# ===========================================================================
+# 11b. Pure status/review helpers
+# ===========================================================================
+
+class TestPureServiceStatusHelpers:
+    def test_build_market_agent_status_snapshot(self):
+        from pearlalgo.market_agent.service_status import build_market_agent_status_snapshot
+
+        checker = MagicMock()
+        checker.check_data_freshness.return_value = {"age_minutes": 1.5, "is_fresh": True}
+        perf_tracker = MagicMock()
+        perf_tracker.get_daily_performance.return_value = {
+            "total_pnl": 125.0,
+            "wins": 2,
+            "losses": 1,
+        }
+        circuit_breaker = MagicMock()
+        circuit_breaker.get_status.return_value = {
+            "daily_pnl": -25.0,
+            "session_pnl": -10.0,
+            "would_block_total": 1,
+            "mode": "enforce",
+        }
+
+        with patch(
+            "pearlalgo.market_agent.service_status.get_market_hours",
+            return_value=MagicMock(is_market_open=MagicMock(return_value=True)),
+        ):
+            with patch(
+                "pearlalgo.market_agent.service_status.check_trading_session",
+                return_value=True,
+            ):
+                result = build_market_agent_status_snapshot(
+                    running=True,
+                    paused=False,
+                    start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                    last_market_data={"latest_bar": {"close": 1}, "df": MagicMock()},
+                    data_quality_checker=checker,
+                    performance_tracker=perf_tracker,
+                    connection_failures=0,
+                    max_connection_failures=10,
+                    signal_count=4,
+                    quiet_period_minutes=7.5,
+                    config={},
+                    trading_circuit_breaker=circuit_breaker,
+                    streak_count=3,
+                    streak_type="win",
+                )
+
+        assert result["agent_running"] is True
+        assert result["daily_pnl"] == 125.0
+        assert result["wins_today"] == 2
+        assert result["data_stale"] is False
+        assert result["risk_mode"] == "enforce"
+        assert result["win_streak"] == 3
+
+    def test_build_pearl_review_message_and_summary_helpers(self):
+        from pearlalgo.market_agent.service_status import (
+            build_pearl_review_message,
+            summarize_pearl_review_trades,
+        )
+
+        now_et = datetime(2026, 3, 25, 15, 0)
+        perf_trades = [
+            {"exit_time": "2026-03-25T13:10:00", "pnl": 75.0, "is_win": True, "signal_id": "s1"},
+            {"exit_time": "2026-03-25T14:00:00", "pnl": 25.0, "is_win": True, "signal_id": "s1"},
+            {"exit_time": "2026-03-25T14:45:00", "pnl": -10.0, "is_win": False, "signal_id": "s2"},
+        ]
+
+        summary = summarize_pearl_review_trades(perf_trades, now_et=now_et)
+        message = build_pearl_review_message(
+            {
+                "agent_running": True,
+                "session_open": True,
+                "futures_open": True,
+            },
+            perf_trades=perf_trades,
+            now_et=now_et,
+        )
+
+        assert len(summary.today_trades) == 2
+        assert summary.daily_pnl == 15.0
+        assert "Last Trade: 15m ago" in summary.time_since_trade
+        assert "2 trades" in message
+        assert "Running" in message
 
 
 # ===========================================================================
@@ -1281,54 +1354,7 @@ class TestOSSignalHandler:
 
 
 # ===========================================================================
-# 27. ML delegation properties (lines 3193-3275)
-# ===========================================================================
-
-class TestMLDelegationProperties:
-    def test_ml_signal_filter(self, service):
-        service._ml_manager.signal_filter = MagicMock()
-        assert service._ml_signal_filter is service._ml_manager.signal_filter
-
-    def test_ml_filter_enabled(self, service):
-        service._ml_manager.filter_enabled = False
-        assert service._ml_filter_enabled is False
-
-    def test_ml_filter_mode(self, service):
-        service._ml_manager.filter_mode = "shadow"
-        assert service._ml_filter_mode == "shadow"
-
-    def test_bandit_policy(self, service):
-        service._ml_manager.bandit_policy = MagicMock()
-        assert service.bandit_policy is service._ml_manager.bandit_policy
-
-    def test_contextual_policy(self, service):
-        service._ml_manager.contextual_policy = MagicMock()
-        assert service.contextual_policy is service._ml_manager.contextual_policy
-
-    def test_shadow_tracker(self, service):
-        service._ml_manager.shadow_tracker = MagicMock()
-        assert service.shadow_tracker is service._ml_manager.shadow_tracker
-
-    def test_ml_adjust_sizing(self, service):
-        service._ml_manager.adjust_sizing = True
-        assert service._ml_adjust_sizing is True
-
-    def test_ml_shadow_threshold(self, service):
-        service._ml_manager.shadow_threshold = 0.5
-        assert service._ml_shadow_threshold == 0.5
-
-    def test_ml_blocking_allowed(self, service):
-        service._ml_manager.blocking_allowed = True
-        assert service._ml_blocking_allowed is True
-
-    def test_ml_lift_metrics(self, service):
-        mock_metrics = {"win_rate_delta": 0.05}
-        service._ml_manager.lift_metrics = mock_metrics
-        assert service._ml_lift_metrics is mock_metrics
-
-
-# ===========================================================================
-# 28. _heartbeat (lines 2986-3015)
+# 27. _heartbeat (lines 2986-3015)
 # ===========================================================================
 
 class TestHeartbeat:

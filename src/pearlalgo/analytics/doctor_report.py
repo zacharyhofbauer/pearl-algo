@@ -10,13 +10,8 @@ The CLI wrapper is located at scripts/monitoring/doctor_cli.py.
 
 from __future__ import annotations
 
-import math
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Dict, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pearlalgo.learning.trade_database import TradeDatabase
+from typing import Any, Dict, List
 
 
 def _fmt_pct(x: float) -> str:
@@ -27,7 +22,7 @@ def _fmt_pct(x: float) -> str:
         return "0%"
 
 
-def build_doctor_rollup(db: "TradeDatabase", *, hours: float = 24.0) -> Dict[str, Any]:
+def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
     """
     Build a comprehensive rollup of recent trading behavior.
 
@@ -158,7 +153,7 @@ def build_doctor_rollup(db: "TradeDatabase", *, hours: float = 24.0) -> Dict[str
 
 
 def _build_brain_rollup(
-    db: "TradeDatabase",
+    db: Any,
     cutoff: str,
     ml_probs: List[float],
     ml_fallbacks: int
@@ -166,86 +161,10 @@ def _build_brain_rollup(
     """Build the brain/learning status section of the rollup."""
     brain: Dict[str, Any] = {}
     try:
-        # Derive state_dir from DB path
-        state_dir = getattr(db, "db_path", None)
-        state_dir = Path(state_dir).parent if state_dir else Path("data/agent_state/NQ")
-
         from pearlalgo.config.config_loader import load_service_config
 
         cfg = load_service_config(validate=False) or {}
-        learning_cfg = cfg.get("learning", {}) or {}
         ml_cfg = cfg.get("ml_filter", {}) or {}
-
-        # Bandit policy (global)
-        try:
-            from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig
-
-            bandit_config = BanditConfig.from_dict(learning_cfg if isinstance(learning_cfg, dict) else {})
-            bandit = BanditPolicy(config=bandit_config, state_dir=state_dir)
-            st = bandit.get_status() or {}
-
-            stats_list = list(getattr(bandit.state, "signal_types", {}).values())
-            total_outcomes = sum(int(getattr(s, "sample_count", 0) or 0) for s in stats_list)
-
-            weighted_sum = 0.0
-            weighted_denom = 0
-            stdevs: List[float] = []
-            for s in stats_list:
-                n = int(getattr(s, "sample_count", 0) or 0)
-                w = max(1, n)
-                weighted_denom += w
-                try:
-                    weighted_sum += float(getattr(s, "expected_win_rate", 0.5) or 0.5) * w
-                except Exception:
-                    weighted_sum += 0.5 * w
-
-                try:
-                    a = float(getattr(s, "alpha", 0.0) or 0.0)
-                    b = float(getattr(s, "beta", 0.0) or 0.0)
-                    if a > 0 and b > 0:
-                        var = (a * b) / (((a + b) ** 2) * (a + b + 1))
-                        if var >= 0:
-                            stdevs.append(math.sqrt(var))
-                except Exception:
-                    pass
-
-            avg_expected = (weighted_sum / max(1, weighted_denom)) if weighted_denom else 0.5
-            avg_unc = (sum(stdevs) / len(stdevs)) if stdevs else None
-
-            brain["bandit"] = {
-                "enabled": bool(st.get("enabled", True)),
-                "mode": str(st.get("mode", "")),
-                "decision_threshold": float(st.get("decision_threshold", bandit_config.decision_threshold) or bandit_config.decision_threshold),
-                "explore_rate": float(st.get("explore_rate", bandit_config.explore_rate) or bandit_config.explore_rate),
-                "total_decisions": int(st.get("total_decisions", 0) or 0),
-                "execute_rate": float(st.get("execute_rate", 0.0) or 0.0),
-                "total_outcomes": int(total_outcomes),
-                "avg_expected_win_rate": float(avg_expected),
-                "avg_uncertainty": float(avg_unc) if avg_unc is not None else None,
-            }
-        except Exception:
-            pass
-
-        # Contextual policy (optional)
-        try:
-            contextual_cfg = learning_cfg.get("contextual", {}) if isinstance(learning_cfg, dict) else {}
-            if isinstance(contextual_cfg, dict) and bool(contextual_cfg.get("enabled", False)):
-                from pearlalgo.learning.contextual_bandit import ContextualBanditPolicy, ContextualBanditConfig
-
-                ctx_config = ContextualBanditConfig.from_dict(contextual_cfg)
-                ctx_policy = ContextualBanditPolicy(config=ctx_config, state_dir=state_dir)
-                ctx_status = ctx_policy.get_status() or {}
-                brain["contextual"] = {
-                    "enabled": bool(ctx_status.get("enabled", True)),
-                    "mode": str(ctx_status.get("mode", "")),
-                    "decision_threshold": float(ctx_config.decision_threshold),
-                    "explore_rate": float(ctx_config.explore_rate),
-                    "total_decisions": int(ctx_status.get("total_decisions", 0) or 0),
-                    "execute_rate": float(ctx_status.get("execute_rate", 0.0) or 0.0),
-                    "unique_contexts": int(ctx_status.get("unique_contexts", 0) or 0),
-                }
-        except Exception:
-            pass
 
         # ML stats (from logged predictions in generated signals)
         try:
@@ -276,7 +195,7 @@ def _build_brain_rollup(
 
 def _add_ml_lift_to_brain(
     brain: Dict[str, Any],
-    db: "TradeDatabase",
+    db: Any,
     cutoff: str,
     ml_cfg: Dict[str, Any]
 ) -> None:

@@ -14,10 +14,14 @@ from datetime import datetime, timezone, timedelta
 import pytest
 
 from pearlalgo.api.tradovate_helpers import (
+    estimate_commission_per_trade,
     normalize_fill,
+    summarize_paired_trades_for_period,
+    tradovate_performance_summary,
     tradovate_positions_for_api,
     tradovate_performance_for_period,
 )
+import pearlalgo.api.tradovate_helpers as helpers_mod
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +173,97 @@ class TestTradovatePerformanceForPeriod:
         assert "trades" in result
         assert "wins" in result
         assert "losses" in result
+
+    def test_uses_supplied_paired_trades_without_repairing(self, monkeypatch):
+        monkeypatch.setattr(
+            helpers_mod,
+            "_raw_fills_to_trades",
+            lambda _fills: pytest.fail("raw fill pairing should not run when paired_trades is supplied"),
+        )
+        paired_trades = [
+            {"exit_time": "2026-03-10T10:30:00", "pnl": 40.0},
+            {"exit_time": "2026-03-10T11:30:00", "pnl": -10.0},
+        ]
+
+        result = tradovate_performance_for_period(
+            [],
+            datetime(2026, 3, 10, 10, 0),
+            commission_per_trade=2.5,
+            paired_trades=paired_trades,
+        )
+
+        assert result == {
+            "pnl": 25.0,
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+        }
+
+
+class TestEstimateCommissionPerTrade:
+    def test_returns_zero_without_equity_or_trades(self):
+        assert estimate_commission_per_trade([], equity=50100.0, start_balance=50000.0) == 0.0
+        assert estimate_commission_per_trade([{"pnl": 25.0}], equity=0.0, start_balance=50000.0) == 0.0
+
+    def test_derives_commission_from_equity_gap(self):
+        trades = [{"pnl": 100.0}, {"pnl": 50.0}]
+        result = estimate_commission_per_trade(trades, equity=50090.0, start_balance=50000.0)
+        assert result == 30.0
+
+
+class TestSummarizePairedTradesForPeriod:
+    def test_filters_period_and_applies_commission(self):
+        paired_trades = [
+            {"exit_time": "2026-03-10T09:59:59", "pnl": 999.0},
+            {"exit_time": "2026-03-10T10:30:00", "pnl": 75.0},
+            {"exit_time": "2026-03-10T11:00:00", "pnl": -25.0},
+            {"exit_time": "2026-03-10T12:00:00", "pnl": 10.0},
+            {"exit_time": "bad-timestamp", "pnl": 50.0},
+        ]
+
+        result = summarize_paired_trades_for_period(
+            paired_trades,
+            datetime(2026, 3, 10, 10, 0),
+            end_utc=datetime(2026, 3, 10, 12, 0),
+            commission_per_trade=5.0,
+        )
+
+        assert result == {
+            "pnl": 40.0,
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+        }
+
+
+class TestTradovatePerformanceSummary:
+    def test_uses_supplied_paired_trades_without_repairing(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            helpers_mod,
+            "_raw_fills_to_trades",
+            lambda _fills: pytest.fail("raw fill pairing should not run when paired_trades is supplied"),
+        )
+        state_dir = tmp_path / "state"
+        state_dir.mkdir()
+        paired_trades = [
+            {"pnl": 60.0},
+            {"pnl": -10.0},
+        ]
+
+        result = tradovate_performance_summary(
+            {"equity": 50035.0},
+            [],
+            state_dir,
+            paired_trades=paired_trades,
+        )
+
+        assert result == {
+            "pnl": 35.0,
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+            "tradovate_equity": 50035.0,
+        }

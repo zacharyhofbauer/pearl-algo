@@ -352,8 +352,8 @@ class TestSessionFilter:
             enable_direction_gating=False,
         ))
 
-        # Mock 8 PM ET (20:00) -> should be overnight session
-        with patch.object(cb, '_get_current_session', return_value=("overnight", 20)):
+        # Mock get_current_session in the filters module
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.get_current_session", return_value=("overnight", 20)):
             decision = cb.should_allow_signal({"direction": "long"})
 
         assert decision.allowed is True
@@ -366,8 +366,8 @@ class TestSessionFilter:
             enable_direction_gating=False,
         ))
 
-        # Mock 8 AM ET -> should be morning session (not allowed)
-        with patch.object(cb, '_get_current_session', return_value=("morning", 8)):
+        # Mock get_current_session in the filters module
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.get_current_session", return_value=("morning", 8)):
             decision = cb.should_allow_signal({"direction": "long"})
 
         assert decision.allowed is False

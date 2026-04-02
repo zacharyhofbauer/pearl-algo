@@ -3,19 +3,14 @@ Tests for SignalHandler
 
 Tests:
 - Constructor initialization with required and optional dependencies
-- configure_ml_filter method
 - get_stats method
-- Signal processing happy path (ML filter, circuit breaker, execution, notification)
+- Signal processing happy path (circuit breaker, execution, notification)
 - Signal rejection by circuit breaker (enforce vs warn-only modes)
-- ML filter application (shadow mode, threshold gating, disabled, errors)
-- Bandit policy decisions and error handling
-- Contextual policy decisions and error handling
-- Execution gating, placement, policy-based blocking, size multipliers
+- Execution gating, placement
 - Virtual entry tracking
 - Error handling and graceful degradation
 - Notification queue full / priority escalation
 - Edge cases (empty signals, missing fields, multiple signals)
-- Context feature building (time buckets, session, regime)
 """
 
 import asyncio
@@ -75,9 +70,8 @@ def make_mock_notification_queue():
 
 
 def make_mock_order_manager():
-    """Create a mock OrderManager with no-op ML sizing."""
+    """Create a mock OrderManager with safe defaults."""
     om = MagicMock()
-    om.apply_ml_opportunity_sizing.return_value = None
     return om
 
 
@@ -187,13 +181,6 @@ class TestSignalHandlerInit:
         )
 
         assert h.trading_circuit_breaker is None
-        assert h.bandit_policy is None
-        assert h._bandit_config is None
-        assert h.contextual_policy is None
-        assert h._ml_signal_filter is None
-        assert h._ml_filter_enabled is False
-        assert h._ml_filter_mode == "shadow"
-        assert h._ml_shadow_threshold is None
         assert h.execution_adapter is None
         assert h.telegram_notifier is None
 
@@ -213,10 +200,6 @@ class TestSignalHandlerInit:
     ):
         """Constructor should accept and store every optional keyword argument."""
         cb = MagicMock()
-        bp = MagicMock()
-        bc = MagicMock()
-        cp = MagicMock()
-        mf = MagicMock()
         ea = MagicMock()
         tn = MagicMock()
 
@@ -226,59 +209,14 @@ class TestSignalHandlerInit:
             notification_queue=notification_queue,
             order_manager=order_manager,
             trading_circuit_breaker=cb,
-            bandit_policy=bp,
-            bandit_config=bc,
-            contextual_policy=cp,
-            ml_signal_filter=mf,
-            ml_filter_enabled=True,
-            ml_filter_mode="live",
-            ml_shadow_threshold=0.6,
             execution_adapter=ea,
             telegram_notifier=tn,
         )
 
         assert h.trading_circuit_breaker is cb
-        assert h.bandit_policy is bp
-        assert h._bandit_config is bc
-        assert h.contextual_policy is cp
-        assert h._ml_signal_filter is mf
-        assert h._ml_filter_enabled is True
-        assert h._ml_filter_mode == "live"
-        assert h._ml_shadow_threshold == 0.6
         assert h.execution_adapter is ea
         assert h.telegram_notifier is tn
 
-
-# ===========================================================================
-# Tests: configure_ml_filter
-# ===========================================================================
-
-class TestConfigureMLFilter:
-    """Tests for the configure_ml_filter method."""
-
-    def test_configure_ml_filter_sets_all_values(self, handler):
-        """configure_ml_filter should update all four ML filter settings."""
-        mock_filter = MagicMock()
-        handler.configure_ml_filter(
-            ml_signal_filter=mock_filter,
-            enabled=True,
-            mode="live",
-            shadow_threshold=0.65,
-        )
-
-        assert handler._ml_signal_filter is mock_filter
-        assert handler._ml_filter_enabled is True
-        assert handler._ml_filter_mode == "live"
-        assert handler._ml_shadow_threshold == 0.65
-
-    def test_configure_ml_filter_defaults_disable(self, handler):
-        """configure_ml_filter with defaults should leave filter disabled."""
-        handler.configure_ml_filter(ml_signal_filter=None)
-
-        assert handler._ml_signal_filter is None
-        assert handler._ml_filter_enabled is False
-        assert handler._ml_filter_mode == "shadow"
-        assert handler._ml_shadow_threshold is None
 
 
 # ===========================================================================
@@ -334,8 +272,8 @@ class TestProcessSignalHappyPath:
     async def test_full_pipeline_calls_all_stages(
         self, state_manager, performance_tracker, notification_queue, order_manager
     ):
-        """A valid signal should traverse every stage: CB check -> ML filter
-        -> ML sizing -> tracking -> virtual entry -> policy -> execution -> notification."""
+        """A valid signal should traverse every stage: CB check -> tracking
+        -> virtual entry -> execution -> notification."""
         h = SignalHandler(
             state_manager=state_manager,
             performance_tracker=performance_tracker,
@@ -348,7 +286,6 @@ class TestProcessSignalHappyPath:
 
         performance_tracker.track_signal_generated.assert_called_once_with(signal)
         performance_tracker.track_entry.assert_called_once()
-        order_manager.apply_ml_opportunity_sizing.assert_called_once_with(signal)
         notification_queue.enqueue_entry.assert_awaited_once()
         assert h.signal_count == 1
 
@@ -512,239 +449,7 @@ class TestCircuitBreaker:
         assert active_positions[0]["signal_id"] == "pos-1"
 
 
-# ===========================================================================
-# Tests: ML Filter
-# ===========================================================================
 
-class TestMLFilter:
-    """Tests for _apply_ml_filter."""
-
-    @pytest.mark.asyncio
-    async def test_disabled_filter_skips(self, handler, valid_signal):
-        """Disabled ML filter should not modify the signal at all."""
-        handler._ml_filter_enabled = False
-
-        await handler._apply_ml_filter(valid_signal)
-
-        assert "_ml_prediction" not in valid_signal
-
-    @pytest.mark.asyncio
-    async def test_none_filter_skips_even_if_enabled(self, handler, valid_signal):
-        """Enabled flag with None filter object should skip without error."""
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = None
-
-        await handler._apply_ml_filter(valid_signal)
-
-        assert "_ml_prediction" not in valid_signal
-
-    @pytest.mark.asyncio
-    async def test_filter_attaches_prediction_in_shadow_mode(self, handler, valid_signal):
-        """Enabled ML filter should attach _ml_prediction and _ml_shadow_pass_filter."""
-        mock_pred = MagicMock()
-        mock_pred.to_dict.return_value = {"win_probability": 0.72, "model": "xgb_v3"}
-        mock_pred.win_probability = 0.72
-
-        mock_filter = MagicMock()
-        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
-
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = mock_filter
-        handler._ml_filter_mode = "shadow"
-
-        await handler._apply_ml_filter(valid_signal)
-
-        assert valid_signal["_ml_prediction"] == {"win_probability": 0.72, "model": "xgb_v3"}
-        assert valid_signal["_ml_shadow_pass_filter"] is True
-
-    @pytest.mark.asyncio
-    async def test_shadow_threshold_gates_pass_filter(self, handler, valid_signal):
-        """When shadow threshold is set, _ml_shadow_pass_filter should reflect the gate."""
-        mock_pred = MagicMock()
-        mock_pred.to_dict.return_value = {"win_probability": 0.45}
-        mock_pred.win_probability = 0.45
-
-        mock_filter = MagicMock()
-        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
-
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = mock_filter
-        handler._ml_filter_mode = "shadow"
-        handler._ml_shadow_threshold = 0.60  # Above the prediction
-
-        await handler._apply_ml_filter(valid_signal)
-
-        # 0.45 < 0.60 => should NOT pass the shadow filter
-        assert valid_signal["_ml_shadow_pass_filter"] is False
-        assert valid_signal["_ml_shadow_threshold"] == 0.60
-
-    @pytest.mark.asyncio
-    async def test_filter_error_handled_gracefully(self, handler, valid_signal):
-        """ML filter error should not propagate; signal stays processable."""
-        mock_filter = MagicMock()
-        mock_filter.should_execute_async = AsyncMock(side_effect=RuntimeError("model load failed"))
-
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = mock_filter
-
-        # Must not raise
-        await handler._apply_ml_filter(valid_signal)
-
-        assert "_ml_prediction" not in valid_signal
-
-    @pytest.mark.asyncio
-    async def test_filter_extracts_regime_context(self, handler):
-        """ML filter should build regime/volatility/session context from signal."""
-        signal = make_valid_signal()
-        signal["market_regime"] = {
-            "regime": "trending",
-            "volatility_ratio": 0.5,   # < 0.8 => "low"
-            "session": "US_regular",
-        }
-
-        mock_pred = MagicMock()
-        mock_pred.to_dict.return_value = {"win_probability": 0.8}
-        mock_pred.win_probability = 0.8
-
-        mock_filter = MagicMock()
-        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
-
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = mock_filter
-
-        await handler._apply_ml_filter(signal)
-
-        ctx = mock_filter.should_execute_async.call_args[0][1]  # 2nd positional arg
-        assert ctx["regime"]["regime"] == "trending"
-        assert ctx["regime"]["volatility"] == "low"
-        assert ctx["regime"]["session"] == "US_regular"
-
-    @pytest.mark.asyncio
-    async def test_filter_high_volatility_bucket(self, handler):
-        """Volatility ratio > 1.5 should map to 'high' bucket."""
-        signal = make_valid_signal()
-        signal["market_regime"] = {"regime": "volatile", "volatility_ratio": 2.0, "session": ""}
-
-        mock_pred = MagicMock()
-        mock_pred.to_dict.return_value = {"win_probability": 0.5}
-        mock_pred.win_probability = 0.5
-
-        mock_filter = MagicMock()
-        mock_filter.should_execute_async = AsyncMock(return_value=(True, mock_pred))
-
-        handler._ml_filter_enabled = True
-        handler._ml_signal_filter = mock_filter
-
-        await handler._apply_ml_filter(signal)
-
-        ctx = mock_filter.should_execute_async.call_args[0][1]
-        assert ctx["regime"]["volatility"] == "high"
-
-
-# ===========================================================================
-# Tests: Bandit Policy
-# ===========================================================================
-
-class TestBanditPolicy:
-    """Tests for _apply_bandit_policy."""
-
-    def test_no_policy_sets_not_evaluated(self, handler, valid_signal):
-        """Without a bandit policy, status should be 'not_evaluated'."""
-        result = handler._apply_bandit_policy(valid_signal)
-
-        assert result is None
-        assert valid_signal["_policy_status"] == "not_evaluated"
-
-    def test_policy_decision_attached_to_signal(self, handler, valid_signal):
-        """Bandit decision metadata should be written into the signal dict."""
-        mock_decision = MagicMock()
-        mock_decision.execute = True
-        mock_decision.sampled_score = 0.85
-        mock_decision.mode = "thompson"
-        mock_decision.reason = "explore"
-        mock_decision.size_multiplier = 1.2
-        mock_decision.to_dict.return_value = {"execute": True, "mode": "thompson", "score": 0.85}
-
-        mock_policy = MagicMock()
-        mock_policy.decide.return_value = mock_decision
-
-        handler.bandit_policy = mock_policy
-        result = handler._apply_bandit_policy(valid_signal)
-
-        assert result is mock_decision
-        assert valid_signal["_policy_status"] == "thompson:explore"
-        assert valid_signal["_policy_execute"] is True
-        assert valid_signal["_policy_score"] == 0.85
-        assert valid_signal["_policy_size_multiplier"] == 1.2
-        assert valid_signal["_policy"] == {"execute": True, "mode": "thompson", "score": 0.85}
-
-    def test_policy_error_captured_in_status(self, handler, valid_signal):
-        """Bandit policy error should be caught and recorded, not re-raised."""
-        mock_policy = MagicMock()
-        mock_policy.decide.side_effect = ValueError("arm index out of range")
-
-        handler.bandit_policy = mock_policy
-        result = handler._apply_bandit_policy(valid_signal)
-
-        assert result is None
-        assert "error:" in valid_signal["_policy_status"]
-        assert "arm index out of range" in valid_signal["_policy_status"]
-
-
-# ===========================================================================
-# Tests: Contextual Policy
-# ===========================================================================
-
-class TestContextualPolicy:
-    """Tests for _apply_contextual_policy."""
-
-    def test_skipped_when_none(self, handler, valid_signal):
-        """No contextual policy should leave signal untouched."""
-        handler.contextual_policy = None
-
-        handler._apply_contextual_policy(valid_signal)
-
-        assert "_policy_ctx" not in valid_signal
-
-    def test_decision_attached_to_signal(self, handler, valid_signal):
-        """Contextual policy decision and features should be stored on the signal."""
-        mock_ctx_features = MagicMock()
-        mock_ctx_features.to_dict.return_value = {
-            "session": "US_regular",
-            "regime": "trending",
-            "time_bucket": "midday",
-        }
-
-        mock_ctx_decision = MagicMock()
-        mock_ctx_decision.to_dict.return_value = {"execute": True, "score": 0.9}
-
-        mock_ctx_policy = MagicMock()
-        mock_ctx_policy.decide.return_value = mock_ctx_decision
-
-        handler.contextual_policy = mock_ctx_policy
-        handler._context_features_class = MagicMock(return_value=mock_ctx_features)
-
-        handler._apply_contextual_policy(valid_signal)
-
-        assert valid_signal["_context_features"] == {
-            "session": "US_regular",
-            "regime": "trending",
-            "time_bucket": "midday",
-        }
-        assert valid_signal["_policy_ctx"] == {"execute": True, "score": 0.9}
-
-    def test_error_captured_in_signal(self, handler, valid_signal):
-        """Contextual policy error should be captured, not re-raised."""
-        mock_ctx_policy = MagicMock()
-        mock_ctx_policy.decide.side_effect = RuntimeError("context build failed")
-
-        handler.contextual_policy = mock_ctx_policy
-        handler._context_features_class = MagicMock(return_value=MagicMock())
-
-        handler._apply_contextual_policy(valid_signal)
-
-        assert "error" in valid_signal["_policy_ctx"]
-        assert "context build failed" in valid_signal["_policy_ctx"]["error"]
 
 
 # ===========================================================================
@@ -819,66 +524,6 @@ class TestExecution:
         assert "error:" in valid_signal["_execution_status"]
         assert "broker disconnect" in valid_signal["_execution_status"]
 
-    @pytest.mark.asyncio
-    async def test_live_policy_blocks_execution(self, handler, valid_signal):
-        """In live mode, policy.execute=False should skip execution entirely."""
-        mock_policy = MagicMock(execute=False, reason="low_score")
-        mock_bandit_config = MagicMock(mode="live")
-
-        handler._bandit_config = mock_bandit_config
-        handler.execution_adapter = MagicMock()
-
-        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
-
-        assert valid_signal["_execution_status"] == "policy_skip:low_score"
-        handler.execution_adapter.check_preconditions.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_live_policy_applies_size_multiplier(self, handler, valid_signal):
-        """In live mode, position_size should be scaled by the policy multiplier."""
-        valid_signal["position_size"] = 4
-
-        mock_policy = MagicMock(execute=True, size_multiplier=0.5, reason="exploit")
-        mock_bandit_config = MagicMock(mode="live")
-
-        mock_precond = MagicMock(execute=True)
-        mock_result = MagicMock(success=True, parent_order_id="order_789")
-
-        mock_adapter = MagicMock()
-        mock_adapter.check_preconditions.return_value = mock_precond
-        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
-
-        handler._bandit_config = mock_bandit_config
-        handler.execution_adapter = mock_adapter
-
-        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
-
-        # 4 * 0.5 = 2.0, int(2.0) = 2, max(1, 2) = 2
-        assert valid_signal["position_size"] == 2
-        assert valid_signal["_execution_status"] == "placed"
-
-    @pytest.mark.asyncio
-    async def test_size_multiplier_minimum_clamp(self, handler, valid_signal):
-        """Position size should never be reduced below 1 by the multiplier."""
-        valid_signal["position_size"] = 1
-
-        mock_policy = MagicMock(execute=True, size_multiplier=0.01, reason="explore")
-        mock_bandit_config = MagicMock(mode="live")
-
-        mock_precond = MagicMock(execute=True)
-        mock_result = MagicMock(success=True, parent_order_id="order_min")
-
-        mock_adapter = MagicMock()
-        mock_adapter.check_preconditions.return_value = mock_precond
-        mock_adapter.place_bracket = AsyncMock(return_value=mock_result)
-
-        handler._bandit_config = mock_bandit_config
-        handler.execution_adapter = mock_adapter
-
-        await handler._execute_signal(valid_signal, policy_decision=mock_policy)
-
-        # 1 * 0.01 = 0.01, int(0.01) = 0, max(1, 0) = 1
-        assert valid_signal["position_size"] == 1
 
 
 # ===========================================================================
@@ -1095,24 +740,6 @@ class TestProcessSignalErrorHandling:
         assert h.error_count == 1
         assert h.signal_count == 0  # Did not complete
 
-    async def test_ml_sizing_failure_is_non_fatal(
-        self, state_manager, performance_tracker, notification_queue, order_manager
-    ):
-        """ML opportunity sizing failure should NOT stop signal processing."""
-        order_manager.apply_ml_opportunity_sizing.side_effect = ValueError("bad feature vector")
-
-        h = SignalHandler(
-            state_manager=state_manager,
-            performance_tracker=performance_tracker,
-            notification_queue=notification_queue,
-            order_manager=order_manager,
-        )
-
-        await h.process_signal(make_valid_signal())
-
-        assert h.signal_count == 1
-        assert h.error_count == 0
-
     async def test_notification_queue_full_records_failure(
         self, state_manager, performance_tracker, notification_queue, order_manager
     ):
@@ -1157,24 +784,6 @@ class TestNotificationPriority:
         call_kwargs = notification_queue.enqueue_entry.call_args.kwargs
         assert call_kwargs["priority"] == Priority.HIGH
 
-    async def test_ml_critical_elevates_to_critical_priority(
-        self, state_manager, performance_tracker, notification_queue, order_manager
-    ):
-        """Signal with _ml_priority='critical' should escalate to Priority.CRITICAL."""
-        h = SignalHandler(
-            state_manager=state_manager,
-            performance_tracker=performance_tracker,
-            notification_queue=notification_queue,
-            order_manager=order_manager,
-        )
-
-        signal = make_valid_signal()
-        signal["_ml_priority"] = "critical"
-
-        await h.process_signal(signal)
-
-        call_kwargs = notification_queue.enqueue_entry.call_args.kwargs
-        assert call_kwargs["priority"] == Priority.CRITICAL
 
 
 # ===========================================================================
@@ -1318,91 +927,3 @@ class TestEdgeCases:
         assert h.signal_count == 1
 
 
-# ===========================================================================
-# Tests: Build Context Features
-# ===========================================================================
-
-class TestBuildContextFeatures:
-    """Tests for _build_context_features_for_signal."""
-
-    def test_no_context_class_returns_none(self, handler, valid_signal):
-        """Without a context features class, the builder should return None."""
-        handler._context_features_class = None
-
-        result = handler._build_context_features_for_signal(valid_signal)
-
-        assert result is None
-
-    def test_morning_time_bucket(self, handler):
-        """Timestamp with hour < 10 should yield 'morning' time bucket."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = make_valid_signal()
-        signal["timestamp"] = "2024-06-15T08:30:00Z"
-
-        handler._build_context_features_for_signal(signal)
-
-        assert mock_ctx_class.call_args.kwargs["time_bucket"] == "morning"
-
-    def test_midday_time_bucket(self, handler):
-        """Timestamp with 10 <= hour < 14 should yield 'midday' time bucket."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = make_valid_signal()
-        signal["timestamp"] = "2024-06-15T12:00:00Z"
-
-        handler._build_context_features_for_signal(signal)
-
-        assert mock_ctx_class.call_args.kwargs["time_bucket"] == "midday"
-
-    def test_afternoon_time_bucket(self, handler):
-        """Timestamp with hour >= 14 should yield 'afternoon' time bucket."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = make_valid_signal()
-        signal["timestamp"] = "2024-06-15T15:30:00Z"
-
-        handler._build_context_features_for_signal(signal)
-
-        assert mock_ctx_class.call_args.kwargs["time_bucket"] == "afternoon"
-
-    def test_session_extracted_from_underscore_key(self, handler):
-        """Session should be read from signal['_session'] first."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = make_valid_signal()
-        signal["_session"] = "US_regular"
-
-        handler._build_context_features_for_signal(signal)
-
-        assert mock_ctx_class.call_args.kwargs["session"] == "US_regular"
-
-    def test_regime_extracted_from_market_regime(self, handler):
-        """Regime should be read from signal['market_regime']['regime']."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = make_valid_signal()
-        signal["market_regime"] = {"regime": "range_bound"}
-
-        handler._build_context_features_for_signal(signal)
-
-        assert mock_ctx_class.call_args.kwargs["regime"] == "range_bound"
-
-    def test_defaults_when_no_context_in_signal(self, handler):
-        """Missing session / regime / timestamp should all default to 'unknown'."""
-        mock_ctx_class = MagicMock()
-        handler._context_features_class = mock_ctx_class
-
-        signal = {}  # No session, no market_regime, no timestamp
-
-        handler._build_context_features_for_signal(signal)
-
-        kwargs = mock_ctx_class.call_args.kwargs
-        assert kwargs["session"] == "unknown"
-        assert kwargs["regime"] == "unknown"
-        assert kwargs["time_bucket"] == "unknown"

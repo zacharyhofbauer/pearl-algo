@@ -43,7 +43,8 @@ from pearlalgo.market_agent.trading_circuit_breaker import (
     TradingCircuitBreaker,
     create_trading_circuit_breaker,
 )
-from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.strategies import create_strategy, get_strategy_defaults
+from pearlalgo.strategies.composite_intraday import check_trading_session, detect_market_regime
 from pearlalgo.utils.cadence import CadenceScheduler
 from pearlalgo.execution.advanced_exit_manager import AdvancedExitManager, PartialRunnerManager
 from pearlalgo.utils.data_quality import DataQualityChecker
@@ -58,8 +59,8 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
-# AI shadow tracker removed (restructure Phase 2D)
-# Stub replacements for removed AI module
+# AI shadow tracker removed (restructure Phase 2D) — stubs kept because
+# _map_suggestion_type and _check_proactive_suggestions reference them.
 def get_shadow_tracker():
     """No-op stub: AI shadow tracker was removed."""
     return None
@@ -68,6 +69,11 @@ class SuggestionType:
     """No-op stub: AI suggestion types were removed."""
     RISK_WARNING = "risk_warning"
     STRATEGY_HINT = "strategy_hint"
+    RISK_ALERT = "risk_alert"
+    PATTERN_INSIGHT = "pattern_insight"
+    SESSION_ADVICE = "session_advice"
+    DIRECTION_BIAS = "direction_bias"
+    OPPORTUNITY = "opportunity"
 from pearlalgo.market_agent.audit_logger import AuditLogger, AuditEventType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
@@ -77,6 +83,11 @@ from pearlalgo.market_agent.signal_orchestrator import SignalOrchestrator
 from pearlalgo.market_agent.execution_orchestrator import ExecutionOrchestrator
 from pearlalgo.market_agent.observability_orchestrator import ObservabilityOrchestrator
 from pearlalgo.market_agent.state_builder import StateBuilder
+from pearlalgo.market_agent.service_status import (
+    build_market_agent_status_snapshot as _canonical_build_market_agent_status_snapshot,
+    build_pearl_review_message as _canonical_build_pearl_review_message,
+    generate_pearl_insight as _canonical_generate_pearl_insight,
+)
 
 # Execution layer imports (optional - only used if execution.enabled)
 # IBKR execution is inactive; see execution/_inactive/ibkr/
@@ -98,11 +109,12 @@ except ImportError:
     TradovateExecutionAdapter = None  # type: ignore
     TradovateConfig = None  # type: ignore
 
-# ML/Learning layer removed — OpenClaw handles ML externally.
-# TradeDatabase (SQLite trade storage) was in learning/ but is infrastructure.
-# It will fail to import now that learning/ is deleted; SQLite features are disabled.
-TRADE_DB_AVAILABLE = False
-TradeDatabase = None  # type: ignore
+try:
+    from pearlalgo.learning.trade_database import TradeDatabase
+    TRADE_DB_AVAILABLE = True
+except Exception:
+    TRADE_DB_AVAILABLE = False
+    TradeDatabase = None  # type: ignore
 
 
 
@@ -170,7 +182,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         if deps is None:
             deps = ServiceDependencies(
                 data_provider=data_provider,
-                config=ConfigView(config or PEARL_BOT_CONFIG.copy()) if config is not None else None,
+                config=ConfigView(config or get_strategy_defaults()) if config is not None else None,
                 service_config=load_service_config(),
                 state_dir=state_dir,
                 telegram_bot_token=telegram_bot_token,
@@ -190,16 +202,9 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self.scan_interval = float(self.config.get("scan_interval", 30))
         self._service_config = service_config
 
-        # Strategy adapter (kept so tests can monkeypatch `service.strategy.analyze`).
-        class _StrategyAdapter:
-            def __init__(self, config: ConfigView):
-                self.config = config
-
-            def analyze(self, df: pd.DataFrame, *, current_time: Optional[datetime] = None,
-                        df_5m: Optional[pd.DataFrame] = None) -> list[dict]:
-                return generate_signals(df, config=self.config, current_time=current_time, df_5m=df_5m)
-
-        self.strategy = _StrategyAdapter(self.config)
+        # Strategy adapter remains monkeypatch-friendly for tests, but the live
+        # implementation now comes from the canonical strategies package.
+        self.strategy = create_strategy(self.config)
 
         # --- assign resolved dependencies (no branching) -----------------------
         self.data_fetcher = deps.data_fetcher
@@ -233,6 +238,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         signal_settings = service_config.get("signals", {}) or {}
         self._risk_settings = service_config.get("risk", {}) or {}
         self._strategy_settings = service_config.get("strategy", {}) or {}
+        guardrails_settings = service_config.get("guardrails", {}) or {}
 
         # Signal forwarding removed (restructure Phase 1D).
         # Each agent now runs its own strategy with its own broker data.
@@ -256,7 +262,10 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # TRADING CIRCUIT BREAKER (risk management for consecutive losses/drawdown)
         # ==========================================================================
         self.trading_circuit_breaker: Optional[TradingCircuitBreaker] = None
-        if trading_circuit_breaker_settings.get("enabled", True):
+        active_strategy = str(self._strategy_settings.get("active", "") or "")
+        legacy_signal_gate_enabled = bool(guardrails_settings.get("signal_gate_enabled", False))
+        allow_legacy_signal_gate = legacy_signal_gate_enabled or not active_strategy
+        if trading_circuit_breaker_settings.get("enabled", True) and allow_legacy_signal_gate:
             self.trading_circuit_breaker = create_trading_circuit_breaker(trading_circuit_breaker_settings)
             # Validate config at startup
             config_warnings = self.trading_circuit_breaker.validate_config()
@@ -281,6 +290,13 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             )
             # Hydrate daily P&L from DB so restart does not reset the daily loss counter
             self.trading_circuit_breaker.hydrate_daily_pnl()
+        else:
+            logger.info(
+                "Legacy signal gate disabled for active runtime path "
+                "(strategy=%s, signal_gate_enabled=%s)",
+                active_strategy or "legacy",
+                legacy_signal_gate_enabled,
+            )
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -1268,7 +1284,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             if df is None or len(df) < 50:
                 return
 
-            from pearlalgo.trading_bots.pearl_bot_auto import detect_market_regime
             regime_result = detect_market_regime(df)
             # Normalize regime names: trending_up/trending_down -> trending
             regime = regime_result.regime
@@ -1436,80 +1451,22 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
 
     def _get_status_snapshot(self) -> Dict[str, Any]:
         """Get current status snapshot for Pearl suggestions."""
-        # Calculate uptime
-        uptime_hours = 0.0
-        if self.start_time:
-            uptime_hours = (datetime.now(timezone.utc) - self.start_time).total_seconds() / 3600.0
-            
-        # Calculate data age
-        data_age_minutes = 0.0
-        data_stale = False
-        try:
-            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
-            freshness = self.data_quality_checker.check_data_freshness(
-                last_market_data.get("latest_bar"),
-                last_market_data.get("df")
-            )
-            data_age_minutes = float(freshness.get("age_minutes", 0.0))
-            data_stale = not bool(freshness.get("is_fresh", False))
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            
-        # Get performance stats
-        daily_pnl = 0.0
-        wins_today = 0
-        losses_today = 0
-        try:
-            perf = self.performance_tracker.get_daily_performance()
-            daily_pnl = perf.get("total_pnl", 0.0)
-            wins_today = perf.get("wins", 0)
-            losses_today = perf.get("losses", 0)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            
-        # Get market status
-        futures_open = False
-        session_open = False
-        try:
-            futures_open = bool(get_market_hours().is_market_open())
-            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
-            session_open = check_trading_session(datetime.now(timezone.utc), self.config)
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-        risk_daily_pnl = 0.0
-        risk_session_pnl = 0.0
-        risk_would_block_total = 0
-        risk_mode = "unknown"
-        try:
-            if self.trading_circuit_breaker is not None:
-                cb = self.trading_circuit_breaker.get_status()
-                risk_daily_pnl = float(cb.get("daily_pnl", 0.0) or 0.0)
-                risk_session_pnl = float(cb.get("session_pnl", 0.0) or 0.0)
-                risk_would_block_total = int(cb.get("would_block_total", 0) or 0)
-                risk_mode = str(cb.get("mode", "unknown") or "unknown")
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-
-        return {
-            "agent_running": self.running and not self.paused,
-            "gateway_running": self.connection_failures < self.max_connection_failures,
-            "data_stale": data_stale,
-            "data_age_minutes": data_age_minutes,
-            "daily_pnl": daily_pnl,
-            "wins_today": wins_today,
-            "losses_today": losses_today,
-            "signals_today": self.signal_count,
-            "last_signal_minutes": self._compute_quiet_period_minutes(),
-            "session_open": session_open,
-            "futures_open": futures_open,
-            "agent_uptime_hours": uptime_hours,
-            "win_streak": getattr(self, "_streak_count", 0) if getattr(self, "_streak_type", "") == "win" else 0,
-            "risk_daily_pnl": risk_daily_pnl,
-            "risk_session_pnl": risk_session_pnl,
-            "risk_would_block_total": risk_would_block_total,
-            "risk_mode": risk_mode,
-        }
+        return _canonical_build_market_agent_status_snapshot(
+            running=self.running,
+            paused=self.paused,
+            start_time=self.start_time,
+            last_market_data=getattr(self.data_fetcher, "_last_market_data", None),
+            data_quality_checker=self.data_quality_checker,
+            performance_tracker=self.performance_tracker,
+            connection_failures=self.connection_failures,
+            max_connection_failures=self.max_connection_failures,
+            signal_count=self.signal_count,
+            quiet_period_minutes=self._compute_quiet_period_minutes(),
+            config=self.config,
+            trading_circuit_breaker=self.trading_circuit_breaker,
+            streak_count=getattr(self, "_streak_count", 0),
+            streak_type=getattr(self, "_streak_type", ""),
+        )
 
     async def _check_pearl_suggestions(self) -> None:
         """
@@ -1626,139 +1583,15 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         Focus on unique insights: streaks, observations, recommendations.
         """
         try:
-            import json
-            
-            # Basic state
-            is_running = state.get("agent_running")
-            is_session_open = state.get("session_open")
-            is_futures_open = state.get("futures_open")
-            
-            # Load performance data for deeper insights
             perf_trades = []
-            today_trades = []
-            streak_info = ""
-            time_since_trade = ""
-            daily_pnl = 0.0
-            
             try:
                 perf_trades = self.performance_tracker.load_performance_data()
-
-                # Today's trades
-                today_str = datetime.now(_ET).replace(tzinfo=None).strftime("%Y-%m-%d")  # FIXED 2026-03-25: ET not UTC
-                today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
-
-                # De-duplicate by signal_id to avoid double-counting
-                try:
-                    by_id = {}
-                    no_id = []
-                    for t in today_trades:
-                        sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
-                        if not sid:
-                            no_id.append(t)
-                            continue
-                        by_id[sid] = t  # keep most recent occurrence
-                    if by_id:
-                        today_trades = list(by_id.values()) + no_id
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
-                # Calculate daily P&L from actual trades (not state which may be stale)
-                if today_trades:
-                    daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades)
-
-                # Calculate streak
-                if today_trades:
-                    sorted_trades = sorted(today_trades, key=lambda t: str(t.get("exit_time", "") or ""), reverse=True)
-                    streak = 0
-                    streak_type = None
-                    for t in sorted_trades:
-                        is_win = t.get("is_win", False)
-                        if streak_type is None:
-                            streak_type = "W" if is_win else "L"
-                            streak = 1
-                        elif (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
-                            streak += 1
-                        else:
-                            break
-                    if streak >= 2:
-                        streak_icon = "🔥" if streak_type == "W" else "❄️"
-                        streak_word = "wins" if streak_type == "W" else "losses"
-                        streak_info = f"{streak_icon} Streak: {streak} {streak_word} in a row"
-
-                # Time since last trade
-                if perf_trades:
-                    last_trade = max(perf_trades, key=lambda t: str(t.get("exit_time", "") or ""), default=None)
-                    if last_trade and last_trade.get("exit_time"):
-                        try:
-                            last_exit = datetime.fromisoformat(str(last_trade["exit_time"]).replace("Z", "+00:00"))
-                            # FIXED 2026-03-25: timestamps are now naive ET
-                            if last_exit.tzinfo is not None:
-                                last_exit = last_exit.replace(tzinfo=None)
-                            mins_ago = (datetime.now(_ET).replace(tzinfo=None) - last_exit).total_seconds() / 60
-                            if mins_ago > 60:
-                                hours = int(mins_ago / 60)
-                                time_since_trade = f"⏰ Last Trade: {hours}h ago"
-                            else:
-                                time_since_trade = f"⏰ Last Trade: {int(mins_ago)}m ago"
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")
-            
-            # Generate PEARL insight (context-aware observation)
-            insight = self._generate_pearl_insight(
-                is_running=is_running,
-                is_session_open=is_session_open,
-                is_futures_open=is_futures_open,
-                daily_pnl=daily_pnl,
-                today_trades=today_trades,
+            return _canonical_build_pearl_review_message(
+                state,
+                perf_trades=perf_trades,
             )
-            
-            # Build status line (plain text)
-            status_parts = []
-            if is_running:
-                status_parts.append("🟢 Running")
-            else:
-                status_parts.append("🔴 Stopped")
-            if is_session_open and is_futures_open:
-                status_parts.append("📊 Markets Open")
-            elif not is_futures_open:
-                status_parts.append("🌙 Futures Closed")
-            else:
-                status_parts.append("⏸️ Session Closed")
-            
-            status_line = " • ".join(status_parts)
-            
-            # P&L summary (plain text)
-            pnl_icon = "📈" if daily_pnl > 0 else ("📉" if daily_pnl < 0 else "➖")
-            trades_today = len(today_trades)
-            wins_today = sum(1 for t in today_trades if t.get("is_win"))
-            wr_today = (wins_today / trades_today * 100) if trades_today > 0 else 0
-            
-            # Build plain text message (will be escaped by sender)
-            lines = [status_line]
-            
-            # Add performance if there are trades
-            if trades_today > 0:
-                lines.append("")
-                trades_word = "trade" if trades_today == 1 else "trades"
-                pnl_line = f"{pnl_icon} Today: {fmt_currency(daily_pnl, show_sign=True)} ({trades_today} {trades_word}, {wr_today:.0f}% WR)"
-                lines.append(pnl_line)
-            
-            # Add streak if notable
-            if streak_info:
-                lines.append(streak_info)
-            
-            # Add time since last trade
-            if time_since_trade:
-                lines.append(time_since_trade)
-            
-            # Add PEARL's insight
-            if insight:
-                lines.append("")
-                lines.append(f"💬 {insight}")
-
-            return "\n".join(lines)
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
             return None
@@ -1772,42 +1605,13 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         today_trades: list,
     ) -> str:
         """Generate a contextual PEARL insight based on current state."""
-        try:
-            trades_count = len(today_trades)
-            wins = sum(1 for t in today_trades if t.get("is_win"))
-            losses = trades_count - wins
-            
-            # Session-based insights
-            if not is_futures_open:
-                return "Markets are closed. Rest up for the next session!"
-            
-            if not is_session_open:
-                return "Strategy session is paused. I'm watching but not trading."
-            
-            if not is_running:
-                return "I'm currently stopped. Start me when you're ready to trade."
-            
-            # Performance-based insights
-            if trades_count == 0:
-                return "No trades yet today. Waiting for the right setup..."
-            
-            wr = (wins / trades_count * 100) if trades_count > 0 else 0
-            
-            if daily_pnl > 100:
-                return f"Great day! Up ${daily_pnl:,.0f}. Consider protecting these gains."
-            elif daily_pnl < -100:
-                return f"Tough day, down ${abs(daily_pnl):,.0f}. Stay disciplined."
-            elif wr >= 70 and trades_count >= 3:
-                return f"Strong {wr:.0f}% win rate today. Execution is sharp!"
-            elif wr < 40 and trades_count >= 3:
-                return f"{wr:.0f}% WR so far. Market may be choppy."
-            elif losses >= 3 and wins == 0:
-                return "Multiple losses in a row. Consider taking a break."
-            else:
-                return "All systems normal. Scanning for opportunities..."
-        except Exception as e:
-            logger.debug(f"Non-critical: {e}")
-            return "All systems normal."
+        return _canonical_generate_pearl_insight(
+            is_running=is_running,
+            is_session_open=is_session_open,
+            is_futures_open=is_futures_open,
+            daily_pnl=daily_pnl,
+            today_trades=today_trades,
+        )
 
         """
         Compute compact trend arrows for multiple timeframes.
@@ -1925,7 +1729,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         
         session_open = False
         try:
-            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             session_open = check_trading_session(bar_time, self.config) if bar_time else False
         except Exception as e:
             logger.warning(f"Session check failed in MTF trends: {e}")
@@ -2058,7 +1861,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                         bar_time = bar_time.replace(tzinfo=timezone.utc)
             
             # Check strategy session first (more specific)
-            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             check_time = bar_time if bar_time else datetime.now(timezone.utc)
             strategy_session_open = check_trading_session(check_time, self.config)
             if not strategy_session_open:
@@ -2574,7 +2376,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
 
         strategy_session_open = None
         try:
-            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             strategy_session_open = check_trading_session(datetime.now(timezone.utc), self.config)
         except Exception as e:
             logger.debug(f"Non-critical: {e}")
@@ -3486,4 +3287,3 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         signal_name = signal_names.get(signum, f"Signal {signum}")
         logger.info(f"Received {signal_name}, initiating graceful shutdown...")
         self.shutdown_requested = True
-

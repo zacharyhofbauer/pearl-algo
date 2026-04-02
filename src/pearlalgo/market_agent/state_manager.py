@@ -696,26 +696,9 @@ class MarketAgentStateManager:
                 logger.warning(f"State operation failed: {e}")
                 service_config = {}
 
-        # SQLite dual-write
-        sqlite_enabled = False
-        trade_db = None
-        if SQLITE_AVAILABLE:
-            try:
-                storage_cfg = service_config.get("storage", {}) or {}
-                sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
-                if sqlite_enabled:
-                    if self._explicit_state_dir:
-                        db_path = self.state_dir / "trades.db"
-                    else:
-                        db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
-                        db_path = Path(str(db_path_raw))
-                    trade_db = TradeDatabase(db_path)
-            except Exception as e:
-                logger.warning(f"SQLite storage not enabled/available: {e}")
-
-        # Expose for callers that inspect these directly
-        self._sqlite_enabled = sqlite_enabled
-        self._trade_db = trade_db
+        # SQLite dual-write (learning module removed; always disabled)
+        self._sqlite_enabled = False
+        self._trade_db = None
 
         # -- Internal submodules --
         signal_settings = service_config.get("signals", {}) or {}
@@ -728,7 +711,7 @@ class MarketAgentStateManager:
             ),
             max_signal_lines=signal_settings.get("max_signal_lines", 5000),
         )
-        self._signal_store.set_sqlite(sqlite_enabled, trade_db)
+        self._signal_store.set_sqlite(False, None)
 
         self._event_log = _EventLog(self.events_file)
         self._state_persistence = _StatePersistence(self.state_dir, self.state_file)

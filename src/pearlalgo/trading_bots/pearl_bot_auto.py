@@ -165,25 +165,29 @@ def _safe_div(numerator: float, denominator: float, default: float = 0.0) -> flo
 
 
 def _safe_pct(numerator: float, denominator: float, default: float = 0.0) -> float:
-    """
-    Safely calculate percentage: (numerator / denominator) * 100.
-
-    Args:
-        numerator: The numerator
-        denominator: The denominator
-        default: Value to return if division is unsafe (default 0.0)
-
-    Returns:
-        Percentage result or default value
-    """
-    if denominator == 0 or abs(denominator) < 1e-10:
-        return default
-    return (numerator / denominator) * 100
+    """Safely calculate percentage: (numerator / denominator) * 100."""
+    result = _safe_div(numerator, denominator, default)
+    return result * 100 if result != default else default
 
 
 # ============================================================================
 # SAFE CHECK WRAPPER + INDICATOR CONTEXT
 # ============================================================================
+
+# Indicator health tracking — incremented by safe_check on failure
+_indicator_failures: Dict[str, int] = {}
+_indicator_successes: Dict[str, int] = {}
+
+
+def get_indicator_health() -> Dict[str, Any]:
+    """Return indicator failure/success counts for observability (exposed via /api/state)."""
+    return {
+        "failures": dict(_indicator_failures),
+        "successes": dict(_indicator_successes),
+        "total_failures": sum(_indicator_failures.values()),
+        "total_successes": sum(_indicator_successes.values()),
+    }
+
 
 def safe_check(fn, *args, **kwargs) -> Tuple[Optional[str], float]:
     """Run a signal check function, catching exceptions gracefully.
@@ -196,8 +200,11 @@ def safe_check(fn, *args, **kwargs) -> Tuple[Optional[str], float]:
     visibility is critical.  Use ``ErrorHandler`` for non-strategy modules.
     """
     try:
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        _indicator_successes[fn.__name__] = _indicator_successes.get(fn.__name__, 0) + 1
+        return result
     except Exception as e:
+        _indicator_failures[fn.__name__] = _indicator_failures.get(fn.__name__, 0) + 1
         logger.warning(
             f"Indicator check '{fn.__name__}' failed — returned (None, 0.0): {e}",
             exc_info=True,
@@ -321,15 +328,6 @@ def detect_market_regime(
     avg_range = high_low_range.iloc[-volatility_window:].mean()
     volatility_ratio = _safe_div(current_range, avg_range, default=1.0)
 
-    # Price range analysis (for ranging detection)
-    price_high = recent["high"].max()
-    price_low = recent["low"].min()
-    _safe_pct(price_high - price_low, current_close, default=0.0)
-
-    # Recent price movement (momentum)
-    first_close = recent["close"].iloc[0]
-    _safe_pct(current_close - first_close, first_close, default=0.0)
-    
     # Classify regime
     regime = "ranging"
     confidence = 0.5
@@ -1042,6 +1040,10 @@ def check_trading_session(dt: datetime, config: Dict) -> bool:
     2. ``config["start_hour"]`` / ``config["end_hour"]`` (legacy integer keys)
     """
     try:
+        strategy_cfg = config.get("strategy", {}) if hasattr(config, "get") else {}
+        if isinstance(strategy_cfg, dict) and strategy_cfg.get("enforce_session_window") is False:
+            return True
+
         et_tz = ZoneInfo("America/New_York")
         et_time = dt.astimezone(et_tz) if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(et_tz)
 
@@ -1359,6 +1361,22 @@ class StrategyParams(_BaseModel):
     vwap_2sd_sl_atr_mult: float = _Field(default=0.75, description="SL ATR mult beyond the band")
     vwap_2sd_volume_spike_mult: float = _Field(default=1.5, description="Volume > N × avg = spike")
 
+    # -- SMC (Smart Money Concepts) ----------------------------------------
+    allow_smc_entries: bool = False  # Disabled by default
+    smc_swing_length: int = _Field(default=10, ge=3, description="Swing high/low lookback for SMC")
+    smc_fvg_lookback: int = _Field(default=20, ge=5, description="Bars back to search for active FVGs")
+    smc_ob_lookback: int = _Field(default=20, ge=5, description="Bars back to search for order blocks")
+    smc_fvg_base_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
+    smc_ob_boost: float = _Field(default=0.10, description="Confidence boost for OB confluence")
+    smc_bos_boost: float = _Field(default=0.08, description="Confidence boost for BOS/CHoCH")
+    smc_volume_boost: float = _Field(default=0.08, description="Confidence boost for volume confirmation")
+    smc_key_level_boost: float = _Field(default=0.10, description="Confidence boost for key level alignment")
+    smc_vwap_boost: float = _Field(default=0.05, description="Confidence boost for VWAP alignment")
+    smc_sl_atr_mult: float = _Field(default=0.8, description="SL ATR mult beyond FVG boundary")
+    smc_tp_atr_mult: float = _Field(default=2.5, description="TP ATR mult (fallback when no liquidity target)")
+    smc_silver_bullet_windows: list = _Field(default_factory=lambda: [[10, 11], [14, 15], [15, 16]],
+                                              description="Silver Bullet time windows [[start_h, end_h], ...] ET")
+
 
 def _load_strategy_params(config: Dict) -> StrategyParams:
     """Build a :class:`StrategyParams` from a config dict.
@@ -1368,9 +1386,21 @@ def _load_strategy_params(config: Dict) -> StrategyParams:
     """
     # Collect values from the config dict that match StrategyParams fields
     overrides: Dict[str, Any] = {}
+    strategy_cfg = config.get("strategy", {}) if hasattr(config, "get") else {}
+    strategies_cfg = config.get("strategies", {}) if hasattr(config, "get") else {}
+    active_strategy = "composite_intraday"
+    if isinstance(strategy_cfg, dict):
+        active_strategy = str(strategy_cfg.get("active", active_strategy) or active_strategy)
+    nested_params: Dict[str, Any] = {}
+    if isinstance(strategies_cfg, dict):
+        raw_nested = strategies_cfg.get(active_strategy, {}) or {}
+        if isinstance(raw_nested, dict):
+            nested_params = raw_nested
     for field_name in StrategyParams.model_fields:
         if field_name in config:
             overrides[field_name] = config[field_name]
+        elif field_name in nested_params:
+            overrides[field_name] = nested_params[field_name]
     return StrategyParams(**overrides)
 
 
@@ -2094,53 +2124,6 @@ def _check_vwap_2sd_signal(
     }
 
 
-def _apply_filters(
-    signals: List[Dict],
-    params: StrategyParams,
-    regime: "MarketRegime",
-) -> List[Dict]:
-    """Stage 4: Apply post-processing filters and regime adjustments.
-
-    - Applies regime-based confidence multiplier.
-    - Caps confidence at ``params.max_confidence``.
-    - Removes signals below ``params.min_confidence`` after adjustment.
-    """
-    regime_multiplier = 1.0
-    if regime.recommendation == "reduced_size":
-        regime_multiplier = params.regime_reduced_multiplier
-    elif regime.recommendation == "avoid":
-        regime_multiplier = params.regime_avoid_multiplier
-
-    filtered: List[Dict] = []
-    for sig in signals:
-        original_conf = sig["confidence"]
-        adjusted_conf = min(original_conf * regime_multiplier, params.max_confidence)
-        sig["confidence"] = round(adjusted_conf, 4)
-        sig["regime_adjustment"] = {
-            "original_confidence": round(original_conf, 4),
-            "multiplier": regime_multiplier,
-            "adjusted_confidence": round(adjusted_conf, 4),
-        }
-        sig["market_regime"] = regime.to_dict()
-
-        direction = sig.get("direction", "")
-        if direction == "short":
-            min_conf = params.min_confidence_short
-        elif direction == "long":
-            min_conf = params.min_confidence_long
-        else:
-            min_conf = params.min_confidence
-
-        if adjusted_conf >= min_conf:
-            filtered.append(sig)
-        else:
-            logger.debug(
-                "Signal dropped after regime adjustment: %s conf %.3f < %.3f",
-                direction, adjusted_conf, min_conf,
-            )
-    return filtered
-
-
 # ============================================================================
 # TIME-OF-DAY CONFIDENCE SCALING
 # ============================================================================
@@ -2166,7 +2149,16 @@ def _get_time_of_day_multiplier(
     Controlled by ``pearl_bot_auto.tod_scaling`` in config.  When disabled
     (the default in base.yaml) returns 1.0 so behaviour is unchanged.
     """
-    pba = config.get("pearl_bot_auto", {})
+    strategies_cfg = config.get("strategies", {}) or {}
+    strategy_cfg = config.get("strategy", {}) or {}
+    active_strategy = str(strategy_cfg.get("active", "composite_intraday") or "composite_intraday")
+    pba = {}
+    if isinstance(strategies_cfg, dict):
+        nested = strategies_cfg.get(active_strategy, {}) or {}
+        if isinstance(nested, dict):
+            pba = nested
+    if not pba:
+        pba = config.get("pearl_bot_auto", {})
     if isinstance(pba, ConfigView):
         tod_cfg = pba.get("tod_scaling", {})
     else:
@@ -2229,8 +2221,6 @@ def generate_signals(
     - :func:`_calculate_indicators` — compute all indicator values (Stage 1)
     - Inline signal detection & confidence scoring (Stages 2-3, kept inline
       because the long/short logic shares local variables heavily)
-    - :func:`_apply_filters` — regime adjustment & post-filter (Stage 4)
-
     The ``StrategyParams`` model holds all former magic numbers.
     """
     if config is None:
@@ -2918,12 +2908,36 @@ def generate_signals(
         signal_candidates.append(vwap_2sd_signal)
         logger.info("VWAP 2SD signal generated: %s conf=%.2f", vwap_2sd_signal.get("direction"), vwap_2sd_signal.get("confidence", 0))
 
+    # SMC (Smart Money Concepts) — FVG + Order Block + Silver Bullet
+    try:
+        from pearlalgo.trading_bots.smc_signals import _check_smc_signal
+        smc_signal = safe_check(_check_smc_signal, df, ind, params, current_time)
+        if isinstance(smc_signal, tuple):
+            smc_signal = smc_signal[0] if smc_signal[0] else None
+        if isinstance(smc_signal, dict):
+            signal_candidates.append(smc_signal)
+            logger.info("SMC signal generated: %s conf=%.2f type=%s",
+                        smc_signal.get("direction"), smc_signal.get("confidence", 0),
+                        smc_signal.get("signal_type", "smc"))
+    except Exception as e:
+        logger.debug("SMC signal check unavailable: %s", e)
+
     # Add metadata to signals including regime information
     for signal in signal_candidates:
         signal["timestamp"] = current_time.isoformat()
         signal["symbol"] = config["symbol"]
         signal["timeframe"] = config["timeframe"]
-        signal["type"] = "pearlbot_pinescript"
+        signal["type"] = signal.get("signal_type", "pearlbot_pinescript")
+        # Tag signal source for multi-strategy analysis
+        st = signal.get("signal_type", "")
+        if "orb" in st.lower():
+            signal["signal_source"] = "orb"
+        elif "vwap_2sd" in st.lower():
+            signal["signal_source"] = "vwap_2sd"
+        elif "smc" in st.lower():
+            signal["signal_source"] = "smc"
+        else:
+            signal["signal_source"] = "ema_pinescript"
         signal["virtual_broker"] = True  # Mark as virtual - no real execution
         
         # Apply regime-based confidence adjustment

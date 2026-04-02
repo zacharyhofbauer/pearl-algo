@@ -173,7 +173,7 @@ IBKR_VERBOSE_LOGGING: bool = False
 # SQLite is the primary write path (single source of truth).
 # JSON files are generated as periodic exports for external tools.
 STORAGE_SQLITE_ENABLED: bool = True
-STORAGE_DB_PATH: str = "data/agent_state/NQ/trades.db"
+STORAGE_DB_PATH: str = "data/agent_state/MNQ/trades.db"
 # Dual-write is DEPRECATED — kept only for transition.
 # Set to False to use SQLite-only mode (recommended).
 STORAGE_DUAL_WRITE_FILES: bool = False

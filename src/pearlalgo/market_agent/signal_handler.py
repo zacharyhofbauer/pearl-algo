@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 import pandas as pd
 import pytz
 
+from pearlalgo.strategies.composite_intraday import calculate_atr
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp
@@ -486,7 +487,6 @@ class SignalHandler:
         market_data = {}
         if buffer_data is not None and len(buffer_data) > 0:
             try:
-                from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr
                 atr_series = calculate_atr(buffer_data, period=14)
                 if len(atr_series) > 20:
                     atr_current = float(atr_series.iloc[-1])

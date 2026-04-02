@@ -11,7 +11,6 @@ from pearlalgo.trading_bots.pearl_bot_auto import (
     CONFIG,
     MarketRegime,
     StrategyParams,
-    _apply_filters,
     _safe_div,
     _safe_pct,
     _get_key_levels_cache_key,
@@ -27,11 +26,6 @@ from pearlalgo.trading_bots.pearl_bot_auto import (
     calculate_atr,
     generate_signals,
     check_trading_session,
-    check_vwap_position,
-    detect_ema_crossover,
-    detect_vwap_cross,
-    _apply_filters,
-    StrategyParams,
 )
 
 
@@ -711,51 +705,6 @@ class TestDetectVwapCross:
         bullish, bearish = detect_vwap_cross(df, vwap_series=vwap)
         assert not bullish
         assert not bearish
-
-
-class TestApplyFilters:
-    """Test _apply_filters post-processing and regime adjustments."""
-
-    def test_reduced_regime_scales_confidence(self):
-        """Reduced-size regime multiplies confidence by regime_reduced_multiplier."""
-        signals = [{"confidence": 0.80}]
-        params = StrategyParams(min_confidence=0.40)
-        regime = MarketRegime(
-            regime="ranging", confidence=0.6,
-            trend_strength=0.3, volatility_ratio=1.0,
-            recommendation="reduced_size",
-        )
-        filtered = _apply_filters(signals, params, regime)
-        assert len(filtered) == 1
-        expected = round(0.80 * params.regime_reduced_multiplier, 4)
-        assert filtered[0]["confidence"] == expected
-        assert filtered[0]["regime_adjustment"]["multiplier"] == params.regime_reduced_multiplier
-
-    def test_avoid_regime_drops_weak_signal(self):
-        """Avoid regime pushes confidence below min_confidence, dropping the signal."""
-        signals = [{"confidence": 0.60}]
-        params = StrategyParams(min_confidence=0.55)
-        regime = MarketRegime(
-            regime="volatile", confidence=0.7,
-            trend_strength=0.1, volatility_ratio=3.0,
-            recommendation="avoid",
-        )
-        filtered = _apply_filters(signals, params, regime)
-        # 0.60 * 0.5 = 0.30 < 0.55 → dropped
-        assert len(filtered) == 0
-
-    def test_confidence_capped_at_max(self):
-        """Confidence never exceeds params.max_confidence."""
-        signals = [{"confidence": 0.99}]
-        params = StrategyParams(min_confidence=0.40, max_confidence=0.95)
-        regime = MarketRegime(
-            regime="trending_up", confidence=0.9,
-            trend_strength=0.8, volatility_ratio=1.0,
-            recommendation="full_size",
-        )
-        filtered = _apply_filters(signals, params, regime)
-        assert len(filtered) == 1
-        assert filtered[0]["confidence"] <= 0.95
 
 
 class TestGenerateSignalsStrengthened:

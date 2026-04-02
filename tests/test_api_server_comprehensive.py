@@ -243,6 +243,36 @@ def _patch_operator(state_dir):
         p.stop()
 
 
+@pytest.fixture()
+def _patch_auth_and_operator(state_dir):
+    """Patch: read-only API auth and operator passphrase both enabled."""
+    patches = [
+        patch.object(server_mod, "_state_dir", state_dir),
+        patch.object(server_mod, "_market", "NQ"),
+        patch.object(server_mod, "_auth_enabled", True),
+        patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
+        patch.object(server_mod, "_operator_enabled", True),
+        patch.object(server_mod, "_operator_passphrase", OPERATOR_PASS),
+        patch.object(server_mod, "_operator_failures", {}),
+        patch.object(server_mod, "_data_provider", None),
+        patch.object(server_mod, "_data_provider_error", "mocked-away"),
+        patch.object(core_mod, "_state_dir", state_dir),
+        patch.object(core_mod, "_market", "NQ"),
+        patch.object(core_mod, "_auth_enabled", True),
+        patch.object(core_mod, "_api_keys", {VALID_API_KEY}),
+        patch.object(core_mod, "_operator_enabled", True),
+        patch.object(core_mod, "_operator_passphrase", OPERATOR_PASS),
+        patch.object(core_mod, "_operator_failures", {}),
+        patch.object(core_mod, "_data_provider", None),
+        patch.object(core_mod, "_data_provider_error", "mocked-away"),
+    ]
+    for p in patches:
+        p.start()
+    yield
+    for p in patches:
+        p.stop()
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _patch_broadcast_loop():
     """Prevent the startup event's infinite broadcast loop from hanging tests."""
@@ -334,6 +364,11 @@ class TestOperatorAuth:
         resp = client.get("/api/operator/ping")
         assert resp.status_code == 403
 
+    @pytest.mark.usefixtures("_patch_auth_and_operator")
+    def test_operator_ping_rejects_api_key_only(self, client):
+        resp = client.get("/api/operator/ping", headers={"X-API-Key": VALID_API_KEY})
+        assert resp.status_code == 403
+
 
 # ===========================================================================
 # 4. GET /api/state
@@ -341,6 +376,11 @@ class TestOperatorAuth:
 
 
 class TestStateEndpoint:
+    @pytest.mark.usefixtures("_patch_auth_and_operator")
+    def test_state_still_accepts_read_only_api_key_when_operator_enabled(self, client):
+        resp = client.get("/api/state", headers={"X-API-Key": VALID_API_KEY})
+        assert resp.status_code == 200
+
     @pytest.mark.usefixtures("_patch_no_auth")
     def test_state_full(self, client):
         resp = client.get("/api/state")
@@ -572,6 +612,13 @@ class TestKillSwitch:
         resp = client.post("/api/kill-switch")
         assert resp.status_code == 403
 
+    @pytest.mark.usefixtures("_patch_auth_and_operator")
+    def test_kill_switch_rejects_api_key_only_when_operator_enabled(self, client):
+        server_mod._rate_limit_buckets.clear()
+        core_mod._rate_limit_buckets.clear()
+        resp = client.post("/api/kill-switch", headers={"X-API-Key": VALID_API_KEY})
+        assert resp.status_code == 403
+
 
 # ===========================================================================
 # 13. POST /api/resume
@@ -611,6 +658,16 @@ class TestCloseAllTrades:
         body = resp.json()
         assert body["ok"] is True
 
+    @pytest.mark.usefixtures("_patch_auth_and_operator")
+    def test_close_all_trades_rejects_api_key_only(self, client):
+        server_mod._rate_limit_buckets.clear()
+        core_mod._rate_limit_buckets.clear()
+        resp = client.post(
+            "/api/close-all-trades",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 403
+
 
 # ===========================================================================
 # 15. POST /api/close-trade
@@ -642,6 +699,17 @@ class TestCloseTrade:
             headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 422
+
+    @pytest.mark.usefixtures("_patch_auth_and_operator")
+    def test_close_trade_rejects_api_key_only(self, client):
+        server_mod._rate_limit_buckets.clear()
+        core_mod._rate_limit_buckets.clear()
+        resp = client.post(
+            "/api/close-trade",
+            json={"signal_id": "sig_001"},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 403
 
 
 # ===========================================================================

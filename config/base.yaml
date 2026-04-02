@@ -53,7 +53,7 @@ trading_circuit_breaker:
   max_daily_drawdown: 1000.0
   max_daily_profit: 3000.0  # Stop trading after hitting profit target (MFF 50K rule)
   max_concurrent_positions: 5
-  enable_session_filter: true
+  enable_session_filter: false
   allowed_sessions:
   - overnight
   - premarket
@@ -128,6 +128,8 @@ signals:
       - ranging
       - trending_bullish
       - trending_bearish
+# Legacy compatibility bridge. Canonical live strategy params belong under
+# strategies.composite_intraday; this section is still read as a fallback.
 pearl_bot_auto:
   ema_fast: 5
   ema_slow: 13
@@ -170,7 +172,7 @@ performance:
   max_records: 1000
   default_lookback_days: 7
 virtual_pnl:
-  enabled: true
+  enabled: false
   intrabar_tiebreak: take_profit
   notify_entry: true
   notify_exit: true

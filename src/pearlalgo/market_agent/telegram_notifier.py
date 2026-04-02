@@ -25,7 +25,6 @@ from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
     TelegramPrefs,
     _truncate_telegram_text,
-    _format_uptime,
     format_signal_status,
     format_signal_direction,
     format_signal_confidence_tier,
@@ -35,13 +34,13 @@ from pearlalgo.utils.telegram_alerts import (
     # New UX improvement helpers
     format_signal_action_cue,
     sanitize_telegram_markdown,
-    # Standardized terminology constants
-    LABEL_SCANS,
 )
 from pearlalgo.market_agent.telegram_formatters import (
     format_compact_signal as _canonical_format_compact_signal,
     format_signal_message as _canonical_format_signal_message,
     format_status_message as _canonical_format_status_message,
+    format_enhanced_status_message as _canonical_format_enhanced_status_message,
+    format_heartbeat_message as _canonical_format_heartbeat_message,
 )
 
 TELEGRAM_AVAILABLE = importlib.util.find_spec("telegram") is not None
@@ -182,7 +181,9 @@ class MarketAgentTelegramNotifier:
             Formatted message string
         """
         symbol = signal.get("symbol", "MNQ")  # Default to MNQ (micro Nasdaq)
-        signal_type = signal.get("type", "unknown").replace("_", " ").title()
+        signal_type_raw = str(signal.get("type", "unknown") or "unknown")
+        signal_type = signal_type_raw.replace("_", " ").title()
+        signal_type_key = signal_type_raw.lower()
         direction = signal.get("direction", "long").upper()
         entry_price = signal.get("entry_price", 0)
         stop_loss = signal.get("stop_loss", 0)
@@ -360,7 +361,7 @@ class MarketAgentTelegramNotifier:
             message += f"• 📉 {vol_text}\n"
 
         # MTF levels if breakout
-        if "breakout" in signal_type.lower():
+        if "breakout" in signal_type_key:
             breakout_levels = mtf_analysis.get("breakout_levels", {})
             resistance_5m = breakout_levels.get("resistance_5m")
             if resistance_5m:
@@ -386,9 +387,9 @@ class MarketAgentTelegramNotifier:
             warnings.append("Closing hour - Potential reversals")
 
         # Regime warnings
-        if "ranging" in regime_type and "momentum" in signal_type.lower():
+        if "ranging" in regime_type and "momentum" in signal_type_key:
             warnings.append("Ranging market - Momentum may whipsaw")
-        elif "trending" in regime_type and "mean_reversion" in signal_type.lower():
+        elif "trending" in regime_type and "mean_reversion" in signal_type_key:
             warnings.append("Trending market - Mean reversion fighting trend")
 
         # Volatility warnings
@@ -530,7 +531,7 @@ class MarketAgentTelegramNotifier:
                     else:
                         # Clean up underscores for display
                         clean = reason.replace("_", " ").replace(":", " | ").title()
-                        message += f"\n⏭ Skipped: {clean}"
+                        message += f"\n⏭ Order skipped: {clean}"
                 elif exec_status.startswith("error"):
                     reason = exec_status.replace("error:", "", 1)
                     message += f"\n⚠️ Exec error: {reason}"
@@ -701,147 +702,10 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            acct_tag = f"[{self.account_label}] " if self.account_label else ""
-            message = f"📊 *{acct_tag}Status*\n"
-
-            # Service and market status
-            status_emoji = "🟢" if status.get("running") else "🔴"
-            pause_status = " ⏸️ PAUSED" if status.get("paused") else ""
-            uptime_str = ""
-            if "uptime" in status and status["uptime"]:
-                uptime_str = f" ({_format_uptime(status['uptime'])})"
-
-            # FuturesMarketOpen: CME ETH + maintenance break semantics (operator/data-quality relevant)
-            futures_market_open = status.get("futures_market_open")
-            if futures_market_open is None:
-                try:
-                    futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    futures_market_open = None
-            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
-            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
-
-            # StrategySessionOpen: strategy trading window (09:30–16:00 ET) for signal generation
-            strategy_session_open = status.get("strategy_session_open")
-            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
-            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
-
-            message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
-            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
-            message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
-
-            # Connection status (only show if issues)
-            connection_status = status.get('connection_status', 'unknown')
-            connection_failures = status.get('connection_failures', 0)
-            if connection_status == 'disconnected' or connection_failures > 0:
-                conn_emoji = "🔴" if connection_status == 'disconnected' else "🟡"
-                message += f"{conn_emoji} *Connection:* {connection_status.upper()}"
-                if connection_failures > 0:
-                    message += f" ({connection_failures} failures)"
-                message += "\n"
-
-            # Activity section (compact single line, using standardized "scans" terminology)
-            scans_total = int(status.get("cycle_count", 0) or 0)
-            scans_session = status.get("cycle_count_session")
-            try:
-                scans_session = int(scans_session) if scans_session is not None else None
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                scans_session = None
-
-            errors = int(status.get("error_count", 0) or 0)
-
-            buffer = int(status.get("buffer_size", 0) or 0)
-            buffer_target = status.get("buffer_size_target")
-            try:
-                buffer_target = int(buffer_target) if buffer_target is not None else None
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                buffer_target = None
-
-            scans_label = f"{scans_session:,} {LABEL_SCANS} (session) / {scans_total:,} (total)" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
-            buffer_label = f"{buffer}/{buffer_target} bars (rolling)" if buffer_target is not None else f"{buffer} bars (rolling)"
-            message += f"📊 *Activity:* {scans_label} • {buffer_label} • {errors} errors\n"
-
-            # Signal delivery clarity: generated vs sent vs failed
-            signals_generated = int(status.get("signal_count", 0) or 0)
-            signals_sent = int(status.get("signals_sent", 0) or 0)
-            signals_failed = int(status.get("signals_send_failures", 0) or 0)
-            message += f"🔔 *Signals:* {signals_generated} generated • {signals_sent} sent • {signals_failed} failed\n"
-
-            last_err = status.get("last_signal_send_error")
-            if last_err:
-                # Keep it short for mobile.
-                msg_err = str(last_err)
-                if len(msg_err) > 140:
-                    msg_err = msg_err[:140] + "…"
-                message += f"⚠️ *Last send error:* {msg_err}\n"
-            
-            # Data quality section (compact)
-            latest_bar = status.get('latest_bar')
-            if latest_bar:
-                data_level = latest_bar.get('_data_level', 'unknown')
-                if data_level == 'level2':
-                    data_emoji = "📊"
-                    data_text = "Level 2"
-                    imbalance = latest_bar.get('imbalance', 0.0)
-                    if imbalance is not None:
-                        imbalance_pct = imbalance * 100
-                        if imbalance > 0.1:
-                            data_text += f" • 🟢 Bid {imbalance_pct:+.1f}%"
-                        elif imbalance < -0.1:
-                            data_text += f" • 🔴 Ask {imbalance_pct:+.1f}%"
-                        else:
-                            data_text += " • ⚪ Balanced"
-                    message += f"{data_emoji} *Data:* {data_text}\n"
-                elif data_level == 'level1':
-                    message += "📈 *Data:* Level 1\n"
-                else:
-                    # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
-                    is_eth = latest_bar.get('_historical_eth', False)
-                    data_emoji = "📊"
-                    
-                    # Calculate data age if timestamp is available
-                    data_age_minutes = None
-                    if 'timestamp' in latest_bar and latest_bar['timestamp']:
-                        try:
-                            from datetime import datetime, timezone
-                            bar_time = parse_utc_timestamp(latest_bar['timestamp'])
-                            if bar_time:
-                                age_delta = datetime.now(timezone.utc) - bar_time
-                                data_age_minutes = age_delta.total_seconds() / 60
-                        except Exception as e:
-                            logger.debug(f"Non-critical: {e}")
-                    
-                    if is_eth:
-                        if data_age_minutes is not None and data_age_minutes > 10:
-                            data_text = f"Delayed (ETH - {data_age_minutes:.0f}m)"
-                            data_emoji = "📉"
-                        else:
-                            data_text = "Live (ETH)"
-                    else:
-                        if data_age_minutes is not None and data_age_minutes > 10:
-                            data_text = f"Delayed ({data_age_minutes:.0f}m)"
-                        else:
-                            data_text = "Live"
-                    message += f"{data_emoji} *Data:* {data_text}\n"
-
-            # Performance section (compact)
-            performance = status.get("performance", {})
-            if performance:
-                exited = performance.get("exited_signals", 0)
-                if exited > 0:
-                    wins = performance.get('wins', 0)
-                    losses = performance.get('losses', 0)
-                    win_rate = performance.get('win_rate', 0) * 100
-                    total_pnl = performance.get('total_pnl', 0)
-                    avg_pnl = performance.get('avg_pnl', 0)
-
-                    message += f"📈 *Performance (7d):* {wins}W/{losses}L • {fmt_pct_direct(win_rate)} WR • {fmt_currency(total_pnl)} • {fmt_currency(avg_pnl)} avg\n"
-                else:
-                    message += "📈 *Performance (7d):* No completed trades yet\n"
-
+            message = _canonical_format_enhanced_status_message(
+                status,
+                account_label=self.account_label,
+            )
             await self.telegram.send_message(message)
             return True
         except Exception as e:
@@ -865,74 +729,7 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            futures_market_open = status.get("futures_market_open")
-            if futures_market_open is None:
-                try:
-                    futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    futures_market_open = None
-
-            strategy_session_open = status.get("strategy_session_open")
-
-            # Ultra-compact heartbeat: Price, Market status, Activity summary
-            latest_price = status.get('latest_price')
-            current_time = status.get('current_time')
-            symbol = status.get('symbol', 'NQ')
-            
-            # Format time (compact)
-            time_str = ""
-            if current_time:
-                try:
-                    if isinstance(current_time, str):
-                        current_time = parse_utc_timestamp(current_time)
-                    if current_time.tzinfo is None:
-                        current_time = current_time.replace(tzinfo=timezone.utc)
-                    time_str = fmt_time_et(current_time, fallback=current_time.strftime("%H:%M UTC"))
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-            
-            # Build compact message
-            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
-            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
-            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
-            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
-            message = f"💓 *Heartbeat* {time_str}\n\n"
-            
-            if latest_price:
-                message += f"💰 {fmt_currency(latest_price)} ({symbol})\n"
-            else:
-                message += f"📊 *Symbol:* {symbol}\n"
-
-            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}  •  {strat_emoji} *StrategySessionOpen:* {strat_text}\n"
-
-            # Activity summary (compact single line)
-            scans_total = int(status.get("cycle_count", 0) or 0)
-            scans_session = status.get("cycle_count_session")
-            try:
-                scans_session = int(scans_session) if scans_session is not None else None
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                scans_session = None
-
-            signals_generated = int(status.get("signal_count", 0) or 0)
-            signals_sent = int(status.get("signals_sent", 0) or 0)
-            signals_failed = int(status.get("signals_send_failures", 0) or 0)
-
-            errors = int(status.get("error_count", 0) or 0)
-
-            buffer = int(status.get("buffer_size", 0) or 0)
-            buffer_target = status.get("buffer_size_target")
-            try:
-                buffer_target = int(buffer_target) if buffer_target is not None else None
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-                buffer_target = None
-
-            scans_part = f"{scans_session:,}/{scans_total:,} {LABEL_SCANS}" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
-            buf_part = f"{buffer}/{buffer_target} bars" if buffer_target is not None else f"{buffer} bars"
-            message += f"📊 {scans_part} • {signals_generated} gen / {signals_sent} sent / {signals_failed} fail • {buf_part} • {errors} errors\n"
-
+            message = _canonical_format_heartbeat_message(status)
             await self.telegram.send_message(message)
             return True
         except Exception as e:
@@ -1349,24 +1146,6 @@ class MarketAgentTelegramNotifier:
 
             # Performance + recent exits (best-effort; never block dashboard).
             try:
-                # 30d performance (from SQLite if available)
-                try:
-                    from pearlalgo.learning.trade_database import TradeDatabase
-                    db_path = self.state_dir / "trades.db"
-                    if db_path.exists():
-                        trade_db = TradeDatabase(db_path)
-                        strategy_perf = trade_db.get_performance_by_signal_type(days=30)
-                        if strategy_perf:
-                            total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
-                            total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
-                            total_losses = sum(perf.get("losses", 0) for perf in strategy_perf.values())
-                            total_trades = total_wins + total_losses
-                            total_wr = (total_wins / total_trades * 100.0) if total_trades > 0 else 0.0
-                            total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
-                            message += f"\n*30d:* {total_emoji} {fmt_currency(total_pnl_all)} ({total_wins}W/{total_losses}L · {total_wr:.0f}%)"
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-
                 # Recent exits (compact)
                 try:
                     recent_exits = status.get("recent_exits", [])

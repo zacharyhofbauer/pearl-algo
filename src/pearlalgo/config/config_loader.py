@@ -1,8 +1,8 @@
 """
 Service-level configuration loader.
 
-Loads configuration from config.yaml for service intervals, circuit breaker,
-data settings, signals, performance tracking, execution (ATS), and learning.
+Loads runtime configuration for service intervals, guardrails, data settings,
+signals, performance tracking, and execution.
 
 **Purpose**: This module handles service behavior configuration (how the service operates).
 
@@ -17,7 +17,7 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 - For deployment-specific settings (hosts, ports, API keys)
 - For Pydantic-validated environment-based configuration
 
-**When to use strategy config (`trading_bots/pearl_bot_auto.py` CONFIG):**
+**When to use strategy config (`strategies/composite_intraday`):**
 - For strategy-specific parameters (symbol, timeframe, risk parameters)
 - For strategy behavior configuration (ATR multipliers, R:R ratios)
 
@@ -40,8 +40,11 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
+from pearlalgo.config.migration import migrate_legacy_runtime_config
+from pearlalgo.config.runtime_validation import validate_runtime_config
 from pearlalgo.config.config_view import ConfigView
 from pearlalgo.config import defaults
+from pearlalgo.strategies.registry import get_strategy_param_fields
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
 
@@ -49,18 +52,18 @@ from pearlalgo.utils.logger import logger
 # Schema validation: use schema_v2 for the --config path.
 def validate_config(data):
     """Delegate to schema_v2 for type-checked validation."""
-    from pearlalgo.config import schema_v2
-    return schema_v2.validate_config(data)
+    return validate_runtime_config(data, warn_unknown=False)
 
 def build_strategy_config_from_yaml(base, config_data):
-    """Merge YAML config sections and pearl_bot_auto overrides into the strategy config dict.
+    """Merge canonical YAML sections into the runtime strategy config dict.
 
     Section merges are shallow (nested dicts are replaced, not deep-merged).
     """
+    config_data = migrate_legacy_runtime_config(config_data)
     result = dict(base)
     for section in ("strategy", "signals", "risk", "data", "service", "execution",
                     "session", "challenge", "performance", "virtual_pnl", "auto_flat",
-                    "swing_trading", "trading_circuit_breaker",
+                    "swing_trading", "guardrails", "strategies", "trading_circuit_breaker",
                     "circuit_breaker", "hud", "indicators", "telegram", "telegram_ui",
                     "storage", "audit", "accounts"):
         if section in config_data:
@@ -72,19 +75,26 @@ def build_strategy_config_from_yaml(base, config_data):
     for key in ("symbol", "timeframe", "scan_interval"):
         if key in config_data:
             result[key] = config_data[key]
-    # pearl_bot_auto section: flatten only StrategyParams keys to top-level
-    # so generate_signals() / StrategyParams can read them; unknown keys are ignored.
-    from pearlalgo.trading_bots.pearl_bot_auto import StrategyParams
-    allowed_keys = set(StrategyParams.model_fields.keys())
-    pba = config_data.get("pearl_bot_auto")
-    if isinstance(pba, dict):
-        for key, value in pba.items():
-            if key in allowed_keys:
-                result[key] = value
-            else:
-                logger.warning(
-                    "pearl_bot_auto key '%s' is not a StrategyParams field; ignoring", key
-                )
+    # Flatten active strategy params to top-level so the canonical strategy
+    # entrypoint receives the runtime call shape it expects.
+    allowed_keys = get_strategy_param_fields()
+    strategy_cfg = config_data.get("strategy", {}) or {}
+    active_strategy = str(strategy_cfg.get("active", "composite_intraday") or "composite_intraday")
+    active_params = {}
+    strategies = config_data.get("strategies", {}) or {}
+    if isinstance(strategies, dict):
+        nested_params = strategies.get(active_strategy)
+        if isinstance(nested_params, dict):
+            active_params = nested_params
+
+    if not active_params:
+        # Legacy compatibility fallback for older configs that still provide
+        # strategy params only under the pearl_bot_auto section.
+        active_params = config_data.get("pearl_bot_auto") if isinstance(config_data.get("pearl_bot_auto"), dict) else {}
+
+    for key, value in active_params.items():
+        if key in allowed_keys:
+            result[key] = value
     return result
 
 def _apply_execution_env_overrides(execution_config):
@@ -141,7 +151,10 @@ def _resolve_config_path(config_path: Optional[Path] = None) -> str:
     if config_path is not None:
         return str(Path(config_path).resolve())
     project_root = Path(__file__).parent.parent.parent.parent
-    return str((project_root / "config" / "config.yaml").resolve())
+    canonical = project_root / "config" / "live" / "tradovate_paper.yaml"
+    if canonical.exists():
+        return str(canonical.resolve())
+    return str((project_root / "config" / "base.yaml").resolve())
 
 
 def clear_config_cache() -> None:
@@ -163,10 +176,10 @@ def build_strategy_config(
     config_data: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
-    Build a strategy config dict from base + config.yaml overrides.
+    Build a strategy config dict from base runtime defaults + YAML overrides.
 
-    This maps config.yaml sections into the keys expected by
-    `pearlalgo.trading_bots.pearl_bot_auto`.
+    This maps canonical runtime sections into the keys expected by the active
+    strategy entrypoint, with compatibility fallback for older config layouts.
     
     Note: Implementation delegated to pearlalgo.config.adapters module.
     """
@@ -330,14 +343,14 @@ def load_service_config(
     validate: bool = True,
 ) -> Dict[str, Any]:
     """
-    Load service configuration from config.yaml.
+    Load service configuration from the canonical runtime config.
 
     Uses the unified config loader with environment variable substitution.
     Results are cached at the module level based on the config file's mtime,
     so repeated calls are nearly free when the file hasn't been modified.
 
     Args:
-        config_path: Path to config.yaml (defaults to config/config.yaml)
+        config_path: Path to a runtime YAML file.
         validate: Whether to validate config and log warnings. Default True.
                   Set to False in tests or when loading config multiple times.
 
@@ -364,7 +377,7 @@ def load_service_config(
             pass
 
     # Load raw config using unified loader
-    config_data = load_config_yaml(config_path)
+    config_data = migrate_legacy_runtime_config(load_config_yaml(config_path))
 
     # Validate config (logs warnings, does not fail)
     if validate and config_data:
@@ -372,7 +385,11 @@ def load_service_config(
 
         # Run mandatory schema validation — fail fast on invalid config
         try:
-            validate_config(config_data)
+            validate_runtime_config(
+                config_data,
+                strict_non_enforced=True,
+                warn_unknown=False,
+            )
             logger.debug("Config schema validation passed")
         except Exception as e:
             logger.error(f"Config schema validation FAILED: {e}")
@@ -382,6 +399,12 @@ def load_service_config(
     result = {}
     for section, defaults in _SERVICE_DEFAULTS.items():
         result[section] = {**defaults, **config_data.get(section, {})}
+
+    # Preserve additional top-level sections that do not have service defaults
+    # but are still required by the runtime (for example strategy/guardrails).
+    for section, value in config_data.items():
+        if section not in result:
+            result[section] = value
 
     # Apply optional in-process overrides (best-effort).
     # This allows experiments/backtests to tweak config without editing files.
@@ -425,7 +448,7 @@ def parse_market_hours_overrides(
     Parse optional market-hours overrides from a loaded service config dict.
 
     This lives in the `config` layer by design: configuration may depend on `utils`,
-    but `utils` must never depend on configuration (see docs/PROJECT_SUMMARY.md).
+    but `utils` must never depend on configuration (see docs/PATH_TRUTH_TABLE.md).
 
     Expected schema under `market_hours`:
     - enable_config_overrides: bool (default False)
@@ -477,7 +500,7 @@ def load_market_hours_overrides(
     validate: bool = False,
 ) -> tuple[set[tuple[int, int, int]], dict[tuple[int, int, int], int]]:
     """
-    Load optional market-hours overrides from config/config.yaml.
+    Load optional market-hours overrides from the runtime config.
 
     - Disabled by default (enable via `market_hours.enable_config_overrides: true`)
     - Never raises on parse errors; returns empty overrides instead
@@ -497,8 +520,3 @@ def load_market_hours_overrides(
     except Exception as e:
         logger.warning(f"Could not load market hours overrides: {e}")
         return set(), {}
-
-
-
-
-

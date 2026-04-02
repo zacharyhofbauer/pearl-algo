@@ -21,6 +21,7 @@ from pearlalgo.utils.paths import parse_utc_timestamp
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.market_agent.audit_logger import AuditEventType
 from pearlalgo.market_agent.notification_queue import Priority
+from pearlalgo.strategies.composite_intraday import check_trading_session
 
 if TYPE_CHECKING:
     pass  # MarketAgentService accessed via self
@@ -409,7 +410,7 @@ class ServiceLoopMixin:
                     pass
                 else:
                     # Full analysis: new bar arrived
-                    # Run pearl_bot_auto strategy
+                    # Run the canonical strategy bundle
                     # Use run_in_executor to avoid blocking the event loop during
                     # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
                     df = market_data.get("df")
@@ -450,7 +451,6 @@ class ServiceLoopMixin:
 
                 # Prefer latest_bar timestamp for session check (reduces wall-clock drift issues).
                 # Fall back to wall-clock time if no latest_bar available.
-                from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 check_time = latest_bar_time if latest_bar_time else datetime.now(timezone.utc)
                 strategy_session_open = check_trading_session(check_time, self.config)
                 futures_market_open = False

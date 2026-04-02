@@ -109,7 +109,6 @@ from pearlalgo.execution.tradovate.utils import tradovate_fills_to_trades as _tr
 
 # -- Extracted modules (Phase 0 refactor) ------------------------------------
 from pearlalgo.api.data_layer import (
-    cached as _cached_new,
     read_state_for_dir as _read_state_for_dir_new,
     is_tv_paper_account as _is_tv_paper_account_new,
     get_start_balance as _get_start_balance_new,
@@ -122,6 +121,7 @@ from pearlalgo.api.tradovate_helpers import (
     normalize_fill as _normalize_fill_new,
     get_tradovate_state as _get_tradovate_state_new,
     get_paired_tradovate_trades as _get_paired_tradovate_trades,
+    estimate_commission_per_trade as _estimate_commission_per_trade,
     tradovate_positions_for_api as _tradovate_positions_for_api_new,
     enrich_positions_with_signal_brackets as _enrich_positions_with_signal_brackets,
     tradovate_performance_summary as _tradovate_performance_summary_new,
@@ -282,11 +282,9 @@ api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 # Operator Passphrase (public read-only, operator-only interactivity)
 # ---------------------------------------------------------------------------
 #
-# If PEARL_OPERATOR_PASSPHRASE is set, interactive endpoints require the caller
-# to present it via the X-PEARL-OPERATOR header (in addition to any API key).
-#
-# This enables a shareable, read-only dashboard link while keeping actions + chat
-# operator-only, without exposing secrets in the public frontend bundle.
+# Interactive/operator endpoints intentionally require a dedicated credential via
+# the X-PEARL-OPERATOR header. Browser-safe API keys remain read-only, which lets
+# us expose a public dashboard without also exposing write authority.
 #
 # Environment variables:
 # - PEARL_OPERATOR_PASSPHRASE=<secret phrase>  (recommended)
@@ -365,36 +363,24 @@ async def verify_operator(
     raise HTTPException(status_code=403, detail="Operator access required.")
 
 
-async def require_operator_or_api_key(
+async def require_operator_access(
     request: Request,
     operator: Optional[str] = Security(operator_header),
-    api_key_from_header: Optional[str] = Security(api_key_header),
-    api_key_from_query: Optional[str] = Security(api_key_query),
 ) -> str:
     """
-    Require either operator passphrase (if configured) or API key (if auth enabled).
+    Require the dedicated operator passphrase for mutating/debug endpoints.
 
-    This is used for interactive endpoints: kill switch, close trades, and LLM chat.
+    Browser-safe API keys are intentionally read-only and must never authorize
+    operator actions.
     """
-    if _operator_enabled:
-        # Enforce operator passphrase when configured (public link can remain read-only).
-        await verify_operator(request=request, operator=operator)
-        return "operator"
-
-    # Fall back to API-key auth when operator mode is not configured.
-    if not _auth_enabled:
-        raise HTTPException(status_code=403, detail="Operator access required.")
-
-    api_key = (api_key_from_header or api_key_from_query or "").strip()
-    if not api_key:
+    if not _operator_enabled:
         raise HTTPException(
-            status_code=401,
-            detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
+            status_code=403,
+            detail="Operator access is not configured on this server.",
         )
-    if not any(secrets.compare_digest(api_key, k) for k in _api_keys):
-        raise HTTPException(status_code=403, detail="Invalid API key.")
 
-    return "api_key"
+    await verify_operator(request=request, operator=operator)
+    return "operator"
 
 
 def _load_api_keys() -> set:
@@ -951,7 +937,13 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
         try:
             if _is_tv_paper_account(state_dir):
                 tv, fills = _get_tradovate_state(state_dir)
-                equity_stats = _tradovate_performance_summary(tv, fills, state_dir)
+                paired_trades = _get_paired_tradovate_trades(state_dir, fills)
+                equity_stats = _tradovate_performance_summary(
+                    tv,
+                    fills,
+                    state_dir,
+                    paired_trades=paired_trades,
+                )
 
                 now = _now_et_naive()
                 td_start = _get_trading_day_start()
@@ -961,23 +953,27 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                 ytd_start = _get_year_to_date_start(now)
                 all_start = datetime(2020, 1, 1)
 
-                all_trades_raw = _tradovate_fills_to_trades(fills)
-                total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
+                total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired_trades)
                 equity = float(tv.get("equity", 0)) if tv else 0
                 start_balance = _get_start_balance(state_dir)
-                total_trades = len(all_trades_raw)
+                total_trades = len(paired_trades)
 
                 # Commission estimation requires live equity as ground truth.
                 # When equity is 0 (adapter offline), skip commission deduction
                 # and use raw fill P&L to avoid wildly incorrect numbers.
-                commission_per_trade = 0.0
-                if equity > 0:
-                    equity_pnl = equity - start_balance
-                    if total_trades > 0 and total_fill_pnl > equity_pnl:
-                        commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+                commission_per_trade = _estimate_commission_per_trade(
+                    paired_trades,
+                    equity=equity,
+                    start_balance=start_balance,
+                )
 
                 cpt = commission_per_trade
-                all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
+                all_fill_stats = _tradovate_performance_for_period(
+                    fills,
+                    all_start,
+                    commission_per_trade=cpt,
+                    paired_trades=paired_trades,
+                )
 
                 # Provide equity (live) or estimated equity (start_balance + fill P&L)
                 live_equity = equity_stats.get("tradovate_equity", 0)
@@ -988,11 +984,11 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
 
                 return {
                     "as_of": now.isoformat(),
-                    "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt),
-                    "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt),
-                    "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt),
-                    "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt),
-                    "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt),
+                    "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt, paired_trades=paired_trades),
+                    "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt, paired_trades=paired_trades),
+                    "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
+                    "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
+                    "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt, paired_trades=paired_trades),
                     "all": all_fill_stats,
                 }
 
@@ -1029,6 +1025,68 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
             return None
 
     return _cached("broadcast_perf_summary", 3.0, _compute)
+
+
+def _build_ws_state_payload(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the shared payload used by all WebSocket state message types."""
+    daily_stats = _compute_daily_stats(state_dir)
+    challenge = _get_challenge_status(state_dir)
+
+    return {
+        "running": state.get("running", False),
+        "paused": state.get("paused", False),
+        "daily_pnl": daily_stats["daily_pnl"],
+        "daily_trades": daily_stats["daily_trades"],
+        "daily_wins": daily_stats["daily_wins"],
+        "daily_losses": daily_stats["daily_losses"],
+        "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),
+        "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
+        "active_trades_unrealized_pnl": daily_stats.get(
+            "tradovate_open_pnl",
+            state.get("active_trades_unrealized_pnl"),
+        ),
+        "futures_market_open": state.get("futures_market_open", False),
+        "data_fresh": state.get("data_fresh", False),
+        "last_updated": _now_et_iso(),
+        "ai_status": _get_ai_status(state),
+        "challenge": challenge,
+        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, state_dir, limit=100),
+        "performance": _compute_performance_stats(state_dir),
+        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, state_dir, hours=72),
+        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, state_dir),
+        "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, state_dir),
+        "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, state_dir, 50),
+        "performance_summary": _cached(
+            "performance_broadcast",
+            2.5,
+            _get_performance_summary_for_broadcast,
+            state_dir,
+        ),
+        "cadence_metrics": _get_cadence_metrics_enhanced(state),
+        "market_regime": _get_market_regime(state),
+        "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+        "signal_rejections_24h": _get_signal_rejections_24h(state),
+        "last_signal_decision": _get_last_signal_decision(state),
+        "shadow_counters": _get_shadow_counters(state),
+        "execution_state": state.get("execution_state"),
+        "tradovate_account": state.get("tradovate_account"),
+        "circuit_breaker": state.get("circuit_breaker"),
+        "ml_filter_performance": state.get("ml_filter_performance"),
+        "session_context": state.get("session_context"),
+        "signal_activity": state.get("signal_activity"),
+        "gateway_status": _get_gateway_status(),
+        "connection_health": _get_connection_health(state),
+        "error_summary": _get_error_summary(state_dir, state),
+        "config": _get_config(state),
+        "data_quality": _get_data_quality(state),
+        "pearl_suggestion": None,
+        "pearl_insights": None,
+        "pearl_ai_available": False,
+        "pearl_feed": [],
+        "pearl_ai_heartbeat": None,
+        "pearl_ai_debug": None,
+        "operator_lock_enabled": bool(_operator_enabled),
+    }
 
 
 class ConnectionManager:
@@ -1121,66 +1179,12 @@ class ConnectionManager:
                         if self.active_connections and combined_hash != self._last_state_hash:
                             self._last_state_hash = combined_hash
 
-                            # Build the full broadcast payload (computed only on change)
-                            daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-
-                            broadcast_payload = {
-                                "running": state.get("running", False),
-                                "paused": state.get("paused", False),
-                                "daily_pnl": daily_stats["daily_pnl"],
-                                "daily_trades": daily_stats["daily_trades"],
-                                "daily_wins": daily_stats["daily_wins"],
-                                "daily_losses": daily_stats["daily_losses"],
-                                "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
-                                # For Tradovate Paper: use Tradovate position count & open PnL
-                                "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
-                                "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
-                                "futures_market_open": state.get("futures_market_open", False),
-                                "data_fresh": state.get("data_fresh", False),
-                                "last_updated": _now_et_iso(),
-                                "ai_status": _get_ai_status(state),
-                                "cadence_metrics": _get_cadence_metrics_enhanced(state),
-                                "market_regime": _get_market_regime(state),
-                                "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
-                                "gateway_status": _get_gateway_status(),
-                                "connection_health": _get_connection_health(state),
-                                "error_summary": _get_error_summary(_state_dir, state),
-                                "config": _get_config(state),
-                                "data_quality": _get_data_quality(state),
-                                # Performance data
-                                "challenge": _get_challenge_status(_state_dir),
-                                "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100),
-                                "performance": _compute_performance_stats(_state_dir),
-                                "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
-                                "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                                # --- NEW: positions, trades, performance_summary ---
-                                # These were previously HTTP-only (30s poll).  Including them
-                                # here gives the frontend ~2s latency on trade updates.
-                                "positions": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_cached, "positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir)),
-                                "recent_trades": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_cached, "trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50)),
-                                "performance_summary": await asyncio.get_event_loop().run_in_executor(
-                                    None, partial(_cached, "performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir)),
-                                # Signal activity & execution state
-                                "signal_rejections_24h": state.get("signal_rejections_24h"),
-                                "last_signal_decision": state.get("last_signal_decision"),
-                                "shadow_counters": state.get("shadow_counters"),
-                                "execution_state": state.get("execution_state"),
-                                "tradovate_account": state.get("tradovate_account"),
-                                "circuit_breaker": state.get("circuit_breaker"),
-                                "ml_filter_performance": state.get("ml_filter_performance"),
-                                "session_context": state.get("session_context"),
-                                "signal_activity": state.get("signal_activity"),
-                                # Pearl AI (removed – keys retained for web-app compat)
-                                "pearl_suggestion": None,
-                                "pearl_insights": None,
-                                "pearl_ai_available": False,
-                                "pearl_feed": [],
-                                "pearl_ai_heartbeat": None,
-                                "pearl_ai_debug": None,
-                                "operator_lock_enabled": bool(_operator_enabled),
-                            }
+                            broadcast_payload = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                _build_ws_state_payload,
+                                _state_dir,
+                                state,
+                            )
 
                             await self.broadcast({"type": "state_update", "data": broadcast_payload})
 
@@ -1271,59 +1275,15 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
             state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
             # Broadcast if we have agent state OR persistent challenge data
             if state or _get_challenge_status(_state_dir):
-                daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-                recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
-                # Build initial_state with the SAME field set as state_update
-                # so the client has full data from the first message.
+                initial_payload = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    _build_ws_state_payload,
+                    _state_dir,
+                    state,
+                )
                 initial_data = {
                     "type": "initial_state",
-                    "data": {
-                        "running": state.get("running", False),
-                        "paused": state.get("paused", False),
-                        "daily_pnl": daily_stats["daily_pnl"],
-                        "daily_trades": daily_stats["daily_trades"],
-                        "daily_wins": daily_stats["daily_wins"],
-                        "daily_losses": daily_stats["daily_losses"],
-                        "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
-                        "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
-                        "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
-                        "futures_market_open": state.get("futures_market_open", False),
-                        "data_fresh": state.get("data_fresh", False),
-                        "last_updated": _now_et_iso(),
-                        "ai_status": _get_ai_status(state),
-                        "challenge": _get_challenge_status(_state_dir),
-                        "recent_exits": recent_exits,
-                        "performance": _compute_performance_stats(_state_dir),
-                        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
-                        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                        "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir),
-                        "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50),
-                        "performance_summary": _cached("performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir),
-                        "cadence_metrics": _get_cadence_metrics_enhanced(state),
-                        "market_regime": _get_market_regime(state),
-                        "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
-                        "signal_rejections_24h": _get_signal_rejections_24h(state),
-                        "last_signal_decision": _get_last_signal_decision(state),
-                        "shadow_counters": _get_shadow_counters(state),
-                        "execution_state": state.get("execution_state"),
-                        "tradovate_account": state.get("tradovate_account"),
-                        "circuit_breaker": state.get("circuit_breaker"),
-                        "ml_filter_performance": state.get("ml_filter_performance"),
-                        "session_context": state.get("session_context"),
-                        "signal_activity": state.get("signal_activity"),
-                        "gateway_status": _get_gateway_status(),
-                        "connection_health": _get_connection_health(state),
-                        "error_summary": _get_error_summary(_state_dir, state),
-                        "config": _get_config(state),
-                        "data_quality": _get_data_quality(state),
-                        "pearl_suggestion": None,
-                        "pearl_insights": None,
-                        "pearl_ai_available": False,
-                        "pearl_feed": [],
-                        "pearl_ai_heartbeat": None,
-                        "pearl_ai_debug": None,
-                        "operator_lock_enabled": bool(_operator_enabled),
-                    }
+                    "data": initial_payload,
                 }
                 await websocket.send_json(initial_data)
 
@@ -1352,57 +1312,15 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                     if _state_dir:
                         state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
                         if state or _get_challenge_status(_state_dir):
-                            daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-                            recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
+                            refresh_payload = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                _build_ws_state_payload,
+                                _state_dir,
+                                state,
+                            )
                             refresh_data = {
                                 "type": "full_refresh",
-                                "data": {
-                                    "running": state.get("running", False),
-                                    "paused": state.get("paused", False),
-                                    "daily_pnl": daily_stats["daily_pnl"],
-                                    "daily_trades": daily_stats["daily_trades"],
-                                    "daily_wins": daily_stats["daily_wins"],
-                                    "daily_losses": daily_stats["daily_losses"],
-                                    "pnl_source": daily_stats.get("pnl_source", "tradovate_fills"),  # FIXED 2026-03-25
-                                    "active_trades_count": daily_stats.get("tradovate_positions", state.get("active_trades_count", 0)),
-                                    "active_trades_unrealized_pnl": daily_stats.get("tradovate_open_pnl", state.get("active_trades_unrealized_pnl")),
-                                    "futures_market_open": state.get("futures_market_open", False),
-                                    "data_fresh": state.get("data_fresh", False),
-                                    "last_updated": _now_et_iso(),
-                                    "ai_status": _get_ai_status(state),
-                                    "challenge": _get_challenge_status(_state_dir),
-                                    "recent_exits": recent_exits,
-                                    "performance": _compute_performance_stats(_state_dir),
-                                    "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
-                                    "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
-                                    "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, _state_dir),
-                                    "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, _state_dir, 50),
-                                    "performance_summary": _cached("performance_broadcast", 2.5, _get_performance_summary_for_broadcast, _state_dir),
-                                    "cadence_metrics": _get_cadence_metrics_enhanced(state),
-                                    "market_regime": _get_market_regime(state),
-                                    "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
-                                    "signal_rejections_24h": _get_signal_rejections_24h(state),
-                                    "last_signal_decision": _get_last_signal_decision(state),
-                                    "shadow_counters": _get_shadow_counters(state),
-                                    "execution_state": state.get("execution_state"),
-                                    "tradovate_account": state.get("tradovate_account"),
-                                    "circuit_breaker": state.get("circuit_breaker"),
-                                    "ml_filter_performance": state.get("ml_filter_performance"),
-                                    "session_context": state.get("session_context"),
-                                    "signal_activity": state.get("signal_activity"),
-                                    "gateway_status": _get_gateway_status(),
-                                    "connection_health": _get_connection_health(state),
-                                    "error_summary": _get_error_summary(_state_dir, state),
-                                    "config": _get_config(state),
-                                    "data_quality": _get_data_quality(state),
-                                    "pearl_suggestion": None,
-                                    "pearl_insights": None,
-                                    "pearl_ai_available": False,
-                                    "pearl_feed": [],
-                                    "pearl_ai_heartbeat": None,
-                                    "pearl_ai_debug": None,
-                                    "operator_lock_enabled": bool(_operator_enabled),
-                                }
+                                "data": refresh_payload,
                             }
                             await websocket.send_json(refresh_data)
 
@@ -1493,14 +1411,15 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                         _fills_data = _read_json_sync(fills_file)
                         tv_fills = _fills_data if isinstance(_fills_data, list) else []
                     if tv_fills:
-                        paired = _tradovate_fills_to_trades(tv_fills)
+                        paired = _get_paired_tradovate_trades(state_dir, tv_fills)
                         # Derive per-trade commission from equity vs fill P&L gap
                         total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
                         start_balance = _get_start_balance(state_dir)
-                        equity_pnl = equity - start_balance
-                        cpt = 0.0  # commission per trade
-                        if len(paired) > 0 and total_fill_pnl > equity_pnl:
-                            cpt = (total_fill_pnl - equity_pnl) / len(paired)
+                        cpt = _estimate_commission_per_trade(
+                            paired,
+                            equity=equity,
+                            start_balance=start_balance,
+                        )
                         # Filter to today's trading day for accurate daily stats
                         td_start = _get_trading_day_start()
                         today_trades = []
@@ -1539,7 +1458,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
         try:
             tv, tv_fills = _get_tradovate_state(state_dir)
             if tv_fills:
-                paired = _tradovate_fills_to_trades(tv_fills)
+                paired = _get_paired_tradovate_trades(state_dir, tv_fills)
                 td_start = _get_trading_day_start()
                 today_trades = []
                 for t in paired:
@@ -1665,7 +1584,7 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
                 try:
                     _, tv_fills = _get_tradovate_state(state_dir)
                     if tv_fills:
-                        paired = _tradovate_fills_to_trades(tv_fills)
+                        paired = _get_paired_tradovate_trades(state_dir, tv_fills)
                         tv_stats["trades"] = len(paired)
                         tv_stats["wins"] = sum(1 for t in paired if (t.get("pnl") or 0) > 0)
                         tv_stats["losses"] = len(paired) - tv_stats["wins"]
@@ -1689,13 +1608,14 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
         if _is_tv_paper_account(state_dir):
             _, tv_fills = _get_tradovate_state(state_dir)
             if tv_fills:
+                paired = _get_paired_tradovate_trades(state_dir, tv_fills)
                 now_utc = _now_et_naive()
                 prev_day_s, prev_day_e = _get_previous_trading_day_bounds()
                 fills_stats = {
-                    "yesterday": _tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e),
-                    "24h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=24)),
-                    "72h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=72)),
-                    "30d": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(days=30)),
+                    "yesterday": _tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e, paired_trades=paired),
+                    "24h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=24), paired_trades=paired),
+                    "72h": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=72), paired_trades=paired),
+                    "30d": _tradovate_performance_for_period(tv_fills, now_utc - timedelta(days=30), paired_trades=paired),
                 }
                 return fills_stats
     except Exception as e:
@@ -1865,9 +1785,20 @@ def _tradovate_positions_for_api(tv: Dict[str, Any]) -> List[Dict[str, Any]]:
     return _tradovate_positions_for_api_new(tv)
 
 
-def _tradovate_performance_summary(tv: Dict[str, Any], fills: List[Dict[str, Any]], state_dir: Path) -> Dict[str, Any]:
+def _tradovate_performance_summary(
+    tv: Dict[str, Any],
+    fills: List[Dict[str, Any]],
+    state_dir: Path,
+    *,
+    paired_trades: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Delegates to :func:`pearlalgo.api.tradovate_helpers.tradovate_performance_summary`."""
-    return _tradovate_performance_summary_new(tv, fills, state_dir)
+    return _tradovate_performance_summary_new(
+        tv,
+        fills,
+        state_dir,
+        paired_trades=paired_trades,
+    )
 
 
 def _tradovate_performance_for_period(
@@ -1875,17 +1806,24 @@ def _tradovate_performance_for_period(
     start_utc: datetime,
     end_utc: Optional[datetime] = None,
     commission_per_trade: float = 0.0,
+    *,
+    paired_trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Delegates to :func:`pearlalgo.api.tradovate_helpers.tradovate_performance_for_period`."""
-    return _tradovate_performance_for_period_new(fills, start_utc, end_utc, commission_per_trade)
+    return _tradovate_performance_for_period_new(
+        fills,
+        start_utc,
+        end_utc,
+        commission_per_trade,
+        paired_trades=paired_trades,
+    )
 
 
 def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
     """Get recent exits. Tradovate Paper: from Tradovate fills. IBKR Virtual: from signals.jsonl."""
     # Tradovate Paper: use Tradovate fills
     if _is_tv_paper_account(state_dir):
-        _, fills = _get_tradovate_state(state_dir)
-        trades = _tradovate_fills_to_trades(fills)
+        trades = _get_paired_tradovate_trades(state_dir)
         recent = []
         for t in trades[-limit:]:
             pnl = t.get("pnl", 0)
@@ -2083,7 +2021,7 @@ def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
                 start_balance = config.get("start_balance", 50000.0)
                 equity = float(tv.get("equity", 0))
                 pnl = round(equity - start_balance, 2)
-                trades_list = _tradovate_fills_to_trades(fills)
+                trades_list = _get_paired_tradovate_trades(state_dir, fills)
                 total = len(trades_list)
                 wins = sum(1 for t in trades_list if (t.get("pnl") or 0) > 0)
                 losses = total - wins
@@ -2136,7 +2074,7 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
         try:
             _, fills = _get_tradovate_state(state_dir)
             if fills:
-                paired = _tradovate_fills_to_trades(fills)
+                paired = _get_paired_tradovate_trades(state_dir, fills)
                 data = [
                     {
                         "exit_time": t.get("close_time") or t.get("exit_time") or t.get("timestamp"),
@@ -2826,7 +2764,7 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 @app.get("/api/debug/tradovate-orders")
 async def debug_tradovate_orders(
     limit: int = Query(default=200, ge=1, le=500, description="Max debug rows to return"),
-    _: str = Depends(require_operator_or_api_key),
+    _: str = Depends(require_operator_access),
 ):
     """
     Internal debug endpoint for Tradovate order normalization.
@@ -2859,7 +2797,7 @@ async def debug_tradovate_orders(
 
 
 @app.get("/api/operator/ping")
-async def operator_ping(_: str = Depends(require_operator_or_api_key)):
+async def operator_ping(_: str = Depends(require_operator_access)):
     """
     Operator-only: verify that operator access is working.
 
@@ -2870,7 +2808,7 @@ async def operator_ping(_: str = Depends(require_operator_or_api_key)):
 
 
 @app.post("/api/kill-switch")
-async def kill_switch(_: str = Depends(require_operator_or_api_key)):
+async def kill_switch(_: str = Depends(require_operator_access)):
     """
     Trigger the kill switch (operator action).
 
@@ -2879,8 +2817,8 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
     Writes `kill_request.flag` into the active market state directory.
 
     Safety policy:
-    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
-    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
+    - Requires operator access via the X-PEARL-OPERATOR header
+    - Browser/API keys remain read-only and cannot trigger this endpoint
     """
     _check_rate_limit("kill-switch")
 
@@ -2907,7 +2845,7 @@ async def kill_switch(_: str = Depends(require_operator_or_api_key)):
 
 
 @app.post("/api/resume")
-async def resume_service(_: str = Depends(require_operator_or_api_key)):
+async def resume_service(_: str = Depends(require_operator_access)):
     """
     Request the agent to resume (unpause) after a circuit-breaker or manual pause.
 
@@ -2933,7 +2871,7 @@ async def resume_service(_: str = Depends(require_operator_or_api_key)):
 
 
 @app.post("/api/close-all-trades", status_code=202)
-async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
+async def close_all_trades(_: str = Depends(require_operator_access)):
     """
     Request the agent to close ALL virtual trades (status=entered).
 
@@ -2942,8 +2880,8 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
     This avoids editing state.json directly (reduces race risk with agent writes).
 
     Safety policy:
-    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
-    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
+    - Requires operator access via the X-PEARL-OPERATOR header
+    - Browser/API keys remain read-only and cannot trigger this endpoint
     """
     _check_rate_limit("close-all-trades")
 
@@ -2973,7 +2911,7 @@ async def close_all_trades(_: str = Depends(require_operator_or_api_key)):
 @app.post("/api/close-trade", status_code=202)
 async def close_trade(
     payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_or_api_key),
+    _: str = Depends(require_operator_access),
 ):
     """
     Request the agent to close a specific virtual trade by signal_id.
@@ -2984,8 +2922,8 @@ async def close_trade(
     This avoids editing state.json directly (reduces race risk with agent writes).
 
     Safety policy:
-    - Requires operator access (X-PEARL-OPERATOR header) when PEARL_OPERATOR_PASSPHRASE is set
-    - Otherwise requires API key authentication when PEARL_API_AUTH_ENABLED=true
+    - Requires operator access via the X-PEARL-OPERATOR header
+    - Browser/API keys remain read-only and cannot trigger this endpoint
     """
     _check_rate_limit("close-trade")
 
@@ -3024,7 +2962,7 @@ async def close_trade(
 @app.post("/api/trailing-stop/override")
 async def trailing_stop_override(
     payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_or_api_key),
+    _: str = Depends(require_operator_access),
 ):
     """
     Apply a dynamic trailing stop parameter override.
@@ -3106,7 +3044,7 @@ async def trailing_stop_override(
 
 
 @app.get("/api/trailing-stop/state")
-async def trailing_stop_state(_: str = Depends(require_operator_or_api_key)):
+async def trailing_stop_state(_: str = Depends(require_operator_access)):
     """
     Get current trailing stop state for all tracked positions.
 
@@ -3126,7 +3064,7 @@ async def trailing_stop_state(_: str = Depends(require_operator_or_api_key)):
 
 
 @app.delete("/api/trailing-stop/override")
-async def clear_trailing_stop_override(_: str = Depends(require_operator_or_api_key)):
+async def clear_trailing_stop_override(_: str = Depends(require_operator_access)):
     """Clear any pending or active trailing stop override."""
     _check_rate_limit("trailing-stop-clear")
 
@@ -3152,7 +3090,7 @@ async def clear_trailing_stop_override(_: str = Depends(require_operator_or_api_
 # Config management endpoints
 # ---------------------------------------------------------------------------
 from pearlalgo.api.config_endpoints import config_router
-app.include_router(config_router, dependencies=[Depends(require_operator_or_api_key)])
+app.include_router(config_router, dependencies=[Depends(require_operator_access)])
 
 
 def _write_operator_request(state_dir: Path, prefix: str, payload: Dict[str, Any]) -> Path:
@@ -3295,7 +3233,13 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     # Tradovate Paper: bucket Tradovate fills by time period for proper breakdowns
     if _is_tv_paper_account(_state_dir):
         tv, fills = _get_tradovate_state(_state_dir)
-        equity_stats = _tradovate_performance_summary(tv, fills, _state_dir)
+        paired_trades = _get_paired_tradovate_trades(_state_dir, fills)
+        equity_stats = _tradovate_performance_summary(
+            tv,
+            fills,
+            _state_dir,
+            paired_trades=paired_trades,
+        )
 
         now = _now_et_naive()
         td_start = _get_trading_day_start()
@@ -3308,19 +3252,22 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         # Derive per-trade commission from equity vs fill P&L gap.
         # Tradovate fills don't include fees, but equity is the ground truth.
         # When equity is 0 (adapter offline), skip commission deduction.
-        all_trades_raw = _tradovate_fills_to_trades(fills)
-        total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in all_trades_raw)
+        total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired_trades)
         equity = float(tv.get("equity", 0)) if tv else 0
         start_balance = _get_start_balance(_state_dir)
-        total_trades = len(all_trades_raw)
-        commission_per_trade = 0.0
-        if equity > 0:
-            equity_pnl = equity - start_balance
-            if total_trades > 0 and total_fill_pnl > equity_pnl:
-                commission_per_trade = (total_fill_pnl - equity_pnl) / total_trades
+        commission_per_trade = _estimate_commission_per_trade(
+            paired_trades,
+            equity=equity,
+            start_balance=start_balance,
+        )
 
         cpt = commission_per_trade  # shorthand
-        all_fill_stats = _tradovate_performance_for_period(fills, all_start, commission_per_trade=cpt)
+        all_fill_stats = _tradovate_performance_for_period(
+            fills,
+            all_start,
+            commission_per_trade=cpt,
+            paired_trades=paired_trades,
+        )
         live_equity = equity_stats.get("tradovate_equity", 0)
         if live_equity:
             all_fill_stats["tradovate_equity"] = live_equity
@@ -3329,11 +3276,11 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
 
         return {
             "as_of": now.isoformat(),
-            "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt),
-            "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt),
-            "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt),
-            "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt),
-            "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt),
+            "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt, paired_trades=paired_trades),
+            "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt, paired_trades=paired_trades),
+            "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
+            "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
+            "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt, paired_trades=paired_trades),
             "all": all_fill_stats,
             "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
         }
@@ -3377,8 +3324,7 @@ async def get_trades(
 
     # Tradovate Paper: reconstruct trades from Tradovate fills
     if _is_tv_paper_account(_state_dir):
-        _, fills = _get_tradovate_state(_state_dir)
-        trades = _tradovate_fills_to_trades(fills)
+        trades = _get_paired_tradovate_trades(_state_dir)
         return trades[-limit:]
 
     # IBKR Virtual: existing signals.jsonl logic

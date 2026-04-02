@@ -3,7 +3,7 @@
 # Designed for cron: collects data, runs backtest, produces analysis.
 #
 # Cron example (run at 5:30 PM ET daily, before session open):
-#   30 17 * * * /home/pearlalgo/pearl-algo-workspace/scripts/backtesting/run_nightly_backtest.sh
+#   30 17 * * * /home/pearlalgo/projects/pearl-algo/scripts/backtesting/run_nightly_backtest.sh
 #
 # Output files:
 #   data/backtest/latest_results.json   - Full backtest results + trades
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-WORKSPACE="${HOME}/pearl-algo-workspace"
+WORKSPACE="${HOME}/projects/pearl-algo"
 cd "${WORKSPACE}"
 
 # Activate virtualenv

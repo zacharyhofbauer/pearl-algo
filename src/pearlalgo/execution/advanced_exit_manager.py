@@ -16,6 +16,13 @@ _ET = pytz.timezone("America/New_York")
 logger = logging.getLogger(__name__)
 
 
+def _hold_duration_minutes(entry_time: datetime) -> float:
+    """Calculate how long a position has been held in minutes (naive ET)."""
+    now_et = datetime.now(_ET).replace(tzinfo=None)
+    et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
+    return (now_et - et_naive).total_seconds() / 60
+
+
 # ============================================================================
 # PARTIAL PROFIT RUNNER (Upgrade 2)
 # ============================================================================
@@ -269,10 +276,7 @@ class AdvancedExitManager:
         if not self.quick_exit_enabled:
             return False, ""
 
-        # Calculate hold duration — FIXED 2026-03-25: naive ET
-        now_et = datetime.now(_ET).replace(tzinfo=None)
-        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
-        duration_min = (now_et - et_naive).total_seconds() / 60
+        duration_min = _hold_duration_minutes(entry_time)
 
         if duration_min < self.quick_exit_min_duration_min:
             return False, ""
@@ -307,10 +311,7 @@ class AdvancedExitManager:
         if not self.time_exit_enabled:
             return False, ""
 
-        # Calculate hold duration — FIXED 2026-03-25: naive ET
-        now_et = datetime.now(_ET).replace(tzinfo=None)
-        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
-        duration_min = (now_et - et_naive).total_seconds() / 60
+        duration_min = _hold_duration_minutes(entry_time)
 
         if duration_min < self.time_exit_min_duration_min:
             return False, ""
@@ -373,9 +374,7 @@ class AdvancedExitManager:
         if not self.max_hold_enabled:
             return False, ""
 
-        now_et = datetime.now(_ET).replace(tzinfo=None)
-        et_naive = entry_time.replace(tzinfo=None) if entry_time.tzinfo else entry_time
-        duration_min = (now_et - et_naive).total_seconds() / 60
+        duration_min = _hold_duration_minutes(entry_time)
 
         if duration_min >= self.max_hold_duration_min:
             reason = (f"Max hold exit: trade held {duration_min:.0f} min "

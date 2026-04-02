@@ -113,22 +113,6 @@ class PerformanceTracker:
         self._sqlite_enabled = False
         self._trade_db = None
         self._async_sqlite_queue = None  # Set via set_sqlite_queue() if async writes enabled
-        if SQLITE_AVAILABLE:
-            try:
-                storage_cfg = service_config.get("storage", {}) or {}
-                self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
-                if self._sqlite_enabled:
-                    # IMPORTANT:
-                    # - In production (no explicit state_dir), honor config.db_path if provided.
-                    # - In tests (explicit state_dir), ALWAYS use state_dir/trades.db regardless of config.
-                    if self._explicit_state_dir:
-                        db_path = self.state_dir / "trades.db"
-                    else:
-                        db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
-                        db_path = Path(str(db_path_raw))
-                    self._trade_db = TradeDatabase(db_path)
-            except Exception as e:
-                logger.debug(f"SQLite storage not enabled/available: {e}")
 
         # Load performance configuration
         data_settings = service_config.get("data", {})

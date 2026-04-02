@@ -67,7 +67,7 @@ class TelegramPrefs:
                 from pearlalgo.utils.paths import ensure_state_dir
                 state_dir = Path(ensure_state_dir())
             except ImportError:
-                state_dir = Path("data/agent_state/NQ")
+                state_dir = Path("data/agent_state/MNQ")
         self._prefs_file = Path(state_dir) / "telegram_prefs.json"
         self._prefs = dict(self.DEFAULTS)
         self._load()

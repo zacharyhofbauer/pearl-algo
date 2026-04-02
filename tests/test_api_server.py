@@ -50,6 +50,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 # ---------------------------------------------------------------------------
 VALID_API_KEY = "test-secret-key-12345"
 INVALID_API_KEY = "wrong-key-99999"
+OPERATOR_PASS = "test-operator-pass"
 
 # ---------------------------------------------------------------------------
 # Sample state data
@@ -208,6 +209,50 @@ def _patch_globals_auth(state_dir):
         patch.object(_server_impl, "_auth_enabled", True),
         patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
         patch.object(_server_impl, "_operator_enabled", False),
+        patch.object(_server_impl, "_data_provider", None),
+        patch.object(_server_impl, "_data_provider_error", "mocked-away"),
+    ]
+    for p in patches:
+        p.start()
+    yield
+    for p in patches:
+        p.stop()
+
+
+@pytest.fixture()
+def _patch_globals_operator(state_dir):
+    """Patch globals with operator access ENABLED."""
+    patches = [
+        patch.object(_server_impl, "_state_dir", state_dir),
+        patch.object(_server_impl, "_state_reader", None),
+        patch.object(_server_impl, "_market", "NQ"),
+        patch.object(_server_impl, "_auth_enabled", False),
+        patch.object(_server_impl, "_api_keys", set()),
+        patch.object(_server_impl, "_operator_enabled", True),
+        patch.object(_server_impl, "_operator_passphrase", OPERATOR_PASS),
+        patch.object(_server_impl, "_operator_failures", {}),
+        patch.object(_server_impl, "_data_provider", None),
+        patch.object(_server_impl, "_data_provider_error", "mocked-away"),
+    ]
+    for p in patches:
+        p.start()
+    yield
+    for p in patches:
+        p.stop()
+
+
+@pytest.fixture()
+def _patch_globals_auth_and_operator(state_dir):
+    """Patch globals with read-only API auth and operator access both enabled."""
+    patches = [
+        patch.object(_server_impl, "_state_dir", state_dir),
+        patch.object(_server_impl, "_state_reader", None),
+        patch.object(_server_impl, "_market", "NQ"),
+        patch.object(_server_impl, "_auth_enabled", True),
+        patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
+        patch.object(_server_impl, "_operator_enabled", True),
+        patch.object(_server_impl, "_operator_passphrase", OPERATOR_PASS),
+        patch.object(_server_impl, "_operator_failures", {}),
         patch.object(_server_impl, "_data_provider", None),
         patch.object(_server_impl, "_data_provider_error", "mocked-away"),
     ]
@@ -425,6 +470,22 @@ class TestTradesEndpoint:
         assert isinstance(body, list)
         assert len(body) == 0
 
+    def test_trades_tv_paper_uses_paired_trades_helper(self, client, _patch_globals, state_dir):
+        """TV-paper trades should come from the shared paired-trades helper."""
+        paired_trades = [
+            {"signal_id": "tv-1", "pnl": 15.0},
+            {"signal_id": "tv-2", "pnl": -5.0},
+        ]
+        with (
+            patch.object(_server_impl, "_is_tv_paper_account", return_value=True),
+            patch.object(_server_impl, "_get_paired_tradovate_trades", return_value=paired_trades) as paired_mock,
+        ):
+            resp = client.get("/api/trades?limit=1")
+
+        assert resp.status_code == 200
+        assert resp.json() == [paired_trades[-1]]
+        paired_mock.assert_called_once_with(state_dir)
+
 
 class TestPositionsEndpoint:
     """/api/positions endpoint."""
@@ -482,6 +543,57 @@ class TestPerformanceSummaryEndpoint:
         body = resp.json()
         assert body["all"]["pnl"] == 0.0
         assert body["all"]["trades"] == 0
+
+    def test_tv_paper_summary_passes_shared_paired_trades(self, client, _patch_globals, state_dir):
+        """TV-paper summary should pair fills once and thread the result through all period builders."""
+        paired_trades = [
+            {"pnl": 30.0},
+            {"pnl": -10.0},
+        ]
+        summary_calls = []
+        period_calls = []
+
+        def _fake_summary(tv, fills, active_state_dir, *, paired_trades=None):
+            summary_calls.append((tv, fills, active_state_dir, paired_trades))
+            return {
+                "pnl": 20.0,
+                "trades": 2,
+                "wins": 1,
+                "losses": 1,
+                "win_rate": 50.0,
+                "tradovate_equity": 50080.0,
+            }
+
+        def _fake_period(fills, start_utc, end_utc=None, commission_per_trade=0.0, *, paired_trades=None):
+            period_calls.append((fills, paired_trades, commission_per_trade))
+            return {
+                "pnl": 12.0,
+                "trades": len(paired_trades or []),
+                "wins": 1,
+                "losses": 1,
+                "win_rate": 50.0,
+            }
+
+        with (
+            patch.object(_server_impl, "_is_tv_paper_account", return_value=True),
+            patch.object(_server_impl, "_get_tradovate_state", return_value=({"equity": 50080.0}, [{"id": 1}])),
+            patch.object(_server_impl, "_get_paired_tradovate_trades", return_value=paired_trades) as paired_mock,
+            patch.object(_server_impl, "_tradovate_performance_summary", side_effect=_fake_summary),
+            patch.object(_server_impl, "_tradovate_performance_for_period", side_effect=_fake_period),
+            patch.object(_server_impl, "_get_start_balance", return_value=50000.0),
+        ):
+            resp = client.get("/api/performance-summary")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["all"]["trades"] == 2
+        assert body["all"]["tradovate_equity"] == 50080.0
+        paired_mock.assert_called_once_with(state_dir, [{"id": 1}])
+        assert len(summary_calls) == 1
+        assert summary_calls[0][2] == state_dir
+        assert summary_calls[0][3] == paired_trades
+        assert len(period_calls) == 6
+        assert all(call[1] == paired_trades for call in period_calls)
 
 
 # =========================================================================
@@ -598,6 +710,27 @@ class TestWebSocket:
             data = ws.receive_json()
             assert data["type"] == "initial_state"
 
+    def test_websocket_initial_and_refresh_use_shared_payload_builder(self, client, _patch_globals):
+        """Initial-state and refresh responses should both come from the shared WS payload builder."""
+        payload = {
+            "running": True,
+            "paused": False,
+            "daily_pnl": 99.0,
+            "positions": [{"signal_id": "pos-1"}],
+            "recent_trades": [{"signal_id": "trade-1"}],
+            "performance_summary": {"all": {"pnl": 99.0}},
+        }
+        with patch.object(_server_impl, "_build_ws_state_payload", return_value=payload) as builder_mock:
+            with client.websocket_connect("/ws") as ws:
+                initial = ws.receive_json()
+                assert initial == {"type": "initial_state", "data": payload}
+
+                ws.send_text("refresh")
+                refresh = ws.receive_json()
+                assert refresh == {"type": "full_refresh", "data": payload}
+
+        assert builder_mock.call_count == 2
+
 
 # =========================================================================
 # 6. Market Status Endpoint
@@ -671,23 +804,23 @@ class TestAuthDisabledPassthrough:
 class TestCloseAllTrades:
     """Tests for POST /api/close-all-trades (flag-file approach)."""
 
-    def test_close_all_creates_flag_file(self, auth_client, _patch_globals_auth, state_dir):
+    def test_close_all_creates_flag_file(self, auth_client, _patch_globals_operator, state_dir):
         """Successful request creates close_all_request.flag in state dir."""
         resp = auth_client.post(
             "/api/close-all-trades",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 202
         flag_file = state_dir / "close_all_request.flag"
         assert flag_file.exists(), "close_all_request.flag was not created"
 
     def test_close_all_flag_contains_valid_json_with_timestamp(
-        self, auth_client, _patch_globals_auth, state_dir,
+        self, auth_client, _patch_globals_operator, state_dir,
     ):
         """Flag file contains valid JSON with requested_at timestamp and source."""
         auth_client.post(
             "/api/close-all-trades",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         flag_file = state_dir / "close_all_request.flag"
         content = json.loads(flag_file.read_text())
@@ -696,21 +829,29 @@ class TestCloseAllTrades:
         datetime.fromisoformat(content["requested_at"])
         assert content["source"] == "web"
 
-    def test_close_all_returns_202(self, auth_client, _patch_globals_auth):
+    def test_close_all_returns_202(self, auth_client, _patch_globals_operator):
         """Endpoint returns HTTP 202 Accepted with ok=True."""
         resp = auth_client.post(
             "/api/close-all-trades",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 202
         body = resp.json()
         assert body["ok"] is True
         assert "message" in body
 
-    def test_close_all_rejects_unauthenticated(self, auth_client, _patch_globals_auth):
-        """Unauthenticated request is rejected (401) when auth is enabled."""
+    def test_close_all_rejects_without_operator(self, auth_client, _patch_globals_auth_and_operator):
+        """Mutating requests require operator access even when API auth is enabled."""
         resp = auth_client.post("/api/close-all-trades")
-        assert resp.status_code == 401
+        assert resp.status_code == 403
+
+    def test_close_all_rejects_api_key_only(self, auth_client, _patch_globals_auth_and_operator):
+        """A read-only API key must not authorize operator actions."""
+        resp = auth_client.post(
+            "/api/close-all-trades",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 403
 
 
 # =========================================================================
@@ -722,13 +863,13 @@ class TestCloseTrade:
     """Tests for POST /api/close-trade (operator-request file approach)."""
 
     def test_close_trade_creates_request_file(
-        self, auth_client, _patch_globals_auth, state_dir,
+        self, auth_client, _patch_globals_operator, state_dir,
     ):
         """Successful request creates a file in operator_requests directory."""
         resp = auth_client.post(
             "/api/close-trade",
             json={"signal_id": "sig_001"},
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 202
         req_dir = state_dir / "operator_requests"
@@ -737,13 +878,13 @@ class TestCloseTrade:
         assert len(files) == 1, f"Expected 1 request file, found {len(files)}"
 
     def test_close_trade_file_contains_signal_id_and_action(
-        self, auth_client, _patch_globals_auth, state_dir,
+        self, auth_client, _patch_globals_operator, state_dir,
     ):
         """Request file contains the signal_id, action, and timestamp."""
         auth_client.post(
             "/api/close-trade",
             json={"signal_id": "sig_XYZ"},
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         req_dir = state_dir / "operator_requests"
         files = list(req_dir.glob("close_trade_*.json"))
@@ -753,12 +894,12 @@ class TestCloseTrade:
         assert "requested_at" in content
         assert content["source"] == "web"
 
-    def test_close_trade_returns_202_with_signal_id(self, auth_client, _patch_globals_auth):
+    def test_close_trade_returns_202_with_signal_id(self, auth_client, _patch_globals_operator):
         """Endpoint returns 202 Accepted with signal_id echoed back."""
         resp = auth_client.post(
             "/api/close-trade",
             json={"signal_id": "sig_001"},
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 202
         body = resp.json()
@@ -766,27 +907,36 @@ class TestCloseTrade:
         assert body["signal_id"] == "sig_001"
 
     def test_close_trade_missing_signal_id_returns_422(
-        self, auth_client, _patch_globals_auth,
+        self, auth_client, _patch_globals_operator,
     ):
         """Request without signal_id in body returns 422."""
         resp = auth_client.post(
             "/api/close-trade",
             json={},
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 422
         assert "signal_id" in resp.json()["detail"].lower()
 
     def test_close_trade_empty_signal_id_returns_422(
-        self, auth_client, _patch_globals_auth,
+        self, auth_client, _patch_globals_operator,
     ):
         """Request with blank/whitespace signal_id returns 422."""
         resp = auth_client.post(
             "/api/close-trade",
             json={"signal_id": "   "},
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 422
+
+    def test_close_trade_rejects_api_key_only(self, auth_client, _patch_globals_auth_and_operator):
+        """A read-only API key must not be able to close a trade."""
+        resp = auth_client.post(
+            "/api/close-trade",
+            json={"signal_id": "sig_001"},
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 403
 
 
 # =========================================================================
@@ -798,24 +948,24 @@ class TestKillSwitch:
     """Tests for POST /api/kill-switch (flag-file approach)."""
 
     def test_kill_switch_creates_flag_file(
-        self, auth_client, _patch_globals_auth, state_dir,
+        self, auth_client, _patch_globals_operator, state_dir,
     ):
         """Successful request creates kill_request.flag in state dir."""
         resp = auth_client.post(
             "/api/kill-switch",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 200
         kill_file = state_dir / "kill_request.flag"
         assert kill_file.exists(), "kill_request.flag was not created"
 
     def test_kill_switch_flag_contains_valid_json(
-        self, auth_client, _patch_globals_auth, state_dir,
+        self, auth_client, _patch_globals_operator, state_dir,
     ):
         """Kill flag file contains valid JSON with timestamp and source."""
         auth_client.post(
             "/api/kill-switch",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         kill_file = state_dir / "kill_request.flag"
         content = json.loads(kill_file.read_text())
@@ -823,21 +973,21 @@ class TestKillSwitch:
         datetime.fromisoformat(content["requested_at"])
         assert content["source"] == "web"
 
-    def test_kill_switch_returns_200_with_ok(self, auth_client, _patch_globals_auth):
+    def test_kill_switch_returns_200_with_ok(self, auth_client, _patch_globals_operator):
         """Endpoint returns 200 with ok=True and a message."""
         resp = auth_client.post(
             "/api/kill-switch",
-            headers={"X-API-Key": VALID_API_KEY},
+            headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
         )
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
         assert "message" in body
 
-    def test_kill_switch_rejects_unauthenticated(self, auth_client, _patch_globals_auth):
-        """Unauthenticated request is rejected (401) when auth is enabled."""
+    def test_kill_switch_rejects_without_operator(self, auth_client, _patch_globals_auth_and_operator):
+        """Mutating requests require operator access even when API auth is enabled."""
         resp = auth_client.post("/api/kill-switch")
-        assert resp.status_code == 401
+        assert resp.status_code == 403
 
     def test_kill_switch_returns_500_when_state_dir_none(self, client):
         """Returns 500 when state directory is not configured."""
@@ -845,14 +995,24 @@ class TestKillSwitch:
             patch.object(_server_impl, "_state_dir", None),
             patch.object(_server_impl, "_auth_enabled", True),
             patch.object(_server_impl, "_api_keys", {VALID_API_KEY}),
-            patch.object(_server_impl, "_operator_enabled", False),
+            patch.object(_server_impl, "_operator_enabled", True),
+            patch.object(_server_impl, "_operator_passphrase", OPERATOR_PASS),
+            patch.object(_server_impl, "_operator_failures", {}),
         ):
             resp = client.post(
                 "/api/kill-switch",
-                headers={"X-API-Key": VALID_API_KEY},
+                headers={"X-PEARL-OPERATOR": OPERATOR_PASS},
             )
             assert resp.status_code == 500
             assert "not configured" in resp.json()["detail"].lower()
+
+    def test_kill_switch_rejects_api_key_only(self, auth_client, _patch_globals_auth_and_operator):
+        """A read-only API key must not trigger the kill switch."""
+        resp = auth_client.post(
+            "/api/kill-switch",
+            headers={"X-API-Key": VALID_API_KEY},
+        )
+        assert resp.status_code == 403
 
 
 # =========================================================================

@@ -17,6 +17,7 @@ from pearlalgo.utils.paths import get_utc_timestamp
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.market_agent.audit_logger import AuditEventType
 from pearlalgo.market_agent.notification_queue import Priority
+from pearlalgo.strategies.composite_intraday import check_trading_session
 
 if TYPE_CHECKING:
     pass  # MarketAgentService accessed via self
@@ -57,7 +58,6 @@ class ServiceLifecycleMixin:
 
         # Start notification queue for async Telegram delivery
         await self.notification_queue.start()
-        logger.info("Notification queue started")
 
         # Startup flow:
         # 1) Rich startup notification (stable)
@@ -86,7 +86,6 @@ class ServiceLifecycleMixin:
                 logger.debug(f"Non-critical: {e}")
                 config_dict["futures_market_open"] = None
             try:
-                from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 config_dict["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
             except Exception as e:
                 logger.debug(f"Non-critical: {e}")

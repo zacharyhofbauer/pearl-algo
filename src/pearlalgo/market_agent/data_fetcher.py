@@ -278,7 +278,7 @@ class MarketAgentDataFetcher:
                     self._stale_bar_restart_triggered = True  # prevent restart loop
                     import subprocess
                     subprocess.Popen(
-                        ["bash", "-c", "sleep 5 && cd /home/pearlalgo/pearl-algo-workspace && ./pearlalgo.sh soft-restart"],
+                        ["bash", "-c", "sleep 5 && cd /home/pearlalgo/projects/pearl-algo && ./pearl.sh soft-restart"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL
                     )

@@ -1,10 +1,10 @@
 """
 Unified configuration file loader.
 
-Provides a single source for loading config/config.yaml with 
+Provides a single source for loading runtime configuration YAML with
 consistent environment variable substitution.
 
-**Purpose**: This module is the canonical way to load the config.yaml file.
+**Purpose**: This module is the canonical way to load the active runtime config.
 All other configuration loaders should use this module to get raw config data.
 
 **Environment variable substitution**:
@@ -37,7 +37,28 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from pearlalgo.config.migration import migrate_legacy_runtime_config
 from pearlalgo.utils.dict_utils import deep_merge as _deep_merge
+
+
+def _project_root() -> Path:
+    """Return the repository root for config resolution."""
+    return Path(__file__).parent.parent.parent.parent
+
+
+def _canonical_live_config_path(project_root: Path) -> Path:
+    """Return the canonical live runtime config path."""
+    return project_root / "config" / "live" / "tradovate_paper.yaml"
+
+
+def _legacy_base_config_path(project_root: Path) -> Path:
+    """Return the legacy shared base config path."""
+    return project_root / "config" / "base.yaml"
+
+
+def _legacy_accounts_dir(project_root: Path) -> Path:
+    """Return the legacy per-account overlay directory."""
+    return project_root / "config" / "accounts"
 
 
 def _substitute_env_vars(value: Any) -> Any:
@@ -77,6 +98,91 @@ def _substitute_env_vars(value: Any) -> Any:
         return value
 
 
+def _load_yaml_file(path: Path, *, substitute_env: bool = True) -> Dict[str, Any]:
+    """Load one YAML file with optional env substitution."""
+    import yaml
+
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    if substitute_env:
+        data = _substitute_env_vars(data)
+    return data
+
+
+def _resolve_default_config_source(
+    project_root: Path,
+    *,
+    env_path: Optional[str] = None,
+) -> Tuple[Optional[Path], Optional[Path]]:
+    """Resolve the default runtime config source.
+
+    Returns `(target_path, legacy_overlay_path)`.
+    - `target_path` is used for explicit paths or the canonical live config.
+    - `legacy_overlay_path` is used only for the compatibility fallback that
+      deep-merges `config/base.yaml` with a single legacy account overlay.
+    """
+    canonical_live_path = _canonical_live_config_path(project_root)
+    if env_path:
+        return Path(env_path), None
+    if canonical_live_path.exists():
+        return canonical_live_path, None
+
+    legacy_overlay_path: Optional[Path] = None
+    accounts_dir = _legacy_accounts_dir(project_root)
+    if accounts_dir.is_dir():
+        candidates = [
+            p for p in accounts_dir.iterdir()
+            if p.suffix in (".yaml", ".yml")
+            and not p.name.startswith(".")
+            and "backup" not in p.name
+        ]
+        if len(candidates) == 1:
+            legacy_overlay_path = candidates[0]
+        elif len(candidates) > 1:
+            try:
+                from pearlalgo.utils.logger import logger
+                logger.warning(
+                    "PEARLALGO_CONFIG_PATH not set and multiple legacy account "
+                    "configs found in %s: %s. Prefer config/live/tradovate_paper.yaml "
+                    "or set PEARLALGO_CONFIG_PATH explicitly.",
+                    accounts_dir,
+                    [p.name for p in candidates],
+                )
+            except ImportError:
+                pass
+
+    if legacy_overlay_path is None:
+        try:
+            from pearlalgo.utils.logger import logger
+            logger.warning(
+                "No canonical live config found and no legacy overlay selected; "
+                "falling back to base config only."
+            )
+        except ImportError:
+            pass
+
+    return None, legacy_overlay_path
+
+
+def _load_legacy_merged_config(
+    project_root: Path,
+    legacy_overlay_path: Optional[Path],
+    *,
+    substitute_env: bool = True,
+) -> Dict[str, Any]:
+    """Load the compatibility fallback stack: base config plus optional overlay."""
+    base_path = _legacy_base_config_path(project_root)
+    base_config = _load_yaml_file(base_path, substitute_env=substitute_env) if base_path.exists() else {}
+    overlay_config = (
+        _load_yaml_file(legacy_overlay_path, substitute_env=substitute_env)
+        if legacy_overlay_path and legacy_overlay_path.exists()
+        else {}
+    )
+    if not base_config and not overlay_config:
+        return {}
+    return _deep_merge(base_config, overlay_config)
+
+
 def load_config_yaml(
     config_path: Optional[Union[str, Path]] = None,
     *,
@@ -84,15 +190,15 @@ def load_config_yaml(
     validate: bool = False,
 ) -> Dict[str, Any]:
     """
-    Load configuration from config.yaml with optional environment variable substitution.
+    Load runtime configuration with optional environment variable substitution.
 
     Resolution order:
-    1) Base config at project_root/config/config.yaml (if present)
-    2) Optional overlay from PEARLALGO_CONFIG_PATH or explicit config_path (if present)
-       Overlay values override base values.
+    1) Explicit ``config_path`` / ``PEARLALGO_CONFIG_PATH`` when provided
+    2) Canonical live config at ``config/live/tradovate_paper.yaml`` when present
+    3) Legacy base + account overlay compatibility fallback
     
     Args:
-        config_path: Path to config.yaml. Defaults to config/config.yaml relative to project root.
+        config_path: Explicit path to a runtime config file.
         substitute_env: Whether to substitute ${ENV_VAR} patterns. Default True.
         validate: Whether to validate config and log warnings. Default False.
                   Set to True during service startup to surface potential issues.
@@ -101,77 +207,47 @@ def load_config_yaml(
         Dictionary with full configuration data.
         Returns empty dict if file doesn't exist or fails to load.
     """
-    # Find project root (4 levels up from this file: config_file.py -> config -> pearlalgo -> src -> project)
-    project_root = Path(__file__).parent.parent.parent.parent
-    base_path = project_root / "config" / "config.yaml"
+    project_root = _project_root()
 
-    overlay_path: Optional[Path] = None
+    target_path: Optional[Path] = None
+    legacy_overlay_path: Optional[Path] = None
     if config_path is None:
-        env_path = os.getenv("PEARLALGO_CONFIG_PATH")
-        if env_path:
-            overlay_path = Path(env_path)
-        else:
-            # FIXED 2026-03-25: Auto-detect single account overlay so
-            # runtime callers of load_config_yaml() (API server, data_fetcher,
-            # etc.) get the same merged config as main.py --config.
-            accounts_dir = project_root / "config" / "accounts"
-            if accounts_dir.is_dir():
-                candidates = [
-                    p for p in accounts_dir.iterdir()
-                    if p.suffix in (".yaml", ".yml")
-                    and not p.name.startswith(".")
-                    and "backup" not in p.name
-                ]
-                if len(candidates) == 1:
-                    overlay_path = candidates[0]
-                elif len(candidates) > 1:
-                    try:
-                        from pearlalgo.utils.logger import logger
-                        logger.warning(
-                            "PEARLALGO_CONFIG_PATH not set and multiple account "
-                            "configs found in %s: %s — account overlay NOT loaded. "
-                            "Set PEARLALGO_CONFIG_PATH to pick one.",
-                            accounts_dir,
-                            [p.name for p in candidates],
-                        )
-                    except ImportError:
-                        pass
-            if overlay_path is None:
-                try:
-                    from pearlalgo.utils.logger import logger
-                    logger.warning(
-                        "PEARLALGO_CONFIG_PATH not set — running with base "
-                        "config only (no account overlay)."
-                    )
-                except ImportError:
-                    pass
+        target_path, legacy_overlay_path = _resolve_default_config_source(
+            project_root,
+            env_path=os.getenv("PEARLALGO_CONFIG_PATH"),
+        )
     else:
-        overlay_path = Path(config_path)
-
-    def _load_yaml(path: Path) -> Dict[str, Any]:
-        import yaml
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
-        if substitute_env:
-            data = _substitute_env_vars(data)
-        return data
+        target_path = Path(config_path)
 
     try:
-        base_config: Dict[str, Any] = {}
-        if base_path.exists():
-            base_config = _load_yaml(base_path)
+        if target_path is not None:
+            resolved_target = target_path
+            if not resolved_target.is_absolute():
+                resolved_target = (project_root / resolved_target).resolve()
+            if not resolved_target.exists():
+                return {}
 
-        overlay_config: Dict[str, Any] = {}
-        if overlay_path and overlay_path.exists():
-            if base_path.resolve() != overlay_path.resolve():
-                overlay_config = _load_yaml(overlay_path)
+            if resolved_target.parent.name == "accounts":
+                config_data = _load_legacy_merged_config(
+                    project_root,
+                    resolved_target,
+                    substitute_env=substitute_env,
+                )
             else:
-                overlay_config = {}
+                config_data = _load_yaml_file(
+                    resolved_target,
+                    substitute_env=substitute_env,
+                )
+        else:
+            config_data = _load_legacy_merged_config(
+                project_root,
+                legacy_overlay_path,
+                substitute_env=substitute_env,
+            )
+            if not config_data:
+                return {}
 
-        if not base_config and not overlay_config:
-            return {}
-
-        config_data = _deep_merge(base_config, overlay_config)
+        config_data = migrate_legacy_runtime_config(config_data)
 
         if validate:
             log_config_warnings(config_data)
@@ -191,17 +267,17 @@ def toggle_strategy_in_config(
     strategy_name: str,
     config_path: Optional[Union[str, Path]] = None,
 ) -> str:
-    """Toggle a strategy on/off in config.yaml.
+    """Toggle a strategy on/off in a runtime config file.
 
-    Reads config.yaml (without env substitution, preserving raw ``${VAR}``
+    Reads the target runtime config (without env substitution, preserving raw ``${VAR}``
     tokens), flips the strategy between ``enabled_signals`` and
     ``disabled_signals``, creates a ``.yaml.backup``, and writes back.
 
     Args:
         strategy_name: Name of the strategy to toggle.
-        config_path: Explicit path to config.yaml.  When ``None``, uses
-            ``PEARLALGO_CONFIG_PATH`` env var or ``config/config.yaml``
-            relative to the project root.
+        config_path: Explicit path to a runtime config file. When ``None``,
+            uses ``PEARLALGO_CONFIG_PATH`` or the canonical live config at
+            ``config/live/tradovate_paper.yaml``.
 
     Returns:
         ``"enabled"`` or ``"disabled"`` — the new state of the strategy.
@@ -219,13 +295,13 @@ def toggle_strategy_in_config(
         if env_path:
             resolved = Path(env_path)
         else:
-            project_root = Path(__file__).parent.parent.parent.parent
-            resolved = project_root / "config" / "config.yaml"
+            project_root = _project_root()
+            resolved = _canonical_live_config_path(project_root)
     else:
         resolved = Path(config_path)
 
     if not resolved.is_absolute():
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = _project_root()
         resolved = (project_root / resolved).resolve()
 
     if not resolved.exists():
@@ -274,6 +350,7 @@ def toggle_strategy_in_config(
 
 # Known top-level config sections (for unknown key detection)
 _KNOWN_CONFIG_SECTIONS = frozenset({
+    "account",
     "accounts",
     "audit",
     "symbol",
@@ -290,13 +367,20 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "data",
     "storage",
     "signals",
+    "guardrails",
+    "trailing_stop",
+    "advanced_exits",
+    "ml_filter",
+    "composite_regime",
+    "runner_mode",
     "performance",
     "virtual_pnl",
     "hud",
     "sessions",
     "auto_flat",
     # Strategy-level extensions
-    "pearl_bot_auto",  # direct overrides for trading_bots/pearl_bot_auto.py
+    "pearl_bot_auto",  # legacy compatibility overrides for strategy params
+    "strategies",
     "indicators",
     "strategy",
     "strategy_variants",

@@ -1,8 +1,8 @@
 """
-Config management API endpoints for the PearlAlgo settings dashboard.
+Config management API endpoints for the PEARL settings dashboard.
 
-Provides GET/POST endpoints for reading and writing YAML configuration
-with validation, backup, atomic writes, and optional service restart.
+The dashboard now reads and writes the single canonical runtime config:
+``config/live/tradovate_paper.yaml``.
 """
 
 from __future__ import annotations
@@ -17,18 +17,21 @@ import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from pearlalgo.config.runtime_validation import (
+    collect_runtime_config_warnings,
+    validate_runtime_config,
+)
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-
-BASE_YAML_PATH = PROJECT_ROOT / "config" / "base.yaml"
-OVERRIDE_YAML_PATH = PROJECT_ROOT / "config" / "accounts" / "tradovate_paper.yaml"
+LIVE_YAML_PATH = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
 
 # ---------------------------------------------------------------------------
 # Rate limiting (mirrors server.py pattern)
@@ -53,160 +56,78 @@ def _check_rate_limit(endpoint: str) -> None:
         bucket.append(now)
 
 
-# ---------------------------------------------------------------------------
-# Forbidden keys — never writable via the API
-# ---------------------------------------------------------------------------
 FORBIDDEN_KEYS = frozenset({
     "execution.adapter",
     "virtual_pnl.enabled",
     "account.name",
 })
 
-# ---------------------------------------------------------------------------
-# Schema registry
-# ---------------------------------------------------------------------------
+
+def _strategy_field(description: str, *, field_type: str = "number", min_val: float | None = None,
+                    max_val: float | None = None, options: List[str] | None = None,
+                    dangerous: bool = False) -> Dict[str, Any]:
+    schema: Dict[str, Any] = {
+        "type": field_type,
+        "dangerous": dangerous,
+        "description": description,
+        "category": "Trading",
+        "yaml_section": "strategies.composite_intraday",
+    }
+    if min_val is not None:
+        schema["min"] = min_val
+    if max_val is not None:
+        schema["max"] = max_val
+    if options is not None:
+        schema["options"] = options
+    return schema
+
+
 SCHEMA: Dict[str, Dict[str, Any]] = {
-    # -- Trading (pearl_bot_auto) --
-    "pearl_bot_auto.stop_loss_atr_mult": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Stop-loss ATR multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
+    # -- Strategy runtime --
+    "strategy.active": {
+        "type": "select",
+        "options": ["composite_intraday"],
+        "dangerous": False,
+        "description": "Active live strategy bundle",
+        "category": "Trading",
+        "yaml_section": "strategy",
     },
-    "pearl_bot_auto.take_profit_atr_mult": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Take-profit ATR multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.min_confidence": {
-        "type": "number", "min": 0, "max": 1,
-        "dangerous": False, "description": "Minimum confidence threshold",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.min_confidence_long": {
-        "type": "number", "min": 0, "max": 1,
-        "dangerous": False, "description": "Minimum confidence (long)",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.min_confidence_short": {
-        "type": "number", "min": 0, "max": 1,
-        "dangerous": False, "description": "Minimum confidence (short)",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.ema_fast": {
-        "type": "number", "min": 1, "max": 50,
-        "dangerous": False, "description": "EMA fast period",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.ema_slow": {
-        "type": "number", "min": 1, "max": 100,
-        "dangerous": False, "description": "EMA slow period",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.volatile_sl_mult": {
-        "type": "number", "min": 0.1, "max": 5,
-        "dangerous": False, "description": "Volatile regime SL multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.volatile_tp_mult": {
-        "type": "number", "min": 0.1, "max": 5,
-        "dangerous": False, "description": "Volatile regime TP multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.ranging_sl_mult": {
-        "type": "number", "min": 0.1, "max": 5,
-        "dangerous": False, "description": "Ranging regime SL multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.ranging_tp_mult": {
-        "type": "number", "min": 0.1, "max": 5,
-        "dangerous": False, "description": "Ranging regime TP multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.allow_vwap_cross_entries": {
+    "strategy.enforce_session_window": {
         "type": "boolean",
-        "dangerous": False, "description": "Allow VWAP cross entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
+        "dangerous": False,
+        "description": "Enforce the strategy-level session window",
+        "category": "Trading",
+        "yaml_section": "strategy",
     },
-    "pearl_bot_auto.allow_vwap_retest_entries": {
-        "type": "boolean",
-        "dangerous": False, "description": "Allow VWAP retest entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.allow_trend_momentum_entries": {
-        "type": "boolean",
-        "dangerous": False, "description": "Allow trend momentum entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.allow_trend_breakout_entries": {
-        "type": "boolean",
-        "dangerous": False, "description": "Allow trend breakout entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.allow_orb_entries": {
-        "type": "boolean",
-        "dangerous": False, "description": "Allow opening range breakout entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.allow_vwap_2sd_entries": {
-        "type": "boolean",
-        "dangerous": False, "description": "Allow VWAP 2 std dev entries",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.vwap_std_dev": {
-        "type": "number", "min": 0.5, "max": 3.0,
-        "dangerous": False, "description": "VWAP standard deviation band",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.volume_ma_length": {
-        "type": "number", "min": 5, "max": 100,
-        "dangerous": False, "description": "Volume moving average length",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.sr_length": {
-        "type": "number", "min": 10, "max": 500,
-        "dangerous": False, "description": "Support/resistance lookback length",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.sr_atr_mult": {
-        "type": "number", "min": 0.1, "max": 3.0,
-        "dangerous": False, "description": "S/R ATR zone multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.trend_momentum_atr_mult": {
-        "type": "number", "min": 0.1, "max": 3.0,
-        "dangerous": False, "description": "Trend momentum ATR multiplier",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.trend_breakout_lookback_bars": {
-        "type": "number", "min": 1, "max": 50,
-        "dangerous": False, "description": "Trend breakout lookback bars",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.tbt_period": {
-        "type": "number", "min": 1, "max": 50,
-        "dangerous": False, "description": "TBT trendline period",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.tbt_trend_type": {
-        "type": "select", "options": ["wicks", "bodies"],
-        "dangerous": False, "description": "TBT trend type",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.adx_period": {
-        "type": "number", "min": 5, "max": 50,
-        "dangerous": False, "description": "ADX period",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.adx_trending_threshold": {
-        "type": "number", "min": 10, "max": 50,
-        "dangerous": False, "description": "ADX trending threshold",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
-    "pearl_bot_auto.adx_ranging_threshold": {
-        "type": "number", "min": 5, "max": 40,
-        "dangerous": False, "description": "ADX ranging threshold",
-        "category": "Trading", "yaml_section": "pearl_bot_auto",
-    },
+    "strategies.composite_intraday.stop_loss_atr_mult": _strategy_field("Stop-loss ATR multiplier", min_val=0.1, max_val=10),
+    "strategies.composite_intraday.take_profit_atr_mult": _strategy_field("Take-profit ATR multiplier", min_val=0.1, max_val=10),
+    "strategies.composite_intraday.min_confidence": _strategy_field("Minimum confidence threshold", min_val=0, max_val=1),
+    "strategies.composite_intraday.min_confidence_long": _strategy_field("Minimum confidence (long)", min_val=0, max_val=1),
+    "strategies.composite_intraday.min_confidence_short": _strategy_field("Minimum confidence (short)", min_val=0, max_val=1),
+    "strategies.composite_intraday.ema_fast": _strategy_field("EMA fast period", min_val=1, max_val=50),
+    "strategies.composite_intraday.ema_slow": _strategy_field("EMA slow period", min_val=1, max_val=100),
+    "strategies.composite_intraday.volatile_sl_mult": _strategy_field("Volatile regime SL multiplier", min_val=0.1, max_val=5),
+    "strategies.composite_intraday.volatile_tp_mult": _strategy_field("Volatile regime TP multiplier", min_val=0.1, max_val=5),
+    "strategies.composite_intraday.ranging_sl_mult": _strategy_field("Ranging regime SL multiplier", min_val=0.1, max_val=5),
+    "strategies.composite_intraday.ranging_tp_mult": _strategy_field("Ranging regime TP multiplier", min_val=0.1, max_val=5),
+    "strategies.composite_intraday.allow_vwap_cross_entries": _strategy_field("Allow VWAP cross entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_vwap_retest_entries": _strategy_field("Allow VWAP retest entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_trend_momentum_entries": _strategy_field("Allow trend momentum entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_trend_breakout_entries": _strategy_field("Allow trend breakout entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_orb_entries": _strategy_field("Allow opening range breakout entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_vwap_2sd_entries": _strategy_field("Allow VWAP 2SD entries", field_type="boolean"),
+    "strategies.composite_intraday.allow_smc_entries": _strategy_field("Allow SMC entries", field_type="boolean"),
+    "strategies.composite_intraday.vwap_std_dev": _strategy_field("VWAP standard deviation band", min_val=0.5, max_val=3.0),
+    "strategies.composite_intraday.volume_ma_length": _strategy_field("Volume moving average length", min_val=5, max_val=100),
+    "strategies.composite_intraday.sr_length": _strategy_field("Support/resistance lookback length", min_val=10, max_val=500),
+    "strategies.composite_intraday.sr_atr_mult": _strategy_field("S/R ATR zone multiplier", min_val=0.1, max_val=3.0),
+    "strategies.composite_intraday.trend_momentum_atr_mult": _strategy_field("Trend momentum ATR multiplier", min_val=0.1, max_val=3.0),
+    "strategies.composite_intraday.trend_breakout_lookback_bars": _strategy_field("Trend breakout lookback bars", min_val=1, max_val=50),
+    "strategies.composite_intraday.tbt_period": _strategy_field("TBT trendline period", min_val=1, max_val=50),
+    "strategies.composite_intraday.tbt_trend_type": _strategy_field("TBT trend type", field_type="select", options=["wicks", "bodies"]),
+    "strategies.composite_intraday.adx_period": _strategy_field("ADX period", min_val=5, max_val=50),
+    "strategies.composite_intraday.adx_trending_threshold": _strategy_field("ADX trending threshold", min_val=10, max_val=50),
+    "strategies.composite_intraday.adx_ranging_threshold": _strategy_field("ADX ranging threshold", min_val=5, max_val=40),
 
     # -- Signals --
     "signals.max_stop_points": {
@@ -256,6 +177,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "dangerous": False, "description": "Max orders per day",
         "category": "Execution", "yaml_section": "execution",
     },
+    "execution.max_daily_loss": {
+        "type": "number", "min": 1, "max": 999999,
+        "dangerous": True, "description": "Hard daily loss stop",
+        "category": "Execution", "yaml_section": "execution",
+    },
 
     # -- Session --
     "session.start_time": {
@@ -291,61 +217,34 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "category": "Risk", "yaml_section": "risk",
     },
 
-    # -- Circuit Breaker --
-    "trading_circuit_breaker.enabled": {
+    # -- Guardrails --
+    "guardrails.signal_gate_enabled": {
         "type": "boolean",
-        "dangerous": True, "description": "Circuit breaker enabled",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+        "dangerous": True,
+        "description": "Re-enable the legacy signal veto layer",
+        "category": "Guardrails",
+        "yaml_section": "guardrails",
     },
-    "trading_circuit_breaker.mode": {
-        "type": "select", "options": ["shadow", "warn_only", "enforce"],
-        "dangerous": True, "description": "Circuit breaker mode",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.max_consecutive_losses": {
+    "guardrails.max_consecutive_losses": {
         "type": "number", "min": 1, "max": 20,
-        "dangerous": True, "description": "Max consecutive losses",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+        "dangerous": True,
+        "description": "Legacy signal gate: max consecutive losses",
+        "category": "Guardrails",
+        "yaml_section": "guardrails",
     },
-    "trading_circuit_breaker.max_session_drawdown": {
+    "guardrails.max_session_drawdown": {
         "type": "number", "min": 100, "max": 99999,
-        "dangerous": True, "description": "Max session drawdown ($)",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+        "dangerous": True,
+        "description": "Legacy signal gate: max session drawdown ($)",
+        "category": "Guardrails",
+        "yaml_section": "guardrails",
     },
-    "trading_circuit_breaker.max_daily_drawdown": {
+    "guardrails.max_daily_drawdown": {
         "type": "number", "min": 100, "max": 99999,
-        "dangerous": True, "description": "Max daily drawdown ($)",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.max_concurrent_positions": {
-        "type": "number", "min": 1, "max": 10,
-        "dangerous": True, "description": "Max concurrent positions (CB)",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.enable_session_filter": {
-        "type": "boolean",
-        "dangerous": False, "description": "Enable session filter",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.enable_direction_gating": {
-        "type": "boolean",
-        "dangerous": False, "description": "Enable direction gating (block longs in downtrends, shorts in uptrends)",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.direction_gating_min_confidence": {
-        "type": "number", "min": 0, "max": 1,
-        "dangerous": False, "description": "Regime confidence threshold for direction gating",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.enable_regime_avoidance": {
-        "type": "boolean",
-        "dangerous": False, "description": "Enable regime avoidance (block trades in choppy/volatile markets)",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
-    },
-    "trading_circuit_breaker.regime_avoidance_min_confidence": {
-        "type": "number", "min": 0, "max": 1,
-        "dangerous": False, "description": "Regime confidence threshold for regime avoidance",
-        "category": "Circuit Breaker", "yaml_section": "trading_circuit_breaker",
+        "dangerous": True,
+        "description": "Legacy signal gate: max daily drawdown ($)",
+        "category": "Guardrails",
+        "yaml_section": "guardrails",
     },
 
     # -- Trailing Stop --
@@ -372,36 +271,6 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     "trailing_stop.max_override_ttl_minutes": {
         "type": "number", "min": 1, "max": 600,
         "dangerous": False, "description": "Max override TTL (minutes)",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.0.activation_atr": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Breakeven: activation ATR",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.0.trail_atr": {
-        "type": "number", "min": 0, "max": 10,
-        "dangerous": False, "description": "Breakeven: trail ATR (0 = entry)",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.1.activation_atr": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Lock profit: activation ATR",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.1.trail_atr": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Lock profit: trail ATR",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.2.activation_atr": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Tight trail: activation ATR",
-        "category": "Trailing Stop", "yaml_section": "trailing_stop",
-    },
-    "trailing_stop.phases.2.trail_atr": {
-        "type": "number", "min": 0.1, "max": 10,
-        "dangerous": False, "description": "Tight trail: trail ATR",
         "category": "Trailing Stop", "yaml_section": "trailing_stop",
     },
 
@@ -436,47 +305,47 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     "advanced_exits.quick_exit.enabled": {
         "type": "boolean",
         "dangerous": False, "description": "Quick exit enabled",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.quick_exit",
     },
     "advanced_exits.quick_exit.min_duration_minutes": {
         "type": "number", "min": 1, "max": 120,
         "dangerous": False, "description": "Quick exit min duration (min)",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.quick_exit",
     },
     "advanced_exits.quick_exit.max_mfe_threshold": {
         "type": "number", "min": 1, "max": 200,
         "dangerous": False, "description": "Quick exit max MFE threshold",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.quick_exit",
     },
     "advanced_exits.quick_exit.min_mae_threshold": {
         "type": "number", "min": 1, "max": 200,
         "dangerous": False, "description": "Quick exit min MAE threshold",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.quick_exit",
     },
     "advanced_exits.time_based_exit.enabled": {
         "type": "boolean",
         "dangerous": False, "description": "Time-based exit enabled",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.time_based_exit",
     },
     "advanced_exits.time_based_exit.min_duration_minutes": {
         "type": "number", "min": 1, "max": 120,
         "dangerous": False, "description": "Time-based exit min duration (min)",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.time_based_exit",
     },
     "advanced_exits.time_based_exit.min_profit_threshold": {
         "type": "number", "min": 1, "max": 500,
         "dangerous": False, "description": "Time-based exit min profit threshold",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.time_based_exit",
     },
     "advanced_exits.time_based_exit.take_percentage": {
         "type": "number", "min": 0.1, "max": 1.0,
         "dangerous": False, "description": "Time-based exit take percentage",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.time_based_exit",
     },
     "advanced_exits.stop_optimization.enabled": {
         "type": "boolean",
         "dangerous": False, "description": "Stop optimization enabled",
-        "category": "Advanced Exits", "yaml_section": "advanced_exits",
+        "category": "Advanced Exits", "yaml_section": "advanced_exits.stop_optimization",
     },
 
     # -- Service --
@@ -518,12 +387,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base (override wins)."""
     merged = deepcopy(base)
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -534,7 +398,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _get_nested(d: dict, dotted_path: str, default: Any = None) -> Any:
-    """Get a value from a nested dict using dotted path notation."""
     keys = dotted_path.split(".")
     current = d
     for key in keys:
@@ -545,7 +408,6 @@ def _get_nested(d: dict, dotted_path: str, default: Any = None) -> Any:
 
 
 def _set_nested(d: dict, dotted_path: str, value: Any) -> None:
-    """Set a value in a nested dict using dotted path notation, creating intermediate dicts."""
     keys = dotted_path.split(".")
     current = d
     for key in keys[:-1]:
@@ -556,7 +418,6 @@ def _set_nested(d: dict, dotted_path: str, value: Any) -> None:
 
 
 def _compute_override_keys(base: dict, override: dict, prefix: str = "") -> List[str]:
-    """Return list of dotted paths where override differs from base."""
     keys = []
     for key, value in override.items():
         path = f"{prefix}.{key}" if prefix else key
@@ -570,13 +431,27 @@ def _compute_override_keys(base: dict, override: dict, prefix: str = "") -> List
 
 
 def _config_hash(merged: dict) -> str:
-    """Compute SHA-256 hash of the merged config as YAML string."""
     yaml_str = yaml.dump(merged, default_flow_style=False, sort_keys=True)
     return hashlib.sha256(yaml_str.encode("utf-8")).hexdigest()
 
 
+def _validate_runtime_candidate(config: dict) -> List[str]:
+    try:
+        validate_runtime_config(
+            config,
+            strict_non_enforced=True,
+            warn_unknown=False,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Runtime config validation failed: {str(e)[:300]}",
+        ) from e
+
+    return collect_runtime_config_warnings(config, warn_unknown=True)
+
+
 def _validate_value(dotted_path: str, value: Any, field_schema: Dict[str, Any]) -> Any:
-    """Validate and coerce a value against its schema definition. Returns the validated value."""
     field_type = field_schema["type"]
 
     if field_type == "boolean":
@@ -589,10 +464,7 @@ def _validate_value(dotted_path: str, value: Any, field_schema: Dict[str, Any]) 
 
     if field_type == "number":
         if isinstance(value, bool):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field '{dotted_path}' must be a number, got boolean",
-            )
+            raise HTTPException(status_code=422, detail=f"Field '{dotted_path}' must be a number, got boolean")
         if not isinstance(value, (int, float)):
             raise HTTPException(
                 status_code=422,
@@ -601,24 +473,15 @@ def _validate_value(dotted_path: str, value: Any, field_schema: Dict[str, Any]) 
         min_val = field_schema.get("min")
         max_val = field_schema.get("max")
         if min_val is not None and value < min_val:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field '{dotted_path}' value {value} is below minimum {min_val}",
-            )
+            raise HTTPException(status_code=422, detail=f"Field '{dotted_path}' value {value} is below minimum {min_val}")
         if max_val is not None and value > max_val:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field '{dotted_path}' value {value} is above maximum {max_val}",
-            )
+            raise HTTPException(status_code=422, detail=f"Field '{dotted_path}' value {value} is above maximum {max_val}")
         return value
 
     if field_type == "select":
         options = field_schema.get("options", [])
         if value not in options:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field '{dotted_path}' must be one of {options}, got '{value}'",
-            )
+            raise HTTPException(status_code=422, detail=f"Field '{dotted_path}' must be one of {options}, got '{value}'")
         return value
 
     if field_type == "text":
@@ -632,9 +495,19 @@ def _validate_value(dotted_path: str, value: Any, field_schema: Dict[str, Any]) 
     raise HTTPException(status_code=422, detail=f"Unknown field type '{field_type}' for '{dotted_path}'")
 
 
-# ---------------------------------------------------------------------------
-# Request / Response models
-# ---------------------------------------------------------------------------
+def _load_live_yaml() -> dict:
+    try:
+        text = LIVE_YAML_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Live config file not found")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot read live config: {str(e)[:200]}")
+
+    try:
+        return yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=500, detail=f"Live config YAML parse error: {str(e)[:200]}")
+
 
 class ConfigUpdateRequest(BaseModel):
     changes: Dict[str, Any]
@@ -642,49 +515,27 @@ class ConfigUpdateRequest(BaseModel):
     restart: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
 config_router = APIRouter(tags=["config"])
 
 
 @config_router.get("/api/config")
 async def get_config():
-    """Read and merge base + override YAML configs, returning merged values and schema."""
-    try:
-        base_text = BASE_YAML_PATH.read_text(encoding="utf-8")
-        base = yaml.safe_load(base_text) or {}
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Base config file not found")
-    except yaml.YAMLError as e:
-        raise HTTPException(status_code=500, detail=f"Base config YAML parse error: {str(e)[:200]}")
-
-    try:
-        override_text = OVERRIDE_YAML_PATH.read_text(encoding="utf-8")
-        overrides = yaml.safe_load(override_text) or {}
-    except FileNotFoundError:
-        overrides = {}
-    except yaml.YAMLError as e:
-        raise HTTPException(status_code=500, detail=f"Override config YAML parse error: {str(e)[:200]}")
-
-    merged = _deep_merge(base, overrides)
-    override_keys = _compute_override_keys(base, overrides)
-    ch = _config_hash(merged)
-
+    live = _load_live_yaml()
+    config_hash = _config_hash(live)
+    override_keys = _compute_override_keys({}, live)
+    validation_warnings = _validate_runtime_candidate(live)
     return {
-        "merged": merged,
-        "overrides": overrides,
+        "merged": live,
+        "overrides": live,
         "override_keys": override_keys,
         "schema": SCHEMA,
-        "config_hash": ch,
+        "config_hash": config_hash,
+        "validation_warnings": validation_warnings,
     }
 
 
 @config_router.post("/api/config")
 async def update_config(body: ConfigUpdateRequest):
-    """
-    Apply config changes to the override YAML file with validation, backup, and atomic write.
-    """
     _check_rate_limit("config-update")
 
     changes = body.changes
@@ -694,103 +545,67 @@ async def update_config(body: ConfigUpdateRequest):
     if not changes:
         raise HTTPException(status_code=422, detail="No changes provided")
 
-    # --- Load current config to verify hash ---
-    try:
-        base_text = BASE_YAML_PATH.read_text(encoding="utf-8")
-        base = yaml.safe_load(base_text) or {}
-    except (FileNotFoundError, yaml.YAMLError) as e:
-        raise HTTPException(status_code=500, detail=f"Cannot read base config: {str(e)[:200]}")
-
-    try:
-        override_text = OVERRIDE_YAML_PATH.read_text(encoding="utf-8")
-        overrides = yaml.safe_load(override_text) or {}
-    except FileNotFoundError:
-        overrides = {}
-    except yaml.YAMLError as e:
-        raise HTTPException(status_code=500, detail=f"Cannot read override config: {str(e)[:200]}")
-
-    merged = _deep_merge(base, overrides)
-    current_hash = _config_hash(merged)
-
+    live = _load_live_yaml()
+    current_hash = _config_hash(live)
     if request_hash != current_hash:
         raise HTTPException(
             status_code=409,
             detail="Config has been modified since you loaded it. Reload and try again.",
         )
 
-    # --- Validate all changes ---
     validated_changes: Dict[str, Any] = {}
     for dotted_path, value in changes.items():
-        # Check forbidden keys
         if dotted_path in FORBIDDEN_KEYS:
             raise HTTPException(
                 status_code=403,
                 detail=f"Field '{dotted_path}' cannot be modified via the API",
             )
-
-        # Check schema exists
         field_schema = SCHEMA.get(dotted_path)
         if field_schema is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unknown config field: '{dotted_path}'",
-            )
+            raise HTTPException(status_code=422, detail=f"Unknown config field: '{dotted_path}'")
+        validated_changes[dotted_path] = _validate_value(dotted_path, value, field_schema)
 
-        # Validate value
-        validated_value = _validate_value(dotted_path, value, field_schema)
-        validated_changes[dotted_path] = validated_value
-
-    # --- Backup current override file ---
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = OVERRIDE_YAML_PATH.parent / f"{OVERRIDE_YAML_PATH.name}.backup.{timestamp}"
+    backup_path = LIVE_YAML_PATH.parent / f"{LIVE_YAML_PATH.name}.backup.{timestamp}"
     try:
-        if OVERRIDE_YAML_PATH.exists():
-            backup_path.write_text(
-                OVERRIDE_YAML_PATH.read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
+        if LIVE_YAML_PATH.exists():
+            backup_path.write_text(LIVE_YAML_PATH.read_text(encoding="utf-8"), encoding="utf-8")
             logger.info("config-update: backup written to %s", backup_path)
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to create backup: {str(e)[:200]}")
 
-    # --- Apply changes to the override dict ---
-    updated_overrides = deepcopy(overrides)
+    updated_live = deepcopy(live)
     changes_applied = []
     for dotted_path, value in validated_changes.items():
-        old_value = _get_nested(updated_overrides, dotted_path)
-        _set_nested(updated_overrides, dotted_path, value)
-        changes_applied.append({
-            "path": dotted_path,
-            "old_value": old_value,
-            "new_value": value,
-        })
+        old_value = _get_nested(updated_live, dotted_path)
+        _set_nested(updated_live, dotted_path, value)
+        changes_applied.append({"path": dotted_path, "old_value": old_value, "new_value": value})
         logger.info("config-update: %s: %r -> %r", dotted_path, old_value, value)
 
-    # --- Atomic write ---
-    new_yaml = yaml.dump(updated_overrides, default_flow_style=False, sort_keys=False)
-    tmp_path = OVERRIDE_YAML_PATH.parent / f".{OVERRIDE_YAML_PATH.name}.tmp"
+    validation_warnings = _validate_runtime_candidate(updated_live)
+
+    new_yaml = yaml.dump(updated_live, default_flow_style=False, sort_keys=False)
+    tmp_path = LIVE_YAML_PATH.parent / f".{LIVE_YAML_PATH.name}.tmp"
     try:
         tmp_path.write_text(new_yaml, encoding="utf-8")
-        os.rename(str(tmp_path), str(OVERRIDE_YAML_PATH))
+        os.rename(str(tmp_path), str(LIVE_YAML_PATH))
     except OSError as e:
-        # Clean up tmp file on failure
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to write config: {str(e)[:200]}")
 
-    # --- Validate round-trip ---
     try:
-        roundtrip = yaml.safe_load(OVERRIDE_YAML_PATH.read_text(encoding="utf-8"))
+        roundtrip = yaml.safe_load(LIVE_YAML_PATH.read_text(encoding="utf-8"))
         if not isinstance(roundtrip, dict):
             raise ValueError("Round-trip parse did not produce a dict")
+        validation_warnings = _validate_runtime_candidate(roundtrip)
     except Exception as e:
-        # Restore from backup
         logger.error("config-update: round-trip validation failed, restoring backup: %s", e)
         try:
             if backup_path.exists():
-                os.rename(str(backup_path), str(OVERRIDE_YAML_PATH))
+                os.rename(str(backup_path), str(LIVE_YAML_PATH))
         except OSError:
             pass
         raise HTTPException(
@@ -798,7 +613,6 @@ async def update_config(body: ConfigUpdateRequest):
             detail=f"Config validation failed after write (backup restored): {str(e)[:200]}",
         )
 
-    # --- Optional restart ---
     restarted = False
     if restart:
         try:
@@ -822,4 +636,5 @@ async def update_config(body: ConfigUpdateRequest):
         "changes_applied": changes_applied,
         "backup_path": str(backup_path),
         "restarted": restarted,
+        "validation_warnings": validation_warnings,
     }

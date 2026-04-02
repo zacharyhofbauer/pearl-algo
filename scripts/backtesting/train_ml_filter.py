@@ -120,7 +120,7 @@ def main() -> int:
     parser.add_argument(
         "--signals-path",
         type=Path,
-        default=Path("data/agent_state/NQ/signals.jsonl"),
+        default=Path("data/agent_state/MNQ/signals.jsonl"),
         help="Path to signals.jsonl",
     )
     parser.add_argument(

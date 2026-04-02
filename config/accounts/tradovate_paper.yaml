@@ -46,12 +46,15 @@ trading_circuit_breaker:
   enable_hour_filter: true
   allowed_trading_hours_et:
   - 1
+  - 2
   - 3
   - 4
   - 9
   - 10
   - 11
   - 12
+  - 13
+  - 14
   - 15
   - 16
   - 18
@@ -162,6 +165,8 @@ advanced_exits:
   max_hold_exit:
     enabled: true
     max_duration_minutes: 180
+# Legacy compatibility bridge. Canonical live strategy params belong under
+# strategies.composite_intraday; this section is still read as a fallback.
 pearl_bot_auto:
   min_confidence: 0.4
   min_confidence_long: 0.4
@@ -194,8 +199,9 @@ pearl_bot_auto:
     rth: 1.0
     post_close: 0.85
     evening: 0.7
-  allow_orb_entries: false
-  allow_vwap_2sd_entries: false
+  allow_orb_entries: true
+  allow_vwap_2sd_entries: true
+  allow_smc_entries: true
   adx_period: 14
   adx_trending_threshold: 25.0
   adx_ranging_threshold: 20.0
