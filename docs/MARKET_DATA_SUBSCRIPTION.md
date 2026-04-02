@@ -43,7 +43,7 @@ You should see:
 
 ### 3) Confirm you are using the intended port / client IDs
 
-Canonical defaults (see `docs/PROJECT_SUMMARY.md`):
+Canonical defaults (see `docs/CURRENT_OPERATING_MODEL.md` and `docs/GATEWAY.md`):
 
 - `IBKR_PORT=4001`
 - `IBKR_CLIENT_ID=10`
@@ -129,8 +129,7 @@ Treat “historical fallback” as a **degradation mode**, not a fix.
 ## References
 
 - `docs/GATEWAY.md` — operational gateway setup and lifecycle
-- `docs/PROJECT_SUMMARY.md` — architecture + configuration source of truth
-
+- `docs/CURRENT_OPERATING_MODEL.md` — current runtime/configuration source of truth
 
 
 

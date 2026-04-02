@@ -8,7 +8,7 @@
 - **Order execution:** Tradovate (paper account = source of truth for trades)
 - **Notifications:** Telegram
 - **Entry point:** `pearl.sh` (master control), `python -m pearlalgo.market_agent.main`
-- **Config hierarchy:** `config/base.yaml` (defaults) + `config/accounts/tradovate_paper.yaml` (overrides)
+- **Canonical runtime config:** `config/live/tradovate_paper.yaml`
 - **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
 
 ## Critical Safety Rules
@@ -23,26 +23,24 @@
 | `max_positions` | current value | Position limit |
 | `max_position_size_per_order` | 1 | 1 contract per order, adds allowed |
 | `max_position_size` | 5 | MFF max 5 MNQ total |
-| `circuit_breaker.*` | current values | Drawdown protection |
+| `guardrails.*` | current values | Minimal execution safety without legacy signal gating |
 | `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
 | `ibkr.execution` | inactive | IBKR is data-only |
 
 ## Config Rules
 
-- **YAML duplicate keys are SILENT** — last key wins, no error. Always check BOTH config files for duplicates before editing.
-- Override hierarchy: `tradovate_paper.yaml` values override `base.yaml` values.
-- Always validate YAML after editing: `python -c "import yaml; yaml.safe_load(open('config/base.yaml'))"`
+- **YAML duplicate keys are SILENT** — last key wins, no error.
+- Canonical runtime edits belong in `config/live/tradovate_paper.yaml`.
+- Always validate YAML after editing: `python -c "import yaml; yaml.safe_load(open('config/live/tradovate_paper.yaml'))"`
 
 ## Forbidden Actions
 
 1. Do NOT re-enable IBKR execution
 2. Do NOT increase contract sizes above 1
-3. Do NOT disable circuit breaker or drawdown limits
+3. Do NOT disable execution guardrails or drawdown limits
 4. Do NOT enable virtual PnL
-5. Do NOT change session filter settings without user approval
+5. Do NOT reintroduce legacy time / direction / regime signal gates without user approval
 6. Do NOT restart the trading service without user approval
-7. Do NOT change circuit breaker mode back to shadow/warn_only without user approval
-8. Do NOT disable direction gating or regime avoidance without user approval
 
 ## Testing
 
@@ -60,21 +58,19 @@
 | `src/pearlalgo/market_agent/signal_handler.py` | Signal processing |
 | `src/pearlalgo/execution/tradovate/adapter.py` | Order execution adapter |
 | `src/pearlalgo/execution/tradovate/client.py` | Tradovate API client |
-| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Signal generation (PineScript logic) |
+| `src/pearlalgo/strategies/composite_intraday/engine.py` | Canonical live strategy bundle |
+| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Legacy implementation bridge behind the canonical strategy wrappers |
 | `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
-| `config/base.yaml` | Base configuration |
-| `config/accounts/tradovate_paper.yaml` | Account-specific overrides |
-| `pearlalgo_web_app/` | Next.js web dashboard (standalone mode, port 3001) |
+| `config/live/tradovate_paper.yaml` | Canonical live runtime configuration |
+| `config/accounts/tradovate_paper.yaml` | Legacy compatibility overlay; canonical live config is `config/live/tradovate_paper.yaml` |
+| `apps/pearl-algo-app/` | Next.js web dashboard (standalone mode, port 3001) |
 | `src/pearlalgo/api/server.py` | FastAPI API server (port 8001) |
 
-## Data Insights (from 1,617-trade backtest, 2026-02-17 to 2026-03-25)
+## Data Insights
 
-- Circuit breaker is in **enforce** mode — it will block trades that violate risk limits
-- Direction gating is ON — longs blocked in downtrends, shorts blocked in uptrends
-- Regime avoidance is ON — trades blocked in ranging/volatile regimes
-- 3-loss cooldown (30-min pause) is the most impactful filter (accounts for 70% of drawdown reduction)
-- Session filter is intentionally OFF — user wants all hours open for OpenClaw agent decisions
-- `min_confidence` stays at 0.40 — raising it interacts badly with regime multipliers
+- Legacy signal gating is intentionally OFF on the canonical live path.
+- Execution should remain disarmed until you explicitly re-arm it.
+- Tradovate Paper is the sole live execution account; IBKR remains data-only.
 
 ## Pearl Algo Memory Bridge (REQUIRED at session end)
 
@@ -89,7 +85,7 @@ ssh pearlassistant@$(tailscale ip -4 2>/dev/null || echo 'PEARL-Macbook')   "bas
 - [files changed]
 - [status: tests passing/failing]
 SUMMARY
-)' 'pearl-algo-workspace'" 2>/dev/null || echo 'Bridge unavailable - manually update Pearl Algo MEMORY.md'
+)' 'pearl-algo'" 2>/dev/null || echo 'Bridge unavailable - manually update Pearl Algo MEMORY.md'
 ```
 
 **What to include:**

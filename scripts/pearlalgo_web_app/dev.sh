@@ -37,7 +37,7 @@ case "$1" in
     frontend|fe)
         # Start frontend dev server
         echo -e "${GREEN}Starting frontend on port $FRONTEND_PORT...${NC}"
-        cd "$PROJECT_ROOT/pearlalgo_web_app"
+        cd "$PROJECT_ROOT/apps/pearl-algo-app"
         npm run dev:fresh
         ;;
 
@@ -57,7 +57,7 @@ case "$1" in
         sleep 2
 
         # Start frontend
-        cd "$PROJECT_ROOT/pearlalgo_web_app"
+        cd "$PROJECT_ROOT/apps/pearl-algo-app"
         npm run dev
         ;;
 

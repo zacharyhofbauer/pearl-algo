@@ -1,6 +1,6 @@
 # Pearl Algo Web App + Telegram Mini App
 
-This repo's **canonical chart** is the web-based **Pearl Algo Web App** (`pearlalgo_web_app/`).
+This repo's **canonical chart** is the web-based **Pearl Algo Web App** (`apps/pearl-algo-app/`).
 
 It powers:
 - A **browser dashboard** (local or deployed)
@@ -86,7 +86,7 @@ node --version  # v20.x.x
   - `WS /ws` - WebSocket for real-time updates
   - `GET /health` - Health check
 
-### 2. Next.js Frontend (`pearlalgo_web_app/`)
+### 2. Next.js Frontend (`apps/pearl-algo-app/`)
 - **Port**: 3001 (default)
 - **Framework**: Next.js 14 with TypeScript
 - **Chart Library**: Lightweight Charts (TradingView)
@@ -129,7 +129,7 @@ Official references:
 - Changelog (2.2): [Cursor changelog 2.2](https://cursor.com/changelog/2-2)
 - Docs: [Cursor docs: Agent Browser](https://cursor.com/docs/agent/browser)
 
-### Quick workflow (recommended for `pearlalgo_web_app/`)
+### Quick workflow (recommended for `apps/pearl-algo-app/`)
 
 1. Start the app (`./pearl.sh chart start`) and open `http://localhost:3001`.
 2. In Cursor, open the Browser on that URL and open the **design sidebar / Visual Editor**.
@@ -167,7 +167,7 @@ git tag "baseline/webapp-$(date -u +%Y-%m-%d-%H%MZ)" -m "Known-good web app UI"
 3. **Preflight build before/after changes**:
 
 ```bash
-cd pearlalgo_web_app && npm run build
+cd apps/pearl-algo-app && npm run build
 ```
 
 ### Emergency rollback (UI/layout/CSS)
@@ -184,9 +184,9 @@ Known-good baseline tag:
 ```bash
 ./scripts/maintenance/git_rollback_paths.sh \
   --target baseline/webapp-2026-02-03-0803Z \
-  --path pearlalgo_web_app \
+  --path apps/pearl-algo-app \
   --path scripts/pearlalgo_web_app \
-  --run "cd pearlalgo_web_app && npm run build" \
+  --run "cd apps/pearl-algo-app && npm run build" \
   --commit \
   --message "Rollback web app UI to known-good template" \
   --yes
@@ -219,8 +219,10 @@ Auth is enabled by default. Store the API key in the secrets file:
 PEARL_API_KEY=your-secret-key
 ```
 
-When starting via `./pearl.sh chart start`, the script exports `NEXT_PUBLIC_API_KEY`
-from `PEARL_API_KEY` so the frontend sends the `X-API-Key` header automatically.
+When starting via `./pearl.sh chart start`, the script exports
+`NEXT_PUBLIC_READONLY_API_KEY` from `PEARL_API_KEY` so the frontend sends the
+read-only `X-API-Key` header automatically. `NEXT_PUBLIC_API_KEY` remains a
+supported legacy fallback for compatibility.
 
 If you change the key, restart the web app and hard refresh the browser.
 
@@ -230,7 +232,8 @@ To disable auth for local development only:
 export PEARL_API_AUTH_ENABLED=false
 ```
 
-Protected endpoints require the `X-API-Key` header.
+Read-only endpoints require the `X-API-Key` header. Mutating/operator endpoints
+also require the `X-PEARL-OPERATOR` header and will reject browser API keys.
 
 ---
 
@@ -287,8 +290,9 @@ See cloudflared tunnel setup documentation for details.
 | `PEARL_WEBAPP_PASSCODE` | *(unset)* | Passcode required when `PEARL_WEBAPP_AUTH_ENABLED=true` (set in local secrets) |
 | `PEARL_AI_API_ENABLED` | `false` | Enable Pearl AI LLM endpoints on the API server (`/api/pearl/*`) |
 | `PEARL_API_AUTH_ENABLED` | `true` | Enable API authentication |
-| `PEARL_API_KEY` | *(secrets.env)* | API key for protected endpoints |
-| `NEXT_PUBLIC_API_KEY` | *(auto from `PEARL_API_KEY`)* | Frontend API key |
+| `PEARL_API_KEY` | *(secrets.env)* | Read-only API key for browser/API access |
+| `NEXT_PUBLIC_READONLY_API_KEY` | *(auto from `PEARL_API_KEY`)* | Preferred frontend read-only API key |
+| `NEXT_PUBLIC_API_KEY` | *(legacy fallback)* | Legacy frontend key name retained for compatibility |
 | `PEARL_RATE_LIMIT_REQUESTS` | `50000` | Rate limit requests per window |
 | `PEARL_RATE_LIMIT_WINDOW` | `60` | Rate limit window (seconds) |
 
@@ -299,7 +303,7 @@ See cloudflared tunnel setup documentation for details.
 Run the test suite:
 
 ```bash
-cd pearlalgo_web_app
+cd apps/pearl-algo-app
 npm test              # Run all tests
 npm run test:watch    # Watch mode
 npm run test:coverage # With coverage

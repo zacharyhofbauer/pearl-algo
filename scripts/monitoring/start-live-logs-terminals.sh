@@ -3,7 +3,8 @@
 # Use with autostart or run manually.
 
 export PATH="/usr/bin:/bin:${PATH}"
-PROJECT_ROOT="/home/pearlalgo/PearlAlgoWorkspace"
+SCRIPT_DIR_SELF="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR_SELF}/../.." && pwd)"
 SCRIPT_DIR="${PROJECT_ROOT}/scripts/monitoring"
 RUNNER="${SCRIPT_DIR}/run-journalctl-colored.sh"
 

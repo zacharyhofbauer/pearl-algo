@@ -7,8 +7,9 @@
 - **Market data:** IBKR gateway (data only, NOT used for execution)
 - **Order execution:** Tradovate (paper account = source of truth for trades)
 - **Notifications:** Telegram
-- **Entry point:** `pearlalgo.sh` (master control), `python -m pearlalgo.market_agent.main`
-- **Config hierarchy:** `config/base.yaml` (defaults) + `config/accounts/tradovate_paper.yaml` (overrides)
+- **Entry point:** `pearl.sh` (master control), `pearlalgo.sh` (compatibility alias), `python -m pearlalgo.market_agent.main`
+- **Canonical live config:** `config/live/tradovate_paper.yaml`
+- **Current live state root:** `/home/pearlalgo/var/pearl-algo/state/data/agent_state/MNQ` (repo `data/` symlinks here)
 - **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
 
 ## Critical Safety Rules
@@ -23,23 +24,23 @@
 | `max_positions` | current value | Position limit |
 | `max_position_size_per_order` | 1 | Prop firm max per trade |
 | `max_position_size` | 1 | Must stay 1 contract |
-| `circuit_breaker.*` | current values | Drawdown protection |
+| `guardrails.*` | current values | Minimal execution safety without legacy signal gating |
 | `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
 | `ibkr.execution` | inactive | IBKR is data-only |
 
 ## Config Rules
 
-- **YAML duplicate keys are SILENT** — last key wins, no error. Always check BOTH config files for duplicates before editing.
-- Override hierarchy: `tradovate_paper.yaml` values override `base.yaml` values.
-- Always validate YAML after editing: `python -c "import yaml; yaml.safe_load(open('config/base.yaml'))"`
+- **YAML duplicate keys are SILENT** — last key wins, no error.
+- Canonical runtime edits belong in `config/live/tradovate_paper.yaml`.
+- Always validate the canonical runtime config after editing: `python -c "import yaml; yaml.safe_load(open('config/live/tradovate_paper.yaml'))"`
 
 ## Forbidden Actions
 
 1. Do NOT re-enable IBKR execution
 2. Do NOT increase contract sizes above 1
-3. Do NOT disable circuit breaker or drawdown limits
+3. Do NOT disable execution guardrails or drawdown limits
 4. Do NOT enable virtual PnL
-5. Do NOT change session filter settings without user approval
+5. Do NOT reintroduce legacy time / direction / regime signal gates without user approval
 6. Do NOT restart the trading service without user approval
 
 ## Testing
@@ -58,21 +59,22 @@
 | `src/pearlalgo/market_agent/signal_handler.py` | Signal processing |
 | `src/pearlalgo/execution/tradovate/adapter.py` | Order execution adapter |
 | `src/pearlalgo/execution/tradovate/client.py` | Tradovate API client |
-| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Signal generation (PineScript logic) |
+| `src/pearlalgo/strategies/composite_intraday/engine.py` | Canonical live strategy bundle |
+| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Legacy implementation bridge behind the canonical strategy wrappers |
 | `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
-| `config/base.yaml` | Base configuration |
-| `config/accounts/tradovate_paper.yaml` | Account-specific overrides |
-| `pearlalgo_web_app/` | Next.js web dashboard (standalone mode, port 3001) |
+| `config/live/tradovate_paper.yaml` | Canonical live runtime configuration |
+| `config/accounts/tradovate_paper.yaml` | Legacy compatibility overlay; canonical live config is `config/live/tradovate_paper.yaml` |
+| `apps/pearl-algo-app/` | Next.js web dashboard (standalone mode, port 3001) |
 | `src/pearlalgo/api/server.py` | FastAPI API server (port 8001) |
 | `src/pearlalgo/api/indicator_service.py` | Indicator calculations (EMA, VWAP AA, BB, ATR) |
-| `pearlalgo_web_app/hooks/useChartManager.ts` | Chart series initialization and refs |
-| `pearlalgo_web_app/lib/schemas.ts` | Zod validation for WS/API data |
+| `apps/pearl-algo-app/hooks/useChartManager.ts` | Chart series initialization and refs |
+| `apps/pearl-algo-app/lib/schemas.ts` | Zod validation for WS/API data |
 
 ## Data Insights (from 922-trade analysis)
 
 - Overnight sessions (18:00-08:30 ET) historically lose money (-$4,477 net)
 - Short trades have poor win rate compared to longs
-- Session filter is intentionally OFF — user wants all hours open for OpenClaw agent decisions
+- Legacy signal gating is intentionally OFF on the canonical live path — user wants strategy decisions without hour/direction/regime vetoes
 
 ---
 
@@ -244,7 +246,7 @@ After making webapp changes, verify ALL of the following before considering the 
 - [ ] **No hardcoded colors** — all colors use `var(--token-name)`
 - [ ] **No hardcoded spacing** — all spacing uses `var(--space-*)` tokens
 - [ ] **Focus states work** — tab through interactive elements, all show visible focus
-- [ ] **Build succeeds** — `npm run build` passes in `pearlalgo_web_app/`
+- [ ] **Build succeeds** — `npm run build` passes in `apps/pearl-algo-app/`
 - [ ] **Restart webapp service** — `sudo systemctl restart pearlalgo-webapp-dev.service`
 
 ### UX Principles for Trading Dashboards
@@ -290,8 +292,8 @@ After making webapp changes, verify ALL of the following before considering the 
 
 | Command | Use when |
 |---|---|
-| `./pearlalgo.sh restart` | Code change, config update, agent issue — no gateway touch, no 2FA |
-| `./pearlalgo.sh restart --gateway` | Gateway crashed or wifi/power cycle — triggers IBKR 2FA on phone |
+| `./pearl.sh soft-restart` | Code change, config update, agent issue — no gateway touch, no 2FA |
+| `./pearl.sh hard-restart` | Gateway crashed or wifi/power cycle — may trigger IBKR 2FA |
 
 **How it works:**
 - `systemctl stop` waits for confirmed dead before next step (no race condition)

@@ -3,15 +3,32 @@
 PearlAlgo Health Monitor v2 — auto-fixes ghost positions, alerts on real issues.
 Runs every 5 min via cron.
 """
-import subprocess, json, sqlite3, sys
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-API_KEY = "EL0lFv7oAVPhLwkqLTXCNvALmGVWBmoyb_pDKSOeKZ4"
-API_URL = f"http://localhost:8001/api/state?api_key={API_KEY}"
-DB = Path("/home/pearlalgo/pearl-algo-workspace/data/tradovate/paper/trades.db")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_STATE_DIR = PROJECT_ROOT / "data" / "agent_state" / "MNQ"
+STATE_DIR = Path(os.getenv("PEARLALGO_STATE_DIR", str(DEFAULT_STATE_DIR)))
+DB = STATE_DIR / "trades.db"
+API_URL = "http://localhost:8001/api/state"
 ALERT_COOLDOWN_FILE = Path("/tmp/pearlalgo_alert_cooldown.json")
 COOLDOWN_MINUTES = 15
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+    load_dotenv(Path.home() / ".config" / "pearlalgo" / "secrets.env", override=False)
+except Exception:
+    pass
+
+API_KEY = os.getenv("PEARL_API_KEY", "").strip()
 
 def get_cooldowns():
     try: return json.loads(ALERT_COOLDOWN_FILE.read_text())
@@ -36,6 +53,19 @@ def alert(msg, key):
 
 def ok(msg): print(f"OK: {msg}")
 
+def table_exists(table_name):
+    if not DB.exists():
+        return False
+    conn = sqlite3.connect(str(DB))
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
 def restart_agent():
     pid_out = subprocess.check_output(
         ["sudo", "systemctl", "show", "-p", "MainPID", "pearlalgo-agent"], text=True
@@ -47,6 +77,8 @@ def restart_agent():
 
 def clear_ghost_signals():
     """Clear ALL entered signals older than 5 min — they're never real after that long."""
+    if not table_exists("signal_events"):
+        return 0
     conn = sqlite3.connect(str(DB))
     cur = conn.cursor()
     # Clear anything entered more than 5 minutes ago
@@ -71,8 +103,10 @@ if result.stdout.strip() != "active":
 
 # 2. API state
 try:
-    import urllib.request
-    resp = urllib.request.urlopen(API_URL, timeout=5)
+    request = urllib.request.Request(API_URL)
+    if API_KEY:
+        request.add_header("X-API-Key", API_KEY)
+    resp = urllib.request.urlopen(request, timeout=5)
     state = json.loads(resp.read())
 except Exception as e:
     alert(f"API unreachable: {e}", "api_down")
@@ -84,13 +118,15 @@ else:
     ok("data_fresh")
 
 # 3. Ghost signal check — clear ALL entered signals (they never self-resolve for real Tradovate fills)
-conn = sqlite3.connect(str(DB))
-ghost_count = conn.execute("SELECT COUNT(*) FROM signal_events WHERE status='entered'").fetchone()[0]
-conn.close()
+ghost_count = 0
+if table_exists("signal_events"):
+    conn = sqlite3.connect(str(DB))
+    ghost_count = conn.execute("SELECT COUNT(*) FROM signal_events WHERE status='entered'").fetchone()[0]
+    conn.close()
 
-# Ghost signals accumulate naturally during Tradovate live trading.
-# Clear silently — NEVER restart agent for this (interrupts live trades).
-if ghost_count > 0:
+if not table_exists("signal_events"):
+    ok(f"ghost-signal check skipped (no signal_events table in {DB})")
+elif ghost_count > 0:
     cleared = clear_ghost_signals()
     ok(f"Auto-cleared {cleared} ghost entered signals (no restart)")
 else:
@@ -120,19 +156,22 @@ now_et = datetime.now(_ET_HCK)
 now_et_hour = now_et.hour
 market_hours = now_et_hour >= 18 or now_et_hour < 16  # overnight + day session
 if market_hours and state.get("running"):
-    conn = sqlite3.connect(str(DB))
-    last = conn.execute(
-        "SELECT MAX(exit_time) FROM trades WHERE date(exit_time) = date('now')"  # FIXED 2026-03-25: times are naive ET
-    ).fetchone()[0]
-    conn.close()
-    if last:
-        last_dt = datetime.fromisoformat(last)  # FIXED 2026-03-25: naive ET, no tz conversion needed
-        mins = (now_et.replace(tzinfo=None) - last_dt).total_seconds() / 60
-        if mins > 90:
-            alert(f"No trades in {mins:.0f}min during market hours — investigate", "trade_drought")
-        else:
-            ok(f"Last trade {mins:.0f}m ago")
+    if not table_exists("trades"):
+        ok(f"trade-drought check skipped (no trades table in {DB})")
     else:
-        ok("No trades today yet")
+        conn = sqlite3.connect(str(DB))
+        last = conn.execute(
+            "SELECT MAX(exit_time) FROM trades WHERE date(exit_time) = date('now')"  # FIXED 2026-03-25: times are naive ET
+        ).fetchone()[0]
+        conn.close()
+        if last:
+            last_dt = datetime.fromisoformat(last)  # FIXED 2026-03-25: naive ET, no tz conversion needed
+            mins = (now_et.replace(tzinfo=None) - last_dt).total_seconds() / 60
+            if mins > 90:
+                alert(f"No trades in {mins:.0f}min during market hours — investigate", "trade_drought")
+            else:
+                ok(f"Last trade {mins:.0f}m ago")
+        else:
+            ok("No trades today yet")
 
 print("Health check v2 complete.")

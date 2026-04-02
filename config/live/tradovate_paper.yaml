@@ -1,0 +1,313 @@
+account:
+  name: tradovate_paper
+  display_name: Tradovate Paper
+  badge: PAPER
+  badge_color: purple
+  telegram_prefix: TV-PAPER
+
+symbol: MNQ
+timeframe: 1m
+scan_interval: 30
+
+strategy:
+  active: composite_intraday
+  enforce_session_window: false
+  enabled_signals:
+  - composite_intraday
+  enable_dynamic_sizing: true
+  base_contracts: 1
+  high_conf_contracts: 1
+  max_conf_contracts: 1
+  high_conf_threshold: 0.8
+  max_conf_threshold: 0.9
+  winning_signal_types:
+  - composite_intraday
+  session_position_scaling:
+    enabled: true
+    london_multiplier: 0.8
+    tokyo_multiplier: 0.7
+    ny_multiplier: 1.5
+  signal_type_size_multipliers:
+    composite_intraday: 1.0
+
+strategies:
+  composite_intraday:
+    ema_fast: 9
+    ema_slow: 21
+    min_confidence: 0.4
+    min_confidence_long: 0.4
+    min_confidence_short: 0.4
+    stop_loss_atr_mult: 1.5
+    take_profit_atr_mult: 2.5
+    volatile_sl_mult: 1.3
+    volatile_tp_mult: 1.3
+    ranging_sl_mult: 0.8
+    ranging_tp_mult: 0.7
+    allow_vwap_cross_entries: true
+    allow_vwap_retest_entries: true
+    allow_trend_momentum_entries: true
+    trend_momentum_atr_mult: 0.5
+    allow_trend_breakout_entries: true
+    trend_breakout_lookback_bars: 5
+    volume_ma_length: 20
+    sr_length: 130
+    sr_atr_mult: 0.5
+    tbt_period: 10
+    tbt_trend_type: wicks
+    sd_threshold_pct: 10.0
+    sd_resolution: 50
+    vwap_std_dev: 1.0
+    allow_orb_entries: true
+    allow_vwap_2sd_entries: true
+    allow_smc_entries: true
+    adx_period: 14
+    adx_trending_threshold: 25.0
+    adx_ranging_threshold: 20.0
+    tod_scaling:
+      enabled: true
+      overnight: 0.6
+      premarket_early: 0.75
+      premarket_late: 0.85
+      rth: 1.0
+      post_close: 0.85
+      evening: 0.7
+
+session:
+  start_time: '18:00'
+  end_time: '17:00'
+  timezone: America/New_York
+
+telegram:
+  enabled: true
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+  notification_tier: debug
+
+risk:
+  max_risk_per_trade: 0.015
+  max_drawdown: 0.1
+  min_position_size: 1
+  max_position_size: 5
+  signal_type_size_multipliers:
+    sr_bounce: 0.25
+  signal_type_max_contracts:
+    sr_bounce: 2
+
+service:
+  status_update_interval: 3600
+  heartbeat_interval: 86400
+  state_save_interval: 10
+  connection_failure_alert_interval: 600
+  data_quality_alert_interval: 300
+  dashboard_chart_enabled: false
+  dashboard_chart_interval: 3600
+  dashboard_chart_timeframe: 5m
+  dashboard_chart_lookback_hours: 6
+  enable_new_bar_gating: false
+  adaptive_cadence_enabled: true
+  scan_interval_active_seconds: 15
+  scan_interval_idle_seconds: 60
+  scan_interval_market_closed_seconds: 300
+  scan_interval_paused_seconds: 60
+  scan_interval_velocity_seconds: 1.5
+  velocity_mode_enabled: true
+  velocity_atr_expansion_threshold: 1.2
+  velocity_volume_spike_threshold: 2.0
+
+circuit_breaker:
+  max_consecutive_errors: 10
+  max_connection_failures: 50
+  max_data_fetch_errors: 5
+  pause_on_connection_failures: false
+
+guardrails:
+  signal_gate_enabled: false
+  max_consecutive_losses: 3
+  max_session_drawdown: 1800.0
+  max_daily_drawdown: 99999.0
+
+data:
+  buffer_size: 300
+  buffer_size_5m: 300
+  buffer_size_15m: 100
+  historical_hours: 5
+  multitimeframe_5m_hours: 25
+  multitimeframe_15m_hours: 25
+  performance_history_limit: 1000
+  stale_data_threshold_minutes: 10
+  connection_timeout_minutes: 30
+  enable_base_cache: true
+  base_refresh_seconds: 60
+  enable_mtf_cache: true
+  mtf_refresh_seconds_5m: 300
+  mtf_refresh_seconds_15m: 900
+  ibkr_data_client_id: 51
+
+storage:
+  sqlite_enabled: true
+  async_writes_enabled: true
+  async_queue_max_size: 1000
+  async_queue_priority_trades: true
+
+signals:
+  enabled_signal_types:
+  - pearlbot_pinescript
+  - smc_fvg
+  - smc_ob
+  - smc_silver_bullet
+  duplicate_window_seconds: 120
+  min_risk_reward: 1.3
+  duplicate_price_threshold_pct: 0.5
+  volatility_threshold: 0.0001
+  avoid_lunch_lull: false
+  skip_overnight: false
+  quality_score:
+    enabled: true
+    threshold: 0.35
+    factors:
+      confidence_weight: 0.3
+      risk_reward_weight: 0.25
+      regime_alignment_weight: 0.2
+      volume_profile_weight: 0.15
+      mtf_alignment_weight: 0.1
+  prioritize_ny_session: false
+  min_volume: 10
+  explore:
+    enabled: false
+    min_confidence: 0.75
+    min_risk_reward: 2.0
+    include_quality_rejects: false
+    bypass_regime_filters: false
+  max_stop_points: 45.0
+  adaptive_volatility_filter:
+    enabled: false
+    expansion_requirement: 2.0
+    median_atr_threshold: 0.0003
+  regime_filters:
+    unified_strategy:
+      allowed_regimes:
+      - ranging
+      - trending_bullish
+      - trending_bearish
+
+performance:
+  max_records: 1000
+  default_lookback_days: 7
+
+virtual_pnl:
+  enabled: false
+  intrabar_tiebreak: take_profit
+  notify_entry: true
+  notify_exit: true
+
+auto_flat:
+  enabled: true
+  daily_enabled: true
+  daily_time: '16:30'
+  friday_enabled: false
+  friday_time: '16:55'
+  weekend_enabled: false
+  timezone: America/New_York
+  notify: true
+
+audit:
+  retention_days: 90
+  snapshot_retention_days: 365
+
+composite_regime:
+  enabled: true
+  chop_zone_low: 4.0
+  chop_zone_high: 6.0
+  chop_zone_min_confidence: 0.75
+  volatile_stop_multiplier: 1.2
+
+runner_mode:
+  enabled: true
+  breakeven_trigger_atr: 1.5
+  runner_trigger_atr: 2.5
+  runner_trail_distance_atr: 1.0
+  breakeven_offset_points: 0.25
+
+execution:
+  enabled: true
+  armed: false
+  mode: paper
+  adapter: tradovate
+  enforce_protection_guard: true
+  allow_reversal_on_opposite_signal: true
+  max_position_size_per_order: 1
+  max_positions: 5
+  max_orders_per_day: 50
+  max_daily_loss: 99999.0
+  cooldown_seconds: 30
+  symbol_whitelist:
+  - MNQ
+  ibkr_trading_client_id: 50
+  ibkr_host: 127.0.0.1
+  ibkr_port: 4001
+
+challenge:
+  enabled: false
+  stage: tv_paper_eval
+  start_balance: 50000.0
+  profit_target: 3000.0
+  max_drawdown: 2000.0
+  max_contracts_mini: 5
+  max_contracts_micro: 1
+  consistency_pct: 0.5
+  min_trading_days: 2
+  t1_news_allowed: true
+  auto_reset_on_pass: true
+  auto_reset_on_fail: true
+
+trailing_stop:
+  enabled: true
+  min_move_points: 0.5
+  allow_external_override: true
+  max_override_ttl_minutes: 120
+  regime_adaptive: true
+  override_bounds:
+    trail_atr_multiplier:
+    - 0.5
+    - 2.0
+    activation_atr_multiplier:
+    - 0.5
+    - 2.0
+  phases:
+  - name: breakeven
+    activation_atr: 1.0
+    trail_atr: 0.0
+  - name: lock_profit
+    activation_atr: 2.0
+    trail_atr: 1.5
+  - name: tight_trail
+    activation_atr: 3.0
+    trail_atr: 1.0
+
+ml_filter:
+  mode: shadow
+
+advanced_exits:
+  quick_exit:
+    enabled: true
+    min_duration_minutes: 20
+    max_mfe_threshold: 20
+    min_mae_threshold: 60
+  time_based_exit:
+    enabled: true
+    min_duration_minutes: 10
+    min_profit_threshold: 30
+    take_percentage: 0.7
+  stop_optimization:
+    enabled: true
+    mae_percentile: 75
+  partial_runner:
+    enabled: true
+    breakeven_trigger_atr: 1.5
+    tight_trail_trigger_atr: 2.5
+    tight_trail_distance_atr: 1.0
+    breakeven_offset: 0.25
+    remove_fixed_tp: true
+  max_hold_exit:
+    enabled: true
+    max_duration_minutes: 180

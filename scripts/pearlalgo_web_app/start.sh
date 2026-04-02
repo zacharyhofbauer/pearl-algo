@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CHART_DIR="$PROJECT_ROOT/pearlalgo_web_app"
+CHART_DIR="$PROJECT_ROOT/apps/pearl-algo-app"
 LOG_DIR="$PROJECT_ROOT/logs"
 
 MARKET="${PEARLALGO_MARKET:-NQ}"

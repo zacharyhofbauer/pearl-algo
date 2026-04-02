@@ -60,13 +60,16 @@ parse_options() {
 }
 
 # Sync web app env vars into .env.local (merge, don't overwrite)
+# Keep NEXT_PUBLIC_API_KEY as a compatibility fallback until the frontend no
+# longer reads the legacy variable name anywhere.
 sync_env_local() {
-    local env_local="$SCRIPT_DIR/pearlalgo_web_app/.env.local"
+    local env_local="$SCRIPT_DIR/apps/pearl-algo-app/.env.local"
     local changed=false
     local temp_file="${env_local}.tmp"
 
     # Vars to sync: target_key=source_value
     declare -A sync_vars
+    [ -n "${PEARL_API_KEY:-}" ] && sync_vars[NEXT_PUBLIC_READONLY_API_KEY]="$PEARL_API_KEY"
     [ -n "${PEARL_API_KEY:-}" ] && sync_vars[NEXT_PUBLIC_API_KEY]="$PEARL_API_KEY"
     [ -n "${PEARL_WEBAPP_AUTH_ENABLED:-}" ] && sync_vars[PEARL_WEBAPP_AUTH_ENABLED]="$PEARL_WEBAPP_AUTH_ENABLED"
     [ -n "${PEARL_WEBAPP_PASSCODE:-}" ] && sync_vars[PEARL_WEBAPP_PASSCODE]="$PEARL_WEBAPP_PASSCODE"
@@ -113,6 +116,10 @@ load_env_files() {
     local secrets_file="$HOME/.config/pearlalgo/secrets.env"
     [ -f "$secrets_file" ] && source "$secrets_file"
     set +a
+
+    if [ -n "${PEARL_API_KEY:-}" ] && [ -z "${NEXT_PUBLIC_READONLY_API_KEY:-}" ]; then
+        export NEXT_PUBLIC_READONLY_API_KEY="$PEARL_API_KEY"
+    fi
 
     if [ -n "${PEARL_API_KEY:-}" ] && [ -z "${NEXT_PUBLIC_API_KEY:-}" ]; then
         export NEXT_PUBLIC_API_KEY="$PEARL_API_KEY"
@@ -184,7 +191,18 @@ check_chart_status() {
 }
 
 check_tv_paper_status() {
-    local pidfile="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
+    if systemctl is-active --quiet pearlalgo-agent 2>/dev/null; then
+        local agent_pid=$(systemctl show -p MainPID --value pearlalgo-agent 2>/dev/null || echo "")
+        local api_active="down"
+        systemctl is-active --quiet pearlalgo-api 2>/dev/null && api_active=":8001"
+        echo -e "${GREEN}●${NC} Tradovate Paper Eval - systemd PID ${agent_pid:-?} | API ${api_active}"
+        return 0
+    fi
+
+    local pidfile="$SCRIPT_DIR/logs/agent_${MARKET}.pid"
+    if [ ! -f "$pidfile" ]; then
+        pidfile="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
+    fi
     local api_ok=$(curl -s http://localhost:8001/health 2>/dev/null | grep -c "ok" || echo 0)
     
     if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
@@ -257,8 +275,16 @@ show_quick_status() {
     activate_venv
     
     local gw_status=$(./scripts/gateway/gateway.sh api-ready &>/dev/null && echo "✅" || echo "❌")
-    local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
-    local tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
+    local tv_paper_status="❌"
+    if systemctl is-active --quiet pearlalgo-agent 2>/dev/null; then
+        tv_paper_status="✅"
+    else
+        local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_${MARKET}.pid"
+        if [ ! -f "$tv_paper_pid_file" ]; then
+            tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
+        fi
+        tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
+    fi
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
 
@@ -281,6 +307,15 @@ start_gateway() {
 
 start_agent() {
     echo -e "${CYAN}▶ Starting Market Agent ($MARKET)...${NC}"
+    if systemctl is-enabled pearlalgo-agent &>/dev/null 2>&1; then
+        if [ "$FOREGROUND" = true ]; then
+            ./scripts/lifecycle/tv_paper_eval.sh restart
+        else
+            ./scripts/lifecycle/tv_paper_eval.sh start --background
+        fi
+        echo ""
+        return
+    fi
     if [ "$FOREGROUND" = true ]; then
         ./scripts/lifecycle/agent.sh start --market "$MARKET"
     else
@@ -300,15 +335,15 @@ start_chart() {
     load_env_files
 
     local LOG_DIR="$SCRIPT_DIR/logs"
-    local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"
+    local CHART_DIR="$SCRIPT_DIR/apps/pearl-algo-app"
     local CHART_PORT="${PEARL_CHART_PORT:-3001}"
 
-    # Start TV Paper API (the only API - port 8001)
+    # Start the API against the same per-market state root the agent uses.
     if ! pgrep -f "api_server.py.*--port 8001" &>/dev/null; then
-        local TV_STATE_DIR="$SCRIPT_DIR/data/tradovate/paper"
+        local TV_STATE_DIR="${PEARLALGO_STATE_DIR:-$SCRIPT_DIR/data/agent_state/${MARKET}}"
         if [ -d "$TV_STATE_DIR" ]; then
             .venv/bin/python scripts/pearlalgo_web_app/api_server.py \
-                --market TV_PAPER_EVAL \
+                --market "$MARKET" \
                 --data-dir "$TV_STATE_DIR" \
                 --port 8001 >> "$LOG_DIR/api_TV_PAPER.log" 2>&1 &
             echo "   API server started (port 8001)"
@@ -319,6 +354,7 @@ start_chart() {
 
     # Start web interface (only if not already running)
     if ! pgrep -f "next-server" &>/dev/null && ! pgrep -f "server\.js.*$CHART_PORT" &>/dev/null; then
+        export NEXT_PUBLIC_READONLY_API_KEY="${PEARL_API_KEY:-}"
         export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
         cd "$CHART_DIR"
 
@@ -367,9 +403,10 @@ start_chart() {
 
 build_chart() {
     echo -e "${CYAN}▶ Building Web App...${NC}"
-    local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"
+    local CHART_DIR="$SCRIPT_DIR/apps/pearl-algo-app"
     local LOG_DIR="$SCRIPT_DIR/logs"
     cd "$CHART_DIR"
+    export NEXT_PUBLIC_READONLY_API_KEY="${PEARL_API_KEY:-}"
     export NEXT_PUBLIC_API_KEY="${PEARL_API_KEY:-}"
 
     # Stop webapp before build to avoid serving stale/missing files during overwrite
@@ -447,10 +484,10 @@ start_all() {
     # Start in dependency order
     start_gateway
     sleep 2
-    # Start Tradovate Paper (MNQ) if config exists
-    if [ -f "$SCRIPT_DIR/config/accounts/tradovate_paper.yaml" ]; then
+    # Start the live market agent first so the API/web layer attaches to the same state dir.
+    if [ -f "$SCRIPT_DIR/config/live/tradovate_paper.yaml" ]; then
         echo -e "${CYAN}▶ Starting Tradovate Paper Eval (MNQ)...${NC}"
-        ./scripts/lifecycle/tv_paper_eval.sh start --background 2>/dev/null || echo -e "${YELLOW}   Tradovate Paper start failed (non-critical)${NC}"
+        start_agent || echo -e "${YELLOW}   Tradovate Paper start failed (non-critical)${NC}"
         echo ""
     fi
     sleep 1
@@ -469,6 +506,11 @@ start_all() {
 
 stop_agent() {
     echo -e "${CYAN}■ Stopping Market Agent ($MARKET)...${NC}"
+    if systemctl is-enabled pearlalgo-agent &>/dev/null 2>&1; then
+        ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
+        echo ""
+        return
+    fi
     ./scripts/lifecycle/agent.sh stop --market "$MARKET" 2>/dev/null || true
     echo ""
 }
@@ -522,12 +564,7 @@ stop_all() {
     # Stop in reverse dependency order
     stop_tunnel
     stop_chart
-    # Stop Tradovate Paper if running
-    if [ -f "$SCRIPT_DIR/logs/agent_TV_PAPER.pid" ] || [ -f "$SCRIPT_DIR/logs/api_TV_PAPER.pid" ]; then
-        echo -e "${CYAN}■ Stopping Tradovate Paper Eval...${NC}"
-        ./scripts/lifecycle/tv_paper_eval.sh stop 2>/dev/null || true
-        echo ""
-    fi
+    stop_agent
     stop_gateway
     
     echo -e "${GREEN}${BOLD}✅ PEARL System Stopped${NC}"
@@ -822,6 +859,7 @@ shift || true
 
 # Parse remaining args for options
 parse_options "$@"
+MARKET="$(echo "$MARKET" | tr '[:lower:]' '[:upper:]')"
 
 case "$COMMAND" in
     start)
@@ -829,6 +867,9 @@ case "$COMMAND" in
         ;;
     stop)
         stop_all
+        ;;
+    restart)
+        restart_all
         ;;
     hard-restart)
         restart_all
@@ -869,8 +910,8 @@ esac
 
 build_dev_webapp() {
     # Build dev webapp, copy static assets, restart dev service
-    # Run after any CSS/JS/TSX changes to pearlalgo_web_app_dev/
-    local DEV_DIR="/home/pearlalgo/pearl-algo-workspace/pearlalgo_web_app_dev"
+    # Run after any CSS/JS/TSX changes to apps/pearl-algo-app/
+    local DEV_DIR="/home/pearlalgo/projects/pearl-algo/apps/pearl-algo-app"
     echo ""
     echo -e "${BOLD}Building dev webapp...${NC}"
     echo ""

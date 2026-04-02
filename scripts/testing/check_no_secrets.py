@@ -35,7 +35,8 @@ SECRET_PATTERNS = [
     (r'(?:PASSPHRASE|OPERATOR_PASSPHRASE)\s*=\s*["\']?(?!<set-in-)[A-Za-z0-9!@#$%^&*]{4,}["\']?', "Hardcoded passphrase"),
     # PEARL_API_KEY with actual value (not placeholder)
     (r'PEARL_API_KEY\s*=\s*(?!<set-in-)[A-Za-z0-9_-]{20,}', "Hardcoded PEARL_API_KEY"),
-    # NEXT_PUBLIC_API_KEY with actual value (not placeholder)
+    # Browser-safe public API keys with actual value (not placeholder)
+    (r'NEXT_PUBLIC_READONLY_API_KEY\s*=\s*(?!<set-in-)[A-Za-z0-9_-]{20,}', "Hardcoded NEXT_PUBLIC_READONLY_API_KEY"),
     (r'NEXT_PUBLIC_API_KEY\s*=\s*(?!<set-in-)[A-Za-z0-9_-]{20,}', "Hardcoded NEXT_PUBLIC_API_KEY"),
 ]
 
@@ -158,7 +159,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 

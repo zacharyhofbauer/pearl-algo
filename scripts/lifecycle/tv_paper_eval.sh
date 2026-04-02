@@ -3,9 +3,9 @@
 # Category: Lifecycle
 # Purpose: Start/Stop/Status for Tradovate Paper Evaluation instance
 #
-# This script launches a separate Pearl agent + API server pair that:
-#   - Writes state to data/agent_state/TV_PAPER_EVAL/ (isolated from IBKR Virtual)
-#   - Runs the API server on port 8001 (separate from IBKR Virtual on 8000)
+# This script launches a Tradovate Paper agent + API server pair that:
+#   - Writes state to the active MNQ runtime root
+#   - Runs the API server on port 8001
 #   - Uses Tradovate as the execution adapter (paper/demo)
 #
 # Usage:
@@ -42,8 +42,8 @@ done
 INSTANCE_NAME="TV_PAPER"
 MARKET="MNQ"
 API_PORT=8001
-CONFIG_FILE="$PROJECT_DIR/config/accounts/tradovate_paper.yaml"
-STATE_DIR="$PROJECT_DIR/data/tradovate/paper"
+CONFIG_FILE="$PROJECT_DIR/config/live/tradovate_paper.yaml"
+STATE_DIR="$PROJECT_DIR/data/agent_state/$MARKET"
 
 PID_FILE="$PROJECT_DIR/logs/agent_${INSTANCE_NAME}.pid"
 API_PID_FILE="$PROJECT_DIR/logs/api_${INSTANCE_NAME}.pid"
@@ -53,6 +53,7 @@ API_LOG_FILE="$PROJECT_DIR/logs/api_${INSTANCE_NAME}.log"
 cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/logs"
 mkdir -p "$STATE_DIR"
+export PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # ---------------------------------------------------------------------------
 # Systemd-aware mode: if pearlalgo-agent.service exists, delegate to systemctl

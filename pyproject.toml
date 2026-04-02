@@ -38,8 +38,7 @@ include-package-data = false
 where = ["src"]
 include = ["pearlalgo", "pearlalgo.*"]
 namespaces = false
-exclude = ["pearlalgo_web_app*"]
+exclude = []
 
 [tool.setuptools.package-data]
 # Pearl AI data removed (restructure Phase 2D)
-

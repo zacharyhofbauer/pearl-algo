@@ -8,12 +8,13 @@
 Architecture Boundary Checker
 
 Statically analyzes Python imports under src/pearlalgo/ to enforce the
-internal module dependency matrix documented in docs/PROJECT_SUMMARY.md.
+internal module dependency matrix documented in docs/PATH_TRUTH_TABLE.md.
 
 Layers and allowed dependencies:
 - utils:          may import utils, stdlib, third-party only
-- config:         may import config, utils
+- config:         may import config, utils, strategies
 - data_providers: may import data_providers, config, utils
+- strategies:     may import strategies, trading_bots, config, utils, learning
 - trading_bots:   may import trading_bots, config, utils, learning (for optional ML signal filtering)
 - execution:      may import execution, config, utils (ATS execution layer)
 - learning:       may import learning, config, utils (adaptive learning layer)
@@ -38,14 +39,17 @@ from typing import Dict, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 # Layers under src/pearlalgo/
-LAYERS = {"utils", "config", "data_providers", "trading_bots", "execution", "learning", "market_agent"}
+LAYERS = {"utils", "config", "data_providers", "strategies", "trading_bots", "execution", "learning", "market_agent"}
 
 # For each layer, which other pearlalgo.* layers it MAY import.
 # Imports of stdlib and third-party packages are always allowed.
 ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "utils": {"utils"},  # utils is self-contained
-    "config": {"config", "utils"},
+    "config": {"config", "utils", "strategies"},
     "data_providers": {"data_providers", "config", "utils"},
+    # The canonical strategies layer wraps legacy trading_bots implementations
+    # during the migration, so that compatibility import is temporarily allowed.
+    "strategies": {"strategies", "trading_bots", "config", "utils", "learning"},
     "trading_bots": {"trading_bots", "config", "utils", "learning"},  # learning for optional ML signal filtering
     "execution": {"execution", "config", "utils"},  # ATS execution layer
     "learning": {"learning", "config", "utils"},  # Adaptive learning layer
@@ -85,6 +89,7 @@ def get_layer(module_path: str) -> Optional[str]:
 
     Examples:
         pearlalgo.utils.logger         -> utils
+        pearlalgo.strategies.registry  -> strategies
         pearlalgo.trading_bots.pearl_bot_auto -> trading_bots
         pearlalgo.market_agent.service  -> market_agent
         pandas                          -> None (external)
@@ -388,7 +393,7 @@ def check_stale_display_names() -> int:
     violations = 0
     repo_root = Path(__file__).resolve().parent.parent.parent
     src_dir = repo_root / "src" / "pearlalgo"
-    web_dir = repo_root / "pearlalgo_web_app"
+    web_dir = repo_root / "apps" / "pearl-algo-app"
 
     # Patterns to flag (only in display/label contexts, not variables/paths)
     stale_patterns = [
@@ -405,8 +410,8 @@ def check_stale_display_names() -> int:
     if src_dir.exists():
         search_dirs.append(("src/pearlalgo", src_dir, "**/*.py"))
     if web_dir.exists():
-        search_dirs.append(("pearlalgo_web_app", web_dir, "**/*.tsx"))
-        search_dirs.append(("pearlalgo_web_app", web_dir, "**/*.ts"))
+        search_dirs.append(("apps/pearl-algo-app", web_dir, "**/*.tsx"))
+        search_dirs.append(("apps/pearl-algo-app", web_dir, "**/*.ts"))
 
     for label, search_dir, glob_pattern in search_dirs:
         for file_path in search_dir.glob(glob_pattern):
@@ -439,9 +444,6 @@ if __name__ == "__main__":
             exit_code = max(exit_code, 1)
 
     sys.exit(exit_code)
-
-
-
 
 
 

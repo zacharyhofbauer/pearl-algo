@@ -7,11 +7,12 @@ Wants=pearlalgo-agent.service
 Type=simple
 User=pearlalgo
 Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace
-Environment="PATH=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/home/pearlalgo/PearlAlgoWorkspace/.env
+WorkingDirectory=/home/pearlalgo/projects/pearl-algo
+Environment="PATH=/home/pearlalgo/projects/pearl-algo/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/pearlalgo/projects/pearl-algo/src"
+EnvironmentFile=/home/pearlalgo/projects/pearl-algo/.env
 EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
-ExecStart=/home/pearlalgo/PearlAlgoWorkspace/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --data-dir data/tradovate/paper --port 8001
+ExecStart=/home/pearlalgo/projects/pearl-algo/.venv/bin/python scripts/pearlalgo_web_app/api_server.py --data-dir data/agent_state/MNQ --port 8001
 Restart=always
 RestartSec=5
 

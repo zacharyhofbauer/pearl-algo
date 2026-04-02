@@ -41,7 +41,7 @@ Safety options:
   --backup-branch <name>    Backup branch name to create at current HEAD (default: backup/pre-rollback-YYYYMMDD-HHMMSSZ)
 
 Optional:
-  --run <cmd>               Validation command to run after staging rollback (e.g. "cd pearlalgo_web_app && npm run build")
+  --run <cmd>               Validation command to run after staging rollback (e.g. "cd apps/pearl-algo-app && npm run build")
   --commit                  Create a single commit after successful verify/run
   --message <msg>           Commit message (only used with --commit)
 
@@ -49,17 +49,17 @@ Examples:
   # Roll back the web app + API server to a known-good commit (no commit yet)
   ./scripts/maintenance/git_rollback_paths.sh \
     --target 0102c787 \
-    --path pearlalgo_web_app \
+    --path apps/pearl-algo-app \
     --path scripts/pearlalgo_web_app \
-    --run "cd pearlalgo_web_app && npm run build" \
+    --run "cd apps/pearl-algo-app && npm run build" \
     --yes
 
   # Same, but commit the rollback
   ./scripts/maintenance/git_rollback_paths.sh \
     --target 0102c787 \
-    --path pearlalgo_web_app \
+    --path apps/pearl-algo-app \
     --path scripts/pearlalgo_web_app \
-    --run "cd pearlalgo_web_app && npm run build" \
+    --run "cd apps/pearl-algo-app && npm run build" \
     --commit \
     --message "Rollback web app to pre-panel-split UI template" \
     --yes

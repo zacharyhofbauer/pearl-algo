@@ -4,7 +4,7 @@
 # Requires compositor enabled: Settings → Window Manager Tweaks → Compositor.
 
 TERMINALRC="${HOME}/.config/xfce4/terminal/terminalrc"
-PROJECT_ROOT="${PEARLALGO_PROJECT_ROOT:-/home/pearlalgo/PearlAlgoWorkspace}"
+PROJECT_ROOT="${PEARLALGO_PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 THEME_RC="${PROJECT_ROOT}/scripts/monitoring/terminalrc-pearlalgo-dark"
 
 mkdir -p "${HOME}/.config/xfce4/terminal"

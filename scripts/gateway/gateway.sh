@@ -9,6 +9,7 @@
 #   start               Start Gateway headless via IBC (Xvfb DISPLAY=:99)
 #   start-vnc           Start Gateway via IBC on VNC display (:1) for manual interaction
 #   stop                Stop Gateway (IBC)
+#   restart             Prefer warm IBC restart; fallback to cold restart if needed
 #   status              Check Gateway status
 #   api-ready           Check API port readiness (exit 0 if ready)
 #   monitor             Monitor until API is ready (max 5 minutes)
@@ -80,6 +81,7 @@ IBC_DIR=""
 IBC_LOG_DIR=""
 JTS_DIR=""
 API_PORT="${IBKR_PORT:-4001}"
+IBC_COMMAND_PORT="${IBKR_COMMAND_PORT:-7462}"
 
 
 _set_ibkr_paths() {
@@ -138,6 +140,32 @@ _gateway_running() {
 
 _api_listening() {
   ss -tuln 2>/dev/null | grep -q ":${API_PORT}"
+}
+
+
+_ibc_command_ready() {
+  nc -z 127.0.0.1 "${IBC_COMMAND_PORT}" 2>/dev/null
+}
+
+
+_warm_restart_gateway() {
+  if [ ! -x "$IBC_DIR/restart.sh" ]; then
+    return 1
+  fi
+
+  if ! _gateway_running; then
+    return 1
+  fi
+
+  if ! _ibc_command_ready; then
+    return 1
+  fi
+
+  echo "Attempting warm IBC restart via command server on port ${IBC_COMMAND_PORT}..."
+  (
+    cd "$IBC_DIR"
+    ./restart.sh
+  )
 }
 
 
@@ -438,6 +466,24 @@ cmd_stop() {
   fi
 
   echo "✅ IB Gateway stopped"
+}
+
+
+cmd_restart() {
+  cd "$PROJECT_DIR"
+  echo "=== Restarting IB Gateway ==="
+  echo ""
+  _ensure_ibkr_install
+
+  if _warm_restart_gateway; then
+    echo "✅ Warm restart command sent to IBC"
+    echo "   This path is preferred because it can preserve auth better than a cold restart."
+    exit 0
+  fi
+
+  echo "⚠️  Warm restart unavailable; falling back to cold restart"
+  echo "   This may require IBKR auth if the session is no longer preserved."
+  sudo systemctl restart ibkr-gateway.service
 }
 
 
@@ -1522,6 +1568,7 @@ Commands:
   start               Start Gateway headless via IBC (Xvfb DISPLAY=:99)
   start-vnc           Start Gateway via IBC on VNC display (:1)
   stop                Stop Gateway (IBC)
+  restart             Prefer warm IBC restart; fallback to cold restart if needed
   status              Check Gateway status
   api-ready           Check API port readiness (exit 0 if ready)
   monitor             Monitor until API is ready (max 5 minutes)
@@ -1585,6 +1632,9 @@ case "$cmd" in
   stop)
     cmd_stop "$@"
     ;;
+  restart)
+    cmd_restart "$@"
+    ;;
   status)
     cmd_status "$@"
     ;;
@@ -1643,5 +1693,3 @@ case "$cmd" in
     exit 2
     ;;
 esac
-
-

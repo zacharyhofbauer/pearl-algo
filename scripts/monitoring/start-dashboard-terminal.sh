@@ -4,7 +4,8 @@
 # Uses /bin/sh so it works when bash is not installed (e.g. minimal Ubuntu).
 
 export PATH="/usr/bin:/bin:${PATH}"
-PROJECT_ROOT="/home/pearlalgo/PearlAlgoWorkspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DASHBOARD="${PROJECT_ROOT}/scripts/monitoring/dashboard.sh"
 REFRESH=30
 
@@ -25,9 +26,6 @@ fi
 # Open a new terminal running the dashboard loop inline (no script path to exec).
 # This avoids "Failed to execute child process ... No such file or directory"
 # when the terminal tries to exec a script path.
-PROJECT_ROOT="/home/pearlalgo/PearlAlgoWorkspace"
-DASHBOARD="${PROJECT_ROOT}/scripts/monitoring/dashboard.sh"
-REFRESH=30
 # Single-quoted so the terminal runs: sh -c 'cd ... && while ...; do ...; done'
 if command -v xfce4-terminal >/dev/null 2>&1; then
     xfce4-terminal --title "PearlAlgo Dashboard" -e "sh -c 'cd ${PROJECT_ROOT} && while true; do clear; ${DASHBOARD}; sleep ${REFRESH}; done'"

@@ -10,10 +10,10 @@ This repo is a **trading platform** with three hard requirements:
 
 - **Service**: `src/pearlalgo/market_agent/service.py` (orchestrator)
 - **Market data**: `src/pearlalgo/data_providers/` (IBKR provider + executor for data only)
-- **Strategy**: `src/pearlalgo/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
+- **Strategy**: `src/pearlalgo/strategies/composite_intraday/` (canonical live strategy bundle)
 - **Execution**: `src/pearlalgo/execution/tradovate/` (Tradovate Paper only; IBKR execution is inactive)
 - **Eval tracker**: `src/pearlalgo/market_agent/tv_paper_eval_tracker.py` (prop firm rule enforcement)
-- **Ops/UI**: Telegram notifier + command handler, Web app (pearlalgo.io)
+- **Ops/UI**: Telegram notifier + command handler, Next.js web app in `apps/pearl-algo-app/` (pearlalgo.io)
 
 ### Single account (Tradovate Paper)
 
@@ -21,9 +21,18 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 
 | Account | Purpose | Execution | State Dir | Config |
 |---------|---------|-----------|-----------|--------|
-| **Tradovate Paper** | Prop firm eval, paper trading | Tradovate (paper) | `data/tradovate/paper` (or per `--data-dir`) | `config/accounts/tradovate_paper.yaml` |
+| **Tradovate Paper** | Prop firm eval, paper trading | Tradovate (paper) | explicit `--data-dir` for the running agent/API; keep them aligned | `config/live/tradovate_paper.yaml` |
 
-**Config**: Base settings in `config/base.yaml`; account overlay in `config/accounts/tradovate_paper.yaml`. Start the agent with `--config config/accounts/tradovate_paper.yaml`.
+**Config**: Canonical live runtime config in `config/live/tradovate_paper.yaml`. Start the agent with `--config config/live/tradovate_paper.yaml`.
+
+### Audit the live runtime layout
+
+Before trusting a dashboard, health check, or historical query after a revamp, verify which
+state directory the live processes are actually using:
+
+```bash
+python3 scripts/ops/audit_runtime_paths.py
+```
 
 ### Quick operational checklist
 
@@ -40,6 +49,8 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 
 ### Web app (pearlalgo.io)
 
+- **Frontend path**: `apps/pearl-algo-app/`
+- **Wrapper scripts**: `scripts/pearlalgo_web_app/`
 - **Status badges** in header: Agent, GW, AI, Market, Data, ML, Shadow savings (with tooltips)
 - **SystemStatusPanel**: Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch, session P&L
 - **Pull-to-refresh** on mobile
@@ -50,12 +61,14 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 
 ### Configuration
 
-- `config/base.yaml` (shared defaults)
-- `config/accounts/tradovate_paper.yaml` (Tradovate Paper account overlay; use with `--config`)
+- `config/live/tradovate_paper.yaml` (canonical Tradovate Paper runtime config)
+- `config/accounts/tradovate_paper.yaml` (legacy overlay kept only for migration compatibility)
 - `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
 
 ### Where to go next
 
-- **Daily operations**: `docs/CHEAT_SHEET.md`
-- **Architecture**: `docs/PROJECT_SUMMARY.md`
-- **Runbooks**: `docs/MARKET_AGENT_GUIDE.md`, `docs/GATEWAY.md`, `docs/TELEGRAM_GUIDE.md`
+- **Current operating model**: `docs/CURRENT_OPERATING_MODEL.md`
+- **Path/runtime truth**: `docs/PATH_TRUTH_TABLE.md`
+- **Gateway operations**: `docs/GATEWAY.md`
+- **Testing**: `docs/TESTING_GUIDE.md`
+- **Historical context only**: `docs/archive/`

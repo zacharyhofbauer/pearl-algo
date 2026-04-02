@@ -2,51 +2,54 @@
 
 Canonical mapping between logical components, Python entry points, shell scripts, and documentation references.
 
+## Top-Level Control
+
+- **Canonical operator entrypoint**: `./pearl.sh`
+- **Compatibility alias**: `./pearlalgo.sh`
+- **Runtime audit**: `python3 scripts/ops/audit_runtime_paths.py`
+- **Operating model**: `docs/CURRENT_OPERATING_MODEL.md`
+
 ## Market Agent Service
 
 - **Logical component**: Market Agent Service (one process per market; production trading loop)
 - **Python entry module**: `pearlalgo.market_agent.main`
-- **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService` (inherits `ServiceNotificationsMixin`)
+- **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService`
 - **Supporting modules**:
+  - `pearlalgo.market_agent.service_lifecycle` – service start/stop lifecycle helpers
+  - `pearlalgo.market_agent.service_loop` – scan-loop/runtime cadence helpers
+  - `pearlalgo.market_agent.service_status` – operator/PEARL status snapshot and review-message helpers
   - `pearlalgo.market_agent.virtual_trade_manager` – Virtual trade exit processing (extracted from service.py)
-  - `pearlalgo.market_agent.service_notifications` – Dashboard/chart mixin for MarketAgentService
   - `pearlalgo.market_agent.data_fetcher` – Data fetching and buffer management
+  - `pearlalgo.market_agent.state_builder` – dashboard/export state assembly
   - `pearlalgo.market_agent.state_manager` – State persistence (JSON/JSONL, signal cache, incremental count)
   - `pearlalgo.market_agent.state_reader` – Thread-safe locked reads for external consumers
   - `pearlalgo.market_agent.performance_tracker` – Performance metrics tracking
+  - `pearlalgo.market_agent.signal_handler` – signal normalization and execution handoff
+  - `pearlalgo.market_agent.order_manager` – order/position control helpers
+  - `pearlalgo.market_agent.operator_handler` – operator command handling
   - `pearlalgo.market_agent.telegram_notifier` – Telegram notifications
   - `pearlalgo.market_agent.health_monitor` – Health monitoring
   - `pearlalgo.market_agent.live_chart_screenshot` – Live chart screenshot export (Playwright)
-  - `pearlalgo.market_agent.challenge_tracker` – Challenge/competition tracking
   - `pearlalgo.market_agent.notification_queue` – Notification queuing
-  - `pearlalgo.market_agent.trading_circuit_breaker` – Circuit breaker logic
+  - `pearlalgo.market_agent.tv_paper_eval_tracker` – prop-firm evaluation tracking
+  - `pearlalgo.market_agent.trading_circuit_breaker` – Legacy signal-gate logic (not on the canonical live path)
 - **Lifecycle scripts**:
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
   - `scripts/ops/status.sh` (manual CLI health check; `--market NQ|ES|GC`)
 - **Docs**:
-  - `docs/MARKET_AGENT_GUIDE.md`
-  - `docs/PROJECT_SUMMARY.md`
+  - `docs/START_HERE.md`
+  - `docs/CURRENT_OPERATING_MODEL.md`
+  - `docs/PATH_TRUTH_TABLE.md`
 
-## Telegram Command Handler
+## Telegram Notifications
 
-- **Logical component**: Telegram Command Handler (interactive bot commands)
-- **Python entry module**: `pearlalgo.market_agent.telegram_command_handler`
-- **Class**: `TelegramCommandHandler` (inherits from 6 mixin base classes)
-- **Mixin modules**:
-  - `pearlalgo.market_agent.telegram_config_commands` – Config/settings commands
-  - `pearlalgo.market_agent.telegram_status_commands` – System status commands
-  - `pearlalgo.market_agent.telegram_trade_commands` – Trade management commands
-  - `pearlalgo.market_agent.telegram_performance_commands` – Performance/analytics commands
-  - `pearlalgo.market_agent.telegram_state_queries` – State reading utilities
-  - `pearlalgo.market_agent.telegram_formatters` – Message formatting utilities
-- **Shell scripts**:
-  - `scripts/telegram/start_command_handler.sh`
-  - `scripts/telegram/check_command_handler.sh`
-  - `scripts/telegram/restart_command_handler.sh`
-- **Supporting script**:
-  - `scripts/telegram/set_bot_commands.py` (sets BotFather commands via API)
-- **Docs**:
-  - `docs/TELEGRAM_GUIDE.md`
+- **Logical component**: Telegram notification delivery
+- **Python modules**:
+  - `pearlalgo.market_agent.telegram_notifier` – outbound Telegram trade/status notifications
+  - `pearlalgo.market_agent.telegram_formatters` – message formatting helpers
+- **Notes**:
+  - The current repo no longer contains a dedicated Telegram shell-script control surface.
+  - Telegram behavior is driven from the market-agent runtime plus config/secrets.
 
 ## IBKR Gateway / API
 
@@ -56,7 +59,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.data_providers.base` – Abstract data provider interface
   - `pearlalgo.data_providers.factory` – Provider factory (creates provider instances)
   - `pearlalgo.data_providers.ibkr.ibkr_provider` – IBKR data provider implementation
-  - `pearlalgo.data_providers.ibkr_executor` – Thread-safe IBKR executor
+  - `pearlalgo.data_providers.ibkr_data_executor` – Thread-safe IBKR executor
 - **Shell scripts** (`scripts/gateway/`):
   - Canonical entry: `gateway.sh` (subcommands for start/stop/status/2FA/VNC/setup)
 - **Docs**:
@@ -67,7 +70,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: Strategy logic and automated tests
 - **Python modules**:
-  - Strategy config/logic: `pearlalgo.trading_bots.pearl_bot_auto`
+  - Canonical strategy config/logic: `pearlalgo.strategies.composite_intraday`
+  - Legacy compatibility namespace: `pearlalgo.trading_bots` (retained while canonical strategy wrappers still delegate into battle-tested legacy code)
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
@@ -85,46 +89,40 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
-  - Relevant sections of `docs/PROJECT_SUMMARY.md`
 
-## Execution (ATS)
+## Execution
 
-- **Logical component**: Automated Trading System (execution + learning)
-- **Python modules** (Execution layer):
+- **Logical component**: Execution adapters and live order handling
+- **Python modules**:
   - `pearlalgo.execution.base` – ExecutionAdapter interface, ExecutionConfig
-  - `pearlalgo.execution.ibkr.adapter` – IBKR bracket order implementation
-  - `pearlalgo.execution.ibkr.tasks` – Order placement tasks
-- **Python modules** (Learning layer):
-  - `pearlalgo.learning.bandit_policy` – Thompson sampling policy
-  - `pearlalgo.learning.policy_state` – Policy statistics persistence
-  - `pearlalgo.learning.contextual_bandit` – Contextual bandit learning
-  - `pearlalgo.learning.feature_engineer` – Feature engineering for ML
-  - `pearlalgo.learning.ensemble_scorer` – Ensemble scoring system
-  - `pearlalgo.learning.ml_signal_filter` – ML-based signal filtering
-  - `pearlalgo.learning.trade_database` – Trade database for learning
+  - `pearlalgo.execution.tradovate.adapter` – Tradovate execution adapter
+  - `pearlalgo.execution.tradovate.client` – Tradovate API client
 - **State files** (in `data/agent_state/<MARKET>/`):
-  - `policy_state.json` – Per-signal-type bandit statistics
-  - `trades.db` – SQLite trade database
+  - `trades.db` – SQLite runtime database
+  - `performance.json` – current performance/export snapshot
 - **Docs**:
-  - `docs/ATS_ROLLOUT_GUIDE.md` – Safe rollout procedures
+  - `docs/archive/2026-04-stabilization/ATS_ROLLOUT_GUIDE.md` – historical execution rollout guidance
 
 ## Configuration
 
 - **Logical component**: Configuration and settings
 - **Config files**:
-  - `config/config.yaml` – primary service + strategy configuration
-  - `config/markets/*.yaml` – per-market configuration overlays
-  - `.env` (from `env.example`) – environment variables (Telegram, IBKR, provider selection)
+  - `config/live/tradovate_paper.yaml` – canonical active Tradovate Paper runtime config
+  - `config/accounts/tradovate_paper.yaml` – legacy overlay retained only for migration compatibility
+  - `config/config.yaml` – auxiliary application config
+  - `.env` (from `env.example`) – non-secret local environment defaults
+  - `~/.config/pearlalgo/secrets.env` – machine-local secrets and runtime credentials
 - **Python modules**:
   - `pearlalgo.config.config_file` – unified YAML loader with env substitution
   - `pearlalgo.config.config_loader` – service config with defaults
-  - `pearlalgo.config.config_schema` – configuration schema validation
+  - `pearlalgo.config.runtime_validation` – runtime validation entrypoints used by startup and config mutation paths
+  - `pearlalgo.config.schema_v2` – Pydantic schema models for config validation
+  - `pearlalgo.config.migration` – config migration helpers
   - `pearlalgo.config.config_view` – configuration view/access layer
   - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
-  - `docs/PROJECT_SUMMARY.md` (configuration section)
-  - `docs/CONFIGURATION_MAP.md`
-  - `docs/MARKET_AGENT_GUIDE.md` (configuration snippets)
+  - `docs/START_HERE.md`
+  - `docs/CURRENT_OPERATING_MODEL.md`
 
 ## Maintenance
 
@@ -132,11 +130,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Shell scripts** (`scripts/maintenance/`):
   - `purge_runtime_artifacts.sh` – safe cleanup of runtime/build artifacts (requires `--yes` flag)
   - `git_rollback_paths.sh` – safe, path-scoped git rollback helper (creates backup branch, restores paths to a target commit/tag, deletes post-target added files)
-- **Python scripts**:
-  - `scripts/maintenance/reset_30d_performance.py` – reset 30-day performance (testing/debugging)
 - **Docs**:
   - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
-  - `docs/PEARL_WEB_APP.md` (emergency UI rollback section)
+  - `docs/PEARL_WEB_APP.md` (optional UI-specific rollback section)
 
 ## Monitoring
 
@@ -149,8 +145,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Ops scripts** (`scripts/ops/`):
   - `status.sh` – manual CLI health check (replaces `quick_status.sh` + `check_agent_status.sh`)
 - **Docs**:
-  - `docs/MARKET_AGENT_GUIDE.md` (monitoring section)
-  - `docs/PROJECT_SUMMARY.md` (status server section)
+  - `docs/START_HERE.md`
   - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
 
 ## Storage
@@ -159,66 +154,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Python modules**:
   - `pearlalgo.storage.async_sqlite_queue` – Async SQLite queue for state management
 - **State directories**:
-  - `data/agent_state/<MARKET>/` – Per-market service state
-
-## Knowledge / RAG
-
-- **Logical component**: Knowledge indexing and retrieval for AI-assisted features
-- **Python modules**:
-  - `pearlalgo.knowledge.indexer` – Knowledge index builder
-  - `pearlalgo.knowledge.retriever` – Context retrieval for queries
-  - `pearlalgo.knowledge.chunker` – Document chunking
-  - `pearlalgo.knowledge.embeddings` – Embedding generation
-  - `pearlalgo.knowledge.scanner` – File system scanner
-  - `pearlalgo.knowledge.index_store` – FAISS index persistence
-  - `pearlalgo.knowledge.datasets` – Dataset management
-  - `pearlalgo.knowledge.types` – Shared types
-- **Scripts** (`scripts/knowledge/`):
-  - `build_index.py` – Build/rebuild knowledge index
-  - `export_datasets.py` – Export datasets for analysis
-  - `watch_repo.py` – Watch repository for changes and re-index
-- **Configuration**: `config.yaml` → `knowledge.*`
-- **Docs**: *(AI_PATCH_GUIDE.md removed - AI features moved to CLI)*
-
-## AI Modules
-
-There are two separate AI-related modules in this repository, serving different purposes:
-
-### `src/pearlalgo/pearl_ai/` (Pearl AI Module)
-
-- **Logical component**: Pearl AI 3.0 - Data-grounded trading analyst with RAG
-- **Purpose**: Comprehensive AI system for CLI/terminal and web app usage
-- **Python modules**:
-  - `pearlalgo.pearl_ai.brain` – Core AI orchestrator (routes between local/Claude)
-  - `pearlalgo.pearl_ai.narrator` – Narrative generation for briefings
-  - `pearlalgo.pearl_ai.memory` – Conversation persistence
-  - `pearlalgo.pearl_ai.data_access` – Trade database RAG integration
-  - `pearlalgo.pearl_ai.cache` – Response caching with semantic hashing
-  - `pearlalgo.pearl_ai.tools` – Tool execution for structured queries
-  - `pearlalgo.pearl_ai.metrics` – Observability and cost tracking
-  - `pearlalgo.pearl_ai.llm_claude` – Claude API integration
-  - `pearlalgo.pearl_ai.llm_local` – Local LLM (Ollama) integration
-  - `pearlalgo.pearl_ai.llm_mock` – Mock LLM for testing
-  - `pearlalgo.pearl_ai.config` – Configuration management
-  - `pearlalgo.pearl_ai.api_router` – FastAPI router for AI endpoints
-- **Features**: RAG, tool use, streaming, caching, cost tracking
-- **Tests**: `tests/test_pearl_brain.py`, `tests/test_pearl_cache.py`, `tests/test_pearl_tools.py`
-
-### `src/pearlalgo/ai/` (In-package Module)
-
-- **Logical component**: Telegram AI integration and shadow tracking
-- **Purpose**: Telegram-specific AI wrappers and suggestion tracking
-- **Python modules**:
-  - `pearlalgo.ai.chat` – PearlAIChat class for conversational AI
-  - `pearlalgo.ai.shadow_tracker` – Shadow tracking for AI suggestion outcomes
-- **Features**: Telegram integration, outcome tracking
-- **Note**: AI chat features have been removed from Telegram; this module provides shadow tracking for ML signal evaluation
-
-### Relationship
-
-- `pearlalgo.pearl_ai` is the comprehensive AI system (v3.0) for CLI and web app
-- `pearlalgo.ai` provides lightweight wrappers for Telegram integration and outcome tracking
-- Both modules coexist; they serve different integration points
+  - `data/agent_state/<MARKET>/` – repo symlink into live runtime state
+  - `/home/pearlalgo/var/pearl-algo/state/data/agent_state/<MARKET>/` – canonical live state location
 
 ## Utilities / Cross‑cutting Concerns
 
@@ -236,10 +173,9 @@ There are two separate AI-related modules in this repository, serving different 
   - `pearlalgo.utils.sparkline` – Progress bar rendering helpers
   - `pearlalgo.utils.volume_pressure` – Signed-volume pressure computations
   - `pearlalgo.utils.telegram_alerts` – Core Telegram messaging
-  - `pearlalgo.utils.telegram_ui_contract` – Telegram UI contract
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:
-  - `docs/PROJECT_SUMMARY.md` (components and cross‑cutting sections)
+  - `docs/CURRENT_OPERATING_MODEL.md`
 
 This table is the canonical reference when adding new scripts, docs, or modules. Any new entry point should be recorded here, and existing docs/scripts should be updated in lock‑step when paths change.

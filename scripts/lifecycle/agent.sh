@@ -60,11 +60,12 @@ cd "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR/logs"
 
 if [ -z "$CONFIG_PATH" ]; then
-    DEFAULT_CONFIG="$PROJECT_DIR/config/accounts/tradovate_paper.yaml"
+    DEFAULT_CONFIG="$PROJECT_DIR/config/live/tradovate_paper.yaml"
     if [ -f "$DEFAULT_CONFIG" ]; then
         CONFIG_PATH="$DEFAULT_CONFIG"
     else
-        CONFIG_PATH="$PROJECT_DIR/config/base.yaml"
+        echo "❌ Missing canonical config: $DEFAULT_CONFIG"
+        exit 1
     fi
 fi
 
@@ -75,6 +76,7 @@ fi
 export PEARLALGO_MARKET="$MARKET_UPPER"
 export PEARLALGO_CONFIG_PATH="$CONFIG_PATH"
 export PEARLALGO_STATE_DIR="$STATE_DIR"
+export PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # Assign default IBKR client IDs if not already set
 if [ -z "${IBKR_CLIENT_ID:-}" ]; then

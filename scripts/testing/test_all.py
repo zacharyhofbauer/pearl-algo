@@ -72,8 +72,7 @@ except ImportError:
 
 from pearlalgo.market_agent.service import MarketAgentService  # noqa: E402
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier  # noqa: E402
-# nq_intraday removed - using pearl_bot_auto now
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG  # noqa: E402
+from pearlalgo.strategies import create_strategy, get_strategy_defaults  # noqa: E402
 from pearlalgo.utils.logging_config import setup_logging  # noqa: E402
 
 
@@ -113,7 +112,7 @@ async def test_telegram_notifications():
             signal={
                 "symbol": "MNQ", "direction": "long", "entry_price": 17500.0,
                 "stop_loss": 17450.0, "take_profit": 17600.0, "confidence": 0.75,
-                "reason": "Test entry", "strategy": "pearl_bot_auto", "type": "breakout",
+                "reason": "Test entry", "strategy": "composite_intraday", "type": "breakout",
             },
         )),
         ("Heartbeat", lambda: notifier.send_heartbeat({
@@ -208,17 +207,15 @@ async def test_signal_generation():
     print()
     
     print("Creating strategy...")
-    # nq_intraday removed - using pearl_bot_auto config
-    config = PEARL_BOT_CONFIG.copy()
+    config = get_strategy_defaults()
     config["symbol"] = "MNQ"
     config["timeframe"] = "1m"
-    strategy = None  # Using generate_signals directly now
+    strategy = create_strategy(config)
     print("✅ Strategy created")
     print()
     
     print("Generating signals...")
-    from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
-    signals = generate_signals(df, config=config)
+    signals = strategy.analyze(df)
     print(f"✅ Generated {len(signals)} signal(s)")
     print()
     
@@ -268,8 +265,7 @@ async def test_service_with_mock():
     print()
     
     print("Creating configuration...")
-    # nq_intraday removed - using pearl_bot_auto config
-    config = PEARL_BOT_CONFIG.copy()
+    config = get_strategy_defaults()
     config["symbol"] = "MNQ"
     config["timeframe"] = "1m"
     print("✅ Configuration created")
@@ -443,7 +439,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

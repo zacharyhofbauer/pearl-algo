@@ -83,7 +83,7 @@ Run this before going full Tradovate (data + execution) to see if Tradovate’s 
 **Prerequisites:**
 - IBKR Gateway running on `localhost:4001`
 - Tradovate credentials in `~/.config/pearlalgo/secrets.env`: `TRADOVATE_USERNAME`, `TRADOVATE_PASSWORD`, `TRADOVATE_CID`, `TRADOVATE_SEC`
-- Use the project venv so `pandas` and deps are available (see [First-Time Setup](../CHEAT_SHEET.md#6-first-time-setup) or run with `.venv/bin/python3`)
+- Use the project venv so `pandas` and deps are available (or run with `.venv/bin/python3`)
 
 ```bash
 .venv/bin/python3 scripts/testing/compare_data_quality.py
@@ -92,7 +92,7 @@ Run this before going full Tradovate (data + execution) to see if Tradovate’s 
 # Options: --bars 500 --symbol MNQ --timeframe 1m --output report.json
 ```
 
-The script prints a recommendation: use Tradovate data (Path A), keep IBKR data + Tradovate execution (Path B), or re-run with more bars. See [CHEAT_SHEET §7](../CHEAT_SHEET.md#7-ibkr-vs-tradovate-data-comparison) for prerequisites and troubleshooting.
+The script prints a recommendation: use Tradovate data (Path A), keep IBKR data + Tradovate execution (Path B), or re-run with more bars.
 
 ---
 
@@ -427,10 +427,10 @@ Check performance metrics via Telegram weekly summary or state file:
 
 ```bash
 # Check state file
-cat data/agent_state/NQ/state.json | jq
+cat data/agent_state/<MARKET>/state.json | jq
 
 # Check performance metrics
-cat data/agent_state/NQ/performance.json | jq
+cat data/agent_state/<MARKET>/performance.json | jq
 ```
 
 **Key Metrics to Track:**
@@ -524,7 +524,7 @@ Always validate strategy performance with **real market data** (IB Gateway + NQ 
 ## 🏗️ Architecture Boundary Testing
 
 The codebase enforces module boundary rules to maintain clean layering and prevent accidental coupling.
-See `docs/PROJECT_SUMMARY.md` (Module Boundaries section) for the full dependency matrix.
+See `docs/PATH_TRUTH_TABLE.md` for the current module and entrypoint map.
 
 ### Quick Check (Warn-Only)
 
@@ -557,12 +557,13 @@ python3 scripts/testing/check_architecture_boundaries.py --verbose
 
 The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
 
-- `utils/` does not import from `config`, `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`
-- `config/` does not import from `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`
-- `data_providers/` does not import from `trading_bots`, `execution`, `learning`, or `market_agent`
-- `trading_bots/` does not import from `data_providers`, `execution`, `learning`, or `market_agent`
-- `execution/` does not import from `data_providers`, `trading_bots`, `learning`, or `market_agent`
-- `learning/` does not import from `data_providers`, `trading_bots`, `execution`, or `market_agent`
+- `utils/` does not import from `config`, `data_providers`, `strategies`, `trading_bots`, `execution`, `learning`, or `market_agent`
+- `config/` does not import from `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`; it may import `strategies` for schema/default resolution
+- `data_providers/` does not import from `strategies`, `trading_bots`, `execution`, `learning`, or `market_agent`
+- `strategies/` is the canonical strategy layer and may import `trading_bots` only for compatibility-backed wrappers during the migration
+- `trading_bots/` is a legacy compatibility namespace and does not import from `data_providers`, `execution`, or `market_agent`
+- `execution/` does not import from `data_providers`, `strategies`, `trading_bots`, `learning`, or `market_agent`
+- `learning/` does not import from `data_providers`, `strategies`, `trading_bots`, `execution`, or `market_agent`
 - `market_agent/` may import from any internal layer (it's the orchestration layer)
 
 ### When to Run
@@ -870,14 +871,11 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 # Check status
 ./scripts/ops/status.sh --market NQ
 
-# Multi-market smoke check
-python3 scripts/testing/smoke_multi_market.py
 ```
 
 ### Key Files
 - `scripts/testing/test_all.py` - Unified test runner
 - `scripts/testing/check_architecture_boundaries.py` - Module boundary enforcement
-- `scripts/testing/smoke_multi_market.py` - Multi-market config + state smoke
 - `scripts/testing/smoke_test_ibkr.py` - IBKR connectivity smoke
 - `scripts/testing/check_no_secrets.py` - Secret detection guardrail
 - `scripts/testing/check_doc_references.py` - Doc path/reference audit
@@ -937,7 +935,7 @@ This section summarizes the current test coverage and highlights areas for futur
 - `test_ibkr_adapter_unit.py` – 10 tests for IBKR adapter with mocked ib_insync (order placement, position management, error handling, fills)
 - `test_signal_pipeline_integration.py` – signal pipeline integration tests, including 5 execution scenarios (adapter called, ML filter rejects, circuit breaker blocks, execution succeeds)
 
-#### Web app tests under `pearlalgo_web_app/__tests__/`
+#### Web app tests under `apps/pearl-algo-app/__tests__/`
 
 - `middleware.test.ts` – 22 tests for Next.js authentication middleware (auth bypass, session validation, redirects)
 - `useWebSocket.test.ts` – 32 tests for WebSocket hook (connection, reconnection, message parsing, cleanup)
@@ -1017,8 +1015,8 @@ The following gaps have been addressed with explicit test coverage:
 
 ## 📚 Additional Resources
 
-- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Complete system reference
-- **[MARKET_AGENT_GUIDE.md](MARKET_AGENT_GUIDE.md)** - Operational guide
+- **[CURRENT_OPERATING_MODEL.md](CURRENT_OPERATING_MODEL.md)** - Current runtime/configuration reference
+- **[PATH_TRUTH_TABLE.md](PATH_TRUTH_TABLE.md)** - Canonical module and path mapping
 - **[GATEWAY.md](GATEWAY.md)** - IBKR Gateway setup
 - **[MOCK_DATA_WARNING.md](MOCK_DATA_WARNING.md)** - Mock data limitations
 

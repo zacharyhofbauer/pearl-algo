@@ -4,7 +4,8 @@
 
 sleep 5
 
-PROJECT_ROOT="/home/pearlalgo/PearlAlgoWorkspace"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LAUNCHER="${PROJECT_ROOT}/scripts/monitoring/start-live-logs-terminals.sh"
 export PATH="/usr/bin:/bin:${PATH}"
 

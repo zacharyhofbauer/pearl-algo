@@ -4,12 +4,15 @@ This document standardizes the roles of all scripts under `scripts/` and identif
 
 ## Lifecycle (`scripts/lifecycle/`)
 
+- `../pearl.sh`
+  - **Role**: Canonical top-level operator entrypoint for start/stop/restart/status.
+  - **Behavior**: Orchestrates gateway, agent, API, and web app using the active market and aligned runtime paths.
 - `agent.sh`
   - **Role**: Canonical market-aware agent lifecycle CLI (start/stop/restart/status).
   - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
 - `tv_paper_eval.sh`
-  - **Role**: Lifecycle for Tradovate Paper eval (start/stop/restart/status). Runs agent + API on port 8001 with market `TV_PAPER_EVAL`.
-  - **Behavior**: Uses `config/markets/tv_paper_eval.yaml`, state in `data/agent_state/TV_PAPER_EVAL/`.
+  - **Role**: Tradovate Paper compatibility lifecycle wrapper for the fixed MNQ paper-eval instance.
+  - **Behavior**: Uses `config/live/tradovate_paper.yaml`, runs the API on port `8001`, and writes state to the active `data/agent_state/MNQ/` root unless overridden by environment.
 
 ## Gateway (`scripts/gateway/`)
 
@@ -19,17 +22,15 @@ Canonical script:
 
 - `gateway.sh` – consolidated gateway CLI (subcommands for start/stop/status/2FA/VNC/setup).
 
-## Telegram (`scripts/telegram/`)
+## Telegram
 
-- `start_command_handler.sh`
-  - **Role**: Canonical entry to start Telegram Command Handler.
-  - **Behavior**: Changes to project root, activates `.venv` if present, selects `.venv/bin/python3` when available, verifies `pearlalgo` import, ensures only one handler instance via `pgrep -f "telegram_command_handler"`, then runs `-m pearlalgo.market_agent.telegram_command_handler`.
-- `check_command_handler.sh`
-  - **Role**: Check if command handler process is running and show PIDs.
-- `restart_command_handler.sh`
-  - **Role**: Restart the Telegram command handler (thin wrapper around stop/start semantics).
-- `set_bot_commands.py`
-  - **Role**: Helper to set BotFather commands via Telegram API using `python-telegram-bot`.
+Telegram support currently lives inside the Python runtime rather than a dedicated
+Telegram scripts directory.
+
+- `src/pearlalgo/market_agent/telegram_notifier.py`
+  - **Role**: Outbound Telegram notifications from the market agent.
+- `src/pearlalgo/market_agent/telegram_formatters.py`
+  - **Role**: Telegram message formatting helpers.
 
 ## Backtesting (`scripts/backtesting/`)
 
@@ -37,7 +38,7 @@ Backtesting scripts for strategy validation on historical data.
 
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
-  - **Usage**: `python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/NQ/signals.jsonl`
+  - **Usage**: `python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/MNQ/signals.jsonl`
 - `train_ml_filter.py`
   - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
 
@@ -51,8 +52,6 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: AST-based module boundary enforcement (warn-only by default; strict mode via `PEARLALGO_ARCH_ENFORCE=1`).
 - `smoke_test_ibkr.py`
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
-- `smoke_multi_market.py`
-  - **Role**: Multi-market state/config isolation smoke test (NQ/ES/GC).
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
 - `check_doc_references.py`
@@ -61,14 +60,6 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Orphan-module report; lists src modules not reachable from entry points/tests/scripts.
 - `check_config_defaults.py`
   - **Role**: Validates consistency between config defaults and schema (run via `make ci` or manually).
-
-## Git hooks / CI guardrails (`scripts/`)
-
-- `pre-commit-eval.sh`
-  - **Role**: Optional pre-commit hook that runs Pearl AI prompt regression eval when prompt files are staged.
-  - **Triggers on**: staged changes to `src/pearlalgo/pearl_ai/(brain|narrator|tools|config).py`.
-  - **Runs**: `python -m pearlalgo.pearl_ai.eval.ci --mock` (fast, no API calls).
-  - **Install**: `ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit`
 
 ## Maintenance (`scripts/maintenance/`)
 
@@ -81,9 +72,6 @@ Scripts for repository hygiene and cleanup operations.
 - `git_rollback_paths.sh`
   - **Role**: Safe, path-scoped git rollback helper (creates backup branch, restores paths to a target commit/tag, deletes post-target added files, verifies exact match).
   - **Use cases**: Emergency web app UI rollbacks (undo bad refactors without rewriting history).
-
-- `reset_30d_performance.py`
-  - **Role**: Reset 30-day performance metrics (testing/debugging).
 
 ## Monitoring (`scripts/monitoring/`)
 
@@ -107,21 +95,7 @@ they do **not** contain trading or strategy logic.
 - `incident_report.py`
   - **Role**: Generate incident reports from state/signals for post-mortem analysis.
 
-## Knowledge (`scripts/knowledge/`)
-
-RAG (Retrieval-Augmented Generation) system for CLI-based AI assistance and codebase indexing.
-
-- `build_index.py`
-  - **Role**: Build or refresh the knowledge index from codebase files.
-  - **Usage**: `python3 scripts/knowledge/build_index.py [--rebuild]`
-- `watch_repo.py`
-  - **Role**: Watch for file changes and incrementally update the knowledge index.
-- `export_datasets.py`
-  - **Role**: Export indexed datasets for training or analysis.
-
-**Note**: Knowledge module provides CLI AI assistance. Configuration in `config/config.yaml` under `knowledge:` section.
-
-## Pearl Algo Web App (`pearlalgo_web_app/`)
+## Pearl Algo Web App (`apps/pearl-algo-app/`)
 
 Web-based TradingView chart interface for real-time market visualization. Uses Next.js 14 with TypeScript.
 
@@ -133,7 +107,7 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
 - `./pearl.sh start --no-chart` - Start all services except web app
 
 **pearl.sh auto-sync:**
-- `sync_env_local()` merges `PEARL_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE` into `pearlalgo_web_app/.env.local` on every start/restart
+- `sync_env_local()` merges `PEARL_API_KEY`, `PEARL_WEBAPP_AUTH_ENABLED`, `PEARL_WEBAPP_PASSCODE` into `apps/pearl-algo-app/.env.local` on every start/restart
 - Chart auto-builds if no production build exists
 
 **Components:**
@@ -141,7 +115,7 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
   - **Role**: FastAPI server providing OHLCV data, agent state, indicators, and trades to the chart frontend.
   - **Port**: 8001 (Tradovate Paper — the only active account)
   - **Endpoints**: `/api/candles`, `/api/indicators`, `/api/markers`, `/api/state`, `/api/trades`, `/api/analytics`, `/api/market-status`, `/ws`, `/health`
-- `pearlalgo_web_app/`
+- `apps/pearl-algo-app/`
   - **Role**: Next.js 14 frontend with TypeScript, Zustand state management, and WebSocket real-time updates.
   - **Port**: 3001 (default)
 

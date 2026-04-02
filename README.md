@@ -11,6 +11,7 @@ and execution via Tradovate.
 ![Telegram dashboard](docs/assets/telegram-dashboard.png)
 
 See `docs/PEARL_WEB_APP.md` for Mini App setup (public HTTPS required) and screenshot capture.
+The canonical frontend lives in `apps/pearl-algo-app/`.
 
 ## Quick start (local)
 
@@ -23,7 +24,7 @@ See `docs/PEARL_WEB_APP.md` for Mini App setup (public HTTPS required) and scree
 ### Install
 
 ```bash
-cd ~/PearlAlgoProject
+cd ~/projects/pearl-algo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -36,24 +37,27 @@ cp env.example .env
 # Edit .env with TELEGRAM_* and IBKR_* values
 ```
 
-Service behavior is configured in `config/base.yaml` and `config/accounts/tradovate_paper.yaml` (use `--config config/accounts/tradovate_paper.yaml` when starting the agent).
+Service behavior is configured in `config/live/tradovate_paper.yaml` (use `--config config/live/tradovate_paper.yaml` when starting the agent).
 
-Strategy parameters (EMA periods, entry triggers, confidence thresholds) are configured in `config/base.yaml` under the `pearl_bot_auto:` section.
+Strategy parameters (EMA periods, entry triggers, confidence thresholds) are configured under `strategies.composite_intraday` in `config/live/tradovate_paper.yaml`.
 
 ### Run (operator scripts)
 
 ```bash
-# Start IBKR Gateway (data source)
-./scripts/gateway/gateway.sh start
+# Audit the live runtime layout first after a revamp
+python3 scripts/ops/audit_runtime_paths.py
 
-# Start Tradovate Paper agent + API
-./scripts/lifecycle/tv_paper_eval.sh start --background
+# Start everything
+./pearl.sh start
 
-# Start Telegram command handler
-./scripts/telegram/start_command_handler.sh --background
+# One-line health check
+./pearl.sh quick
 
-# Check status
-./scripts/lifecycle/tv_paper_eval.sh status
+# Start without the chart if needed
+./pearl.sh start --no-chart
+
+# Tradovate Paper only
+./pearl.sh tv_paper status
 ```
 
 ## Validation
@@ -101,10 +105,12 @@ CI runs tests, linting, type checking, and architecture boundary checks via `.gi
 ## Docs (start here)
 
 - `docs/START_HERE.md`
-- `docs/PROJECT_SUMMARY.md` (single source of truth)
-- `docs/MARKET_AGENT_GUIDE.md`
-- `docs/TELEGRAM_GUIDE.md`
+- `docs/CURRENT_OPERATING_MODEL.md`
+- `docs/PATH_TRUTH_TABLE.md`
+- `docs/GATEWAY.md`
 - `docs/TESTING_GUIDE.md`
+
+Historical notes and migration-era material live under `docs/archive/` and should not be treated as runtime truth.
 
 ## TradingView indicators
 

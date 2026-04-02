@@ -7,12 +7,12 @@ Wants=pearlalgo-api.service
 Type=simple
 User=pearlalgo
 Group=pearlalgo
-WorkingDirectory=/home/pearlalgo/PearlAlgoWorkspace/pearlalgo_web_app
+WorkingDirectory=/home/pearlalgo/projects/pearl-algo/apps/pearl-algo-app
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="NODE_ENV=production"
-EnvironmentFile=/home/pearlalgo/PearlAlgoWorkspace/.env
+EnvironmentFile=/home/pearlalgo/projects/pearl-algo/.env
 EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
-EnvironmentFile=-/home/pearlalgo/PearlAlgoWorkspace/pearlalgo_web_app/.env.local
+EnvironmentFile=-/home/pearlalgo/projects/pearl-algo/apps/pearl-algo-app/.env.local
 ExecStart=/usr/bin/npm start -- -p 3001
 Restart=always
 RestartSec=5
