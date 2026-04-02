@@ -5,12 +5,5 @@ pearlalgo.execution
 pearlalgo.execution.tradovate
 pearlalgo.notifications
 pearlalgo.storage
-pearlalgo.strategies.composite_intraday.orb
-pearlalgo.strategies.composite_intraday.smc
-pearlalgo.strategies.composite_intraday.vwap_2sd
 pearlalgo.strategies.types
 pearlalgo.utils
-
-# Manual-review compatibility surface retained until external/runtime usage is
-# fully removed.
-pearlalgo.market_agent.openclaw_guard

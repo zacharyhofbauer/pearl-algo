@@ -10,9 +10,6 @@ reason it still exists.
 
 ## Live compatibility surfaces
 
-- `./pearlalgo.sh`
-  Compatibility alias for `./pearl.sh`. Keep only while operators or old docs
-  still call the old name. Do not document it as the primary entrypoint.
 - `scripts/pearlalgo_web_app/`
   Compatibility wrappers around `src/pearlalgo/api/server.py`. These are still
   invoked by `pearl.sh`, systemd units, lifecycle scripts, and API tests.
@@ -21,13 +18,8 @@ reason it still exists.
   under `src/pearlalgo/strategies/`. No new strategy entrypoints should be
   added here.
 - `src/pearlalgo/strategies/composite_intraday/pinescript_core.py`
-- `src/pearlalgo/strategies/composite_intraday/smc.py`
-- `src/pearlalgo/strategies/composite_intraday/orb.py`
-- `src/pearlalgo/strategies/composite_intraday/vwap_2sd.py`
-  Canonical strategy-facing wrappers that still delegate to legacy strategy
-  implementation details. `smc.py`, `orb.py`, and `vwap_2sd.py` are currently
-  orphan-allowlisted, so they are good removal candidates once external callers
-  are confirmed absent.
+  Canonical strategy-facing wrapper that still delegates to legacy strategy
+  implementation details.
 - `src/pearlalgo/config/migration.py`
 - legacy overlay/config fallbacks in `src/pearlalgo/config/config_file.py`,
   `src/pearlalgo/config/config_loader.py`, and `src/pearlalgo/market_agent/main.py`
@@ -40,8 +32,6 @@ reason it still exists.
 - `src/pearlalgo/utils/telegram_alerts.py`
   Backward-compatible re-export surface. New imports should use
   `pearlalgo.notifications.*`.
-- `src/pearlalgo/market_agent/openclaw_guard.py`
-  Retained pending manual review of external/runtime integrations.
 
 ## Removal standard
 
@@ -58,3 +48,8 @@ true:
 Historical migration notes and archived scripts/docs have been removed from the
 active repo surface. Use git history for prior rollout context instead of
 pointing current docs at deleted archive paths.
+
+Removed in the April 2, 2026 cleanup pass:
+- deprecated top-level launcher shim
+- three unused composite-intraday bridge wrapper modules
+- the unused OpenClaw guard module

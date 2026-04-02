@@ -7,7 +7,7 @@
 - **Market data:** IBKR gateway (data only, NOT used for execution)
 - **Order execution:** Tradovate (paper account = source of truth for trades)
 - **Notifications:** Telegram
-- **Entry point:** `pearl.sh` (master control), `pearlalgo.sh` (compatibility alias), `python -m pearlalgo.market_agent.main`
+- **Entry point:** `pearl.sh` (master control), `python -m pearlalgo.market_agent.main`
 - **Canonical live config:** `config/live/tradovate_paper.yaml`
 - **Current live state root:** `/home/pearlalgo/var/pearl-algo/state/data/agent_state/MNQ` (repo `data/` symlinks here)
 - **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
@@ -23,7 +23,7 @@
 | `execution.mode` | current value | Paper vs live |
 | `max_positions` | current value | Position limit |
 | `max_position_size_per_order` | 1 | Prop firm max per trade |
-| `max_position_size` | 1 | Must stay 1 contract |
+| `max_position_size` | 5 | MFF max 5 MNQ total |
 | `guardrails.*` | current values | Minimal execution safety without legacy signal gating |
 | `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
 | `ibkr.execution` | inactive | IBKR is data-only |
@@ -60,7 +60,7 @@
 | `src/pearlalgo/execution/tradovate/adapter.py` | Order execution adapter |
 | `src/pearlalgo/execution/tradovate/client.py` | Tradovate API client |
 | `src/pearlalgo/strategies/composite_intraday/engine.py` | Canonical live strategy bundle |
-| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Legacy implementation bridge behind the canonical strategy wrappers |
+| `src/pearlalgo/trading_bots/signal_generator.py` | Core signal generation engine (indicators, regime detection, entry logic) |
 | `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
 | `config/live/tradovate_paper.yaml` | Canonical live runtime configuration |
 | `config/accounts/tradovate_paper.yaml` | Legacy compatibility overlay; canonical live config is `config/live/tradovate_paper.yaml` |
