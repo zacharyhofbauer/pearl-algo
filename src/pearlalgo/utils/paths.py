@@ -147,6 +147,20 @@ def parse_trade_timestamp(timestamp: str) -> datetime:
     return dt_et.replace(tzinfo=None)
 
 
+def parse_trade_timestamp_to_utc(timestamp: str) -> datetime:
+    """Parse a trade timestamp string and return a UTC-aware datetime.
+
+    Mixed formats are supported:
+    - Naive ET strings (post-migration)
+    - UTC strings with ``Z`` or ``+00:00``
+    - Any ISO timestamp with timezone info
+    """
+    normalized = timestamp.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(normalized)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_ET)
+    return dt.astimezone(timezone.utc)
+
 
 
 

@@ -16,7 +16,11 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.market_hours import get_market_hours
-from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
+from pearlalgo.utils.paths import (
+    get_utc_timestamp,
+    parse_trade_timestamp_to_utc,
+    parse_utc_timestamp,
+)
 from pearlalgo.market_agent.notification_queue import Priority
 from pearlalgo.market_agent.state_reader import StateReader
 
@@ -26,6 +30,48 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.performance_tracker import PerformanceTracker
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
     from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
+
+
+def _trade_is_in_trading_day(trade: Dict[str, Any], trading_day_start_utc: datetime) -> bool:
+    """Return True when a trade belongs to the current 6pm ET trading day."""
+    candidate = trade.get("entry_time") or trade.get("exit_time") or trade.get("timestamp")
+    if not candidate:
+        return False
+    try:
+        return parse_trade_timestamp_to_utc(str(candidate)) >= trading_day_start_utc
+    except (TypeError, ValueError):
+        return False
+
+
+def _current_trading_day_start_utc(now_utc: Optional[datetime] = None) -> datetime:
+    """Compute the current 6pm ET trading-day boundary in UTC."""
+    try:
+        from zoneinfo import ZoneInfo
+        et_tz = ZoneInfo("America/New_York")
+    except Exception:
+        et_tz = timezone(timedelta(hours=-5))
+
+    now_utc = now_utc or datetime.now(timezone.utc)
+    now_et = now_utc.astimezone(et_tz)
+    trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+    if now_et.hour < 18:
+        trading_day_start -= timedelta(days=1)
+    return trading_day_start.astimezone(timezone.utc)
+
+
+def _trading_day_start_utc_for_et_date(today_str: str) -> datetime:
+    """Compute the 6pm ET boundary for a specific ET calendar date string."""
+    try:
+        from zoneinfo import ZoneInfo
+        et_tz = ZoneInfo("America/New_York")
+    except Exception:
+        et_tz = timezone(timedelta(hours=-5))
+
+    et_day = datetime.strptime(today_str, "%Y-%m-%d").replace(tzinfo=et_tz)
+    trading_day_start = (et_day - timedelta(days=1)).replace(
+        hour=18, minute=0, second=0, microsecond=0
+    )
+    return trading_day_start.astimezone(timezone.utc)
 
 
 class ScheduledTasks:
@@ -227,11 +273,10 @@ class ScheduledTasks:
                         trades = perf_data.get("trades", []) or []
                     else:
                         trades = []
-                    from pearlalgo.market_agent.stats_computation import get_trading_day_start as _gtds
-                    _td_start_iso = _gtds().isoformat()
+                    trading_day_start_utc = _current_trading_day_start_utc(now_utc)
                     today_trades = [
                         t for t in trades
-                        if (t.get("entry_time") or t.get("exit_time") or "") >= _td_start_iso
+                        if _trade_is_in_trading_day(t, trading_day_start_utc)
                     ]
 
             if not today_trades:
@@ -292,13 +337,12 @@ class ScheduledTasks:
         """
         try:
             from pearlalgo.api.tradovate_helpers import get_paired_tradovate_trades
-            from pearlalgo.market_agent.stats_computation import get_trading_day_start
-
-            trading_day_start_utc = get_trading_day_start()
-            start_iso = trading_day_start_utc.isoformat()
-
+            trading_day_start_utc = _trading_day_start_utc_for_et_date(today_str)
             trades = get_paired_tradovate_trades(self.state_manager.state_dir)
-            return [t for t in trades if (t.get("entry_time") or "") >= start_iso]
+            return [
+                t for t in trades
+                if _trade_is_in_trading_day(t, trading_day_start_utc)
+            ]
         except Exception as e:
             logger.debug(f"Could not get Tradovate today trades: {e}")
             return []

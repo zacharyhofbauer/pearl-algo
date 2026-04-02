@@ -389,7 +389,7 @@ class MarketAgentTelegramNotifier:
         # Regime warnings
         if "ranging" in regime_type and "momentum" in signal_type_key:
             warnings.append("Ranging market - Momentum may whipsaw")
-        elif "trending" in regime_type and "mean_reversion" in signal_type_key:
+        elif "trending" in regime_type and signal_type_key == "mean_reversion_signal":
             warnings.append("Trending market - Mean reversion fighting trend")
 
         # Volatility warnings
@@ -525,7 +525,7 @@ class MarketAgentTelegramNotifier:
                     elif "max_positions" in reason:
                         message += f"\n📊 Max positions reached — skipped"
                     elif "session_filter" in reason:
-                        message += f"\n🕐 Outside trading session — skipped"
+                        message += f"\n⏭ Order skipped: Outside trading session"
                     elif "circuit_breaker" in reason:
                         message += f"\n🚫 Circuit breaker active — skipped"
                     else:

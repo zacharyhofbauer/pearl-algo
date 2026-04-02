@@ -4,6 +4,9 @@ Compatibility-backed wrappers around the Pearl strategy core.
 This module is the canonical import surface for the live composite intraday
 strategy while the underlying implementation is still delegated through the
 legacy bridge module.
+
+Keep new business logic out of this bridge layer until the legacy implementation
+has been fully retired.
 """
 
 from __future__ import annotations

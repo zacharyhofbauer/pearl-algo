@@ -258,6 +258,15 @@ def get_paired_tradovate_trades(
         else:
             active_fills = [normalize_fill(f) for f in active_fills]
 
+        active_fills = [
+            fill
+            for fill in active_fills
+            if str(fill.get("action") or "").lower() in ("buy", "sell")
+            and fill.get("timestamp")
+            and float(fill.get("price", 0.0) or 0.0) > 0
+            and int(fill.get("qty", 0) or 0) > 0
+        ]
+
         owned_order_ids = _load_pearl_execution_order_ids(state_dir)
         if owned_order_ids:
             active_fills = [

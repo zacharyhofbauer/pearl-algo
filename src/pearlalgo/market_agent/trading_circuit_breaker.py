@@ -131,7 +131,8 @@ class TradingCircuitBreaker:
             )
         
         # Strategy selection belongs to the strategy layer, not the breaker.
-        # Legacy time/day and market-quality gates are intentionally inert here.
+        # Legacy hour/session/day gates stay inert here, but market-quality
+        # protections still apply when explicitly enabled in config.
 
         # Check consecutive losses
         decision = self._check_consecutive_losses()
@@ -166,6 +167,34 @@ class TradingCircuitBreaker:
         # Check position limits
         if active_positions is not None:
             decision = self._check_position_limits(signal, active_positions)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+
+        if self.config.enable_direction_gating:
+            decision = self._check_direction_gating(signal)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+
+        regime_decision = self._check_regime_avoidance(signal)
+        if self.config.enable_regime_avoidance:
+            if not regime_decision.allowed:
+                self._record_block(regime_decision.reason)
+                return regime_decision
+        elif not regime_decision.allowed:
+            self._would_have_blocked_regime += 1
+
+        trigger_decision = self._check_trigger_filters(signal)
+        if self.config.enable_trigger_filters:
+            if not trigger_decision.allowed:
+                self._record_block(trigger_decision.reason)
+                return trigger_decision
+        elif not trigger_decision.allowed:
+            self._would_have_blocked_trigger += 1
+
+        if self.config.enable_volatility_filter and market_data is not None:
+            decision = self._check_volatility_filter(market_data)
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
@@ -376,6 +405,27 @@ class TradingCircuitBreaker:
                 f"mode={self.config.mode} should be 'warn_only' or 'enforce'"
             )
 
+        if self.config.enable_direction_gating and not (0.0 <= self.config.direction_gating_min_confidence <= 1.0):
+            warnings.append(
+                "direction_gating_min_confidence must be between 0.0 and 1.0"
+            )
+
+        if self.config.enable_regime_avoidance:
+            if not self.config.blocked_regimes:
+                warnings.append(
+                    "regime avoidance is enabled but blocked_regimes is empty"
+                )
+            if not (0.0 <= self.config.regime_avoidance_min_confidence <= 1.0):
+                warnings.append(
+                    "regime_avoidance_min_confidence must be between 0.0 and 1.0"
+                )
+
+        if self.config.enable_trigger_filters:
+            if not self.config.ema_cross_require_volume and not self.config.low_regime_require_volume:
+                warnings.append(
+                    "trigger filters are enabled but no volume-confirmation rule is active"
+                )
+
         # Log warnings
         for w in warnings:
             logger.warning(f"[TradingCircuitBreaker config] {w}")
@@ -417,7 +467,11 @@ class TradingCircuitBreaker:
             "would_block_by_reason": self._would_block_by_reason.copy(),
             "last_would_block_at": self._last_would_block_at,
             # Observability only; legacy session gating is retired.
-            "session_filter_enabled": False,
+            "session_filter_enabled": self.config.enable_session_filter,
+            "direction_gating_enabled": self.config.enable_direction_gating,
+            "regime_avoidance_enabled": self.config.enable_regime_avoidance,
+            "trigger_filters_enabled": self.config.enable_trigger_filters,
+            "volatility_filter_enabled": self.config.enable_volatility_filter,
             "current_session": current_session,
             "et_hour": et_hour,
             # Shadow outcome tracking (what happened to would-block vs allowed signals)
@@ -746,7 +800,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         win_rate_cooldown_minutes=config.get("win_rate_cooldown_minutes", 30),
         max_concurrent_positions=config.get("max_concurrent_positions", 5),
         min_price_distance_pct=config.get("min_price_distance_pct", 0.5),
-        enable_volatility_filter=False,
+        enable_volatility_filter=config.get("enable_volatility_filter", False),
         min_atr_ratio=config.get("min_atr_ratio", 0.8),
         max_atr_ratio=config.get("max_atr_ratio", 2.5),
         chop_detection_window=config.get("chop_detection_window", 10),
@@ -754,21 +808,20 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         auto_resume_after_cooldown=config.get("auto_resume_after_cooldown", True),
         require_winning_trade_to_resume=config.get("require_winning_trade_to_resume", False),
         # Session filter settings
-        enable_session_filter=False,
-        allowed_sessions=[],
+        enable_session_filter=config.get("enable_session_filter", False),
+        allowed_sessions=config.get("allowed_sessions", []),
         # Hour-level filter
         enable_hour_filter=False,
         allowed_short_hours_et=[],
         allowed_trading_hours_et=config.get("allowed_trading_hours_et", list(range(24))),
         # Weekday filter
-        blocked_weekdays=[],
-        # Market-quality gating is retired; keep these disabled for compatibility.
-        enable_direction_gating=False,
+        blocked_weekdays=config.get("blocked_weekdays", []),
+        enable_direction_gating=config.get("enable_direction_gating", False),
         direction_gating_min_confidence=config.get("direction_gating_min_confidence", 0.70),
-        enable_regime_avoidance=False,
-        blocked_regimes=[],
+        enable_regime_avoidance=config.get("enable_regime_avoidance", False),
+        blocked_regimes=config.get("blocked_regimes", []),
         regime_avoidance_min_confidence=config.get("regime_avoidance_min_confidence", 0.70),
-        enable_trigger_filters=False,
+        enable_trigger_filters=config.get("enable_trigger_filters", False),
         ema_cross_require_volume=config.get("ema_cross_require_volume", True),
         low_regime_require_volume=config.get("low_regime_require_volume", True),
         # Tradovate Paper Evaluation Gate

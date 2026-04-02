@@ -979,11 +979,8 @@ def check_key_level_signals(
             # Touched resistance zone
             if current_close < current_high and current_close < prev_close:
                 # Rejecting from resistance - bearish reversal signal
-                # Boost if wick rejection (high significantly above close = clear rejection)
-                wick_size = _safe_div(current_high - current_close, current_close)
-                rejection_boost = bounce_conf * 1.25 if wick_size > 0.001 else bounce_conf
                 level_info["level_interaction"] = f"bounce_resistance:{nearest_resistance_name}"
-                return "bounce_resistance_short", rejection_boost, level_info
+                return "bounce_resistance_short", bounce_conf, level_info
             elif current_close > prev_close:
                 # Breaking up through resistance - bullish continuation
                 if _safe_div(current_close - prev_close, current_close) > breakout_pct:
@@ -1005,7 +1002,7 @@ def check_key_level_signals(
         if prev_above and recent_below and current_retest and current_close < prev_close:
             # Failed retest confirmed - price came back to broken level and rejected
             level_info["level_interaction"] = f"failed_retest:{nearest_resistance_name}"
-            return "bounce_resistance_short", bounce_conf * 1.3, level_info  # 30% extra confidence
+            return "bounce_resistance_short", bounce_conf, level_info
 
     # =========================================================================
     # CAUTION SIGNALS (Reduce confidence when entering into levels)

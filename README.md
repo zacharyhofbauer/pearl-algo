@@ -6,6 +6,18 @@ Production-ready market trading agent with a modular architecture:
 data providers (IBKR), strategy/signal generation with aggressive entry triggers, state + metrics, Telegram UI,
 and execution via Tradovate.
 
+The current operating model is intentionally narrow:
+- market data from IBKR
+- strategy via `strategies.composite_intraday`
+- execution on a single Tradovate Paper account
+- operator control through `./pearl.sh`
+- dashboard/frontend in `apps/pearl-algo-app/`
+
+Anything outside that path should be treated as non-canonical until proven
+otherwise. Use `docs/START_HERE.md` for the live path and
+`docs/COMPATIBILITY_SURFACES.md` for retained legacy bridges, wrappers, and
+fallbacks.
+
 ## Pearl Algo Web App (Telegram + Mini App)
 
 ![Telegram dashboard](docs/assets/telegram-dashboard.png)
@@ -60,6 +72,19 @@ python3 scripts/ops/audit_runtime_paths.py
 ./pearl.sh tv_paper status
 ```
 
+## Operating model
+
+- **Operator entrypoint**: `./pearl.sh`
+- **Canonical config**: `config/live/tradovate_paper.yaml`
+- **Service**: `src/pearlalgo/market_agent/service.py`
+- **Strategy**: `src/pearlalgo/strategies/composite_intraday/`
+- **Execution**: `src/pearlalgo/execution/tradovate/`
+- **Frontend**: `apps/pearl-algo-app/`
+- **Compatibility leftovers**: `docs/COMPATIBILITY_SURFACES.md`
+
+New runtime logic should be added to the operating-model paths above, not to
+legacy wrappers or compatibility namespaces.
+
 ## Validation
 
 ```bash
@@ -103,7 +128,6 @@ CI runs tests, linting, type checking, and architecture boundary checks via `.gi
 ## Docs (start here)
 
 - `docs/START_HERE.md`
-- `docs/PATH_TRUTH_TABLE.md`
 - `docs/PATH_TRUTH_TABLE.md`
 - `docs/COMPATIBILITY_SURFACES.md`
 - `docs/GATEWAY.md`

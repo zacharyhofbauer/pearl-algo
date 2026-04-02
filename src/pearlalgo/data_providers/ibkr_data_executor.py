@@ -905,12 +905,12 @@ class GetHistoricalDataTask(Task):
                     eligible = [cd for cd in sorted_contracts if _exp_key(cd) >= requested_end_str]
                     active_today = [cd for cd in sorted_contracts if _exp_key(cd) >= today_str]
 
-                    candidates: List[Any] = []
-                    if eligible:
-                        candidates.extend(eligible[:3])  # try up to 3 expirations after requested_end
+                    # Always try the nearest returned contracts first, then any
+                    # contracts that are clearly active for the requested window.
+                    candidates: List[Any] = list(sorted_contracts[:3])
                     if active_today:
-                        # ensure we also try a clearly-active contract as fallback
-                        candidates.append(active_today[0])
+                        # Ensure we also try clearly-active contracts as fallback.
+                        candidates.extend(active_today[:3])
 
                     # Deduplicate by conId
                     seen_conids = set()

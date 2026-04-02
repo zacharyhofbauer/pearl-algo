@@ -244,7 +244,7 @@ class ExecutionResult:
     error_code: Optional[int] = None
     
     # Timing
-    timestamp: datetime = field(default_factory=lambda: datetime.now(_ET))  # FIXED 2026-03-25: store ET not UTC
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -584,4 +584,3 @@ class ExecutionAdapter(ABC):
             "max_orders_per_day": self.config.max_orders_per_day,
             "max_daily_loss": self.config.max_daily_loss,
         }
-

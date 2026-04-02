@@ -112,6 +112,7 @@ def _patch_server(state_dir):
     """Patch server module globals: state dir, auth disabled, no data provider."""
     patches = [
         patch.object(server_mod, "_state_dir", state_dir),
+        patch.object(server_mod, "_state_reader", None),
         patch.object(server_mod, "_market", "NQ"),
         patch.object(server_mod, "_auth_enabled", False),
         patch.object(server_mod, "_api_keys", set()),
@@ -122,6 +123,12 @@ def _patch_server(state_dir):
         patch.object(server_core_mod, "_auth_enabled", False),
         patch.object(server_core_mod, "_api_keys", set()),
     ]
+    server_mod._state_reader_cache.clear()
+    server_mod.ws_manager.active_connections.clear()
+    server_mod.ws_manager._cached_state = {}
+    server_mod.ws_manager._last_state_hash = ""
+    server_mod.ws_manager._last_state_mtime_ns = 0
+    server_mod.ws_manager._last_state_size = 0
     for p in patches:
         p.start()
     yield
@@ -134,6 +141,7 @@ def _patch_server_auth(state_dir):
     """Patch server globals with authentication ENABLED."""
     patches = [
         patch.object(server_mod, "_state_dir", state_dir),
+        patch.object(server_mod, "_state_reader", None),
         patch.object(server_mod, "_market", "NQ"),
         patch.object(server_mod, "_auth_enabled", True),
         patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
@@ -141,6 +149,12 @@ def _patch_server_auth(state_dir):
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
     ]
+    server_mod._state_reader_cache.clear()
+    server_mod.ws_manager.active_connections.clear()
+    server_mod.ws_manager._cached_state = {}
+    server_mod.ws_manager._last_state_hash = ""
+    server_mod.ws_manager._last_state_mtime_ns = 0
+    server_mod.ws_manager._last_state_size = 0
     for p in patches:
         p.start()
     yield
@@ -153,6 +167,7 @@ def _patch_server_auth_and_operator(state_dir):
     """Patch server globals with read-only auth and operator auth enabled."""
     patches = [
         patch.object(server_mod, "_state_dir", state_dir),
+        patch.object(server_mod, "_state_reader", None),
         patch.object(server_mod, "_market", "NQ"),
         patch.object(server_mod, "_auth_enabled", True),
         patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
@@ -162,6 +177,12 @@ def _patch_server_auth_and_operator(state_dir):
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
     ]
+    server_mod._state_reader_cache.clear()
+    server_mod.ws_manager.active_connections.clear()
+    server_mod.ws_manager._cached_state = {}
+    server_mod.ws_manager._last_state_hash = ""
+    server_mod.ws_manager._last_state_mtime_ns = 0
+    server_mod.ws_manager._last_state_size = 0
     for p in patches:
         p.start()
     yield

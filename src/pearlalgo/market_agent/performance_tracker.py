@@ -29,6 +29,7 @@ from pearlalgo.utils.paths import (
     get_signals_file,
     get_utc_timestamp,
     parse_utc_timestamp,
+    parse_trade_timestamp_to_utc,
 )
 from pearlalgo.market_agent.state_manager import _to_json_safe
 from pearlalgo.utils.state_io import (
@@ -739,7 +740,7 @@ class PerformanceTracker:
         ):
             return self._metrics_cache
 
-        cutoff_time = datetime.now(_ET).timestamp() - (days * 24 * 60 * 60)  # FIXED 2026-03-25: ET not UTC
+        cutoff_time = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
 
         # Load all signals
         signals = []
@@ -749,10 +750,13 @@ class PerformanceTracker:
                     for line in f:
                         try:
                             record = json.loads(line.strip())
-                            timestamp_str = record.get("timestamp", "")
+                            timestamp_str = (
+                                record.get("exit_time")
+                                or record.get("entry_time")
+                                or record.get("timestamp", "")
+                            )
                             if timestamp_str:
-                                ts_naive = parse_utc_timestamp(timestamp_str)
-                                timestamp = _ET.localize(ts_naive).timestamp() if ts_naive.tzinfo is None else ts_naive.timestamp()
+                                timestamp = parse_trade_timestamp_to_utc(str(timestamp_str)).timestamp()
                                 if timestamp >= cutoff_time:
                                     signals.append(record)
                         except (json.JSONDecodeError, ValueError):

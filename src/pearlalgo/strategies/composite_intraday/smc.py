@@ -1,5 +1,8 @@
 """
 SMC compatibility surface for the composite intraday bundle.
+
+This wrapper exists only so the canonical strategy bundle can call the retained
+legacy implementation without importing it directly everywhere else.
 """
 
 from __future__ import annotations

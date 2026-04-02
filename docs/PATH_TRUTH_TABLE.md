@@ -5,9 +5,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
 ## Top-Level Control
 
 - **Canonical operator entrypoint**: `./pearl.sh`
-- **Compatibility alias**: `./pearlalgo.sh`
 - **Runtime audit**: `python3 scripts/ops/audit_runtime_paths.py`
 - **Operating model**: `docs/START_HERE.md`
+- **Retained compatibility surfaces**: `docs/COMPATIBILITY_SURFACES.md`
 
 ## Market Agent Service
 
@@ -32,12 +32,11 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.market_agent.live_chart_screenshot` – Live chart screenshot export (Playwright)
   - `pearlalgo.market_agent.notification_queue` – Notification queuing
   - `pearlalgo.market_agent.tv_paper_eval_tracker` – prop-firm evaluation tracking
-  - `pearlalgo.market_agent.trading_circuit_breaker` – Legacy signal-gate logic (not on the canonical live path)
+  - `pearlalgo.market_agent.trading_circuit_breaker` – runtime guardrail and signal-veto evaluation
 - **Lifecycle scripts**:
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
   - `scripts/ops/status.sh` (manual CLI health check; `--market NQ|ES|GC`)
 - **Docs**:
-  - `docs/START_HERE.md`
   - `docs/START_HERE.md`
   - `docs/PATH_TRUTH_TABLE.md`
 
@@ -71,7 +70,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Strategy logic and automated tests
 - **Python modules**:
   - Canonical strategy config/logic: `pearlalgo.strategies.composite_intraday`
-  - Legacy compatibility namespace: `pearlalgo.trading_bots` (retained while canonical strategy wrappers still delegate into battle-tested legacy code)
+  - Retained bridge namespace: `pearlalgo.trading_bots` (legacy implementation surface; do not add new strategy entrypoints there)
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
@@ -87,6 +86,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
+  - `docs/COMPATIBILITY_SURFACES.md`
 
 ## Execution
 
@@ -118,7 +118,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.config.config_view` – configuration view/access layer
   - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
-  - `docs/START_HERE.md`
   - `docs/START_HERE.md`
   - `docs/COMPATIBILITY_SURFACES.md`
 
@@ -170,10 +169,14 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.cadence` – Cadence scheduler and metrics
   - `pearlalgo.utils.sparkline` – Progress bar rendering helpers
   - `pearlalgo.utils.volume_pressure` – Signed-volume pressure computations
-  - `pearlalgo.utils.telegram_alerts` – Core Telegram messaging
+  - `pearlalgo.utils.telegram_alerts` – backward-compatible notification re-export; prefer `pearlalgo.notifications`
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:
   - `docs/START_HERE.md`
 
 This table is the canonical reference when adding new scripts, docs, or modules. Any new entry point should be recorded here, and existing docs/scripts should be updated in lock‑step when paths change.
+
+If a path is retained only as an alias, wrapper, migration bridge, or
+backward-compatibility layer, record it in `docs/COMPATIBILITY_SURFACES.md`
+instead of treating it as part of the operating model.

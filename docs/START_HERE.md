@@ -6,6 +6,10 @@ This repo is a **trading platform** with three hard requirements:
 - **Observable**: every decision should be explainable from logs + persisted state.
 - **Extensible**: new strategies, indicators, data providers, and execution adapters should plug in without rewiring the service.
 
+The current live path is intentionally smaller than the full repo. If a module,
+script, env var, or alias is not part of the operating model below, treat it as
+non-canonical and check `docs/COMPATIBILITY_SURFACES.md` before using it.
+
 ### What runs in production
 
 - **Service**: `src/pearlalgo/market_agent/service.py` (orchestrator)
@@ -14,6 +18,9 @@ This repo is a **trading platform** with three hard requirements:
 - **Execution**: `src/pearlalgo/execution/tradovate/` (Tradovate Paper only; IBKR execution is inactive)
 - **Eval tracker**: `src/pearlalgo/market_agent/tv_paper_eval_tracker.py` (prop firm rule enforcement)
 - **Ops/UI**: Telegram notifier + command handler, Next.js web app in `apps/pearl-algo-app/` (pearlalgo.io)
+
+No new live trading logic should be added outside those paths unless the
+operating model itself is being expanded.
 
 ### Single account (Tradovate Paper)
 
@@ -32,7 +39,17 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 - **Repo compatibility path**: `data/` is a symlink into `~/var/pearl-algo/state/data`
 - **Repo logs path**: `logs/` is a symlink into `~/var/pearl-algo/logs`
 - **Web app frontend**: `apps/pearl-algo-app/`
-- **Web app/API wrapper scripts**: `scripts/pearlalgo_web_app/`
+- **Retained web app/API wrappers**: `scripts/pearlalgo_web_app/` (non-canonical wrapper layer; see compatibility surfaces)
+
+### What is explicitly non-canonical
+
+- Compatibility aliases and wrapper scripts
+- Legacy strategy bridges under `src/pearlalgo/trading_bots/`
+- Old config shapes kept readable by migration helpers
+- Frontend/API auth fallbacks retained to avoid breaking callers
+
+These can remain in the repo, but they should be marked, contained, and kept
+out of new feature work.
 
 ### Safety baseline
 
@@ -78,7 +95,7 @@ python3 scripts/ops/audit_runtime_paths.py
 ### Web app (pearlalgo.io)
 
 - **Frontend path**: `apps/pearl-algo-app/`
-- **Wrapper scripts**: `scripts/pearlalgo_web_app/`
+- **Wrapper scripts**: `scripts/pearlalgo_web_app/` (retained compatibility shell around the API server)
 - **Status badges** in header: Agent, GW, AI, Market, Data, ML, Shadow savings (with tooltips)
 - **SystemStatusPanel**: Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch, session P&L
 - **Pull-to-refresh** on mobile
@@ -95,5 +112,6 @@ python3 scripts/ops/audit_runtime_paths.py
 ### Where to go next
 
 - **Path/runtime truth**: `docs/PATH_TRUTH_TABLE.md`
+- **Retained legacy bridges**: `docs/COMPATIBILITY_SURFACES.md`
 - **Gateway operations**: `docs/GATEWAY.md`
 - **Testing**: `docs/TESTING_GUIDE.md`

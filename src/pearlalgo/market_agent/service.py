@@ -24,7 +24,12 @@ from pearlalgo.utils.config_helpers import safe_get_bool, safe_get_int
 from pearlalgo.utils.formatting import fmt_currency
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.state_io import atomic_write_json
-from pearlalgo.utils.paths import get_utc_timestamp, get_et_timestamp, parse_utc_timestamp
+from pearlalgo.utils.paths import (
+    get_utc_timestamp,
+    get_et_timestamp,
+    parse_trade_timestamp_to_utc,
+    parse_utc_timestamp,
+)
 import pytz
 _ET = pytz.timezone("America/New_York")
 from pearlalgo.market_agent.stats_computation import get_trading_day_start
@@ -1316,7 +1321,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 raw_ts = latest_bar.get("timestamp")
                 if raw_ts:
                     if isinstance(raw_ts, str):
-                        bar_time = parse_utc_timestamp(raw_ts)
+                        bar_time = parse_trade_timestamp_to_utc(raw_ts)
                     else:
                         bar_time = raw_ts
                     if bar_time and bar_time.tzinfo is None:
@@ -1488,9 +1493,8 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                     bar_time = latest_bar.get("timestamp")
                     if bar_time:
                         if isinstance(bar_time, str):
-                            bar_time = parse_utc_timestamp(bar_time)
-                        # Timezone-safe age computation: convert to UTC if aware, assume UTC if naive
-                        if bar_time.tzinfo is None:
+                            bar_time = parse_trade_timestamp_to_utc(bar_time)
+                        elif bar_time.tzinfo is None:
                             bar_time = bar_time.replace(tzinfo=timezone.utc)
                         else:
                             bar_time = bar_time.astimezone(timezone.utc)

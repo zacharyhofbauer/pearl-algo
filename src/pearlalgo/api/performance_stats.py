@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+_ET = ZoneInfo("America/New_York")
+
+
+def _coerce_utc(dt) -> Any:
+    """Normalize naive-ET or aware datetimes to UTC-aware datetimes."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=_ET).astimezone(timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def compute_performance_stats(
@@ -85,8 +94,10 @@ def compute_performance_stats(
             _, tv_fills = get_tradovate_state(state_dir)
             if tv_fills:
                 paired = get_paired_tradovate_trades(state_dir, tv_fills)
-                now_utc = now_et_naive()
+                now_utc = _coerce_utc(now_et_naive())
                 prev_day_s, prev_day_e = get_previous_trading_day_bounds()
+                prev_day_s = _coerce_utc(prev_day_s)
+                prev_day_e = _coerce_utc(prev_day_e)
                 fills_stats = {
                     "yesterday": tradovate_performance_for_period(tv_fills, prev_day_s, prev_day_e, paired_trades=paired),
                     "24h": tradovate_performance_for_period(tv_fills, now_utc - timedelta(hours=24), paired_trades=paired),
@@ -123,8 +134,10 @@ def compute_performance_stats(
             logger.debug(f"Non-critical: {e}")
         return result
 
-    now = now_et_naive()
+    now = _coerce_utc(now_et_naive())
     prev_day_start, prev_day_end = get_previous_trading_day_bounds()
+    prev_day_start = _coerce_utc(prev_day_start)
+    prev_day_end = _coerce_utc(prev_day_end)
 
     cutoffs = {
         "24h": now - timedelta(hours=24),
@@ -143,7 +156,7 @@ def compute_performance_stats(
             if not exit_time_str:
                 continue
             try:
-                exit_time = parse_ts(exit_time_str)
+                exit_time = _coerce_utc(parse_ts(exit_time_str))
             except (ValueError, TypeError):
                 continue
 
@@ -189,7 +202,7 @@ def compute_performance_stats(
                 if not exit_time_str:
                     continue
                 try:
-                    exit_time = parse_ts(exit_time_str)
+                    exit_time = _coerce_utc(parse_ts(exit_time_str))
                     if exit_time >= cutoff_24h:
                         recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
                 except (ValueError, TypeError):
