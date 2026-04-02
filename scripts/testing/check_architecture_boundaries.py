@@ -14,11 +14,12 @@ Layers and allowed dependencies:
 - utils:          may import utils, stdlib, third-party only
 - config:         may import config, utils, strategies
 - data_providers: may import data_providers, config, utils
-- strategies:     may import strategies, trading_bots, config, utils, learning
-- trading_bots:   may import trading_bots, config, utils, learning (for optional ML signal filtering)
+- strategies:     may import strategies, trading_bots, config, utils
+- trading_bots:   may import trading_bots, config, utils
 - execution:      may import execution, config, utils (ATS execution layer)
-- learning:       may import learning, config, utils (adaptive learning layer)
+- storage:        may import storage, config, utils (SQLite persistence layer)
 - market_agent:   may import any internal layer (orchestration)
+- api:            may import api, analytics, config, data_providers, execution, market_agent, utils
 
 Exit codes:
     0 - No violations (or --warn-only mode)
@@ -39,7 +40,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 # Layers under src/pearlalgo/
-LAYERS = {"utils", "config", "data_providers", "strategies", "trading_bots", "execution", "learning", "market_agent"}
+LAYERS = {"utils", "config", "data_providers", "strategies", "trading_bots", "execution", "storage", "market_agent", "api"}
 
 # For each layer, which other pearlalgo.* layers it MAY import.
 # Imports of stdlib and third-party packages are always allowed.
@@ -49,11 +50,12 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "data_providers": {"data_providers", "config", "utils"},
     # The canonical strategies layer wraps legacy trading_bots implementations
     # during the migration, so that compatibility import is temporarily allowed.
-    "strategies": {"strategies", "trading_bots", "config", "utils", "learning"},
-    "trading_bots": {"trading_bots", "config", "utils", "learning"},  # learning for optional ML signal filtering
+    "strategies": {"strategies", "trading_bots", "config", "utils"},
+    "trading_bots": {"trading_bots", "config", "utils"},
     "execution": {"execution", "config", "utils"},  # ATS execution layer
-    "learning": {"learning", "config", "utils"},  # Adaptive learning layer
+    "storage": {"storage", "config", "utils"},  # SQLite persistence layer
     "market_agent": LAYERS,  # orchestration layer can import anything
+    "api": {"api", "analytics", "config", "data_providers", "execution", "market_agent", "utils"},
 }
 
 
@@ -444,9 +446,6 @@ if __name__ == "__main__":
             exit_code = max(exit_code, 1)
 
     sys.exit(exit_code)
-
-
-
 
 
 

@@ -407,14 +407,14 @@ class TestTvPaperEvalGate:
         cb = self._make_cb(enabled=True)
         signal = {"direction": "long", "confidence": 0.8}
         # Patch is_within_trading_window to return True
-        with patch("pearlalgo.market_agent.trading_circuit_breaker.is_within_trading_window", return_value=True):
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.is_within_trading_window", return_value=True):
             decision = cb._check_tv_paper_eval_gate(signal)
         assert decision.allowed is True
 
     def test_enabled_outside_session_blocks(self):
         cb = self._make_cb(enabled=True)
         signal = {"direction": "long", "confidence": 0.8}
-        with patch("pearlalgo.market_agent.trading_circuit_breaker.is_within_trading_window", return_value=False):
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.is_within_trading_window", return_value=False):
             decision = cb._check_tv_paper_eval_gate(signal)
         assert decision.allowed is False
         assert decision.reason == "tv_paper_outside_trading_hours"
@@ -423,7 +423,7 @@ class TestTvPaperEvalGate:
         cb = self._make_cb(enabled=True)
         signal = {"direction": "long", "position_size": 1}
         active_positions = [{"position_size": 5}]
-        with patch("pearlalgo.market_agent.trading_circuit_breaker.is_within_trading_window", return_value=True):
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.is_within_trading_window", return_value=True):
             decision = cb._check_tv_paper_eval_gate(signal, active_positions=active_positions)
         assert decision.allowed is False
         assert decision.reason == "tv_paper_max_contracts_exceeded"
@@ -432,7 +432,7 @@ class TestTvPaperEvalGate:
         cb = self._make_cb(enabled=True)
         signal = {"direction": "long", "position_size": 1}
         active_positions = [{"direction": "short", "position_size": 1}]
-        with patch("pearlalgo.market_agent.trading_circuit_breaker.is_within_trading_window", return_value=True):
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.is_within_trading_window", return_value=True):
             decision = cb._check_tv_paper_eval_gate(signal, active_positions=active_positions)
         assert decision.allowed is False
         assert decision.reason == "tv_paper_hedging_prohibited"
@@ -449,20 +449,19 @@ class TestCircuitBreakerSessionFilter:
     def _make_cb(self, enabled=True, sessions=None):
         config = TradingCircuitBreakerConfig(
             enable_session_filter=enabled,
-            allowed_sessions=sessions or ["regular", "close"],
+            allowed_sessions=sessions or ["overnight", "close"],
         )
         return TradingCircuitBreaker(config)
 
     def test_session_not_in_allowed_blocks(self):
-        cb = self._make_cb(sessions=["regular", "close"])
-        # Mock _get_current_session to return a session not in allowed list
-        with patch.object(cb, "_get_current_session", return_value=("overnight", 22)):
+        cb = self._make_cb(sessions=["close"])
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.get_current_session", return_value=("overnight", 22)):
             decision = cb._check_session_filter()
         assert decision.allowed is False
 
     def test_session_in_allowed_passes(self):
-        cb = self._make_cb(sessions=["regular", "close", "overnight"])
-        with patch.object(cb, "_get_current_session", return_value=("overnight", 22)):
+        cb = self._make_cb(sessions=["close", "overnight"])
+        with patch("pearlalgo.market_agent.circuit_breaker_filters.get_current_session", return_value=("overnight", 22)):
             decision = cb._check_session_filter()
         assert decision.allowed is True
 
@@ -580,67 +579,6 @@ class TestCircuitBreakerRegimeAvoidance:
         }
         # When disabled, should_allow_signal won't call regime avoidance
         decision = cb.should_allow_signal(signal)
-        assert decision.allowed is True
-
-
-# ---------------------------------------------------------------------------
-# ML Chop Shield (lines 1080, 1103, 1127, 1132)
-# ---------------------------------------------------------------------------
-
-
-class TestCircuitBreakerMLChopShield:
-    """Lines 1080, 1103, 1127, 1132: ML chop shield."""
-
-    def _make_cb(self, enabled=True):
-        config = TradingCircuitBreakerConfig(
-            enable_ml_chop_shield=enabled,
-            ml_min_scored_trades=50,
-            ml_min_winrate_delta=0.15,
-            ml_chop_shield_regimes=["ranging", "volatile"],
-        )
-        return TradingCircuitBreaker(config)
-
-    def test_ml_chop_shield_blocks_fail_in_ranging(self):
-        cb = self._make_cb(enabled=True)
-        signal = {
-            "direction": "long",
-            "_ml_prediction": {"pass_filter": False},
-            "market_regime": {"regime": "ranging", "confidence": 0.9},
-        }
-        ml_stats = {
-            "scored_trades": 100,
-            "pass_win_rate": 0.60,
-            "fail_win_rate": 0.20,
-        }
-        decision = cb._check_ml_chop_shield(signal, ml_stats=ml_stats)
-        assert decision.allowed is False
-
-    def test_ml_chop_shield_allows_pass_signal(self):
-        cb = self._make_cb(enabled=True)
-        signal = {
-            "direction": "long",
-            "_ml_prediction": {"pass_filter": True},
-            "market_regime": {"regime": "ranging", "confidence": 0.9},
-        }
-        ml_stats = {
-            "scored_trades": 100,
-            "pass_win_rate": 0.60,
-            "fail_win_rate": 0.20,
-        }
-        decision = cb._check_ml_chop_shield(signal, ml_stats=ml_stats)
-        assert decision.allowed is True
-
-    def test_ml_chop_shield_no_stats_allows(self):
-        cb = self._make_cb(enabled=True)
-        signal = {"direction": "long"}
-        decision = cb._check_ml_chop_shield(signal, ml_stats=None)
-        assert decision.allowed is True
-
-    def test_ml_chop_shield_insufficient_data_allows(self):
-        cb = self._make_cb(enabled=True)
-        signal = {"direction": "long"}
-        ml_stats = {"scored_trades": 10, "pass_win_rate": 0.60, "fail_win_rate": 0.20}
-        decision = cb._check_ml_chop_shield(signal, ml_stats=ml_stats)
         assert decision.allowed is True
 
 
@@ -835,6 +773,7 @@ class TestSignalHandlerProtectionGuard:
         adapter.config = MagicMock()
         adapter.config.enforce_protection_guard = True
         adapter.disarm = MagicMock()
+        adapter._has_existing_stop_for_position = AsyncMock(return_value=False)
         handler = self._make_handler(adapter=adapter)
         result = await handler._enforce_tradovate_protection_guard({"signal_id": "test123"})
         assert result is False
@@ -881,7 +820,6 @@ class TestSignalHandlerExecuteSignal:
         handler = self._make_handler()
         handler._enforce_tradovate_protection_guard = AsyncMock(return_value=False)
         handler.execution_adapter = MagicMock()
-        handler._bandit_config = None
         signal = {"direction": "long", "entry_price": 20000, "confidence": 0.8}
         await handler._execute_signal(signal, policy_decision=None)
         assert signal.get("_execution_status") == "skipped:unprotected_open_position_auto_disarm"
@@ -891,7 +829,6 @@ class TestSignalHandlerExecuteSignal:
         handler = self._make_handler()
         handler._enforce_tradovate_protection_guard = AsyncMock(return_value=True)
         handler.execution_adapter = MagicMock()
-        handler._bandit_config = None
         mock_result = MagicMock()
         mock_result.success = True
         mock_result.parent_order_id = "ORD123"
@@ -906,7 +843,6 @@ class TestSignalHandlerExecuteSignal:
         handler = self._make_handler()
         handler._enforce_tradovate_protection_guard = AsyncMock(return_value=True)
         handler.execution_adapter = MagicMock()
-        handler._bandit_config = None
         handler.execution_adapter.check_preconditions.side_effect = Exception("order fail")
         signal = {"direction": "long", "entry_price": 20000, "confidence": 0.8}
         await handler._execute_signal(signal, policy_decision=None)
@@ -916,7 +852,6 @@ class TestSignalHandlerExecuteSignal:
     async def test_no_adapter_skips_execution(self):
         handler = self._make_handler()
         handler.execution_adapter = None
-        handler._bandit_config = None
         signal = {"direction": "long", "entry_price": 20000}
         await handler._execute_signal(signal, policy_decision=None)
         assert signal.get("_execution_status") == "not_attempted"

@@ -100,6 +100,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         self._rate_limit_backoff: float = 0.0  # extra delay after 429
         self._rate_limit_until: float = 0.0  # time.monotonic() cooldown deadline
 
+        # Maintenance window detection state (503 handling for REST position polls)
+        self._consecutive_503_count: int = 0
+        self._tradovate_maintenance_mode: bool = False
+        self._MAINTENANCE_503_THRESHOLD: int = 3
+
         logger.info(
             f"TradovateExecutionAdapter initialized: "
             f"env={self._tv_config.env}, mode={config.mode.value}"
@@ -1208,6 +1213,66 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             
         return result
 
+    def _build_cached_account_summary(self, degraded_reason: str) -> Dict[str, Any]:
+        """Return a degraded account summary from cached live positions."""
+        now = time.time()
+        positions: List[Dict[str, Any]] = []
+        open_pnl = 0.0
+
+        for contract_id, pos in self._live_positions.items():
+            try:
+                net_pos = float(pos.get("net_pos", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if net_pos == 0:
+                continue
+
+            try:
+                pos_open_pnl = float(pos.get("open_pnl", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                pos_open_pnl = 0.0
+            open_pnl += pos_open_pnl
+
+            ws_updated_at = pos.get("ws_updated_at")
+            cache_age_seconds = None
+            try:
+                if ws_updated_at is not None:
+                    cache_age_seconds = max(0.0, now - float(ws_updated_at))
+            except (TypeError, ValueError):
+                cache_age_seconds = None
+
+            positions.append({
+                "contract_id": contract_id,
+                "net_pos": net_pos,
+                "net_price": pos.get("net_price", 0.0),
+                "open_pnl": pos_open_pnl,
+                "cache_age_seconds": cache_age_seconds,
+            })
+
+        return {
+            "account": self._client.account_name,
+            "account_id": self._client.account_id,
+            "env": self._tv_config.env,
+            "equity": None,
+            "cash_balance": None,
+            "open_pnl": open_pnl,
+            "realized_pnl": None,
+            "week_realized_pnl": None,
+            "initial_margin": None,
+            "maintenance_margin": None,
+            "positions": positions,
+            "position_count": len(positions),
+            "fills": [],
+            "working_orders": [],
+            "order_stats": {},
+            "working_orders_raw_count": 0,
+            "working_orders_debug": [],
+            "degraded": True,
+            "degraded_reason": degraded_reason,
+            "ws_connected": self._client.ws_connected,
+            "authenticated": self._client.is_authenticated,
+        }
+
         # ── REST order reconciliation ─────────────────────────────────────
 
     async def _poll_order_status(self) -> None:
@@ -1633,6 +1698,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         dashboard can display real broker values instead of virtual P&L.
         """
         if not self.is_connected():
+            if self._live_positions:
+                logger.warning(
+                    "Tradovate account summary degraded: using cached live positions "
+                    "while disconnected or unauthenticated"
+                )
+                return self._build_cached_account_summary(
+                    degraded_reason="disconnected_or_auth_lost"
+                )
             return {}
 
         result: Dict[str, Any] = {}

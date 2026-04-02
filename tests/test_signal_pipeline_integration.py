@@ -483,9 +483,6 @@ class TestSignalExecutionPipeline:
     def _build_handler(
         *,
         execution_adapter=None,
-        ml_signal_filter=None,
-        ml_filter_enabled: bool = False,
-        ml_filter_mode: str = "shadow",
         trading_circuit_breaker=None,
     ):
         """Build a SignalHandler with mocked infrastructure dependencies.
@@ -506,7 +503,6 @@ class TestSignalExecutionPipeline:
         notif_queue.enqueue_circuit_breaker.return_value = True
 
         order_mgr = MagicMock()
-        order_mgr.apply_ml_opportunity_sizing.return_value = None
 
         handler = SignalHandler(
             state_manager=state_mgr,
@@ -514,9 +510,6 @@ class TestSignalExecutionPipeline:
             notification_queue=notif_queue,
             order_manager=order_mgr,
             execution_adapter=execution_adapter,
-            ml_signal_filter=ml_signal_filter,
-            ml_filter_enabled=ml_filter_enabled,
-            ml_filter_mode=ml_filter_mode,
             trading_circuit_breaker=trading_circuit_breaker,
         )
 
@@ -568,56 +561,36 @@ class TestSignalExecutionPipeline:
         assert signal["_execution_status"] == "placed"
 
     # -----------------------------------------------------------------------
-    # 5b. Signal → ML filter rejects → No execution
+    # 5b. Signal → Precondition rejects → No execution
     # -----------------------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_ml_filter_live_rejects_no_order_placed(self) -> None:
+    async def test_preconditions_reject_no_order_placed(self) -> None:
         """
-        ML filter in live mode returning should_execute=False annotates the
-        signal with rejection metadata.  Execution adapter preconditions also
-        reject → ``place_bracket`` is never called (no order placed).
+        A rejecting precondition decision skips execution cleanly and no order
+        is placed.
         """
-        # ML filter mock → rejects (handler uses should_execute_async)
-        mock_ml = MagicMock()
-        mock_pred = MagicMock()
-        mock_pred.to_dict.return_value = {
-            "win_probability": 0.30,
-            "pass_filter": False,
-        }
-        mock_pred.win_probability = 0.30
-        mock_ml.should_execute_async = AsyncMock(return_value=(False, mock_pred))
-
         # Execution adapter mock → preconditions fail
         mock_adapter = MagicMock()
+        mock_adapter.get_account_summary = AsyncMock(return_value={})
         mock_adapter.check_preconditions.return_value = MagicMock(
-            execute=False, reason="below_ml_threshold",
+            execute=False, reason="preconditions_rejected",
         )
         mock_adapter.place_bracket = AsyncMock()
 
-        handler, *_ = self._build_handler(
-            execution_adapter=mock_adapter,
-            ml_signal_filter=mock_ml,
-            ml_filter_enabled=True,
-            ml_filter_mode="live",
-        )
+        handler, _, mock_perf, notif_queue, _ = self._build_handler(execution_adapter=mock_adapter)
 
         signal = _make_signal()
         signal["position_size"] = 1
         await handler.process_signal(signal)
 
-        # ML filter metadata attached
-        assert signal.get("_ml_shadow_pass_filter") is False
-        assert signal.get("_ml_prediction") is not None
-
-        # ML filter was consulted
-        mock_ml.should_execute_async.assert_called_once()
-
         # No order was placed
         mock_adapter.place_bracket.assert_not_called()
+        mock_perf.track_entry.assert_not_called()
+        notif_queue.enqueue_entry.assert_not_awaited()
 
         # Execution status reflects the skip
-        assert signal["_execution_status"].startswith("skipped:")
+        assert signal["_execution_status"] == "skipped:preconditions_rejected"
 
     # -----------------------------------------------------------------------
     # 5c. Signal → Circuit breaker blocks → No execution
@@ -711,3 +684,4 @@ class TestSignalExecutionPipeline:
 
         # Performance tracking was invoked
         mock_perf.track_signal_generated.assert_called_once()
+        mock_perf.update_signal_execution_metadata.assert_called_once_with("test-signal-id-001", signal)

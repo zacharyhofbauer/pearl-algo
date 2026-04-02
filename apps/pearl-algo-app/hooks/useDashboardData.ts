@@ -8,10 +8,73 @@ import { apiFetch } from '@/lib/api'
 
 const REFRESH_INTERVAL = 10000 // 10 seconds when HTTP remains the primary live path
 const WS_REFRESH_INTERVAL = 30000 // 30 seconds for socket-backed steady state
+const ANALYTICS_REFRESH_INTERVAL = 120000 // slower-changing trade-dock analytics
 const MIN_BARS = 500
 const MARKER_HOURS = 72
 const FETCH_TIMEOUT_MS = 10000 // 10 seconds
 const RETRY_DELAY_MS = 2000 // 2 seconds
+
+type DashboardResponse = Response | null
+type DashboardResponses = [
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+  DashboardResponse,
+]
+
+function restoreLastGoodArray<T>(
+  lastGoodRef: { current: T[] },
+  setValue: (value: T[]) => void
+): void {
+  if (lastGoodRef.current.length > 0) {
+    setValue(lastGoodRef.current)
+  }
+}
+
+async function applyArrayResponse<T>(
+  response: DashboardResponse,
+  lastGoodRef: { current: T[] },
+  setValue: (value: T[]) => void
+): Promise<void> {
+  if (!response?.ok) {
+    restoreLastGoodArray(lastGoodRef, setValue)
+    return
+  }
+
+  try {
+    const data = await response.json()
+    const nextValue = Array.isArray(data) ? data : []
+    setValue(nextValue)
+    lastGoodRef.current = nextValue
+  } catch {
+    restoreLastGoodArray(lastGoodRef, setValue)
+  }
+}
+
+async function applyNullableResponse<T>(
+  response: DashboardResponse,
+  lastGoodRef: { current: T | null },
+  setValue: (value: T | null) => void
+): Promise<void> {
+  if (!response?.ok) {
+    setValue(lastGoodRef.current)
+    return
+  }
+
+  try {
+    const nextValue = (await response.json()) || null
+    setValue(nextValue)
+    lastGoodRef.current = nextValue
+  } catch {
+    setValue(lastGoodRef.current)
+  }
+}
 
 interface UseDashboardDataOptions {
   timeframe: Timeframe
@@ -69,6 +132,7 @@ export function useDashboardData({
   const lastGoodPerformanceRef = useRef<PerformanceSummary | null>(null)
   
   const lastDataHashRef = useRef('')
+  const lastAnalyticsFetchRef = useRef(0)
   const fetchStartRef = useRef<number>(0)
   const abortControllerRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
@@ -99,6 +163,10 @@ export function useDashboardData({
       }, FETCH_TIMEOUT_MS)
 
       const includeSocketOwnedData = wsStatus !== 'connected'
+      const nowMs = Date.now()
+      const shouldFetchAnalytics =
+        wsStatus !== 'connected' ||
+        nowMs - lastAnalyticsFetchRef.current >= ANALYTICS_REFRESH_INTERVAL
 
       // Fetch all data in parallel with abort support.
       // When the WebSocket is healthy, it owns the hot state/trades/positions
@@ -110,7 +178,7 @@ export function useDashboardData({
         apiFetch(`/api/markers?hours=${MARKER_HOURS}`, fetchOptions),
         includeSocketOwnedData ? apiFetch(`/api/state`, fetchOptions) : Promise.resolve(null),
         apiFetch(`/api/market-status`, fetchOptions),
-        apiFetch(`/api/analytics`, fetchOptions).catch(() => null),
+        shouldFetchAnalytics ? apiFetch(`/api/analytics`, fetchOptions).catch(() => null) : Promise.resolve(null),
         includeSocketOwnedData ? apiFetch(`/api/positions`, fetchOptions).catch(() => null) : Promise.resolve(null),
         includeSocketOwnedData ? apiFetch(`/api/trades?limit=50`, fetchOptions).catch(() => null) : Promise.resolve(null),
         apiFetch(`/api/signals?limit=80`, fetchOptions).catch(() => null),
@@ -119,9 +187,9 @@ export function useDashboardData({
           : Promise.resolve(null),
       ]
 
-      let results: any[]
+      let results: DashboardResponses
       try {
-        results = await Promise.all(fetchPromises)
+        results = (await Promise.all(fetchPromises)) as DashboardResponses
         clearTimeout(timeoutId)
       } catch (err) {
         clearTimeout(timeoutId)
@@ -196,87 +264,22 @@ export function useDashboardData({
       }
 
       if (stateData && !stateData.error) {
+        let nextAnalytics = agentState?.analytics
         if (analyticsRes?.ok) {
           try {
-            const analyticsData = await analyticsRes.json()
-            setAgentState({ ...stateData, analytics: analyticsData })
+            nextAnalytics = await analyticsRes.json()
+            lastAnalyticsFetchRef.current = nowMs
           } catch {
-            setAgentState(stateData)
-          }
-        } else {
-          setAgentState(stateData)
-        }
-      }
-
-      // Update positions only when HTTP owns that data path.
-      if (positionsRes?.ok) {
-        try {
-          const positionsData = await positionsRes.json()
-          const positionsArray = Array.isArray(positionsData) ? positionsData : []
-          setPositions(positionsArray)
-          lastGoodPositionsRef.current = positionsArray
-        } catch {
-          // Preserve last-good state
-          if (lastGoodPositionsRef.current.length > 0) {
-            setPositions(lastGoodPositionsRef.current)
+            nextAnalytics = agentState?.analytics
           }
         }
-      } else {
-        // Only preserve if we have last-good data (don't overwrite with empty on first failure)
-        if (lastGoodPositionsRef.current.length > 0) {
-          setPositions(lastGoodPositionsRef.current)
-        }
+        setAgentState(nextAnalytics ? { ...stateData, analytics: nextAnalytics } : stateData)
       }
 
-      // Update recent trades only when HTTP owns that data path.
-      if (tradesRes?.ok) {
-        try {
-          const tradesData = await tradesRes.json()
-          const tradesArray = Array.isArray(tradesData) ? tradesData : []
-          setRecentTrades(tradesArray)
-          lastGoodTradesRef.current = tradesArray
-        } catch {
-          if (lastGoodTradesRef.current.length > 0) {
-            setRecentTrades(lastGoodTradesRef.current)
-          }
-        }
-      } else {
-        if (lastGoodTradesRef.current.length > 0) {
-          setRecentTrades(lastGoodTradesRef.current)
-        }
-      }
-
-      // Update recent signal events (preserve last-good on failure)
-      if (signalsRes?.ok) {
-        try {
-          const signalsData = await signalsRes.json()
-          const signalsArray = Array.isArray(signalsData) ? signalsData : []
-          setRecentSignals(signalsArray)
-          lastGoodSignalsRef.current = signalsArray
-        } catch {
-          if (lastGoodSignalsRef.current.length > 0) {
-            setRecentSignals(lastGoodSignalsRef.current)
-          }
-        }
-      } else {
-        if (lastGoodSignalsRef.current.length > 0) {
-          setRecentSignals(lastGoodSignalsRef.current)
-        }
-      }
-
-      // Update performance summary only when HTTP owns that data path.
-      if (perfSummaryRes?.ok) {
-        try {
-          const perfData = await perfSummaryRes.json()
-          const perf = perfData || null
-          setPerformanceSummary(perf)
-          lastGoodPerformanceRef.current = perf
-        } catch {
-          setPerformanceSummary(lastGoodPerformanceRef.current)
-        }
-      } else {
-        setPerformanceSummary(lastGoodPerformanceRef.current)
-      }
+      await applyArrayResponse(positionsRes, lastGoodPositionsRef, setPositions)
+      await applyArrayResponse(tradesRes, lastGoodTradesRef, setRecentTrades)
+      await applyArrayResponse(signalsRes, lastGoodSignalsRef, setRecentSignals)
+      await applyNullableResponse(perfSummaryRes, lastGoodPerformanceRef, setPerformanceSummary)
 
       // Record successful fetch
       const fetchDuration = performance.now() - fetchStartRef.current
@@ -366,6 +369,7 @@ export function useDashboardData({
   }, [])
 
   const handleTradeRefresh = useCallback(() => {
+    lastAnalyticsFetchRef.current = 0
     fetchData(timeframe, barCount)
   }, [fetchData, timeframe, barCount])
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { apiFetchJson } from '@/lib/api'
+import { getNestedValue } from '@/lib/settings'
 
 export interface FieldSchema {
   type: 'number' | 'boolean' | 'select' | 'text'
@@ -34,17 +35,6 @@ interface SettingsState {
   saveChanges: (restart: boolean) => Promise<void>
   setActiveCategory: (cat: string) => void
   getFieldValue: (path: string) => any
-}
-
-function getNestedValue(obj: Record<string, any> | null, path: string): any {
-  if (!obj) return undefined
-  const keys = path.split('.')
-  let current: any = obj
-  for (const key of keys) {
-    if (current == null || typeof current !== 'object') return undefined
-    current = current[key]
-  }
-  return current
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({

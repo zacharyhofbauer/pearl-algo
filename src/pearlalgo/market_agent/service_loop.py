@@ -391,15 +391,6 @@ class ServiceLoopMixin:
                                 },
                             )
 
-                # Inject safety/learning state into market_data so downstream signal generation can:
-                # - run ML filter in score-only or lift-gated blocking mode
-                # - apply drift guard cooldown adjustments (tighten filters + reduce size)
-                try:
-                    if isinstance(market_data, dict):
-                        market_data["ml_blocking_allowed"] = bool(getattr(self, "_ml_blocking_allowed", False))
-                except Exception as e:
-                    logger.warning(f"Critical path error: {e}", exc_info=True)
-
                 # Generate signals (or skip if no new bar / stale data)
                 signals = []
                 if _stale_guard_skip:
@@ -548,7 +539,7 @@ class ServiceLoopMixin:
                         except Exception as e:
                             logger.warning(f"Regime snapshot failed: {e}")
                         if self._signal_follower_mode:
-                            # Follower: use streamlined path (skips ML/bandit)
+                            # Follower: use streamlined execution path.
                             await self._signal_handler.follower_execute(signal_obj)
                         else:
                             await self._signal_handler.process_signal(signal_obj, buffer_data=buffer_data)
@@ -576,12 +567,6 @@ class ServiceLoopMixin:
                     await self._sync_virtual_trades_with_broker()
                 except Exception as e:
                     logger.debug(f"Virtual trade broker sync failed (non-fatal): {e}")
-
-                # Refresh ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
-                try:
-                    self.signal_orchestrator.refresh_ml_lift()
-                except Exception as e:
-                    logger.debug(f"ML lift refresh failed (non-fatal): {e}")
 
                 # Send periodic dashboard (replaces status + heartbeat)
                 # Determine quiet reason (for observability) and capture diagnostics every cycle (for SQLite rollups).

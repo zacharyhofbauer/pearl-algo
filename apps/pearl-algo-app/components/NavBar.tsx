@@ -5,7 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useAgentStore, useChartStore } from '@/stores'
-import { derivePearlMode, deriveHeadline } from '@/types/pearl'
+import { deriveHeadline } from '@/types/pearl'
 import { formatMarketCountdown } from '@/lib/formatters'
 
 function truncateText(text: string, maxLength: number): string {
@@ -28,11 +28,9 @@ export default function NavBar() {
 
   const dashboardContext = useMemo(() => {
     if (!isDashboard || !agentState) return null
-    const hasAI = Boolean(agentState.ai_status)
     const isConnected = Boolean(agentState.running)
     const isMarketOpen = agentState.futures_market_open ?? true
 
-    const aiMode = derivePearlMode(agentState.ai_status || null, agentState.pearl_insights || null)
     const headline = deriveHeadline(
       agentState.pearl_feed || [],
       agentState.pearl_suggestion || null,
@@ -42,11 +40,7 @@ export default function NavBar() {
 
     let statusDotClass = ''
     if (!isMarketOpen) statusDotClass = 'market-closed'
-    else if (hasAI || isConnected) {
-      if (aiMode === 'live') statusDotClass = 'live'
-      else if (aiMode === 'shadow') statusDotClass = 'shadow'
-      else statusDotClass = 'connected'
-    }
+    else if (isConnected) statusDotClass = 'connected'
 
     let closedText = 'Market Closed'
     if (!isMarketOpen && marketStatus?.next_open) {

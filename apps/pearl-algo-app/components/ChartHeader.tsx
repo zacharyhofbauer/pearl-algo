@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useChartStore, useChartSettingsStore, type Timeframe } from '@/stores'
-import { useAIStatus } from '@/hooks/useAIStatus'
 import type { AgentState } from '@/stores/agentStore'
 import type { MarketStatus } from '@/stores/chartStore'
 import type { IChartApi } from 'lightweight-charts'
@@ -35,8 +34,6 @@ export default function ChartHeader({
   const [badgeTip, setBadgeTip] = useState<string | null>(null)
   const [showIndicatorsDropdown, setShowIndicatorsDropdown] = useState(false)
 
-  const aiStatus = useAIStatus(agentState?.ai_status ?? null)
-
   // Close indicators dropdown on outside click
   useEffect(() => {
     if (!showIndicatorsDropdown) return
@@ -61,8 +58,6 @@ export default function ChartHeader({
       confidence: Math.round(regime.confidence * 100),
     }
   }
-
-  const aiMode = aiStatus.aiMode
 
   // Compute last price + change for mobile price strip
   const priceInfo = useMemo(() => {
@@ -239,22 +234,16 @@ export default function ChartHeader({
               </span>
             )
           })()}
-          {/* Badge 4: OC (OpenClaw + AI mode) */}
+          {/* Badge 4: OC (OpenClaw service) */}
           {agentState && (() => {
-            const ocOk = true // OpenClaw runs on Mac gateway, always available
+            const ocOk = agentState?.openclaw_status?.status === 'online'
             let label: string, cls: string, tip: string
             if (!ocOk) {
               label = 'OC\u2193'; cls = 'error'
-              tip = 'OpenClaw node offline \u2014 AI unavailable'
-            } else if (aiMode === 'live') {
-              label = isCompactHeader ? 'OC\u00B7L' : 'OC\u00B7LIVE'; cls = 'live'
-              tip = 'OpenClaw online \u00B7 ML filter LIVE \u2014 blocking low-confidence signals'
-            } else if (aiMode === 'shadow') {
-              label = isCompactHeader ? 'OC\u00B7S' : 'OC\u00B7SHDW'; cls = 'shadow'
-              tip = 'OpenClaw online \u00B7 ML in shadow mode \u2014 observing signals, not blocking yet'
+              tip = 'OpenClaw node offline'
             } else {
               label = 'OC'; cls = 'ok'
-              tip = 'OpenClaw online \u00B7 AI/ML disabled'
+              tip = 'OpenClaw online'
             }
             return (
               <span className={`badge oc-ai-badge ${cls}`} role="button" tabIndex={0} title={tip}
@@ -299,14 +288,7 @@ export default function ChartHeader({
             {badgeTip === 'oc' && (
               <p><strong>OpenClaw</strong> \u2014 {agentState?.openclaw_status?.status === 'online'
                 ? `Online (port ${agentState?.openclaw_status?.port}). `
-                : 'Offline. '}{(() => {
-                const ai = (agentState as any)?.ai_status
-                const mode = ai?.ml_filter?.mode
-                return mode === 'shadow'
-                  ? 'ML filter in SHADOW \u2014 recording predictions, not blocking trades.'
-                  : mode === 'live' ? 'ML filter LIVE \u2014 actively blocking low-confidence signals.'
-                  : 'AI/ML disabled.'
-              })()}</p>
+                : 'Offline. '}Independent runtime service status only.</p>
             )}
             {badgeTip === 'data' && (
               <p><strong>Data Feed</strong> \u2014 {agentState?.data_fresh ? 'Fresh.' : 'STALE \u2014 market data not updating.'} {(() => {

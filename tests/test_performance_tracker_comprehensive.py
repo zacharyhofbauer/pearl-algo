@@ -511,24 +511,3 @@ class TestTrackExitSQLiteFeatures:
         tracker._sqlite_queue = mock_queue
         tracker.track_exit("sig1", exit_price=18010.0, exit_reason="tp_hit")
 
-    def test_ml_prediction_features(self, tracker, tmp_path):
-        rec = self._make_signal_with_extras(
-            win_probability=0.75,
-            pass_filter=True,
-        )
-        _write_signals(tmp_path, [rec])
-        tracker._sqlite_enabled = True
-        mock_queue = MagicMock()
-        tracker._sqlite_queue = mock_queue
-        tracker.track_exit("sig1", exit_price=18010.0, exit_reason="tp_hit")
-
-    def test_ml_confidence_level_mapping(self, tracker, tmp_path):
-        rec = self._make_signal_with_extras(
-            confidence_level="high",
-            win_probability=0.9,
-        )
-        _write_signals(tmp_path, [rec])
-        tracker._sqlite_enabled = True
-        mock_queue = MagicMock()
-        tracker._sqlite_queue = mock_queue
-        tracker.track_exit("sig1", exit_price=18010.0, exit_reason="tp_hit")

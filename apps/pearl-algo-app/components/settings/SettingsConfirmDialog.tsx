@@ -1,21 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import { formatSettingsValue, getNestedValue } from '@/lib/settings'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 interface SettingsConfirmDialogProps {
   onClose: () => void
-}
-
-function getNestedValue(obj: Record<string, any> | null, path: string): any {
-  if (!obj) return undefined
-  const keys = path.split('.')
-  let current: any = obj
-  for (const key of keys) {
-    if (current == null || typeof current !== 'object') return undefined
-    current = current[key]
-  }
-  return current
 }
 
 export default function SettingsConfirmDialog({ onClose }: SettingsConfirmDialogProps) {
@@ -110,8 +100,6 @@ export default function SettingsConfirmDialog({ onClose }: SettingsConfirmDialog
   )
 }
 
-function formatValue(value: any): string {
-  if (value === null || value === undefined) return 'null'
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
+function formatValue(value: unknown): string {
+  return formatSettingsValue(value)
 }

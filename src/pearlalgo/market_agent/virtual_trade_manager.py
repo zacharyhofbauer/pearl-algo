@@ -3,7 +3,7 @@ Virtual Trade Manager
 
 Manages virtual trade exit processing -- detects when TP/SL is touched on
 active virtual trades and records the outcome across all tracking systems
-(performance tracker, circuit breaker, learning policies).
+(performance tracker and circuit breaker).
 
 Extracted from service.py for better code organization and testability.
 """

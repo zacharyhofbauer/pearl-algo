@@ -28,6 +28,7 @@ server_core_mod = server_mod  # server_core merged into server
 # Constants
 # ---------------------------------------------------------------------------
 VALID_API_KEY = "test-smoke-key-99999"
+OPERATOR_PASS = "test-smoke-operator-pass"
 
 # Minimal sample state that satisfies _read_state_safe / get_state
 SAMPLE_STATE: Dict[str, Any] = {
@@ -37,8 +38,6 @@ SAMPLE_STATE: Dict[str, Any] = {
     "data_fresh": True,
     "active_trades_count": 0,
     "active_trades_unrealized_pnl": 0.0,
-    "learning": {},
-    "learning_contextual": {},
 }
 
 SAMPLE_SIGNAL_ROWS: List[Dict[str, Any]] = [
@@ -139,6 +138,27 @@ def _patch_server_auth(state_dir):
         patch.object(server_mod, "_auth_enabled", True),
         patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
         patch.object(server_mod, "_operator_enabled", False),
+        patch.object(server_mod, "_data_provider", None),
+        patch.object(server_mod, "_data_provider_error", "mocked-away"),
+    ]
+    for p in patches:
+        p.start()
+    yield
+    for p in patches:
+        p.stop()
+
+
+@pytest.fixture()
+def _patch_server_auth_and_operator(state_dir):
+    """Patch server globals with read-only auth and operator auth enabled."""
+    patches = [
+        patch.object(server_mod, "_state_dir", state_dir),
+        patch.object(server_mod, "_market", "NQ"),
+        patch.object(server_mod, "_auth_enabled", True),
+        patch.object(server_mod, "_api_keys", {VALID_API_KEY}),
+        patch.object(server_mod, "_operator_enabled", True),
+        patch.object(server_mod, "_operator_passphrase", OPERATOR_PASS),
+        patch.object(server_mod, "_operator_failures", {}),
         patch.object(server_mod, "_data_provider", None),
         patch.object(server_mod, "_data_provider_error", "mocked-away"),
     ]
@@ -323,3 +343,30 @@ class TestWebSocketEndpoint:
             # or it sends the state directly
             assert isinstance(data, dict)
             assert "running" in data or "type" in data
+
+
+@pytest.mark.e2e
+class TestOperatorBoundarySmoke:
+    """Minimal smoke checks for operator-only access boundaries."""
+
+    @pytest.mark.usefixtures("_patch_server_auth_and_operator")
+    def test_read_only_state_accepts_api_key_while_operator_ping_rejects_it(self, client):
+        state_resp = client.get("/api/state", headers={"X-API-Key": VALID_API_KEY})
+        assert state_resp.status_code == 200
+
+        operator_resp = client.get("/api/operator/ping", headers={"X-API-Key": VALID_API_KEY})
+        assert operator_resp.status_code == 403
+
+    @pytest.mark.usefixtures("_patch_server_auth_and_operator")
+    def test_operator_ping_accepts_operator_header(self, client):
+        resp = client.get("/api/operator/ping", headers={"X-PEARL-OPERATOR": OPERATOR_PASS})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    @pytest.mark.usefixtures("_patch_server_auth_and_operator")
+    def test_kill_switch_accepts_operator_header_and_writes_flag(self, client, state_dir):
+        server_mod._rate_limit_buckets.clear()
+        resp = client.post("/api/kill-switch", headers={"X-PEARL-OPERATOR": OPERATOR_PASS})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert (state_dir / "kill_request.flag").exists()

@@ -131,6 +131,27 @@ class TestTrackSignalGenerated:
         mock_sm.save_signal.assert_called_once()
 
 
+class TestUpdateSignalExecutionMetadata:
+    def test_updates_nested_signal_with_execution_ids(self, tmp_path: Path) -> None:
+        pt = _make_performance_tracker(tmp_path)
+        signal = _make_signal()
+        signal_id = pt.track_signal_generated(signal)
+
+        signal["_execution_status"] = "placed"
+        signal["_execution_order_id"] = "ORD-100"
+        signal["_execution_stop_order_id"] = "ORD-101"
+        signal["_execution_take_profit_order_id"] = "ORD-102"
+
+        pt.update_signal_execution_metadata(signal_id, signal)
+
+        record = json.loads(pt.signals_file.read_text(encoding="utf-8").strip())
+        nested = record["signal"]
+        assert nested["_execution_status"] == "placed"
+        assert nested["_execution_order_id"] == "ORD-100"
+        assert nested["_execution_stop_order_id"] == "ORD-101"
+        assert nested["_execution_take_profit_order_id"] == "ORD-102"
+
+
 # ===================================================================
 # track_exit – P&L calculations
 # ===================================================================

@@ -72,6 +72,7 @@ def _make_service(**overrides):
     # Data fetcher
     svc.data_fetcher = AsyncMock()
     svc.data_fetcher.fetch_startup_snapshot = AsyncMock(return_value=None)
+    svc.data_fetcher.close = AsyncMock()
 
     # Performance tracker
     svc.performance_tracker = MagicMock()
@@ -358,6 +359,30 @@ class TestStopNotificationQueue:
     async def test_stop_notification_queue_exception_caught(self):
         svc = _make_service(running=True, start_time=datetime.now(timezone.utc))
         svc.notification_queue.stop = AsyncMock(side_effect=RuntimeError("timeout"))
+        await svc.stop("test")
+        assert svc.running is False
+
+
+class TestStopDataFetcherCleanup:
+    """Provider cleanup should happen during stop() so executor threads exit."""
+
+    @pytest.mark.asyncio
+    async def test_stop_closes_data_fetcher(self):
+        svc = _make_service(running=True, start_time=datetime.now(timezone.utc))
+        await svc.stop("test")
+        svc.data_fetcher.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_data_fetcher_close_exception_caught(self):
+        svc = _make_service(running=True, start_time=datetime.now(timezone.utc))
+        svc.data_fetcher.close = AsyncMock(side_effect=RuntimeError("provider busy"))
+        await svc.stop("test")
+        assert svc.running is False
+
+    @pytest.mark.asyncio
+    async def test_stop_data_fetcher_close_timeout_caught(self):
+        svc = _make_service(running=True, start_time=datetime.now(timezone.utc))
+        svc.data_fetcher.close = AsyncMock(side_effect=asyncio.TimeoutError)
         await svc.stop("test")
         assert svc.running is False
 

@@ -68,8 +68,7 @@ def _make_service_mock():
     svc._analysis_skip_count = 0
     svc._analysis_run_count = 0
 
-    # ML / follower
-    svc._ml_blocking_allowed = False
+    # Follower mode
     svc._signal_follower_mode = False
 
     # State / observability
@@ -118,7 +117,6 @@ def _make_service_mock():
 
     svc.audit_logger = MagicMock()
     svc.signal_orchestrator = MagicMock()
-    svc.signal_orchestrator.refresh_ml_lift = MagicMock()
 
     svc._signal_handler = MagicMock()
     svc._signal_handler.process_signal = AsyncMock()
@@ -695,34 +693,7 @@ class TestNewBarGating:
 
 
 # ===========================================================================
-# Tests: ML blocking injection (lines 399-400)
-# ===========================================================================
-
-class TestMLBlockingInjection:
-    """Lines 399-400: ml_blocking_allowed injection error is caught."""
-
-    @pytest.mark.asyncio
-    async def test_ml_blocking_injection_error_caught(self):
-        """Error injecting ml_blocking_allowed should be caught."""
-        svc = _make_service_mock()
-        svc._ml_blocking_allowed = False
-
-        # Make market_data a non-dict-like object to trigger the except
-        # Actually, we need to use a real dict but cause isinstance to fail
-        # Better: just verify normal path works
-        md = _make_market_data()
-
-        with patch("pearlalgo.utils.error_handler.ErrorHandler.is_connection_error_from_data", return_value=False):
-            svc.data_fetcher.fetch_latest_data = AsyncMock(return_value=md)
-            svc.strategy.analyze = MagicMock(return_value=[])
-
-            await _run_one_cycle(svc)
-
-        assert md.get("ml_blocking_allowed") is False
-
-
-# ===========================================================================
-# Tests: Stale guard skip / skip_analysis paths (lines 406, 409, 423)
+# Tests: Stale guard skip / skip_analysis paths
 # ===========================================================================
 
 class TestSignalGenerationPaths:
@@ -1030,23 +1001,6 @@ class TestPositionMonitorAndVirtualExits:
             await _run_one_cycle(svc)
 
         assert svc.cycle_count == 1
-
-    @pytest.mark.asyncio
-    async def test_ml_lift_refresh_error_caught(self):
-        """signal_orchestrator.refresh_ml_lift exception should be caught."""
-        svc = _make_service_mock()
-        svc.signal_orchestrator.refresh_ml_lift = MagicMock(side_effect=RuntimeError("ML error"))
-
-        md = _make_market_data()
-
-        with patch("pearlalgo.utils.error_handler.ErrorHandler.is_connection_error_from_data", return_value=False):
-            svc.data_fetcher.fetch_latest_data = AsyncMock(return_value=md)
-            svc.strategy.analyze = MagicMock(return_value=[])
-
-            await _run_one_cycle(svc)
-
-        assert svc.cycle_count == 1
-
 
 # ===========================================================================
 # Tests: scan_finished event failure (lines 615-616)

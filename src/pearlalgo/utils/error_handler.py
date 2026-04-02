@@ -190,7 +190,7 @@ class ErrorHandler:
             level: Log level - "debug", "info", "warning", or "error"
             extra: Optional extra context for structured logging
             category: Optional category for filtering (e.g., "sqlite", "telegram",
-                      "ml_filter", "serialization", "file_io")
+                      "serialization", "file_io")
         """
         message = f"{operation} failed: {error}"
         extra = extra or {}
@@ -249,7 +249,6 @@ class ErrorHandler:
             logger.debug(f"{operation} failed: {error}", extra=context)
 
         return error_info
-
 
 
 

@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from pearlalgo.execution.tradovate.utils import (
     tradovate_fills_to_trades as _raw_fills_to_trades,
@@ -95,6 +95,152 @@ def get_tradovate_state(state_dir: Path) -> tuple:
 # ---------------------------------------------------------------------------
 
 
+def _parse_signal_timestamp(row: Dict[str, Any], signal: Dict[str, Any]) -> Optional[datetime]:
+    """Return a comparable naive ET datetime for a signal row."""
+    from pearlalgo.utils.paths import parse_trade_timestamp
+
+    for candidate in (
+        row.get("entry_time"),
+        row.get("timestamp"),
+        signal.get("entry_time"),
+        signal.get("timestamp"),
+    ):
+        if not candidate:
+            continue
+        try:
+            return parse_trade_timestamp(str(candidate))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _load_pearl_execution_order_ids(state_dir: Path) -> Set[str]:
+    """Load PEARL-owned Tradovate order IDs persisted in ``signals.jsonl``."""
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return set()
+
+    order_ids: Set[str] = set()
+    keys = (
+        "_execution_order_id",
+        "_execution_stop_order_id",
+        "_execution_take_profit_order_id",
+    )
+
+    try:
+        with signals_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line.strip())
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                sources = [row]
+                signal = row.get("signal")
+                if isinstance(signal, dict):
+                    sources.append(signal)
+                for source in sources:
+                    for key in keys:
+                        value = source.get(key)
+                        if value not in (None, ""):
+                            order_ids.add(str(value))
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+
+    return order_ids
+
+
+def _load_signal_trade_candidates(state_dir: Path) -> List[Dict[str, Any]]:
+    """Load signal rows suitable for heuristic PEARL trade attribution."""
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    try:
+        with signals_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line.strip())
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+                signal = row.get("signal")
+                if not isinstance(signal, dict):
+                    continue
+
+                direction = str(signal.get("direction") or "").lower()
+                if direction not in ("long", "short"):
+                    continue
+
+                try:
+                    entry_price = float(signal.get("entry_price"))
+                    position_size = int(signal.get("position_size") or 1)
+                except (TypeError, ValueError):
+                    continue
+
+                signal_time = _parse_signal_timestamp(row, signal)
+                if signal_time is None:
+                    continue
+
+                candidates.append({
+                    "signal_id": str(row.get("signal_id") or ""),
+                    "direction": direction,
+                    "entry_price": entry_price,
+                    "position_size": position_size,
+                    "timestamp": signal_time,
+                })
+    except Exception as e:
+        logger.debug(f"Non-critical: {e}")
+
+    return candidates
+
+
+def _attribute_trades_to_pearl_signals(
+    trades: List[Dict[str, Any]],
+    signal_candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Match paired trades back to PEARL signals when explicit order IDs are absent."""
+    if not trades or not signal_candidates:
+        return []
+
+    from pearlalgo.utils.paths import parse_trade_timestamp
+
+    attributed: List[Dict[str, Any]] = []
+    remaining = list(signal_candidates)
+
+    for trade in trades:
+        try:
+            trade_time = parse_trade_timestamp(str(trade.get("entry_time") or ""))
+            trade_price = float(trade.get("entry_price") or 0.0)
+            trade_size = int(trade.get("position_size") or 0)
+        except (TypeError, ValueError):
+            continue
+
+        direction = str(trade.get("direction") or "").lower()
+        eligible = []
+        for idx, candidate in enumerate(remaining):
+            if candidate["direction"] != direction:
+                continue
+            if candidate["position_size"] != trade_size:
+                continue
+            price_delta = abs(candidate["entry_price"] - trade_price)
+            if price_delta > 2.0:
+                continue
+            time_delta = abs((candidate["timestamp"] - trade_time).total_seconds())
+            if time_delta > 180:
+                continue
+            eligible.append((time_delta, price_delta, idx))
+
+        if not eligible:
+            continue
+
+        _, _, best_idx = min(eligible)
+        attributed.append(trade)
+        remaining.pop(best_idx)
+
+    return attributed
+
+
 def get_paired_tradovate_trades(
     state_dir: Path,
     fills: Optional[List[Dict[str, Any]]] = None,
@@ -111,7 +257,20 @@ def get_paired_tradovate_trades(
             _, active_fills = get_tradovate_state(state_dir)
         else:
             active_fills = [normalize_fill(f) for f in active_fills]
-        return _raw_fills_to_trades(active_fills)
+
+        owned_order_ids = _load_pearl_execution_order_ids(state_dir)
+        if owned_order_ids:
+            active_fills = [
+                fill for fill in active_fills
+                if str(fill.get("order_id") or "") in owned_order_ids
+            ]
+            return _raw_fills_to_trades(active_fills)
+
+        paired = _raw_fills_to_trades(active_fills)
+        signal_candidates = _load_signal_trade_candidates(state_dir)
+        if signal_candidates:
+            return _attribute_trades_to_pearl_signals(paired, signal_candidates)
+        return paired
 
     # TTL of 10s is safe — fills arrive at most every 30s (cooldown_seconds).
     return cached(f"tv_paired_trades:{state_dir}", 10.0, _pair)

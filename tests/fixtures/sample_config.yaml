@@ -117,20 +117,6 @@ execution:
   max_daily_loss: 1000.0
   cooldown_seconds: 60
 
-learning:
-  enabled: true
-  mode: shadow
-  min_samples_per_type: 10
-  explore_rate: 0.1
-  decision_threshold: 0.3
-
-ml_filter:
-  enabled: true
-  mode: shadow
-  require_lift_to_block: true
-  lift_min_trades: 50
-  min_probability: 0.5
-
 storage:
   sqlite_enabled: false
 

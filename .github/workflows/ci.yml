@@ -87,6 +87,10 @@ jobs:
         run: |
           python scripts/testing/check_doc_references.py
 
+      - name: Stale code audit (orphan allowlist)
+        run: |
+          python scripts/testing/report_orphan_modules.py --enforce
+
       - name: Security scan (Trivy - filesystem/dependencies)
         uses: aquasecurity/trivy-action@master
         with:
@@ -118,4 +122,3 @@ jobs:
           path: |
             coverage.xml
             docs/coverage-badge.svg
-

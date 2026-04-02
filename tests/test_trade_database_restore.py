@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pearlalgo.learning.trade_database import TradeDatabase
+from pearlalgo.storage.trade_database import TradeDatabase
 
 
 def test_trade_database_creates_runtime_schema(tmp_path: Path) -> None:

@@ -2,13 +2,12 @@
 
 import React, { useMemo } from 'react'
 import type { RecentSignalEvent } from '@/components/TradeDockPanel'
-import type { PearlFeedMessage, SignalRejections, LastSignalDecision, AgentState } from '@/stores/agentStore'
+import type { PearlFeedMessage, SignalRejections, AgentState } from '@/stores/agentStore'
 
 interface SystemLogsPanelProps {
   recentSignals: RecentSignalEvent[]
   pearlFeed: PearlFeedMessage[]
   signalRejections: SignalRejections | null
-  lastSignalDecision: LastSignalDecision | null
   agentState?: AgentState | null
 }
 
@@ -106,16 +105,6 @@ function getSystemStatusRows(agentState: AgentState | null | undefined): StatusR
     text: ocStatus === 'online' ? 'Online' : 'Offline',
   })
 
-  // ML Filter
-  const mlMode = agentState.ai_status?.ml_filter?.mode
-  if (mlMode === 'live') {
-    rows.push({ label: 'ML Filter', color: '#4caf50', text: 'Live' })
-  } else if (mlMode === 'shadow') {
-    rows.push({ label: 'ML Filter', color: '#ffb74d', text: 'Shadow' })
-  } else {
-    rows.push({ label: 'ML Filter', color: '#666', text: mlMode || 'Off' })
-  }
-
   return rows
 }
 
@@ -123,7 +112,6 @@ export default function SystemLogsPanel({
   recentSignals,
   pearlFeed,
   signalRejections,
-  lastSignalDecision,
   agentState,
 }: SystemLogsPanelProps) {
   const entries = useMemo<LogEntry[]>(() => {
@@ -170,21 +158,11 @@ export default function SystemLogsPanel({
       })
     }
 
-    // Last signal decision (if it's a skip)
-    if (lastSignalDecision && lastSignalDecision.action === 'skip') {
-      const time = parseTime(lastSignalDecision.timestamp)
-      logs.push({
-        time,
-        type: 'reject',
-        message: `ML skip: ${lastSignalDecision.signal_type} (p=${lastSignalDecision.ml_probability.toFixed(2)}) — ${lastSignalDecision.reason}`,
-      })
-    }
-
     // Sort reverse chronological
     logs.sort((a, b) => b.time.getTime() - a.time.getTime())
 
     return logs
-  }, [recentSignals, pearlFeed, lastSignalDecision])
+  }, [recentSignals, pearlFeed])
 
   const statusRows = useMemo(() => getSystemStatusRows(agentState), [agentState])
 

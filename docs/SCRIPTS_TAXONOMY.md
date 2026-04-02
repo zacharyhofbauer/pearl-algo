@@ -39,8 +39,6 @@ Backtesting scripts for strategy validation on historical data.
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
   - **Usage**: `python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/MNQ/signals.jsonl`
-- `train_ml_filter.py`
-  - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
 
 ## Testing (`scripts/testing/`)
 

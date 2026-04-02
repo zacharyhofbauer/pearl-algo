@@ -7,14 +7,11 @@
 
 import type {
   AgentState,
-  AIStatus,
   PearlFeedMessage,
   PearlSuggestion,
   PearlInsights,
   PearlAIHeartbeat,
   PearlAIDebugInfo,
-  ShadowCounters,
-  MLFilterPerformance,
 } from '@/stores'
 
 // ============================================================================
@@ -68,12 +65,6 @@ export interface PearlPanelData {
   feed: PearlFeedMessage[]
   // Current suggestion (if any)
   suggestion: PearlSuggestion | null
-  // AI status for mode pills
-  aiStatus: AIStatus | null
-  // Shadow counters
-  shadowCounters: ShadowCounters | null
-  // ML filter performance
-  mlFilterPerformance: MLFilterPerformance | null
   // Full insights (for shadow metrics history)
   insights: PearlInsights | null
   // Debug/heartbeat info
@@ -158,22 +149,12 @@ export interface PearlChatResponse {
 // ============================================================================
 
 /**
- * Derive the overall Pearl mode from AI status
+ * Derive the overall Pearl mode from Pearl insights only.
  */
-export function derivePearlMode(aiStatus: AIStatus | null, insights: PearlInsights | null): PearlMode {
+export function derivePearlMode(insights: PearlInsights | null): PearlMode {
   const shadowMetrics = insights?.shadow_metrics
   
-  // Check for live mode first (live takes precedence over shadow)
-  if (aiStatus?.bandit_mode === 'live') return 'live'
-  if (aiStatus?.contextual_mode === 'live') return 'live'
-  if (aiStatus?.ml_filter?.enabled && aiStatus.ml_filter.mode === 'live') return 'live'
-  
-  // Check for shadow mode
   if (shadowMetrics?.mode === 'shadow') return 'shadow'
-  if (aiStatus?.bandit_mode === 'shadow') return 'shadow'
-  if (aiStatus?.contextual_mode === 'shadow') return 'shadow'
-  if (aiStatus?.ml_filter?.enabled && aiStatus.ml_filter.mode === 'shadow') return 'shadow'
-  
   return 'off'
 }
 
@@ -231,7 +212,6 @@ export function deriveTradingContext(agentState: AgentState | null): TradingCont
     }
   }
   
-  const lastDecision = agentState.last_signal_decision
   const regimeRaw = agentState.market_regime?.regime
   const regimeTrimmed = typeof regimeRaw === 'string' ? regimeRaw.trim() : ''
   const regimeNorm = regimeTrimmed.toLowerCase()
@@ -255,9 +235,7 @@ export function deriveTradingContext(agentState: AgentState | null): TradingCont
     allowedDirection,
     marketOpen: typeof agentState.futures_market_open === 'boolean' ? agentState.futures_market_open : null,
     dataFresh: typeof agentState.data_fresh === 'boolean' ? agentState.data_fresh : null,
-    lastDecision: lastDecision?.action
-      ? { action: lastDecision.action.toUpperCase(), timestamp: lastDecision.timestamp }
-      : null,
+    lastDecision: null,
   }
 }
 
@@ -285,7 +263,7 @@ export function derivePearlStatus(
     }
   }
   
-  const mode = derivePearlMode(agentState?.ai_status || null, agentState?.pearl_insights || null)
+  const mode = derivePearlMode(agentState?.pearl_insights || null)
   
   return {
     mode,
@@ -316,9 +294,6 @@ export function createPearlPanelData(
     tradingContext: deriveTradingContext(agentState),
     feed,
     suggestion: suggestion || insights?.shadow_metrics?.active_suggestion || null,
-    aiStatus: agentState?.ai_status || null,
-    shadowCounters: agentState?.shadow_counters || null,
-    mlFilterPerformance: agentState?.ml_filter_performance || null,
     insights,
     heartbeat,
     debug,

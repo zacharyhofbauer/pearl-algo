@@ -35,18 +35,9 @@ def mock_deps(tmp_path):
     notification_queue = AsyncMock()
     notification_queue.enqueue_raw_message = AsyncMock()
 
-    shadow_tracker = MagicMock()
-    shadow_tracker.mark_followed = MagicMock()
-    shadow_tracker.mark_dismissed = MagicMock()
-
-    bandit_policy = MagicMock()
-    bandit_policy.record_outcome = MagicMock()
-
     return {
         "state_manager": state_manager,
         "notification_queue": notification_queue,
-        "shadow_tracker": shadow_tracker,
-        "bandit_policy": bandit_policy,
         "get_status_snapshot": lambda: {"daily_pnl": 100, "wins_today": 3, "losses_today": 1},
     }
 
@@ -54,13 +45,6 @@ def mock_deps(tmp_path):
 @pytest.fixture
 def handler(mock_deps):
     """Create an OperatorHandler with default dependencies."""
-    return OperatorHandler(**mock_deps)
-
-
-@pytest.fixture
-def handler_no_bandit(mock_deps):
-    """Create an OperatorHandler without a bandit policy."""
-    mock_deps["bandit_policy"] = None
     return OperatorHandler(**mock_deps)
 
 
@@ -94,8 +78,8 @@ class TestProcessGradeRequest:
     """Tests for process_grade_request()."""
 
     @pytest.mark.asyncio
-    async def test_valid_grade_applies_to_learning(self, handler, tmp_path):
-        """Should record outcome with bandit_policy for a valid grade."""
+    async def test_valid_grade_logs_feedback(self, handler, tmp_path):
+        """Should log grade feedback and send notification."""
         grade_file = _write_grade_file(tmp_path, {
             "signal_id": "sig-001",
             "signal_type": "momentum",
@@ -105,16 +89,11 @@ class TestProcessGradeRequest:
 
         await handler.process_grade_request(grade_file)
 
-        handler.bandit_policy.record_outcome.assert_called_once_with(
-            signal_id="sig-001",
-            signal_type="momentum",
-            is_win=True,
-            pnl=250.0,
-        )
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_sends_applied_notification(self, handler, tmp_path):
-        """Should send 'Grade Applied' notification when learning is updated."""
+    async def test_sends_logged_notification(self, handler, tmp_path):
+        """Should send 'Grade Logged' notification."""
         grade_file = _write_grade_file(tmp_path, {
             "signal_id": "sig-001",
             "signal_type": "momentum",
@@ -125,7 +104,7 @@ class TestProcessGradeRequest:
 
         handler.notification_queue.enqueue_raw_message.assert_awaited_once()
         call_args = handler.notification_queue.enqueue_raw_message.call_args
-        assert "Grade Applied" in call_args[0][0] or "Grade Applied" in str(call_args)
+        assert "Grade Logged" in call_args[0][0] or "Grade Logged" in str(call_args)
 
     @pytest.mark.asyncio
     async def test_cleanup_removes_grade_file(self, handler, tmp_path):
@@ -152,8 +131,8 @@ class TestProcessGradeRequest:
         assert not grade_file.exists()
 
     @pytest.mark.asyncio
-    async def test_already_exited_skips_learning(self, handler, tmp_path):
-        """Should not apply to learning if signal is already exited and force=False."""
+    async def test_already_exited_still_logs(self, handler, tmp_path):
+        """Should still log grade even if signal is already exited."""
         _write_signals_file(handler.state_manager.signals_file, [
             {"signal_id": "sig-001", "status": "exited"},
         ])
@@ -170,7 +149,7 @@ class TestProcessGradeRequest:
 
         await handler.process_grade_request(grade_file)
 
-        handler.bandit_policy.record_outcome.assert_not_called()
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_already_exited_sends_logged_notification(self, handler, tmp_path):
@@ -196,8 +175,8 @@ class TestProcessGradeRequest:
         assert "Grade Logged" in call_args[0][0] or "Grade Logged" in str(call_args)
 
     @pytest.mark.asyncio
-    async def test_force_applies_even_if_exited(self, handler, tmp_path):
-        """Should apply to learning when force=True, even for exited signals."""
+    async def test_force_flag_still_logs(self, handler, tmp_path):
+        """Should log grade with force=True."""
         _write_signals_file(handler.state_manager.signals_file, [
             {"signal_id": "sig-001", "status": "exited"},
         ])
@@ -212,31 +191,26 @@ class TestProcessGradeRequest:
 
         await handler.process_grade_request(grade_file)
 
-        handler.bandit_policy.record_outcome.assert_called_once_with(
-            signal_id="sig-001",
-            signal_type="momentum",
-            is_win=False,
-            pnl=-100.0,
-        )
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_no_bandit_policy_still_sends_not_applied(self, handler_no_bandit, tmp_path):
-        """Should send logged notification when bandit_policy is None."""
+    async def test_grade_always_sends_logged(self, handler, tmp_path):
+        """Should send 'Grade Logged' notification."""
         grade_file = _write_grade_file(tmp_path, {
             "signal_id": "sig-001",
             "signal_type": "test",
             "is_win": True,
         })
 
-        await handler_no_bandit.process_grade_request(grade_file)
+        await handler.process_grade_request(grade_file)
 
-        handler_no_bandit.notification_queue.enqueue_raw_message.assert_awaited_once()
-        call_args = handler_no_bandit.notification_queue.enqueue_raw_message.call_args
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
+        call_args = handler.notification_queue.enqueue_raw_message.call_args
         assert "Grade Logged" in call_args[0][0] or "Grade Logged" in str(call_args)
 
     @pytest.mark.asyncio
     async def test_feedback_file_update(self, handler, tmp_path):
-        """Should update feedback.jsonl with applied_to_learning flag."""
+        """Should update feedback.jsonl with processed flag."""
         fb_file = _write_feedback_file(tmp_path, [
             {"signal_id": "sig-001", "feedback": "good"},
             {"signal_id": "sig-002", "feedback": "bad"},
@@ -256,8 +230,8 @@ class TestProcessGradeRequest:
 
         updated = [r for r in records if r.get("signal_id") == "sig-001"]
         assert len(updated) == 1
-        assert updated[0]["applied_to_learning"] is True
-        assert "applied_at" in updated[0]
+        assert updated[0]["processed"] is True
+        assert "processed_at" in updated[0]
 
     @pytest.mark.asyncio
     async def test_default_values_for_missing_fields(self, handler, tmp_path):
@@ -268,16 +242,11 @@ class TestProcessGradeRequest:
 
         await handler.process_grade_request(grade_file)
 
-        handler.bandit_policy.record_outcome.assert_called_once_with(
-            signal_id="sig-partial",
-            signal_type="unknown",
-            is_win=False,
-            pnl=0.0,
-        )
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_signal_not_found_in_signals_file(self, handler, tmp_path):
-        """Should treat unknown signals as not-exited and apply grade."""
+        """Should treat unknown signals as not-exited and log grade."""
         _write_signals_file(handler.state_manager.signals_file, [
             {"signal_id": "sig-other", "status": "active"},
         ])
@@ -290,7 +259,7 @@ class TestProcessGradeRequest:
 
         await handler.process_grade_request(grade_file)
 
-        handler.bandit_policy.record_outcome.assert_called_once()
+        handler.notification_queue.enqueue_raw_message.assert_awaited_once()
 
 
 # =========================================================================
@@ -305,8 +274,6 @@ class TestProcessOperatorRequests:
     async def test_noop_when_dir_does_not_exist(self, handler, tmp_path):
         """Should return silently if operator_requests dir doesn't exist."""
         await handler.process_operator_requests(tmp_path)
-        handler.shadow_tracker.mark_followed.assert_not_called()
-        handler.shadow_tracker.mark_dismissed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_noop_when_dir_is_empty(self, handler, tmp_path):
@@ -315,12 +282,10 @@ class TestProcessOperatorRequests:
         req_dir.mkdir()
 
         await handler.process_operator_requests(tmp_path)
-        handler.shadow_tracker.mark_followed.assert_not_called()
-        handler.shadow_tracker.mark_dismissed.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_accept_feedback(self, handler, tmp_path):
-        """Should call mark_followed for accept action."""
+    async def test_accept_feedback_cleans_up(self, handler, tmp_path):
+        """Should process accept action and clean up file."""
         req_dir = tmp_path / "operator_requests"
         req_dir.mkdir()
 
@@ -329,17 +294,16 @@ class TestProcessOperatorRequests:
             "action": "accept",
             "suggestion_id": "sug-001",
         }
-        (req_dir / "pearl_suggestion_feedback_001.json").write_text(json.dumps(fb))
+        fp = req_dir / "pearl_suggestion_feedback_001.json"
+        fp.write_text(json.dumps(fb))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_followed.assert_called_once()
-        call_args = handler.shadow_tracker.mark_followed.call_args
-        assert call_args[0][0] == "sug-001"
+        assert not fp.exists()
 
     @pytest.mark.asyncio
-    async def test_dismiss_feedback(self, handler, tmp_path):
-        """Should call mark_dismissed for dismiss action."""
+    async def test_dismiss_feedback_cleans_up(self, handler, tmp_path):
+        """Should process dismiss action and clean up file."""
         req_dir = tmp_path / "operator_requests"
         req_dir.mkdir()
 
@@ -348,13 +312,12 @@ class TestProcessOperatorRequests:
             "action": "dismiss",
             "suggestion_id": "sug-002",
         }
-        (req_dir / "pearl_suggestion_feedback_002.json").write_text(json.dumps(fb))
+        fp = req_dir / "pearl_suggestion_feedback_002.json"
+        fp.write_text(json.dumps(fb))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_dismissed.assert_called_once()
-        call_args = handler.shadow_tracker.mark_dismissed.call_args
-        assert call_args[0][0] == "sug-002"
+        assert not fp.exists()
 
     @pytest.mark.asyncio
     async def test_invalid_action_is_ignored(self, handler, tmp_path):
@@ -367,12 +330,12 @@ class TestProcessOperatorRequests:
             "action": "upvote",
             "suggestion_id": "sug-003",
         }
-        (req_dir / "pearl_suggestion_feedback_003.json").write_text(json.dumps(fb))
+        fp = req_dir / "pearl_suggestion_feedback_003.json"
+        fp.write_text(json.dumps(fb))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_followed.assert_not_called()
-        handler.shadow_tracker.mark_dismissed.assert_not_called()
+        assert not fp.exists()
 
     @pytest.mark.asyncio
     async def test_missing_fields_skipped(self, handler, tmp_path):
@@ -382,16 +345,18 @@ class TestProcessOperatorRequests:
 
         # Missing suggestion_id
         fb1 = {"type": "pearl_suggestion_feedback", "action": "accept"}
-        (req_dir / "pearl_suggestion_feedback_001.json").write_text(json.dumps(fb1))
+        fp1 = req_dir / "pearl_suggestion_feedback_001.json"
+        fp1.write_text(json.dumps(fb1))
 
         # Missing action
         fb2 = {"type": "pearl_suggestion_feedback", "suggestion_id": "sug-004"}
-        (req_dir / "pearl_suggestion_feedback_002.json").write_text(json.dumps(fb2))
+        fp2 = req_dir / "pearl_suggestion_feedback_002.json"
+        fp2.write_text(json.dumps(fb2))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_followed.assert_not_called()
-        handler.shadow_tracker.mark_dismissed.assert_not_called()
+        assert not fp1.exists()
+        assert not fp2.exists()
 
     @pytest.mark.asyncio
     async def test_wrong_type_skipped(self, handler, tmp_path):
@@ -404,11 +369,12 @@ class TestProcessOperatorRequests:
             "action": "accept",
             "suggestion_id": "sug-005",
         }
-        (req_dir / "pearl_suggestion_feedback_005.json").write_text(json.dumps(fb))
+        fp = req_dir / "pearl_suggestion_feedback_005.json"
+        fp.write_text(json.dumps(fb))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_followed.assert_not_called()
+        assert not fp.exists()
 
     @pytest.mark.asyncio
     async def test_file_cleanup_after_processing(self, handler, tmp_path):
@@ -429,65 +395,27 @@ class TestProcessOperatorRequests:
         assert not fp.exists()
 
     @pytest.mark.asyncio
-    async def test_file_cleanup_even_on_error(self, handler, tmp_path):
-        """Should still clean up file when mark_followed raises."""
-        req_dir = tmp_path / "operator_requests"
-        req_dir.mkdir()
-
-        handler.shadow_tracker.mark_followed.side_effect = RuntimeError("tracker error")
-
-        fb = {
-            "type": "pearl_suggestion_feedback",
-            "action": "accept",
-            "suggestion_id": "sug-err",
-        }
-        fp = req_dir / "pearl_suggestion_feedback_err.json"
-        fp.write_text(json.dumps(fb))
-
-        await handler.process_operator_requests(tmp_path)
-
-        # File should still be cleaned up despite the error
-        assert not fp.exists()
-
-    @pytest.mark.asyncio
     async def test_multiple_files_processed(self, handler, tmp_path):
         """Should process multiple feedback files in one call."""
         req_dir = tmp_path / "operator_requests"
         req_dir.mkdir()
 
+        files = []
         for i in range(5):
             fb = {
                 "type": "pearl_suggestion_feedback",
                 "action": "accept" if i % 2 == 0 else "dismiss",
                 "suggestion_id": f"sug-batch-{i}",
             }
-            (req_dir / f"pearl_suggestion_feedback_{i:03d}.json").write_text(json.dumps(fb))
+            fp = req_dir / f"pearl_suggestion_feedback_{i:03d}.json"
+            fp.write_text(json.dumps(fb))
+            files.append(fp)
 
         await handler.process_operator_requests(tmp_path)
 
-        # 3 accepts (0,2,4), 2 dismisses (1,3)
-        assert handler.shadow_tracker.mark_followed.call_count == 3
-        assert handler.shadow_tracker.mark_dismissed.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_shadow_context_includes_snapshot(self, handler, tmp_path):
-        """Should pass daily snapshot context to shadow_tracker calls."""
-        req_dir = tmp_path / "operator_requests"
-        req_dir.mkdir()
-
-        fb = {
-            "type": "pearl_suggestion_feedback",
-            "action": "accept",
-            "suggestion_id": "sug-ctx",
-        }
-        (req_dir / "pearl_suggestion_feedback_ctx.json").write_text(json.dumps(fb))
-
-        await handler.process_operator_requests(tmp_path)
-
-        call_args = handler.shadow_tracker.mark_followed.call_args
-        context = call_args[0][1]
-        assert "daily_pnl" in context
-        assert context["daily_pnl"] == 100
+        # All files should be cleaned up
+        for fp in files:
+            assert not fp.exists()
 
     @pytest.mark.asyncio
     async def test_non_matching_filenames_ignored(self, handler, tmp_path):
@@ -501,15 +429,17 @@ class TestProcessOperatorRequests:
             "action": "accept",
             "suggestion_id": "sug-bad-name",
         }
-        (req_dir / "other_request.json").write_text(json.dumps(fb))
+        fp = req_dir / "other_request.json"
+        fp.write_text(json.dumps(fb))
 
         await handler.process_operator_requests(tmp_path)
 
-        handler.shadow_tracker.mark_followed.assert_not_called()
+        # Non-matching file should NOT be cleaned up
+        assert fp.exists()
 
     @pytest.mark.asyncio
-    async def test_status_snapshot_failure_uses_empty(self, mock_deps, tmp_path):
-        """Should use empty context if _get_status_snapshot raises."""
+    async def test_status_snapshot_failure_still_processes(self, mock_deps, tmp_path):
+        """Should still process requests if _get_status_snapshot raises."""
         mock_deps["get_status_snapshot"] = MagicMock(side_effect=RuntimeError("snap fail"))
         h = OperatorHandler(**mock_deps)
 
@@ -521,11 +451,10 @@ class TestProcessOperatorRequests:
             "action": "accept",
             "suggestion_id": "sug-snap-fail",
         }
-        (req_dir / "pearl_suggestion_feedback_snap.json").write_text(json.dumps(fb))
+        fp = req_dir / "pearl_suggestion_feedback_snap.json"
+        fp.write_text(json.dumps(fb))
 
         await h.process_operator_requests(tmp_path)
 
-        # Should still succeed with empty context
-        h.shadow_tracker.mark_followed.assert_called_once()
-        call_context = h.shadow_tracker.mark_followed.call_args[0][1]
-        assert call_context["daily_pnl"] == 0
+        # Should still succeed and clean up the file
+        assert not fp.exists()

@@ -319,8 +319,8 @@ class StateBuilder:
         # ==========================================================================
         # ATS (Automated Trading System) status - for Telegram commands
         # ==========================================================================
-        # Persist execution and learning status so /arm, /positions, /policy commands
-        # can read accurate state even when service is running.
+        # Persist execution status so /arm and /positions commands can read
+        # accurate state even when service is running.
         state["execution"] = (
             self.service.execution_adapter.get_status()
             if self.service.execution_adapter is not None
@@ -357,37 +357,13 @@ class StateBuilder:
             # Override virtual trade counts with real broker data
             state["active_trades_count"] = self.service._tradovate_account.get("position_count", 0)
             state["active_trades_unrealized_pnl"] = self.service._tradovate_account.get("open_pnl", 0.0)
-        # ML/Learning removed — OpenClaw handles ML externally.
-        state["learning"] = {"enabled": False, "mode": "disabled"}
-        state["learning_contextual"] = {"enabled": False, "mode": "disabled"}
-        state["ml_filter"] = {"enabled": False, "mode": "disabled"}
-
         # ==========================================================================
         # Notification queue stats (async Telegram delivery observability)
         # ==========================================================================
         state["notification_queue"] = self.service.notification_queue.get_stats()
 
-        # ==========================================================================
-        # Pearl AI Insights (shadow tracking for web app)
-        # ==========================================================================
-        try:
-            shadow_metrics = self.service.shadow_tracker.get_metrics()
-            active_suggestion = self.service.shadow_tracker.get_active_suggestion()
-
-            # Get AI chat status
-            ai_enabled = False  # AI chat removed (restructure Phase 2D)
-
-            state["pearl_insights"] = {
-                "current_suggestion": active_suggestion,
-                "shadow_metrics": shadow_metrics,
-                "ai_enabled": ai_enabled,
-                "last_insight_time": shadow_metrics.get("active_suggestion", {}).get("timestamp") if shadow_metrics.get("active_suggestion") else None,
-                "suggestions_today": shadow_metrics.get("total_suggestions", 0),
-                "accuracy_7d": shadow_metrics.get("accuracy_rate", 0),
-            }
-        except Exception as e:
-            logger.debug(f"Could not build pearl_insights: {e}")
-            state["pearl_insights"] = None
+        # Pearl AI Insights (shadow tracker removed in Phase 2D)
+        state["pearl_insights"] = None
 
         # ==========================================================================
         # Trading circuit breaker status (risk management observability)

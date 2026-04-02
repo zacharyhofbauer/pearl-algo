@@ -1,7 +1,7 @@
 """
 Signal Handler Module
 
-Handles signal processing, ML filtering, policy decisions, and execution.
+Handles signal processing, circuit-breaker checks, and execution.
 Extracted from service.py for better code organization.
 """
 
@@ -198,16 +198,26 @@ class SignalHandler:
                         f"signal {str(signal_id)[:16]}: {e}"
                     )
 
+            # ==========================================================================
+            # EXECUTION: Place bracket order if execution adapter is enabled + armed
+            # ==========================================================================
+            if self.execution_adapter is not None:
+                await self._execute_signal(signal, policy_decision=None)
+                self.performance_tracker.update_signal_execution_metadata(signal_id, signal)
+
+                execution_status = signal.get("_execution_status", "")
+                if execution_status not in ("placed", "placed_no_id"):
+                    logger.info(
+                        f"process_signal: skipping virtual entry record — "
+                        f"execution_status={execution_status!r} (not placed)"
+                    )
+                    return
+
             # Virtual entry: enter immediately at the signal's entry price
             entry_price = self._track_virtual_entry(signal, signal_id, preserve_full_signal=True)
 
             # Audit: trade entered
             self._log_trade_entry(signal_id, signal, entry_price, "virtual")
-
-            # ==========================================================================
-            # EXECUTION: Place bracket order if execution adapter is enabled + armed
-            # ==========================================================================
-            await self._execute_signal(signal, policy_decision=None)
 
             # Queue entry alert to Telegram (non-blocking)
             await self._queue_entry_notification(signal, signal_id, entry_price, buffer_data)
@@ -221,8 +231,7 @@ class SignalHandler:
     async def follower_execute(self, signal: Dict) -> None:
         """Streamlined execution path for signal forwarding (Tradovate Paper follower).
 
-        Skips ML filter, bandit policy, and contextual policy since these are
-        IBKR Virtual-specific. Only runs: circuit breaker -> position sizing ->
+        Uses the streamlined follower path. Only runs: circuit breaker -> position sizing ->
         tracking -> virtual entry -> execution -> notification.
 
         Serialized via _execution_semaphore to prevent signal storms: concurrent
@@ -257,6 +266,7 @@ class SignalHandler:
                 # Previously virtual entry was recorded before execution, causing trades.db
                 # to fill with phantom entries even when broker rejected the order.
                 await self._execute_signal(signal, policy_decision=None)
+                self.performance_tracker.update_signal_execution_metadata(signal_id, signal)
 
                 execution_status = signal.get("_execution_status", "")
                 if execution_status != "placed":
@@ -632,6 +642,8 @@ class SignalHandler:
         signal["_execution_status"] = execution_status
         if execution_result:
             signal["_execution_order_id"] = execution_result.parent_order_id
+            signal["_execution_stop_order_id"] = execution_result.stop_order_id
+            signal["_execution_take_profit_order_id"] = execution_result.take_profit_order_id
 
     async def _enforce_tradovate_protection_guard(self, signal: Dict) -> bool:
         """

@@ -59,21 +59,6 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
-# AI shadow tracker removed (restructure Phase 2D) — stubs kept because
-# _map_suggestion_type and _check_proactive_suggestions reference them.
-def get_shadow_tracker():
-    """No-op stub: AI shadow tracker was removed."""
-    return None
-
-class SuggestionType:
-    """No-op stub: AI suggestion types were removed."""
-    RISK_WARNING = "risk_warning"
-    STRATEGY_HINT = "strategy_hint"
-    RISK_ALERT = "risk_alert"
-    PATTERN_INSIGHT = "pattern_insight"
-    SESSION_ADVICE = "session_advice"
-    DIRECTION_BIAS = "direction_bias"
-    OPPORTUNITY = "opportunity"
 from pearlalgo.market_agent.audit_logger import AuditLogger, AuditEventType
 from pearlalgo.market_agent.scheduled_tasks import ScheduledTasks
 from pearlalgo.market_agent.operator_handler import OperatorHandler
@@ -110,7 +95,7 @@ except ImportError:
     TradovateConfig = None  # type: ignore
 
 try:
-    from pearlalgo.learning.trade_database import TradeDatabase
+    from pearlalgo.storage.trade_database import TradeDatabase
     TRADE_DB_AVAILABLE = True
 except Exception:
     TRADE_DB_AVAILABLE = False
@@ -285,8 +270,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 f"mode={cb_mode}, "
                 f"max_consecutive_losses={self.trading_circuit_breaker.config.max_consecutive_losses}, "
                 f"max_session_drawdown=${self.trading_circuit_breaker.config.max_session_drawdown}, "
-                f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}, "
-                f"direction_gating={self.trading_circuit_breaker.config.enable_direction_gating}"
+                f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}"
             )
             # Hydrate daily P&L from DB so restart does not reset the daily loss counter
             self.trading_circuit_breaker.hydrate_daily_pnl()
@@ -365,7 +349,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
         # ==========================================================================
-        # ML/Learning removed — OpenClaw handles ML externally.
+        # Strategy execution is intentionally rule-based here.
 
         # ==========================================================================
         # AUTO-FLAT (Virtual trades) - Daily + Friday/Weekend safety
@@ -502,8 +486,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # Initialize Pearl suggestion engine
         self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_manager.state_dir))
 
-        # Shadow tracker (stub — AI shadow tracker was removed in Phase 2D)
-        self.shadow_tracker = get_shadow_tracker()
 
         # ------------------------------------------------------------------
         # Extracted sub-modules (Phase 3: Arch-1B decomposition)
@@ -520,7 +502,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self.operator_handler = OperatorHandler(
             state_manager=self.state_manager,
             notification_queue=self.notification_queue,
-            shadow_tracker=self.shadow_tracker,
             get_status_snapshot=lambda: getattr(self, "_get_status_snapshot", lambda: {})(),
         )
 
@@ -739,11 +720,11 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             self.last_signal_id_prefix = sh.last_signal_id_prefix
 
     # -- DELETED: ~350-line inline _process_signal method --
-    # All signal processing logic (circuit breaker, ML filter, ML sizing,
-    # performance tracking, bandit/contextual policy, execution, notifications)
+    # All signal processing logic (circuit breaker, sizing,
+    # performance tracking, execution, notifications)
     # now lives in signal_handler.py::SignalHandler.process_signal().
     # Call sites updated to use self._signal_handler.process_signal() directly.
-    # Helper methods below (_compute_base_position_size, _apply_ml_opportunity_sizing)
+    # Helper methods below (_compute_base_position_size)
     # were only called from _process_signal but are kept for other code paths.
     # Note: _build_context_features_for_signal was removed (now in signal_handler.py).
 
@@ -1300,6 +1281,32 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         and ``ordType`` field variants.  Falls back to OCO-linked sell orders
         when the order type is missing (sparse Tradovate rows).
         """
+        summary_method = getattr(self.execution_adapter, "get_account_summary", None)
+        if callable(summary_method):
+            try:
+                summary = await summary_method()
+                working_orders = summary.get("working_orders") or []
+                stop_action = "sell" if direction == "long" else "buy"
+
+                best_candidate = None
+                for order in working_orders:
+                    action = str(order.get("action") or "").strip().lower()
+                    if action != stop_action:
+                        continue
+
+                    order_type = str(order.get("order_type") or "").strip().lower()
+                    if "stop" in order_type or "trailing" in order_type:
+                        return int(order["id"])
+
+                    stop_px = order.get("stop_price")
+                    if stop_px is not None and best_candidate is None:
+                        best_candidate = int(order["id"])
+
+                if best_candidate is not None:
+                    return best_candidate
+            except Exception as e:
+                logger.debug(f"Could not find stop order from account summary: {e}")
+
         try:
             orders = await self.execution_adapter._client.get_orders()
             stop_action = "Sell" if direction == "long" else "Buy"
@@ -1347,6 +1354,33 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
 
         For a long position, the TP is a Sell Limit; for short, a Buy Limit.
         """
+        summary_method = getattr(self.execution_adapter, "get_account_summary", None)
+        if callable(summary_method):
+            try:
+                summary = await summary_method()
+                working_orders = summary.get("working_orders") or []
+                tp_action = "sell" if direction == "long" else "buy"
+
+                best_candidate = None
+                for order in working_orders:
+                    action = str(order.get("action") or "").strip().lower()
+                    if action != tp_action:
+                        continue
+
+                    order_type = str(order.get("order_type") or "").strip().lower()
+                    if "limit" in order_type:
+                        return int(order["id"])
+
+                    price = order.get("price")
+                    stop_px = order.get("stop_price")
+                    if price is not None and stop_px is None and best_candidate is None:
+                        best_candidate = int(order["id"])
+
+                if best_candidate is not None:
+                    return best_candidate
+            except Exception as e:
+                logger.debug(f"Could not find TP order from account summary: {e}")
+
         try:
             orders = await self.execution_adapter._client.get_orders()
             tp_action = "Sell" if direction == "long" else "Buy"
@@ -1482,18 +1516,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             prefs_obj = self.telegram_notifier._get_prefs()
             prefs = prefs_obj.all()
 
-            # Update shadow tracker with current context (for ongoing tracking)
-            try:
-                shadow_context = {
-                    "daily_pnl": state.get("daily_pnl", 0),
-                    "wins_today": state.get("wins_today", 0),
-                    "losses_today": state.get("losses_today", 0),
-                    "active_positions": state.get("active_trades_count", 0),
-                }
-                self.shadow_tracker.update_context(shadow_context)
-            except Exception as e:
-                logger.debug(f"Shadow tracker update failed (non-fatal): {e}")
-
             # Generate suggestion (engine handles cooldowns)
             suggestion = self.suggestion_engine.generate_suggestion(
                 state,
@@ -1502,25 +1524,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
 
             if suggestion:
                 logger.info(f"Sending proactive PEARL suggestion: {suggestion.message}")
-
-                # Record suggestion in shadow tracker
-                try:
-                    # Map cooldown_key to suggestion type
-                    suggestion_type = self._map_suggestion_type(suggestion.cooldown_key)
-                    shadow_context = {
-                        "daily_pnl": state.get("daily_pnl", 0),
-                        "wins_today": state.get("wins_today", 0),
-                        "losses_today": state.get("losses_today", 0),
-                        "active_positions": state.get("active_trades_count", 0),
-                    }
-                    self.shadow_tracker.record_suggestion(
-                        suggestion_type=suggestion_type,
-                        message=suggestion.message,
-                        action=suggestion.accept_label,
-                        context=shadow_context,
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to record suggestion in shadow tracker: {e}")
 
                 # Pass plain text - send_pearl_notification will escape for MarkdownV2
                 await self.telegram_notifier.send_pearl_notification(suggestion.message, message_type="Suggestion")
@@ -1555,26 +1558,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 
         except Exception as e:
             logger.warning(f"Error checking Pearl suggestions: {e}")
-
-    def _map_suggestion_type(self, cooldown_key: str) -> str:
-        """Map suggestion cooldown key to shadow tracker suggestion type."""
-        key = str(cooldown_key or "").lower()
-        if "problem" in key or "gateway" in key or "data" in key or "agent" in key:
-            return SuggestionType.RISK_ALERT.value
-        elif "risk" in key or "drawdown" in key:
-            return SuggestionType.RISK_ALERT.value
-        elif "milestone" in key or "streak" in key or "profit" in key:
-            return SuggestionType.PATTERN_INSIGHT.value
-        elif "eod" in key or "quiet" in key:
-            return SuggestionType.SESSION_ADVICE.value
-        elif "greeting" in key:
-            return SuggestionType.SESSION_ADVICE.value
-        elif "pattern" in key or "direction" in key or "bias" in key:
-            return SuggestionType.DIRECTION_BIAS.value
-        elif "opportunity" in key or "volatility" in key or "volume" in key:
-            return SuggestionType.OPPORTUNITY.value
-        else:
-            return SuggestionType.PATTERN_INSIGHT.value
 
     def _build_pearl_review_message(self, state: Dict[str, Any]) -> Optional[str]:
         """Build PEARL check-in content (plain text, will be converted to MarkdownV2 by sender).
@@ -2305,7 +2288,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                         logger.debug(f"Non-critical: {e}")
             
             # ==========================================================================
-            # Process grade request (manual feedback for learning)
+            # Process grade request (manual operator feedback log)
             # ==========================================================================
             grade_file = state_dir / "grade_request.json"
             if grade_file.exists():
@@ -2475,10 +2458,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 if self.execution_adapter is not None
                 else {"enabled": False, "armed": False, "mode": "disabled"}
             ),
-            # ML/Learning removed — OpenClaw handles ML externally.
-            "learning": {"enabled": False, "mode": "disabled"},
-            "learning_contextual": {"enabled": False, "mode": "disabled"},
-            "ml_filter": {"enabled": False, "mode": "disabled"},
         }
 
     def _persist_cycle_diagnostics(
@@ -2520,34 +2499,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         except Exception as e:
             # Never allow observability writes to affect runtime.
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
-
-    def _build_ml_training_trades_from_signals(self, *, limit: int = 2000) -> list[dict]:
-        """Build supervised training samples.
-
-        Delegated to SignalOrchestrator.build_ml_training_trades_from_signals().
-        """
-        return self.signal_orchestrator.build_ml_training_trades_from_signals(limit=limit)
-
-    async def _build_ml_training_trades_from_signals_async(self, *, limit: int = 2000) -> list[dict]:
-        """Async wrapper.
-
-        Delegated to SignalOrchestrator.build_ml_training_trades_from_signals_async().
-        """
-        return await self.signal_orchestrator.build_ml_training_trades_from_signals_async(limit=limit)
-
-    def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
-        """Compute shadow A/B lift for ML gating.
-
-        Delegated to SignalOrchestrator.compute_ml_lift_metrics().
-        """
-        return self.signal_orchestrator.compute_ml_lift_metrics(trades)
-
-    def _refresh_ml_lift(self, *, force: bool = False) -> None:
-        """Refresh ML lift metrics + blocking allowance.
-
-        Delegated to SignalOrchestrator.refresh_ml_lift().
-        """
-        self.signal_orchestrator.refresh_ml_lift(force=force)
 
     @staticmethod
     def _parse_hhmm(value: Any, *, default: tuple[int, int]) -> tuple[int, int]:

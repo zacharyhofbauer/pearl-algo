@@ -359,13 +359,13 @@ class TestGenerateSignals:
         assert signals == []
 
     def test_outside_trading_hours(self, sample_ohlcv_df):
-        """Test no signals outside trading hours."""
-        # Use a time outside trading hours (e.g., 3 AM ET)
+        """Signal generation should still run outside historical session windows."""
+        # Use a time outside historical trading hours (e.g., 3 AM ET)
         non_trading_time = datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc)  # 3 AM ET
 
         signals = generate_signals(sample_ohlcv_df, current_time=non_trading_time)
 
-        assert signals == []
+        assert isinstance(signals, list)
 
     def test_during_trading_hours(self, sample_ohlcv_df):
         """Test signal generation during trading hours.
@@ -426,7 +426,7 @@ class TestGenerateSignals:
 
 
 class TestCheckTradingSession:
-    """Test trading session checks."""
+    """Session checks are observability-only and never block strategy execution."""
 
     def test_during_session(self):
         """Test time during trading session."""
@@ -454,7 +454,7 @@ class TestCheckTradingSession:
             "end_minute": 0,
         }
 
-        assert check_trading_session(before_time, config) is False
+        assert check_trading_session(before_time, config) is True
 
     def test_after_session(self):
         """Test time after trading session."""
@@ -468,7 +468,7 @@ class TestCheckTradingSession:
             "end_minute": 0,
         }
 
-        assert check_trading_session(after_time, config) is False
+        assert check_trading_session(after_time, config) is True
 
 
 class TestKeyLevelsCaching:
@@ -796,4 +796,3 @@ class TestGenerateSignalsStrengthened:
             assert signal["entry_price"] > 0
             assert 0 < signal["confidence"] <= 1.0
             assert signal["direction"] in ("long", "short")
-

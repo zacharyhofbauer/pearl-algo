@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import inspect
 from typing import Dict, Optional
 
 import pandas as pd
@@ -104,6 +105,18 @@ class MarketAgentDataFetcher:
             f"MarketAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
             f"base_cache_enabled={self._enable_base_cache}, mtf_cache_enabled={self._enable_mtf_cache}"
         )
+
+    async def close(self) -> None:
+        """Close any provider-owned resources used by the fetcher."""
+        close_method = getattr(self.data_provider, "close", None)
+        if not callable(close_method):
+            return
+
+        logger.info("Closing MarketAgentDataFetcher data provider...")
+        result = close_method()
+        if inspect.isawaitable(result):
+            await result
+        logger.info("MarketAgentDataFetcher data provider closed")
 
     async def fetch_startup_snapshot(self, timeout_seconds: float = 2.0) -> Dict:
         """

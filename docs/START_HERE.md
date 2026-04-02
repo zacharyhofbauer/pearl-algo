@@ -25,6 +25,34 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 
 **Config**: Canonical live runtime config in `config/live/tradovate_paper.yaml`. Start the agent with `--config config/live/tradovate_paper.yaml`.
 
+### Canonical directory layout
+
+- **Repo root**: `/home/pearlalgo/projects/pearl-algo`
+- **Live runtime state**: `/home/pearlalgo/var/pearl-algo/state/data/agent_state/MNQ`
+- **Repo compatibility path**: `data/` is a symlink into `~/var/pearl-algo/state/data`
+- **Repo logs path**: `logs/` is a symlink into `~/var/pearl-algo/logs`
+- **Web app frontend**: `apps/pearl-algo-app/`
+- **Web app/API wrapper scripts**: `scripts/pearlalgo_web_app/`
+
+### Safety baseline
+
+- Current state should be checked before any restart or re-arm:
+  - `./pearl.sh quick`
+  - `python3 scripts/ops/audit_runtime_paths.py`
+- Trading is safe only when:
+  - `positions=[]`
+  - `execution.armed=false` until you intentionally re-arm
+- No strategy or execution changes should be mixed with web app/UI work.
+
+### Known single points of failure
+
+| SPOF | Impact | Mitigation |
+|------|--------|-----------|
+| IBKR Gateway (localhost:4001) | Market data stops, no signals generated | Connection circuit breaker, auto-reconnect every 60s |
+| Tradovate API | Orders cannot be placed, open positions can't exit | No failover; logs alert, manual kill-switch via Telegram |
+| Agent process (single PID) | All trading halts | Systemd `Restart=always, RestartSec=10` |
+| Local filesystem (/home/pearlalgo/var/) | State lost on crash | No redundancy; ensure reliable storage |
+
 ### Audit the live runtime layout
 
 Before trusting a dashboard, health check, or historical query after a revamp, verify which
@@ -62,13 +90,10 @@ python3 scripts/ops/audit_runtime_paths.py
 ### Configuration
 
 - `config/live/tradovate_paper.yaml` (canonical Tradovate Paper runtime config)
-- `config/accounts/tradovate_paper.yaml` (legacy overlay kept only for migration compatibility)
 - `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
 
 ### Where to go next
 
-- **Current operating model**: `docs/CURRENT_OPERATING_MODEL.md`
 - **Path/runtime truth**: `docs/PATH_TRUTH_TABLE.md`
 - **Gateway operations**: `docs/GATEWAY.md`
 - **Testing**: `docs/TESTING_GUIDE.md`
-- **Historical context only**: `docs/archive/`

@@ -200,7 +200,7 @@ class ExecutionDecision:
     size_multiplier: float = 1.0  # Adjust position size (from policy)
     adjusted_size: Optional[int] = None  # Final position size after adjustment
     
-    # Policy metadata (if learning is enabled)
+    # Optional strategy metadata
     policy_score: Optional[float] = None
     policy_recommendation: Optional[str] = None
     
@@ -584,5 +584,4 @@ class ExecutionAdapter(ABC):
             "max_orders_per_day": self.config.max_orders_per_day,
             "max_daily_loss": self.config.max_daily_loss,
         }
-
 

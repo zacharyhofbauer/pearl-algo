@@ -33,12 +33,10 @@ class OperatorHandler:
         *,
         state_manager: MarketAgentStateManager,
         notification_queue: NotificationQueue,
-        shadow_tracker: Any = None,
         get_status_snapshot: Optional[Callable[[], Dict]] = None,
     ):
         self.state_manager = state_manager
         self.notification_queue = notification_queue
-        self.shadow_tracker = shadow_tracker
         self._get_status_snapshot = get_status_snapshot or (lambda: {})
 
     # ------------------------------------------------------------------
@@ -50,10 +48,10 @@ class OperatorHandler:
 
         The grade request contains:
         - signal_id: The signal to grade
-        - signal_type: The type of signal (for learning)
+        - signal_type: The type of signal
         - is_win: Whether it was a win
         - pnl: Optional P&L value
-        - force: Whether to apply even if signal already exited
+        - force: Whether to log even if signal already exited
         """
         try:
             grade_req = load_json_file(Path(grade_file))
@@ -77,10 +75,9 @@ class OperatorHandler:
             except Exception as e:
                 logger.warning(f"Failed to check signal exit status: {e}")
 
-            # ML/Learning removed — grade feedback is logged but not applied.
-            applied = False
+            processed = True
 
-            # Update feedback.jsonl to mark as applied
+            # Update feedback.jsonl to mark the request as processed.
             feedback_file = self.state_manager.state_dir / "feedback.jsonl"
             if feedback_file.exists():
                 try:
@@ -88,9 +85,12 @@ class OperatorHandler:
                     with file_lock(lock_path):
                         records = load_jsonl_file(feedback_file, max_lines=50000)
                         for rec in records:
-                            if rec.get("signal_id") == signal_id and not rec.get("applied_to_learning"):
-                                rec["applied_to_learning"] = applied
-                                rec["applied_at"] = datetime.now(timezone.utc).isoformat()
+                            if rec.get("signal_id") == signal_id and not rec.get("processed"):
+                                for key in list(rec.keys()):
+                                    if str(key).startswith("applied_"):
+                                        rec.pop(key, None)
+                                rec["processed"] = processed
+                                rec["processed_at"] = datetime.now(timezone.utc).isoformat()
                         atomic_write_jsonl(feedback_file, records)
                 except Exception as e:
                     logger.warning(f"Could not update feedback file: {e}")
@@ -261,12 +261,8 @@ class OperatorHandler:
                 if not action or not suggestion_id:
                     continue
 
-                if action == "accept":
-                    self.shadow_tracker.mark_followed(suggestion_id, shadow_context)
-                    logger.info(f"[Pearl] Suggestion accepted (shadow): {suggestion_id}")
-                elif action == "dismiss":
-                    self.shadow_tracker.mark_dismissed(suggestion_id, shadow_context)
-                    logger.info(f"[Pearl] Suggestion dismissed (shadow): {suggestion_id}")
+                if action in ("accept", "dismiss"):
+                    logger.info(f"[Pearl] Suggestion {action}ed: {suggestion_id}")
                 else:
                     logger.warning(f"[Pearl] Unknown suggestion feedback action: {action}")
             except Exception as e:

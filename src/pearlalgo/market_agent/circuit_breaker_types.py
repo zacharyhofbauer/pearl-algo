@@ -93,12 +93,6 @@ class TradingCircuitBreakerConfig:
     ema_cross_require_volume: bool = True
     low_regime_require_volume: bool = True
 
-    # Phase 4: ML chop shield
-    enable_ml_chop_shield: bool = False
-    ml_min_scored_trades: int = 50
-    ml_min_winrate_delta: float = 0.15
-    ml_chop_shield_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
-
     # Tradovate Paper Evaluation Gate
     enable_tv_paper_eval_gate: bool = False
     tv_paper_max_contracts_mini: int = 5

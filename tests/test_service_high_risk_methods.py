@@ -52,8 +52,6 @@ MINIMAL_SERVICE_CONFIG = {
     "auto_flat": {},
     "storage": {"sqlite_enabled": False},
     "challenge": {},
-    "ml_filter": {"enabled": False},
-    "learning": {"enabled": False},
     "execution": {"enabled": False},
 }
 
@@ -567,19 +565,17 @@ class TestProcessOperatorRequests:
         state_manager.state_dir = tmp_path
 
         notification_queue = AsyncMock()
-        shadow_tracker = MagicMock()
 
         handler = OperatorHandler(
             state_manager=state_manager,
             notification_queue=notification_queue,
-            shadow_tracker=shadow_tracker,
             get_status_snapshot=lambda: {"daily_pnl": 100, "wins_today": 3},
         )
         return handler
 
     @pytest.mark.asyncio
-    async def test_accept_feedback_marks_followed(self, operator_handler, tmp_path):
-        """Accepting a suggestion should call shadow_tracker.mark_followed."""
+    async def test_accept_feedback_cleans_up_file(self, operator_handler, tmp_path):
+        """Accepting a suggestion should clean up the request file."""
         req_dir = tmp_path / "operator_requests"
         req_dir.mkdir()
 
@@ -592,15 +588,12 @@ class TestProcessOperatorRequests:
 
         await operator_handler.process_operator_requests(tmp_path)
 
-        operator_handler.shadow_tracker.mark_followed.assert_called_once()
-        args = operator_handler.shadow_tracker.mark_followed.call_args
-        assert args[0][0] == "sugg_abc123"
         # File should be cleaned up
         assert not (req_dir / "pearl_suggestion_feedback_001.json").exists()
 
     @pytest.mark.asyncio
-    async def test_dismiss_feedback_marks_dismissed(self, operator_handler, tmp_path):
-        """Dismissing a suggestion should call shadow_tracker.mark_dismissed."""
+    async def test_dismiss_feedback_cleans_up_file(self, operator_handler, tmp_path):
+        """Dismissing a suggestion should clean up the request file."""
         req_dir = tmp_path / "operator_requests"
         req_dir.mkdir()
 
@@ -613,9 +606,6 @@ class TestProcessOperatorRequests:
 
         await operator_handler.process_operator_requests(tmp_path)
 
-        operator_handler.shadow_tracker.mark_dismissed.assert_called_once()
-        args = operator_handler.shadow_tracker.mark_dismissed.call_args
-        assert args[0][0] == "sugg_xyz789"
         assert not (req_dir / "pearl_suggestion_feedback_002.json").exists()
 
     @pytest.mark.asyncio
@@ -630,9 +620,6 @@ class TestProcessOperatorRequests:
 
         # Should not crash and file should be cleaned up
         assert not (req_dir / "pearl_suggestion_feedback_003.json").exists()
-        # No shadow tracker calls
-        operator_handler.shadow_tracker.mark_followed.assert_not_called()
-        operator_handler.shadow_tracker.mark_dismissed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_missing_action_or_id_skips_silently(self, operator_handler, tmp_path):
@@ -649,7 +636,6 @@ class TestProcessOperatorRequests:
 
         await operator_handler.process_operator_requests(tmp_path)
 
-        operator_handler.shadow_tracker.mark_followed.assert_not_called()
         assert not (req_dir / "pearl_suggestion_feedback_004.json").exists()
 
     @pytest.mark.asyncio
@@ -657,9 +643,6 @@ class TestProcessOperatorRequests:
         """If operator_requests dir doesn't exist, should return immediately."""
         # Don't create the dir — handler should just return
         await operator_handler.process_operator_requests(tmp_path)
-
-        operator_handler.shadow_tracker.mark_followed.assert_not_called()
-        operator_handler.shadow_tracker.mark_dismissed.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_service_delegates_to_operator_handler(self, service):

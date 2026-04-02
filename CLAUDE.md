@@ -62,7 +62,6 @@
 | `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Legacy implementation bridge behind the canonical strategy wrappers |
 | `src/pearlalgo/market_agent/state_manager.py` | Signal state machine |
 | `config/live/tradovate_paper.yaml` | Canonical live runtime configuration |
-| `config/accounts/tradovate_paper.yaml` | Legacy compatibility overlay; canonical live config is `config/live/tradovate_paper.yaml` |
 | `apps/pearl-algo-app/` | Next.js web dashboard (standalone mode, port 3001) |
 | `src/pearlalgo/api/server.py` | FastAPI API server (port 8001) |
 

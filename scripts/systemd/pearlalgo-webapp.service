@@ -10,10 +10,12 @@ Group=pearlalgo
 WorkingDirectory=/home/pearlalgo/projects/pearl-algo/apps/pearl-algo-app
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="NODE_ENV=production"
+Environment="PORT=3001"
+Environment="HOSTNAME=0.0.0.0"
 EnvironmentFile=/home/pearlalgo/projects/pearl-algo/.env
 EnvironmentFile=-/home/pearlalgo/.config/pearlalgo/secrets.env
 EnvironmentFile=-/home/pearlalgo/projects/pearl-algo/apps/pearl-algo-app/.env.local
-ExecStart=/usr/bin/npm start -- -p 3001
+ExecStart=/usr/bin/node .next/standalone/server.js
 Restart=always
 RestartSec=5
 

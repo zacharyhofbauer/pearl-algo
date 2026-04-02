@@ -4,16 +4,16 @@ on:
   push:
     branches: ["**"]
     paths:
-      - 'pearlalgo_web_app/**'
+      - 'apps/pearl-algo-app/**'
       - '.github/workflows/web-app-ci.yml'
   pull_request:
     paths:
-      - 'pearlalgo_web_app/**'
+      - 'apps/pearl-algo-app/**'
       - '.github/workflows/web-app-ci.yml'
 
 defaults:
   run:
-    working-directory: pearlalgo_web_app
+    working-directory: apps/pearl-algo-app
 
 jobs:
   lint-and-type-check:
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: pearlalgo_web_app/package-lock.json
+          cache-dependency-path: apps/pearl-algo-app/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -53,7 +53,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: pearlalgo_web_app/package-lock.json
+          cache-dependency-path: apps/pearl-algo-app/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -65,7 +65,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: web-app-coverage
-          path: pearlalgo_web_app/coverage/
+          path: apps/pearl-algo-app/coverage/
 
   build:
     runs-on: ubuntu-latest
@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: pearlalgo_web_app/package-lock.json
+          cache-dependency-path: apps/pearl-algo-app/package-lock.json
 
       - name: Install dependencies
         run: npm ci

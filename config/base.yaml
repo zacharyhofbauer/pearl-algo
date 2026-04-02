@@ -53,24 +53,6 @@ trading_circuit_breaker:
   max_daily_drawdown: 1000.0
   max_daily_profit: 3000.0  # Stop trading after hitting profit target (MFF 50K rule)
   max_concurrent_positions: 5
-  enable_session_filter: false
-  allowed_sessions:
-  - overnight
-  - premarket
-  - morning
-  - midday
-  - afternoon
-  - close
-  enable_direction_gating: true
-  direction_gating_min_confidence: 0.7
-  enable_regime_avoidance: false
-  blocked_regimes:
-  - ranging
-  - volatile
-  regime_avoidance_min_confidence: 0.7
-  enable_trigger_filters: false
-  ema_cross_require_volume: true
-  low_regime_require_volume: true
 data:
   buffer_size: 300
   buffer_size_5m: 300
@@ -148,8 +130,6 @@ pearl_bot_auto:
   trend_momentum_atr_mult: 0.5
   allow_trend_breakout_entries: true
   trend_breakout_lookback_bars: 5
-  tod_scaling:
-    enabled: false
 strategy:
   enabled_signals:
   - unified_strategy

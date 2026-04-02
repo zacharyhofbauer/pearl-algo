@@ -55,8 +55,6 @@ MINIMAL_SERVICE_CONFIG = {
     "auto_flat": {},
     "storage": {"sqlite_enabled": False},
     "challenge": {},
-    "ml_filter": {"enabled": False},
-    "learning": {"enabled": False},
     "execution": {"enabled": False},
 }
 
@@ -430,10 +428,27 @@ class TestFindStopOrderId:
         assert result == 42
 
     @pytest.mark.asyncio
+    async def test_prefers_normalized_working_orders_from_account_summary(self, service):
+        mock_adapter = MagicMock()
+        mock_adapter.get_account_summary = AsyncMock(return_value={
+            "working_orders": [
+                {"id": 84, "action": "Sell", "order_type": "Stop", "stop_price": 17450.0},
+            ]
+        })
+        mock_adapter._client = AsyncMock()
+        service.execution_adapter = mock_adapter
+
+        result = await service._find_stop_order_id("long")
+
+        assert result == 84
+        mock_adapter._client.get_orders.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_no_match(self, service):
         mock_adapter = MagicMock()
         mock_client = AsyncMock()
         mock_client.get_orders.return_value = []
+        mock_adapter.get_account_summary = AsyncMock(return_value={"working_orders": []})
         mock_adapter._client = mock_client
         service.execution_adapter = mock_adapter
         result = await service._find_stop_order_id("long")
@@ -444,6 +459,7 @@ class TestFindStopOrderId:
         mock_adapter = MagicMock()
         mock_client = AsyncMock()
         mock_client.get_orders.side_effect = RuntimeError("Error")
+        mock_adapter.get_account_summary = AsyncMock(side_effect=RuntimeError("summary failed"))
         mock_adapter._client = mock_client
         service.execution_adapter = mock_adapter
         result = await service._find_stop_order_id("long")
@@ -512,47 +528,6 @@ class TestGetStatusSnapshot:
         result = service._get_status_snapshot()
         assert result["risk_daily_pnl"] == -50.0
         assert result["risk_mode"] == "enforce"
-
-
-# ===========================================================================
-# 9. _map_suggestion_type (lines 1319-1337)
-# ===========================================================================
-
-class TestMapSuggestionType:
-    """_map_suggestion_type references SuggestionType stubs that have limited attrs.
-    The code uses .RISK_ALERT, .PATTERN_INSIGHT etc. which are only available
-    when the full AI module is present. With the stubs, some branches raise
-    AttributeError. We test the branches that work and verify others raise."""
-
-    def test_risk_key_raises_with_stub(self, service):
-        # SuggestionType stub has no RISK_ALERT attribute
-        with pytest.raises(AttributeError):
-            service._map_suggestion_type("risk_drawdown")
-
-    def test_gateway_key_raises_with_stub(self, service):
-        with pytest.raises(AttributeError):
-            service._map_suggestion_type("gateway_down")
-
-    def test_method_exists_and_callable(self, service):
-        assert callable(service._map_suggestion_type)
-
-    def test_branches_with_patched_suggestion_type(self, service):
-        """Patch SuggestionType to have expected attributes and verify routing."""
-        mock_st = MagicMock()
-        mock_st.RISK_ALERT.value = "risk_alert"
-        mock_st.PATTERN_INSIGHT.value = "pattern_insight"
-        mock_st.SESSION_ADVICE.value = "session_advice"
-        mock_st.DIRECTION_BIAS.value = "direction_bias"
-        mock_st.OPPORTUNITY.value = "opportunity"
-
-        with patch("pearlalgo.market_agent.service.SuggestionType", mock_st):
-            assert service._map_suggestion_type("risk_drawdown") == "risk_alert"
-            assert service._map_suggestion_type("milestone_reached") == "pattern_insight"
-            assert service._map_suggestion_type("eod_review") == "session_advice"
-            assert service._map_suggestion_type("greeting_morning") == "session_advice"
-            assert service._map_suggestion_type("pattern_detected") == "direction_bias"
-            assert service._map_suggestion_type("opportunity_volatility") == "opportunity"
-            assert service._map_suggestion_type("unknown_xyz") == "pattern_insight"
 
 
 # ===========================================================================
@@ -1235,7 +1210,7 @@ class TestGetStatus:
         assert "cycle_count" in result
         assert "signal_count" in result
         assert "execution" in result
-        assert "learning" in result
+        assert "learning" not in result
 
     def test_uptime_calculation(self, service):
         service.start_time = datetime.now(timezone.utc) - timedelta(hours=2, minutes=30)
@@ -1470,55 +1445,6 @@ class TestGetTradingDayDate:
         from pearlalgo.market_agent.service import get_trading_day_date
         result = get_trading_day_date()
         assert isinstance(result, date)
-
-
-# ===========================================================================
-# 32. SuggestionType stub (lines 65-68)
-# ===========================================================================
-
-class TestSuggestionTypeStub:
-    def test_has_expected_attributes(self):
-        from pearlalgo.market_agent.service import SuggestionType
-        assert hasattr(SuggestionType, "RISK_WARNING")
-        assert hasattr(SuggestionType, "STRATEGY_HINT")
-
-
-# ===========================================================================
-# 33. get_shadow_tracker stub (lines 61-63)
-# ===========================================================================
-
-class TestGetShadowTrackerStub:
-    def test_returns_none(self):
-        from pearlalgo.market_agent.service import get_shadow_tracker
-        assert get_shadow_tracker() is None
-
-
-# ===========================================================================
-# 34. _build_ml_training_trades delegation (lines 2430-2456)
-# ===========================================================================
-
-class TestMLTrainingDelegation:
-    def test_sync_delegates(self, service):
-        service.signal_orchestrator.build_ml_training_trades_from_signals = MagicMock(return_value=[])
-        result = service._build_ml_training_trades_from_signals(limit=100)
-        service.signal_orchestrator.build_ml_training_trades_from_signals.assert_called_once_with(limit=100)
-        assert result == []
-
-    def test_compute_ml_lift_delegates(self, service):
-        service.signal_orchestrator.compute_ml_lift_metrics = MagicMock(return_value={"delta": 0.05})
-        result = service._compute_ml_lift_metrics([])
-        assert result == {"delta": 0.05}
-
-    def test_refresh_ml_lift_delegates(self, service):
-        service.signal_orchestrator.refresh_ml_lift = MagicMock()
-        service._refresh_ml_lift(force=True)
-        service.signal_orchestrator.refresh_ml_lift.assert_called_once_with(force=True)
-
-    @pytest.mark.asyncio
-    async def test_async_delegates(self, service):
-        service.signal_orchestrator.build_ml_training_trades_from_signals_async = AsyncMock(return_value=[{"t": 1}])
-        result = await service._build_ml_training_trades_from_signals_async(limit=50)
-        assert result == [{"t": 1}]
 
 
 # ===========================================================================

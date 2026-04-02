@@ -1,27 +1,6 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 
-// Types for agent state
-export interface AIStatus {
-  bandit_mode: 'off' | 'shadow' | 'live'
-  contextual_mode: 'off' | 'shadow' | 'live'
-  ml_filter: {
-    enabled: boolean
-    mode: string
-    lift: {
-      lift_ok?: boolean
-      lift_win_rate?: number
-      lift_avg_pnl?: number
-    }
-  }
-  direction_gating: {
-    enabled: boolean
-    blocks: number
-    shadow_regime: number
-    shadow_trigger: number
-  }
-}
-
 export interface TvPaperConsistency {
   met: boolean
   best_day_pnl: number
@@ -152,7 +131,6 @@ export interface MarketRegime {
 
 export interface SignalRejections {
   direction_gating: number
-  ml_filter: number
   circuit_breaker: number
   session_filter: number
   max_positions: number
@@ -174,19 +152,6 @@ export interface CircuitBreakerStatus {
   rolling_win_rate?: number
   trip_reason?: string
   trips_today: number
-}
-
-// ML Filter detailed performance
-export interface MLFilterPerformance {
-  enabled: boolean
-  mode: string
-  win_rate_pass?: number
-  win_rate_fail?: number
-  trades_passed: number
-  trades_blocked: number
-  lift_ok: boolean
-  lift_win_rate?: number
-  lift_avg_pnl?: number
 }
 
 // Session context
@@ -214,32 +179,6 @@ export interface SignalActivity {
     executed: number
     blocked: number
   }
-}
-
-export interface LastSignalDecision {
-  signal_type: string
-  ml_probability: number
-  action: 'execute' | 'skip'
-  reason: string
-  timestamp: string | null
-}
-
-export interface ShadowCounters {
-  would_block_total: number
-  would_block_by_reason: Record<string, number>
-  ml_would_skip: number
-  ml_total_decisions: number
-  ml_execute_rate: number
-  // Shadow outcome comparison (what happened to blocked vs allowed signals)
-  blocked_wins: number
-  blocked_losses: number
-  blocked_total: number
-  blocked_pnl: number
-  allowed_wins: number
-  allowed_losses: number
-  allowed_total: number
-  allowed_pnl: number
-  net_saved: number
 }
 
 export interface GatewayStatus {
@@ -461,7 +400,6 @@ export interface AgentState {
   active_trades_unrealized_pnl?: number | null
   futures_market_open: boolean
   data_fresh: boolean
-  ai_status: AIStatus | null
   challenge: ChallengeStatus | null
   recent_exits: RecentExit[]
   performance: PerformanceStats | null
@@ -471,8 +409,6 @@ export interface AgentState {
   cadence_metrics: CadenceMetrics | null
   market_regime: MarketRegime | null
   signal_rejections_24h: SignalRejections | null
-  last_signal_decision: LastSignalDecision | null
-  shadow_counters: ShadowCounters | null
   gateway_status: GatewayStatus | null
   connection_health: ConnectionHealth | null
   error_summary: ErrorSummary | null
@@ -488,7 +424,6 @@ export interface AgentState {
   // New fields for enhanced transparency
   execution_state: ExecutionState | null
   circuit_breaker: CircuitBreakerStatus | null
-  ml_filter_performance: MLFilterPerformance | null
   session_context: SessionContext | null
   signal_activity: SignalActivity | null
   openclaw_status?: { status: string; port?: number } | null
@@ -559,7 +494,6 @@ const initialAgentState: AgentState = {
   active_trades_unrealized_pnl: null,
   futures_market_open: false,
   data_fresh: false,
-  ai_status: null,
   challenge: null,
   recent_exits: [],
   performance: null,
@@ -569,8 +503,6 @@ const initialAgentState: AgentState = {
   cadence_metrics: null,
   market_regime: null,
   signal_rejections_24h: null,
-  last_signal_decision: null,
-  shadow_counters: null,
   gateway_status: null,
   connection_health: null,
   error_summary: null,
@@ -584,7 +516,6 @@ const initialAgentState: AgentState = {
   // New fields for enhanced transparency
   execution_state: null,
   circuit_breaker: null,
-  ml_filter_performance: null,
   session_context: null,
   signal_activity: null,
   tradovate_account: null,
@@ -647,7 +578,6 @@ export const selectDailyPnL = (state: AgentStore) => state.agentState?.daily_pnl
 export const selectActiveTradesCount = (state: AgentStore) => state.agentState?.active_trades_count ?? 0
 export const selectPerformance = (state: AgentStore) => state.agentState?.performance
 export const selectChallenge = (state: AgentStore) => state.agentState?.challenge
-export const selectAIStatus = (state: AgentStore) => state.agentState?.ai_status
 export const selectCadenceMetrics = (state: AgentStore) => state.agentState?.cadence_metrics
 export const selectGatewayStatus = (state: AgentStore) => state.agentState?.gateway_status
 export const selectAnalytics = (state: AgentStore) => state.agentState?.analytics
@@ -659,7 +589,6 @@ export const selectBuySellPressure = (state: AgentStore) => state.agentState?.bu
 export const selectConfig = (state: AgentStore) => state.agentState?.config
 export const selectExecutionState = (state: AgentStore) => state.agentState?.execution_state
 export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.circuit_breaker
-export const selectMLFilterPerformance = (state: AgentStore) => state.agentState?.ml_filter_performance
 export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
 export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
 export const selectTradovateAccount = (state: AgentStore) => state.agentState?.tradovate_account

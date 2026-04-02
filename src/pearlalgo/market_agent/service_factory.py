@@ -91,6 +91,12 @@ def _build_notification_queue(
     )
 
 
+def _telegram_enabled(service_config: Dict[str, Any]) -> bool:
+    """Whether Telegram notifications are enabled for this runtime."""
+    telegram_settings = service_config.get("telegram", {}) or {}
+    return bool(telegram_settings.get("enabled", True))
+
+
 @dataclass
 class ServiceDependencies:
     """Container for all ``MarketAgentService`` dependencies.
@@ -168,6 +174,7 @@ class ServiceDependencies:
                 bot_token=self.telegram_bot_token,
                 chat_id=self.telegram_chat_id,
                 state_dir=self.state_dir,
+                enabled=_telegram_enabled(self.service_config),
                 account_label=_get_account_label(self.service_config),
                 message_thread_id=self.telegram_thread_id,
             )
@@ -232,6 +239,7 @@ def build_service_dependencies(
         bot_token=telegram_bot_token,
         chat_id=telegram_chat_id,
         state_dir=state_dir,
+        enabled=_telegram_enabled(service_config),
         account_label=_get_account_label(service_config),
         message_thread_id=telegram_thread_id,
     )

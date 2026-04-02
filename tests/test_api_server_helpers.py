@@ -3,7 +3,7 @@ Tests for helper functions in pearlalgo.api.server that are not covered
 by the existing endpoint tests in test_api_server.py.
 
 Covers: _read_json_sync, _candle_cache_*, _get_recent_exits,
-_get_recent_signals, _get_ai_status, _get_challenge_status,
+_get_recent_signals, _get_challenge_status,
 _json_sanitize, _get_equity_curve, _get_risk_metrics,
 _get_market_regime, _get_signal_rejections_24h, _get_connection_health,
 _get_error_summary, _aggregate_performance_since, _get_trading_week_start,
@@ -221,40 +221,7 @@ class TestGetRecentSignals:
 
 
 # ---------------------------------------------------------------------------
-# 5. _get_ai_status
-# ---------------------------------------------------------------------------
-
-class TestGetAiStatus:
-    def test_empty_state(self):
-        result = srv._get_ai_status({})
-        assert result["bandit_mode"] == "off"
-        assert result["contextual_mode"] == "off"
-        assert result["ml_filter"]["enabled"] is False
-        assert result["direction_gating"]["enabled"] is False
-
-    def test_enabled_learning(self):
-        state = {
-            "learning": {"enabled": True, "mode": "shadow"},
-            "learning_contextual": {"enabled": True, "mode": "live"},
-            "ml_filter": {"enabled": True, "mode": "live", "lift": {"win_rate": 5.0}},
-            "trading_circuit_breaker": {
-                "direction_gating_enabled": True,
-                "blocks_by_reason": {"direction_gating": 3},
-                "would_have_blocked_regime": 2,
-                "would_have_blocked_trigger": 1,
-            },
-        }
-        result = srv._get_ai_status(state)
-        assert result["bandit_mode"] == "shadow"
-        assert result["contextual_mode"] == "live"
-        assert result["ml_filter"]["enabled"] is True
-        assert result["ml_filter"]["lift"] == {"win_rate": 5.0}
-        assert result["direction_gating"]["enabled"] is True
-        assert result["direction_gating"]["blocks"] == 3
-
-
-# ---------------------------------------------------------------------------
-# 6. _get_challenge_status
+# 5. _get_challenge_status
 # ---------------------------------------------------------------------------
 
 class TestGetChallengeStatus:
@@ -430,7 +397,7 @@ class TestGetEquityCurve:
 
 
 # ---------------------------------------------------------------------------
-# 9. _build_ws_state_payload
+# 8. _build_ws_state_payload
 # ---------------------------------------------------------------------------
 
 class TestBuildWsStatePayload:
@@ -446,7 +413,6 @@ class TestBuildWsStatePayload:
             "execution_state": {"mode": "live"},
             "tradovate_account": {"equity": 50010.0},
             "circuit_breaker": {"armed": False},
-            "ml_filter_performance": {"lift": 1.2},
             "session_context": {"session": "ny"},
             "signal_activity": {"generated": 3},
         }
@@ -480,12 +446,6 @@ class TestBuildWsStatePayload:
             rejections_mock = stack.enter_context(
                 patch.object(srv, "_get_signal_rejections_24h", return_value={"direction_gating": 2})
             )
-            decision_mock = stack.enter_context(
-                patch.object(srv, "_get_last_signal_decision", return_value={"allowed": True})
-            )
-            shadow_mock = stack.enter_context(
-                patch.object(srv, "_get_shadow_counters", return_value={"generated": 1})
-            )
             stack.enter_context(patch.object(srv, "_get_gateway_status", return_value={"connected": True}))
             stack.enter_context(patch.object(srv, "_get_connection_health", return_value={"status": "healthy"}))
             stack.enter_context(patch.object(srv, "_get_error_summary", return_value={"recent_errors": 0}))
@@ -502,12 +462,8 @@ class TestBuildWsStatePayload:
         assert payload["recent_trades"] == [{"signal_id": "trade-1"}]
         assert payload["performance_summary"] == {"all": {"pnl": 42.0}}
         assert payload["signal_rejections_24h"] == {"direction_gating": 2}
-        assert payload["last_signal_decision"] == {"allowed": True}
-        assert payload["shadow_counters"] == {"generated": 1}
         assert payload["operator_lock_enabled"] is True
         rejections_mock.assert_called_once_with(state)
-        decision_mock.assert_called_once_with(state)
-        shadow_mock.assert_called_once_with(state)
 
 
 # ---------------------------------------------------------------------------
@@ -548,40 +504,28 @@ class TestGetMarketRegime:
         assert result["confidence"] == 0.0
         assert result["allowed_direction"] == "both"
 
-    def test_trending_up_with_gating(self):
+    def test_trending_up_reports_no_direction_restriction(self):
         state = {
             "regime": "trending_up",
             "regime_confidence": 0.85,
-            "trading_circuit_breaker": {
-                "direction_gating_enabled": True,
-                "direction_gating_min_confidence": 0.7,
-            },
         }
         result = srv._get_market_regime(state)
         assert result["regime"] == "trending_up"
         assert result["confidence"] == 0.85
-        assert result["allowed_direction"] == "long"
+        assert result["allowed_direction"] == "both"
 
-    def test_trending_down_with_gating(self):
+    def test_trending_down_reports_no_direction_restriction(self):
         state = {
             "regime": "trending_down",
             "regime_confidence": 0.9,
-            "trading_circuit_breaker": {
-                "direction_gating_enabled": True,
-                "direction_gating_min_confidence": 0.7,
-            },
         }
         result = srv._get_market_regime(state)
-        assert result["allowed_direction"] == "short"
+        assert result["allowed_direction"] == "both"
 
     def test_low_confidence_no_restriction(self):
         state = {
             "regime": "trending_up",
             "regime_confidence": 0.3,
-            "trading_circuit_breaker": {
-                "direction_gating_enabled": True,
-                "direction_gating_min_confidence": 0.7,
-            },
         }
         result = srv._get_market_regime(state)
         assert result["allowed_direction"] == "both"

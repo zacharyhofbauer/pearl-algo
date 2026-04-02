@@ -14,6 +14,12 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+class _ConfigStub(SimpleNamespace):
+    """Simple config object that supports both attribute and dict-style access."""
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
 
 # ---------------------------------------------------------------------------
 # Mock service builder
@@ -75,12 +81,13 @@ def _make_mock_service(**overrides: Any) -> MagicMock:
     svc.connection_timeout_minutes = overrides.get("connection_timeout_minutes", 15)
 
     # Config
-    svc.config = SimpleNamespace(
+    svc.config = _ConfigStub(
         symbol="MNQ",
         timeframe="5m",
         scan_interval=60,
         start_time="18:00",
         end_time="16:10",
+        session={"start_time": "18:00", "end_time": "16:10"},
     )
     svc._config_warnings = overrides.get("_config_warnings", [])
 
@@ -116,26 +123,10 @@ def _make_mock_service(**overrides: Any) -> MagicMock:
     # ATS adapters
     svc.execution_adapter = overrides.get("execution_adapter", None)
     svc._tradovate_account = overrides.get("_tradovate_account", None)
-    svc.bandit_policy = overrides.get("bandit_policy", None)
-    svc.contextual_policy = overrides.get("contextual_policy", None)
-
-    # ML filter
-    svc._ml_filter_enabled = False
-    svc._ml_filter_mode = "shadow"
-    svc._ml_signal_filter = None
-    svc._ml_require_lift_to_block = True
-    svc._ml_blocking_allowed = False
-    svc._ml_lift_metrics = {}
-    svc._ml_lift_last_eval_at = None
 
     # Notification queue
     svc.notification_queue = MagicMock()
     svc.notification_queue.get_stats.return_value = {"pending": 0, "sent": 0}
-
-    # Shadow tracker
-    svc.shadow_tracker = MagicMock()
-    svc.shadow_tracker.get_metrics.return_value = {}
-    svc.shadow_tracker.get_active_suggestion.return_value = None
 
     # Circuit breaker
     svc.trading_circuit_breaker = overrides.get("trading_circuit_breaker", None)
@@ -179,7 +170,7 @@ class TestBuildStateKeys:
             "config", "cadence_mode",
             "quiet_reason", "quiet_period_minutes",
             "version", "run_id", "market",
-            "execution", "learning", "learning_contextual",
+            "execution",
             "notification_queue", "trading_circuit_breaker",
         }
         missing = expected_keys - state.keys()
@@ -305,14 +296,14 @@ class TestBuildStateEdgeCases:
         assert state["execution"] == {"enabled": False, "armed": False, "mode": "disabled"}
 
     @patch("pearlalgo.market_agent.state_builder.get_market_hours")
-    def test_bandit_policy_none(self, mock_mkt_hours: MagicMock) -> None:
+    def test_removed_policy_sections_omitted(self, mock_mkt_hours: MagicMock) -> None:
         mock_mkt_hours.return_value.is_market_open.return_value = True
 
         from pearlalgo.market_agent.state_builder import StateBuilder
 
-        svc = _make_mock_service(bandit_policy=None)
+        svc = _make_mock_service()
         state = StateBuilder(svc).build_state()
-        assert state["learning"] == {"enabled": False, "mode": "disabled"}
+        assert "learning" not in state
 
     @patch("pearlalgo.market_agent.state_builder.get_market_hours")
     def test_circuit_breaker_none(self, mock_mkt_hours: MagicMock) -> None:

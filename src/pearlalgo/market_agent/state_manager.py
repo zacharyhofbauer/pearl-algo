@@ -11,7 +11,7 @@ This module is the PRIMARY state store using JSON files. It's designed for:
 - Mobile/Telegram bot compatibility
 
 For analytics and querying, see also:
-- learning/trade_database.py (SQLite secondary store)
+- storage/trade_database.py (SQLite secondary store)
 - storage/async_sqlite_queue.py (non-blocking SQLite writes)
 
 See docs/architecture/state_management.md for full details.
@@ -44,7 +44,7 @@ from pearlalgo.utils.paths import (
 )
 
 try:
-    from pearlalgo.learning.trade_database import TradeDatabase
+    from pearlalgo.storage.trade_database import TradeDatabase
     SQLITE_AVAILABLE = True
 except Exception:
     SQLITE_AVAILABLE = False
@@ -696,7 +696,7 @@ class MarketAgentStateManager:
                 logger.warning(f"State operation failed: {e}")
                 service_config = {}
 
-        # SQLite dual-write (learning module removed; always disabled)
+        # SQLite dual-write to the secondary analytics store.
         self._sqlite_enabled = False
         self._trade_db = None
 

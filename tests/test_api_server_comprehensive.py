@@ -49,9 +49,6 @@ SAMPLE_STATE: Dict[str, Any] = {
     "data_fresh": True,
     "active_trades_count": 1,
     "active_trades_unrealized_pnl": 25.50,
-    "learning": {"enabled": True, "mode": "shadow", "total_skips": 3, "total_decisions": 10, "execute_rate": 0.7},
-    "learning_contextual": {"enabled": False},
-    "ml_filter": {"enabled": True, "mode": "shadow", "lift": {"win_rate": 0.05}},
     "trading_circuit_breaker": {
         "direction_gating_enabled": True,
         "direction_gating_min_confidence": 0.7,
@@ -388,7 +385,6 @@ class TestStateEndpoint:
         body = resp.json()
         assert "running" in body
         assert "daily_pnl" in body
-        assert "ai_status" in body
         assert "market_regime" in body
         assert "cadence_metrics" in body
         assert "operator_lock_enabled" in body
@@ -735,34 +731,7 @@ class TestRateLimiting:
 
 
 # ===========================================================================
-# 17. HELPER FUNCTIONS: _get_ai_status
-# ===========================================================================
-
-
-class TestGetAiStatus:
-    def test_ai_status_with_full_state(self):
-        result = server_mod._get_ai_status(SAMPLE_STATE)
-        assert "bandit_mode" in result
-        assert "contextual_mode" in result
-        assert "ml_filter" in result
-        assert "direction_gating" in result
-
-    def test_ai_status_bandit_mode(self):
-        result = server_mod._get_ai_status(SAMPLE_STATE)
-        assert result["bandit_mode"] == "shadow"
-
-    def test_ai_status_contextual_off(self):
-        result = server_mod._get_ai_status(SAMPLE_STATE)
-        assert result["contextual_mode"] == "off"
-
-    def test_ai_status_empty_state(self):
-        result = server_mod._get_ai_status({})
-        assert result["bandit_mode"] == "off"
-        assert result["contextual_mode"] == "off"
-
-
-# ===========================================================================
-# 18. HELPER: _get_market_regime
+# 17. HELPER: _get_market_regime
 # ===========================================================================
 
 
@@ -790,7 +759,7 @@ class TestGetMarketRegime:
 
 
 # ===========================================================================
-# 19. HELPER: _get_cadence_metrics_enhanced
+# 18. HELPER: _get_cadence_metrics_enhanced
 # ===========================================================================
 
 
@@ -806,7 +775,7 @@ class TestGetCadenceMetrics:
 
 
 # ===========================================================================
-# 20. HELPER: _get_connection_health
+# 19. HELPER: _get_connection_health
 # ===========================================================================
 
 
@@ -823,7 +792,7 @@ class TestGetConnectionHealth:
 
 
 # ===========================================================================
-# 21. HELPER: _get_config
+# 20. HELPER: _get_config
 # ===========================================================================
 
 
@@ -850,7 +819,7 @@ class TestGetConfig:
 
 
 # ===========================================================================
-# 22. HELPER: _get_data_quality
+# 21. HELPER: _get_data_quality
 # ===========================================================================
 
 
@@ -867,7 +836,7 @@ class TestGetDataQuality:
 
 
 # ===========================================================================
-# 23. HELPER: _get_error_summary
+# 22. HELPER: _get_error_summary
 # ===========================================================================
 
 
@@ -896,7 +865,7 @@ class TestGetErrorSummary:
 
 
 # ===========================================================================
-# 24. HELPER: _get_signal_rejections_24h
+# 23. HELPER: _get_signal_rejections_24h
 # ===========================================================================
 
 
@@ -912,41 +881,7 @@ class TestGetSignalRejections:
 
 
 # ===========================================================================
-# 25. HELPER: _get_last_signal_decision
-# ===========================================================================
-
-
-class TestGetLastSignalDecision:
-    def test_no_decision(self):
-        result = server_mod._get_last_signal_decision({})
-        assert result is None
-
-    def test_with_decision(self):
-        state = {"learning": {"last_decision": {"signal_type": "long", "score": 0.8, "execute": True, "reason": "test", "at": "2025-06-01T12:00:00Z"}}}
-        result = server_mod._get_last_signal_decision(state)
-        assert result is not None
-        assert result["action"] == "execute"
-        assert result["ml_probability"] == 0.8
-
-
-# ===========================================================================
-# 26. HELPER: _get_shadow_counters
-# ===========================================================================
-
-
-class TestGetShadowCounters:
-    def test_shadow_counters(self):
-        result = server_mod._get_shadow_counters(SAMPLE_STATE)
-        assert result["would_block_total"] == 5
-        assert result["net_saved"] == 50.0
-
-    def test_shadow_counters_empty(self):
-        result = server_mod._get_shadow_counters({})
-        assert result["would_block_total"] == 0
-
-
-# ===========================================================================
-# 27. HELPER: _json_sanitize
+# 24. HELPER: _json_sanitize
 # ===========================================================================
 
 
@@ -967,7 +902,7 @@ class TestJsonSanitize:
 
 
 # ===========================================================================
-# 28. HELPER: _snap_to_bar
+# 25. HELPER: _snap_to_bar
 # ===========================================================================
 
 
@@ -1549,10 +1484,6 @@ class TestDataLayerCleanupTtlCache:
 
 
 class TestServerCoreHelpers:
-    def test_get_ai_status(self):
-        result = core_mod._get_ai_status(SAMPLE_STATE)
-        assert "bandit_mode" in result
-
     def test_get_market_regime(self):
         result = core_mod._get_market_regime(SAMPLE_STATE)
         assert result["regime"] == "trending_up"
@@ -1573,17 +1504,9 @@ class TestServerCoreHelpers:
         result = core_mod._get_data_quality(SAMPLE_STATE)
         assert result["is_stale"] is False
 
-    def test_get_shadow_counters(self):
-        result = core_mod._get_shadow_counters(SAMPLE_STATE)
-        assert result["would_block_total"] == 5
-
     def test_get_signal_rejections(self):
         result = core_mod._get_signal_rejections_24h(SAMPLE_STATE)
         assert result["direction_gating"] == 3
-
-    def test_get_last_signal_decision_none(self):
-        result = core_mod._get_last_signal_decision({})
-        assert result is None
 
     def test_json_sanitize(self):
         result = core_mod._json_sanitize({"key": 123})
@@ -1981,6 +1904,41 @@ class TestGetDataProvider:
             with patch.object(server_mod, "_data_provider_error", "already failed"):
                 result = server_mod._get_data_provider()
                 assert result is None
+
+    def test_uses_ibkr_data_client_id_fallbacks(self):
+        """The API provider should honor canonical IBKR data-client env vars."""
+        with (
+            patch.object(server_mod, "_data_provider", None),
+            patch.object(server_mod, "_data_provider_error", None),
+            patch("pearlalgo.config.settings.get_settings") as mock_get_settings,
+            patch("pearlalgo.data_providers.factory.create_data_provider") as mock_create,
+            patch.dict(
+                os.environ,
+                {
+                    "IB_HOST": "10.0.0.8",
+                    "IB_PORT": "5001",
+                    "IBKR_HOST": "10.0.0.8",
+                    "IBKR_PORT": "5001",
+                    "IBKR_DATA_CLIENT_ID": "11",
+                },
+                clear=True,
+            ),
+        ):
+            mock_get_settings.return_value = MagicMock(
+                ib_host="127.0.0.1",
+                ib_port=4001,
+                ib_client_id=1,
+                ib_data_client_id=7,
+            )
+            mock_create.return_value = object()
+
+            result = server_mod._get_data_provider()
+
+        assert result is mock_create.return_value
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["host"] == "10.0.0.8"
+        assert mock_create.call_args.kwargs["port"] == 5001
+        assert mock_create.call_args.kwargs["client_id"] == 11
 
 
 # ===========================================================================

@@ -2,8 +2,8 @@
 Tests for Prometheus metrics generation.
 
 Validates that serve_agent_status.py generates correct Prometheus metrics
-for all categories: agent status, trading, market, errors, circuit breaker,
-challenge, ML/learning, and cadence.
+for agent status, trading, market, errors, circuit breaker, challenge,
+and cadence.
 """
 
 import pytest
@@ -144,31 +144,6 @@ class TestGenerateMetrics:
         assert "pearlalgo_session_filter_enabled 1" in metrics
         assert "pearlalgo_session_allowed 0" in metrics
         assert "pearlalgo_current_et_hour 14" in metrics
-
-    def test_ml_learning_metrics(self):
-        """ML/Learning metrics should be correctly exposed."""
-        state = {
-            "ml_filter": {
-                "enabled": True,
-                "mode": "shadow",
-                "signals_evaluated": 100,
-                "signals_passed": 75,
-                "signals_blocked": 25,
-            },
-            "bandit_policy": {
-                "enabled": True,
-                "mode": "shadow",
-            }
-        }
-        metrics = generate_metrics(state)
-        
-        assert "pearlalgo_ml_filter_enabled 1" in metrics
-        assert "pearlalgo_ml_filter_mode 1" in metrics  # shadow = 1
-        assert "pearlalgo_ml_signals_evaluated_total 100" in metrics
-        assert "pearlalgo_ml_signals_passed_total 75" in metrics
-        assert "pearlalgo_ml_signals_blocked_total 25" in metrics
-        assert "pearlalgo_bandit_policy_enabled 1" in metrics
-        assert "pearlalgo_bandit_policy_mode 1" in metrics
 
     def test_cadence_latency_metrics(self):
         """Cadence/latency metrics should be correctly exposed."""

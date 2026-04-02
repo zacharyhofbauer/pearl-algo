@@ -132,13 +132,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
     - pearlalgo_session_filter_enabled: Session filter flag
     - pearlalgo_session_allowed: Current session allowed
     
-    **ML/Learning (shadow mode):**
-    - pearlalgo_ml_filter_enabled: ML filter enabled
-    - pearlalgo_ml_filter_mode: ML mode (0=off, 1=shadow, 2=live)
-    - pearlalgo_ml_signals_evaluated: Signals evaluated by ML
-    - pearlalgo_ml_signals_passed: Signals that passed ML filter
-    - pearlalgo_bandit_policy_enabled: Bandit learning enabled
-    
     **Cadence/Latency:**
     - pearlalgo_cycle_duration_seconds: Last cycle duration
     - pearlalgo_cycle_duration_p50_seconds: Median cycle time
@@ -206,20 +199,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
     session_filter_enabled = _b(circuit_breaker.get("session_filter_enabled", True))
     session_allowed = _b(circuit_breaker.get("session_allowed", True))
     et_hour = _i(circuit_breaker.get("et_hour", 0)) if state_error == 0 else 0
-    
-    # === ML/LEARNING ===
-    ml_filter = state.get("ml_filter", {}) if state_error == 0 else {}
-    ml_enabled = _b(ml_filter.get("enabled", False))
-    ml_mode_str = ml_filter.get("mode", "off") if state_error == 0 else "off"
-    ml_mode = {"off": 0, "shadow": 1, "live": 2}.get(ml_mode_str, 0)
-    ml_evaluated = _i(ml_filter.get("signals_evaluated", 0))
-    ml_passed = _i(ml_filter.get("signals_passed", 0))
-    ml_blocked = _i(ml_filter.get("signals_blocked", 0))
-    
-    bandit = state.get("bandit_policy", {}) if state_error == 0 else {}
-    bandit_enabled = _b(bandit.get("enabled", False))
-    bandit_mode_str = bandit.get("mode", "off") if state_error == 0 else "off"
-    bandit_mode = {"off": 0, "shadow": 1, "live": 2}.get(bandit_mode_str, 0)
     
     # === CADENCE/LATENCY ===
     cadence = state.get("cadence_metrics", {}) if state_error == 0 else {}
@@ -376,37 +355,6 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_current_et_hour gauge",
         f"pearlalgo_current_et_hour {et_hour}",
         "",
-        
-        # === ML/LEARNING ===
-        "# HELP pearlalgo_ml_filter_enabled ML signal filter enabled (1=enabled, 0=disabled)",
-        "# TYPE pearlalgo_ml_filter_enabled gauge",
-        f"pearlalgo_ml_filter_enabled {ml_enabled}",
-        "",
-        "# HELP pearlalgo_ml_filter_mode ML filter mode (0=off, 1=shadow, 2=live)",
-        "# TYPE pearlalgo_ml_filter_mode gauge",
-        f"pearlalgo_ml_filter_mode {ml_mode}",
-        "",
-        "# HELP pearlalgo_ml_signals_evaluated_total Signals evaluated by ML filter",
-        "# TYPE pearlalgo_ml_signals_evaluated_total counter",
-        f"pearlalgo_ml_signals_evaluated_total {ml_evaluated}",
-        "",
-        "# HELP pearlalgo_ml_signals_passed_total Signals that passed ML filter",
-        "# TYPE pearlalgo_ml_signals_passed_total counter",
-        f"pearlalgo_ml_signals_passed_total {ml_passed}",
-        "",
-        "# HELP pearlalgo_ml_signals_blocked_total Signals blocked by ML filter",
-        "# TYPE pearlalgo_ml_signals_blocked_total counter",
-        f"pearlalgo_ml_signals_blocked_total {ml_blocked}",
-        "",
-        "# HELP pearlalgo_bandit_policy_enabled Bandit policy learning enabled (1=enabled, 0=disabled)",
-        "# TYPE pearlalgo_bandit_policy_enabled gauge",
-        f"pearlalgo_bandit_policy_enabled {bandit_enabled}",
-        "",
-        "# HELP pearlalgo_bandit_policy_mode Bandit policy mode (0=off, 1=shadow, 2=live)",
-        "# TYPE pearlalgo_bandit_policy_mode gauge",
-        f"pearlalgo_bandit_policy_mode {bandit_mode}",
-        "",
-        
         # === CADENCE/LATENCY ===
         "# HELP pearlalgo_cycle_duration_seconds Duration of last scan cycle",
         "# TYPE pearlalgo_cycle_duration_seconds gauge",
@@ -502,4 +450,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

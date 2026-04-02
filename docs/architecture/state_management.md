@@ -112,7 +112,7 @@ python scripts/maintenance/rebuild_sqlite_from_json.py
 - `src/pearlalgo/market_agent/state_manager.py` - JSON state management (writes with exclusive locks)
 - `src/pearlalgo/market_agent/state_builder.py` - State snapshot construction (assembles `state.json` payload from service components)
 - `src/pearlalgo/market_agent/state_reader.py` - Locked reads for external consumers (shared locks)
-- `src/pearlalgo/learning/trade_database.py` - SQLite operations
+- `src/pearlalgo/storage/trade_database.py` - SQLite operations
 - `src/pearlalgo/storage/async_sqlite_queue.py` - Async write queue
 
 > **Note (v0.2.5):** The former `src/pearlalgo/state/` package has been eliminated. I/O helpers moved to `utils/state_io.py`; `state_builder`, `state_manager`, and `state_reader` live under `market_agent/`.

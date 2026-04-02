@@ -10,12 +10,14 @@ Orphan Module Report
 Builds a static import graph for src/pearlalgo and reports modules that are not
 reachable from known entry points or from tests/scripts imports.
 
-This is intentionally a report (exit code 0). Use it to decide whether a module
-should be justified, merged, or deleted.
+By default this is a report (exit code 0). In enforce mode, every remaining
+orphan must be explicitly justified in the allowlist, and stale allowlist
+entries fail the check.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -24,11 +26,25 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src" / "pearlalgo"
 TESTS_ROOT = REPO_ROOT / "tests"
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
+ALLOWLIST_PATH = Path(__file__).with_name("orphan_allowlist.txt")
 
 ENTRYPOINTS = {
     "pearlalgo",
     "pearlalgo.market_agent.main",
 }
+
+
+def _load_allowlist() -> Set[str]:
+    if not ALLOWLIST_PATH.exists():
+        return set()
+
+    allowlist: Set[str] = set()
+    for line in ALLOWLIST_PATH.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        allowlist.add(entry)
+    return allowlist
 
 
 def _module_info(file_path: Path) -> Tuple[str, List[str]]:
@@ -152,6 +168,14 @@ def _reachable_from_roots(graph: Dict[str, Set[str]], roots: Set[str]) -> Set[st
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Report orphan modules under src/pearlalgo/")
+    parser.add_argument(
+        "--enforce",
+        action="store_true",
+        help="Fail when unresolved or stale orphan allowlist entries are found.",
+    )
+    args = parser.parse_args()
+
     modules = _collect_src_modules()
     graph = _build_import_graph(modules)
 
@@ -161,12 +185,16 @@ def main() -> int:
 
     reachable = _reachable_from_roots(graph, roots)
     orphans = sorted(m for m in modules if m not in reachable)
+    allowlist = _load_allowlist()
+    unexpected_orphans = sorted(m for m in orphans if m not in allowlist)
+    stale_allowlist = sorted(m for m in allowlist if m not in orphans)
 
     print("Orphan Module Report")
     print("=" * 60)
     print(f"Total modules: {len(modules)}")
     print(f"Reachable:     {len(reachable)}")
     print(f"Orphans:       {len(orphans)}")
+    print(f"Allowlisted:   {len(sorted(m for m in orphans if m in allowlist))}")
     print("-" * 60)
 
     if orphans:
@@ -175,6 +203,23 @@ def main() -> int:
             print(f"- {module} ({path})")
     else:
         print("No orphan modules detected.")
+
+    if unexpected_orphans:
+        print("-" * 60)
+        print("Unexpected orphans (not allowlisted):")
+        for module in unexpected_orphans:
+            print(f"- {module}")
+
+    if stale_allowlist:
+        print("-" * 60)
+        print("Stale allowlist entries (no longer orphaned):")
+        for module in stale_allowlist:
+            print(f"- {module}")
+
+    if args.enforce and (unexpected_orphans or stale_allowlist):
+        print("-" * 60)
+        print("FAILED: Update scripts/testing/orphan_allowlist.txt or remove stale entries.")
+        return 1
 
     return 0
 

@@ -2,7 +2,7 @@
 Doctor Report
 
 Builds a rollup of recent trading behavior including signal events,
-trade exits, cycle diagnostics, and learning system status.
+trade exits, and cycle diagnostics.
 
 This module provides the business logic for the /doctor command.
 The CLI wrapper is located at scripts/monitoring/doctor_cli.py.
@@ -31,7 +31,7 @@ def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
         hours: Lookback window in hours (default: 24)
 
     Returns:
-        Dictionary with events, trade summary, diagnostics, distributions, and brain status
+        Dictionary with events, trade summary, diagnostics, and distributions
     """
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=float(hours))).isoformat()
@@ -65,9 +65,6 @@ def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
     size_counts = {k: 0 for (k, _, _) in size_bins}
     stop_samples: List[float] = []
     size_samples: List[float] = []
-    ml_probs: List[float] = []
-    ml_fallbacks = 0
-
     for ev in gen_events:
         payload = ev.get("payload", {}) or {}
         sig = payload.get("signal", {}) if isinstance(payload, dict) else {}
@@ -106,16 +103,6 @@ def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
                         size_counts[label] += 1
                         break
 
-        # ML prediction (if attached to signal)
-        ml_pred = sig.get("_ml_prediction")
-        if isinstance(ml_pred, dict):
-            try:
-                ml_probs.append(float(ml_pred.get("win_probability", 0.0)))
-            except Exception:
-                pass
-            if bool(ml_pred.get("fallback_used", False)):
-                ml_fallbacks += 1
-
     stop_avg = None
     stop_med = None
     size_avg = None
@@ -132,9 +119,6 @@ def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Brain / learning rollup (best-effort)
-    brain = _build_brain_rollup(db, cutoff, ml_probs, ml_fallbacks)
-
     return {
         "window_hours": float(hours),
         "cutoff": cutoff,
@@ -148,140 +132,7 @@ def build_doctor_rollup(db: Any, *, hours: float = 24.0) -> Dict[str, Any]:
         "stop_median": stop_med,
         "size_avg": size_avg,
         "size_median": size_med,
-        "brain": brain,
     }
-
-
-def _build_brain_rollup(
-    db: Any,
-    cutoff: str,
-    ml_probs: List[float],
-    ml_fallbacks: int
-) -> Dict[str, Any]:
-    """Build the brain/learning status section of the rollup."""
-    brain: Dict[str, Any] = {}
-    try:
-        from pearlalgo.config.config_loader import load_service_config
-
-        cfg = load_service_config(validate=False) or {}
-        ml_cfg = cfg.get("ml_filter", {}) or {}
-
-        # ML stats (from logged predictions in generated signals)
-        try:
-            if isinstance(ml_cfg, dict) and bool(ml_cfg.get("enabled", False)):
-                min_prob = float(ml_cfg.get("min_probability", 0.55))
-                passed = sum(1 for p in ml_probs if p >= min_prob)
-                brain["ml"] = {
-                    "enabled": True,
-                    "min_probability": float(min_prob),
-                    "predictions": int(len(ml_probs)),
-                    "passed": int(passed),
-                    "pass_rate": float(passed / max(1, len(ml_probs))) if ml_probs else 0.0,
-                    "avg_prob": float(sum(ml_probs) / len(ml_probs)) if ml_probs else None,
-                    "fallbacks": int(ml_fallbacks),
-                    "fallback_rate": float(ml_fallbacks / max(1, len(ml_probs))) if ml_probs else 0.0,
-                }
-        except Exception:
-            pass
-
-        # ML lift (shadow A/B) from graded exits (trades table)
-        _add_ml_lift_to_brain(brain, db, cutoff, ml_cfg)
-
-    except Exception:
-        brain = {}
-
-    return brain
-
-
-def _add_ml_lift_to_brain(
-    brain: Dict[str, Any],
-    db: Any,
-    cutoff: str,
-    ml_cfg: Dict[str, Any]
-) -> None:
-    """Add ML lift statistics to the brain section."""
-    try:
-        if isinstance(ml_cfg, dict) and bool(ml_cfg.get("enabled", False)):
-            lookback = int(ml_cfg.get("lift_lookback_trades", 200) or 200)
-            min_trades = int(ml_cfg.get("lift_min_trades", 50) or 50)
-            min_lift = float(ml_cfg.get("lift_min_winrate_delta", 0.05) or 0.05)
-            mode = str(ml_cfg.get("mode", "shadow") or "shadow").lower()
-            require_lift = bool(ml_cfg.get("require_lift_to_block", True))
-
-            try:
-                recent_trades = db.get_recent_trades_by_exit(limit=lookback, from_exit_time=cutoff)
-            except Exception:
-                recent_trades = []
-
-            scored = []
-            for t in recent_trades:
-                feats = t.get("features", {}) if isinstance(t, dict) else {}
-                if not isinstance(feats, dict):
-                    continue
-                if "ml_pass_filter" not in feats:
-                    continue
-                try:
-                    if float(feats.get("ml_fallback_used", 0.0) or 0.0) >= 0.5:
-                        continue
-                except Exception:
-                    pass
-                scored.append(t)
-
-            if len(scored) >= min_trades:
-                p_group = []
-                f_group = []
-                for t in scored:
-                    feats = t.get("features", {}) or {}
-                    try:
-                        pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
-                    except Exception:
-                        pass_flag = True
-                    (p_group if pass_flag else f_group).append(t)
-
-                def _wr(xs: List[Dict[str, Any]]) -> float:
-                    wins = 0
-                    for tt in xs:
-                        try:
-                            if bool(tt.get("is_win", False)):
-                                wins += 1
-                        except Exception:
-                            continue
-                    return wins / max(1, len(xs))
-
-                if p_group and f_group:
-                    wr_pass = _wr(p_group)
-                    wr_fail = _wr(f_group)
-                    lift_wr = wr_pass - wr_fail
-                    lift_ok = bool(lift_wr >= min_lift)
-                    blocking_allowed = (mode == "live") and (lift_ok if require_lift else True)
-                    brain["ml_lift"] = {
-                        "scored_trades": int(len(scored)),
-                        "pass_trades": int(len(p_group)),
-                        "fail_trades": int(len(f_group)),
-                        "win_rate_pass": float(wr_pass),
-                        "win_rate_fail": float(wr_fail),
-                        "lift_win_rate": float(lift_wr),
-                        "lift_min_winrate_delta": float(min_lift),
-                        "lift_ok": bool(lift_ok),
-                        "mode": mode,
-                        "require_lift_to_block": bool(require_lift),
-                        "blocking_allowed": bool(blocking_allowed),
-                    }
-                else:
-                    brain["ml_lift"] = {
-                        "scored_trades": int(len(scored)),
-                        "pass_trades": int(len(p_group)),
-                        "fail_trades": int(len(f_group)),
-                        "status": "no_split",
-                    }
-            else:
-                brain["ml_lift"] = {
-                    "scored_trades": int(len(scored)),
-                    "min_trades": int(min_trades),
-                    "status": "insufficient_data",
-                }
-    except Exception:
-        pass
 
 
 def format_doctor_rollup_text(r: Dict[str, Any]) -> str:
@@ -347,7 +198,6 @@ def format_doctor_rollup_text(r: Dict[str, Any]) -> str:
         ("rejected_quality_scorer", "quality"),
         ("rejected_order_book", "order book"),
         ("rejected_invalid_prices", "invalid prices"),
-        ("rejected_ml_filter", "ML"),
     ]:
         try:
             v = int(diag.get(key, 0) or 0)
@@ -386,62 +236,5 @@ def format_doctor_rollup_text(r: Dict[str, Any]) -> str:
         lines.append("Quiet reasons (top):")
         for k, v in quiet.items():
             lines.append(f"- {k}: {int(v)}")
-
-    # Brain / learning
-    brain = r.get("brain") or {}
-    if brain:
-        lines.append("")
-        lines.append("Brain (learning):")
-
-        b = brain.get("bandit") or {}
-        if b:
-            try:
-                unc = b.get("avg_uncertainty")
-                unc_txt = f" | unc ±{float(unc):.0%}" if unc is not None else ""
-                lines.append(
-                    f"- Bandit: mode={b.get('mode')} | decisions={int(b.get('total_decisions', 0) or 0)} | "
-                    f"outcomes={int(b.get('total_outcomes', 0) or 0)} | expWR={float(b.get('avg_expected_win_rate', 0.5) or 0.5):.0%}"
-                    f"{unc_txt}"
-                )
-            except Exception:
-                pass
-
-        c = brain.get("contextual") or {}
-        if c:
-            try:
-                lines.append(
-                    f"- Contextual: mode={c.get('mode')} | decisions={int(c.get('total_decisions', 0) or 0)} | "
-                    f"contexts={int(c.get('unique_contexts', 0) or 0)}"
-                )
-            except Exception:
-                pass
-
-        m = brain.get("ml") or {}
-        if m:
-            try:
-                lines.append(
-                    f"- ML: preds={int(m.get('predictions', 0) or 0)} | pass@{float(m.get('min_probability', 0.55) or 0.55):.2f}="
-                    f"{int(m.get('passed', 0) or 0)} | fallback={int(m.get('fallbacks', 0) or 0)}"
-                )
-            except Exception:
-                pass
-
-        ml_lift = brain.get("ml_lift") or {}
-        if ml_lift:
-            try:
-                if "lift_win_rate" in ml_lift:
-                    lines.append(
-                        f"- ML lift: passWR={float(ml_lift.get('win_rate_pass', 0.0) or 0.0):.0%} "
-                        f"blockWR={float(ml_lift.get('win_rate_fail', 0.0) or 0.0):.0%} "
-                        f"lift={float(ml_lift.get('lift_win_rate', 0.0) or 0.0):+.0%} "
-                        f"(ok={bool(ml_lift.get('lift_ok', False))})"
-                    )
-                else:
-                    lines.append(
-                        f"- ML lift: {str(ml_lift.get('status', 'unknown'))} "
-                        f"(scored={int(ml_lift.get('scored_trades', 0) or 0)})"
-                    )
-            except Exception:
-                pass
 
     return "\n".join(lines).strip() + "\n"

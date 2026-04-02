@@ -7,7 +7,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Canonical operator entrypoint**: `./pearl.sh`
 - **Compatibility alias**: `./pearlalgo.sh`
 - **Runtime audit**: `python3 scripts/ops/audit_runtime_paths.py`
-- **Operating model**: `docs/CURRENT_OPERATING_MODEL.md`
+- **Operating model**: `docs/START_HERE.md`
 
 ## Market Agent Service
 
@@ -38,7 +38,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `scripts/ops/status.sh` (manual CLI health check; `--market NQ|ES|GC`)
 - **Docs**:
   - `docs/START_HERE.md`
-  - `docs/CURRENT_OPERATING_MODEL.md`
+  - `docs/START_HERE.md`
   - `docs/PATH_TRUTH_TABLE.md`
 
 ## Telegram Notifications
@@ -75,7 +75,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
-  - `train_ml_filter.py` – offline training for ML signal filter artifacts
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
   - `test_all.py` – unified validation runner (telegram / signals / service)
@@ -101,14 +100,13 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `trades.db` – SQLite runtime database
   - `performance.json` – current performance/export snapshot
 - **Docs**:
-  - `docs/archive/2026-04-stabilization/ATS_ROLLOUT_GUIDE.md` – historical execution rollout guidance
+  - `docs/COMPATIBILITY_SURFACES.md` – retained compatibility and rollout leftovers that still affect current paths
 
 ## Configuration
 
 - **Logical component**: Configuration and settings
 - **Config files**:
   - `config/live/tradovate_paper.yaml` – canonical active Tradovate Paper runtime config
-  - `config/accounts/tradovate_paper.yaml` – legacy overlay retained only for migration compatibility
   - `config/config.yaml` – auxiliary application config
   - `.env` (from `env.example`) – non-secret local environment defaults
   - `~/.config/pearlalgo/secrets.env` – machine-local secrets and runtime credentials
@@ -122,7 +120,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
   - `docs/START_HERE.md`
-  - `docs/CURRENT_OPERATING_MODEL.md`
+  - `docs/START_HERE.md`
+  - `docs/COMPATIBILITY_SURFACES.md`
 
 ## Maintenance
 
@@ -176,6 +175,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:
-  - `docs/CURRENT_OPERATING_MODEL.md`
+  - `docs/START_HERE.md`
 
 This table is the canonical reference when adding new scripts, docs, or modules. Any new entry point should be recorded here, and existing docs/scripts should be updated in lock‑step when paths change.

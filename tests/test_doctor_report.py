@@ -101,7 +101,6 @@ class TestFormatDoctorRollupText:
             "stop_median": None,
             "size_avg": None,
             "size_median": None,
-            "brain": {},
         }
 
         text = format_doctor_rollup_text(rollup)
@@ -133,44 +132,6 @@ class TestFormatDoctorRollupText:
 
         assert "- P&L: -$500" in text
 
-    def test_formats_brain_section(self):
-        """Should format brain/learning section when present."""
-        rollup = {
-            "window_hours": 24.0,
-            "events": {},
-            "trade_summary": {"total": 0},
-            "cycle_diagnostics": {},
-            "quiet_reasons_top": {},
-            "stop_bins": {},
-            "size_bins": {},
-            "stop_avg": None,
-            "stop_median": None,
-            "size_avg": None,
-            "size_median": None,
-            "brain": {
-                "bandit": {
-                    "mode": "shadow",
-                    "total_decisions": 100,
-                    "total_outcomes": 50,
-                    "avg_expected_win_rate": 0.55,
-                    "avg_uncertainty": 0.08,
-                },
-                "ml": {
-                    "predictions": 80,
-                    "min_probability": 0.55,
-                    "passed": 60,
-                    "fallbacks": 5,
-                },
-            },
-        }
-
-        text = format_doctor_rollup_text(rollup)
-
-        assert "Brain (learning):" in text
-        assert "Bandit: mode=shadow" in text
-        assert "decisions=100" in text
-        assert "ML: preds=80" in text
-
     def test_handles_empty_events(self):
         """Should handle empty events gracefully."""
         rollup = {
@@ -185,7 +146,6 @@ class TestFormatDoctorRollupText:
             "stop_median": None,
             "size_avg": None,
             "size_median": None,
-            "brain": {},
         }
 
         text = format_doctor_rollup_text(rollup)
@@ -206,7 +166,6 @@ class TestFormatDoctorRollupText:
             "stop_median": None,
             "size_avg": None,
             "size_median": None,
-            "brain": {},
         }
 
         text = format_doctor_rollup_text(rollup)

@@ -231,6 +231,40 @@ class TestBuildServiceDependencies:
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
+    def test_build_service_dependencies_honors_telegram_enabled_flag(
+        self,
+        mock_fetcher_cls,
+        mock_state_mgr_cls,
+        mock_perf_cls,
+        mock_tg_cls,
+        mock_nq_cls,
+        mock_health_cls,
+        mock_load_cfg,
+        tmp_path: Path,
+    ) -> None:
+        mock_load_cfg.return_value = _stub_service_config()
+        mock_state_mgr_cls.return_value.state_dir = tmp_path
+        service_cfg = _stub_service_config(telegram={"enabled": False, "notification_tier": "important"})
+
+        build_service_dependencies(
+            data_provider=_mock_data_provider(),
+            config=_minimal_config(),
+            state_dir=tmp_path,
+            telegram_bot_token="tok",
+            telegram_chat_id="cid",
+            service_config=service_cfg,
+        )
+
+        mock_tg_cls.assert_called_once()
+        assert mock_tg_cls.call_args.kwargs["enabled"] is False
+
+    @patch("pearlalgo.market_agent.service_factory.load_service_config")
+    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
+    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
+    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
+    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
     def test_loads_service_config_when_none(
         self,
         mock_fetcher_cls,

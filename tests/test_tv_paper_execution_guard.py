@@ -7,7 +7,7 @@ Covers:
 - Position guard: same direction allowed
 - Intraday breach: blocks when equity below floor
 - Intraday breach: allows when equity above floor
-- follower_execute: skips ML filter and bandit
+- follower_execute: uses the streamlined execution path
 """
 
 from __future__ import annotations
@@ -278,16 +278,16 @@ class TestIntradayBreachAllows:
 
 
 # ===========================================================================
-# follower_execute: skips ML filter and bandit
+# follower_execute: streamlined execution path
 # ===========================================================================
 
 
-class TestFollowerExecuteSkipsMLAndBandit:
-    """follower_execute only runs circuit breaker + execution, no ML/bandit."""
+class TestFollowerExecuteFastPath:
+    """follower_execute only runs the streamlined circuit-breaker + execution path."""
 
     @pytest.mark.asyncio
     async def test_follower_execute_calls_execute_signal(self):
-        """Verify follower_execute calls _execute_signal (not ML filter)."""
+        """Verify follower_execute calls _execute_signal directly."""
         from pearlalgo.market_agent.signal_handler import SignalHandler
 
         # Create a minimal SignalHandler with mocked dependencies
@@ -296,6 +296,7 @@ class TestFollowerExecuteSkipsMLAndBandit:
         handler.error_count = 0
         handler.last_signal_generated_at = None
         handler.last_signal_id_prefix = None
+        handler._execution_semaphore = asyncio.Semaphore(1)
 
         # Mock all collaborators
         handler._circuit_breaker = MagicMock()
@@ -303,11 +304,9 @@ class TestFollowerExecuteSkipsMLAndBandit:
 
         handler.performance_tracker = MagicMock()
         handler.performance_tracker.track_signal_generated = MagicMock(return_value="sig_001")
+        handler.performance_tracker.update_signal_execution_metadata = MagicMock()
 
         handler._order_manager = MagicMock()
-        handler._ml_filter = None  # No ML filter in follower mode
-        handler._bandit_policy = None
-        handler._contextual_bandit = None
         handler._audit_logger = None
         handler._notification_queue = MagicMock()
         handler._notification_queue.enqueue_raw_message = AsyncMock()
@@ -321,9 +320,9 @@ class TestFollowerExecuteSkipsMLAndBandit:
 
         await handler.follower_execute(signal)
 
-        # _execute_signal should be called (no ML filter or bandit in path)
+        # _execute_signal should be called on the streamlined path.
         handler._execute_signal.assert_awaited_once()
-        # policy_decision arg should be None (bandit skipped)
+        # policy_decision arg should be None on the streamlined path.
         call_args = handler._execute_signal.call_args
         assert call_args.kwargs.get("policy_decision") is None or call_args[0][1] is None
 

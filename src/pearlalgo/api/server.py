@@ -25,6 +25,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
@@ -82,13 +83,13 @@ def _candle_cache_set(key: str, value: List[Dict[str, Any]]) -> None:
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
 try:
-    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body, Request
+    from fastapi import APIRouter, FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from fastapi.security import APIKeyHeader, APIKeyQuery
     import uvicorn
 except ImportError:
-    print("ERROR: FastAPI/uvicorn not installed. Run: pip install fastapi uvicorn")
+    logging.critical("FastAPI/uvicorn not installed. Run: pip install fastapi uvicorn")
     sys.exit(1)
 
 import hashlib
@@ -131,6 +132,7 @@ from pearlalgo.api.metrics import (
     compute_risk_metrics,
     DEFAULT_RISK_METRICS,
 )
+from pearlalgo.analytics import compute_session_analytics as _compute_session_analytics
 
 import pandas as pd
 
@@ -201,6 +203,121 @@ def _cached(key: str, ttl_seconds: float, fn, *args, **kwargs):
     with _ttl_cache_lock:
         _ttl_cache[key] = (result, now + ttl_seconds)
     return result
+
+
+def _state_cache_key(prefix: str, state_dir: Path, *parts: object) -> str:
+    suffix = ":".join(str(part) for part in parts if part is not None)
+    base = f"{prefix}:{state_dir}"
+    return f"{base}:{suffix}" if suffix else base
+
+
+def _get_cached_daily_stats(state_dir: Path) -> Dict[str, Any]:
+    return _cached(_state_cache_key("daily_stats", state_dir), 2.5, _compute_daily_stats, state_dir)
+
+
+def _get_cached_recent_exits(state_dir: Path, limit: int = 100) -> List[Dict[str, Any]]:
+    return _cached(
+        _state_cache_key("recent_exits", state_dir, limit),
+        5.0,
+        _get_recent_exits,
+        state_dir,
+        limit=limit,
+    )
+
+
+def _get_cached_performance_stats(state_dir: Path) -> Optional[Dict[str, Any]]:
+    return _cached(_state_cache_key("performance_stats", state_dir), 5.0, _compute_performance_stats, state_dir)
+
+
+def _get_cached_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
+    return _cached(_state_cache_key("equity_curve", state_dir, hours), 10.0, _get_equity_curve, state_dir, hours=hours)
+
+
+def _get_cached_risk_metrics(state_dir: Path) -> Dict[str, Any]:
+    return _cached(_state_cache_key("risk_metrics", state_dir), 10.0, _get_risk_metrics, state_dir)
+
+
+def _get_cached_positions_for_broadcast(state_dir: Path) -> List[Dict[str, Any]]:
+    return _cached(_state_cache_key("positions_broadcast", state_dir), 2.5, _get_positions_for_broadcast, state_dir)
+
+
+def _get_cached_trades_for_broadcast(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
+    return _cached(
+        _state_cache_key("trades_broadcast", state_dir, limit),
+        2.5,
+        _get_trades_for_broadcast,
+        state_dir,
+        limit,
+    )
+
+
+def _get_cached_broadcast_performance_summary(state_dir: Path) -> Optional[Dict[str, Any]]:
+    return _cached(
+        _state_cache_key("performance_broadcast", state_dir),
+        2.5,
+        _get_performance_summary_for_broadcast,
+        state_dir,
+    )
+
+
+async def _load_dashboard_derived_fields(state_dir: Path) -> Dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    daily_stats, recent_exits, performance, equity_curve, risk_metrics = await asyncio.gather(
+        loop.run_in_executor(None, _get_cached_daily_stats, state_dir),
+        loop.run_in_executor(None, _get_cached_recent_exits, state_dir, 100),
+        loop.run_in_executor(None, _get_cached_performance_stats, state_dir),
+        loop.run_in_executor(None, _get_cached_equity_curve, state_dir, 72),
+        loop.run_in_executor(None, _get_cached_risk_metrics, state_dir),
+    )
+    return {
+        "daily_stats": daily_stats,
+        "recent_exits": recent_exits,
+        "performance": performance,
+        "equity_curve": equity_curve,
+        "risk_metrics": risk_metrics,
+    }
+
+
+def _compute_session_analytics_for_state(state_dir: Path) -> Dict[str, Any]:
+    signals = _get_recent_signals(state_dir, limit=2000)
+
+    if _is_tv_paper_account(state_dir):
+        performance_trades = _get_paired_tradovate_trades(state_dir)
+        analytics_signals = [
+            {
+                "signal_id": row.get("signal_id"),
+                "status": row.get("status"),
+                "exit_time": row.get("exit_time"),
+                "pnl": row.get("pnl"),
+            }
+            for row in signals
+        ]
+        return _compute_session_analytics(
+            signals=analytics_signals,
+            performance_trades=performance_trades,
+        )
+
+    performance_trades = (_get_cached_performance_data(state_dir) or {}).get("trades") or []
+    analytics_signals = signals
+    if performance_trades:
+        analytics_signals = [
+            {
+                "signal_id": row.get("signal_id"),
+                "status": row.get("status"),
+                "exit_time": row.get("exit_time"),
+                "pnl": row.get("pnl"),
+            }
+            for row in signals
+        ]
+
+    return _compute_session_analytics(
+        signals=analytics_signals,
+        performance_trades=performance_trades,
+    )
+
+
+def _get_cached_session_analytics(state_dir: Path) -> Dict[str, Any]:
+    return _cached(_state_cache_key("session_analytics", state_dir), 10.0, _compute_session_analytics_for_state, state_dir)
 
 
 def _get_cached_performance_data(state_dir: Path) -> dict:
@@ -381,6 +498,12 @@ async def require_operator_access(
 
     await verify_operator(request=request, operator=operator)
     return "operator"
+
+
+operator_router = APIRouter(
+    dependencies=[Depends(require_operator_access)],
+    tags=["operator"],
+)
 
 
 def _load_api_keys() -> set:
@@ -575,12 +698,26 @@ def _get_data_provider():
     
     try:
         from pearlalgo.data_providers.factory import create_data_provider
+        from pearlalgo.config.settings import get_settings
+
+        settings = get_settings()
+        host = os.getenv("IB_HOST") or os.getenv("IBKR_HOST") or settings.ib_host
+        port = int(os.getenv("IB_PORT") or os.getenv("IBKR_PORT") or settings.ib_port)
+        client_id = int(
+            os.getenv("IB_CLIENT_ID_LIVE_CHART")
+            or os.getenv("IBKR_DATA_CLIENT_ID")
+            or os.getenv("PEARLALGO_IB_DATA_CLIENT_ID")
+            or settings.ib_data_client_id
+            or settings.ib_client_id
+            or 88
+        )
         
         provider = create_data_provider(
             "ibkr",
-            host=os.getenv("IB_HOST", "127.0.0.1"),
-            port=int(os.getenv("IB_PORT", "4001")),
-            client_id=int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "88")),
+            settings=settings,
+            host=host,
+            port=port,
+            client_id=client_id,
         )
         _data_provider = provider
         return provider
@@ -685,10 +822,43 @@ from pearlalgo.api.indicator_service import calculate_indicators as _calculate_i
 # FastAPI App
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    """Initialize API runtime state and background tasks for the app lifespan."""
+    global _market, _state_dir
+
+    if not _market:
+        _market = str(os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET)).strip().upper()
+    if _state_dir is None:
+        _state_dir = _resolve_state_dir(_market)
+
+    _init_auth()
+    _init_accounts_config()
+
+    if ws_manager._broadcast_task is None or ws_manager._broadcast_task.done():
+        ws_manager._broadcast_task = asyncio.create_task(
+            ws_manager.start_broadcast_loop(interval=2.0)
+        )
+
+    try:
+        yield
+    finally:
+        task = ws_manager._broadcast_task
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                ws_manager._broadcast_task = None
+
 app = FastAPI(
     title="Pearl Algo Web App API",
     description="API for the Pearl Algo Web App",
     version="1.0.0",
+    lifespan=_app_lifespan,
 )
 
 def _cors_origins() -> list[str]:
@@ -1024,12 +1194,12 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
             logger.debug(f"Broadcast performance-summary error: {e}")
             return None
 
-    return _cached("broadcast_perf_summary", 3.0, _compute)
+    return _cached(_state_cache_key("broadcast_perf_summary", state_dir), 3.0, _compute)
 
 
 def _build_ws_state_payload(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]:
     """Build the shared payload used by all WebSocket state message types."""
-    daily_stats = _compute_daily_stats(state_dir)
+    daily_stats = _get_cached_daily_stats(state_dir)
     challenge = _get_challenge_status(state_dir)
 
     return {
@@ -1048,30 +1218,21 @@ def _build_ws_state_payload(state_dir: Path, state: Dict[str, Any]) -> Dict[str,
         "futures_market_open": state.get("futures_market_open", False),
         "data_fresh": state.get("data_fresh", False),
         "last_updated": _now_et_iso(),
-        "ai_status": _get_ai_status(state),
         "challenge": challenge,
-        "recent_exits": _cached("recent_exits", 5.0, _get_recent_exits, state_dir, limit=100),
-        "performance": _compute_performance_stats(state_dir),
-        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, state_dir, hours=72),
-        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, state_dir),
-        "positions": _cached("positions_broadcast", 2.5, _get_positions_for_broadcast, state_dir),
-        "recent_trades": _cached("trades_broadcast", 2.5, _get_trades_for_broadcast, state_dir, 50),
-        "performance_summary": _cached(
-            "performance_broadcast",
-            2.5,
-            _get_performance_summary_for_broadcast,
-            state_dir,
-        ),
+        "recent_exits": _get_cached_recent_exits(state_dir, 100),
+        "performance": _get_cached_performance_stats(state_dir),
+        "equity_curve": _get_cached_equity_curve(state_dir, 72),
+        "risk_metrics": _get_cached_risk_metrics(state_dir),
+        "positions": _get_cached_positions_for_broadcast(state_dir),
+        "recent_trades": _get_cached_trades_for_broadcast(state_dir, 50),
+        "performance_summary": _get_cached_broadcast_performance_summary(state_dir),
         "cadence_metrics": _get_cadence_metrics_enhanced(state),
         "market_regime": _get_market_regime(state),
         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
         "signal_rejections_24h": _get_signal_rejections_24h(state),
-        "last_signal_decision": _get_last_signal_decision(state),
-        "shadow_counters": _get_shadow_counters(state),
         "execution_state": state.get("execution_state"),
         "tradovate_account": state.get("tradovate_account"),
         "circuit_breaker": state.get("circuit_breaker"),
-        "ml_filter_performance": state.get("ml_filter_performance"),
         "session_context": state.get("session_context"),
         "signal_activity": state.get("signal_activity"),
         "gateway_status": _get_gateway_status(),
@@ -1110,14 +1271,14 @@ class ConnectionManager:
             logger.warning(f"[WebSocket] Connection rejected: max {_WS_MAX_CONNECTIONS} reached")
             return False
         self.active_connections.append(websocket)
-        print(f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}")
+        logger.info(f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}")
         return True
 
     def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        print(f"[WebSocket] Client disconnected. Total connections: {len(self.active_connections)}")
+        logger.info(f"[WebSocket] Client disconnected. Total connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: Dict[str, Any]):
         """Broadcast a message to all connected clients using asyncio.gather."""
@@ -1192,28 +1353,12 @@ class ConnectionManager:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[WebSocket] Broadcast error: {e}")
+                logger.warning(f"[WebSocket] Broadcast error: {e}")
                 await asyncio.sleep(interval)
 
 
 # Global connection manager
 ws_manager = ConnectionManager()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize authentication and start WebSocket broadcast loop."""
-    global _market, _state_dir
-
-    # Support uvicorn --reload import mode (main() may not run in that process)
-    if not _market:
-        _market = str(os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET)).strip().upper()
-    if _state_dir is None:
-        _state_dir = _resolve_state_dir(_market)
-
-    _init_auth()
-    _init_accounts_config()
-    asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
 
 
 @app.websocket("/ws")
@@ -1327,7 +1472,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
             except WebSocketDisconnect:
                 break
     except Exception as e:
-        print(f"[WebSocket] Error: {e}")
+        logger.error(f"[WebSocket] Error: {e}")
     finally:
         ws_manager.disconnect(websocket)
 
@@ -1947,36 +2092,6 @@ def _get_recent_signals(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]
     return events[:limit]
 
 
-def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract AI/ML status from agent state."""
-    learning = state.get("learning", {})
-    learning_contextual = state.get("learning_contextual", {})
-    ml_filter = state.get("ml_filter", {})
-    circuit_breaker = state.get("trading_circuit_breaker", {})
-
-    # Determine mode (off, shadow, live)
-    def get_mode(section: Dict) -> str:
-        if not section.get("enabled", False):
-            return "off"
-        return section.get("mode", "off")
-
-    return {
-        "bandit_mode": get_mode(learning),
-        "contextual_mode": get_mode(learning_contextual),
-        "ml_filter": {
-            "enabled": ml_filter.get("enabled", False),
-            "mode": ml_filter.get("mode", "off"),
-            "lift": ml_filter.get("lift", {}),
-        },
-        "direction_gating": {
-            "enabled": circuit_breaker.get("direction_gating_enabled", False),
-            "blocks": circuit_breaker.get("blocks_by_reason", {}).get("direction_gating", 0),
-            "shadow_regime": circuit_breaker.get("would_have_blocked_regime", 0),
-            "shadow_trigger": circuit_breaker.get("would_have_blocked_trigger", 0),
-        },
-    }
-
-
 def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
     """Get challenge status from challenge_state.json (supports both IBKR Virtual + Tradovate Paper)."""
     data = _read_json_sync(state_dir / "challenge_state.json")
@@ -2087,9 +2202,9 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
                 data = []
         except Exception as e:
             logger.debug(f"Tradovate fills unavailable for equity curve, falling back: {e}")
-            data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+            data = _cached(_state_cache_key("performance_data", state_dir), 10.0, _load_performance_data, state_dir)
     else:
-        data = _cached("performance_data", 10.0, _load_performance_data, state_dir)
+        data = _cached(_state_cache_key("performance_data", state_dir), 10.0, _load_performance_data, state_dir)
 
     if not data:
         return []
@@ -2220,23 +2335,22 @@ def _get_market_regime(state: Dict[str, Any]) -> Dict[str, Any]:
     The agent now computes regime from the data buffer via detect_market_regime()
     and stores regime, regime_confidence, regime_trend_strength, etc. in state.
     """
-    circuit_breaker = state.get("trading_circuit_breaker", {})
-
     # Get regime from state (computed by service._save_state from buffer data)
     regime = state.get("regime") or "unknown"
 
     # Use actual confidence from detect_market_regime() if available
     confidence = float(state.get("regime_confidence", 0.0) or 0.0)
 
-    # Determine allowed direction based on direction gating
     allowed_direction = "both"
-    if circuit_breaker.get("direction_gating_enabled", False):
-        min_confidence = circuit_breaker.get("direction_gating_min_confidence", 0.7)
-        if confidence >= min_confidence:
-            if regime in ["trending_up"]:
-                allowed_direction = "long"
-            elif regime in ["trending_down"]:
-                allowed_direction = "short"
+    circuit_breaker = state.get("trading_circuit_breaker", {}) or {}
+    direction_gating_enabled = bool(circuit_breaker.get("direction_gating_enabled", False))
+    min_confidence = float(circuit_breaker.get("direction_gating_min_confidence", 0.7) or 0.7)
+
+    if direction_gating_enabled and confidence >= min_confidence:
+        if regime == "trending_up":
+            allowed_direction = "long"
+        elif regime == "trending_down":
+            allowed_direction = "short"
 
     return {
         "regime": regime,
@@ -2252,7 +2366,7 @@ def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
     TradingCircuitBreaker._record_block() so nothing is silently
     miscategorized.  Previous version missed position_clustering,
     drawdowns, volatility, regime_avoidance, trigger_filters,
-    ml_chop_shield, tv_paper_eval_gate, session_filtered, and
+    tv_paper_eval_gate, session_filtered, and
     in_cooldown:* actual blocks.
     """
     circuit_breaker = state.get("trading_circuit_breaker", {})
@@ -2285,10 +2399,6 @@ def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
     volatility_keys = ["low_volatility", "extreme_volatility", "chop_detected"]
     regime_keys = ["regime_avoidance", "regime_avoidance_low_confidence"]
     trigger_keys = ["trigger_ema_cross_no_volume", "trigger_low_regime_no_volume"]
-    ml_chop_keys = [
-        "ml_chop_shield", "ml_chop_shield_no_stats",
-        "ml_chop_shield_insufficient_data", "ml_chop_shield_insufficient_lift",
-    ]
     tv_paper_keys = [
         "tv_paper_outside_trading_hours", "tv_paper_max_contracts_exceeded",
         "tv_paper_hedging_prohibited", "tv_paper_news_blackout",
@@ -2296,7 +2406,7 @@ def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
 
     for group in (direction_keys, cb_keys, drawdown_keys, session_keys,
                   position_keys, clustering_keys, volatility_keys, regime_keys,
-                  trigger_keys, ml_chop_keys, tv_paper_keys):
+                  trigger_keys, tv_paper_keys):
         tracked_keys.update(group)
 
     # Catch-all: any reason not in a known group (future-proofing)
@@ -2317,54 +2427,8 @@ def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
         "volatility_filter": _sum(volatility_keys),
         "regime_avoidance": _sum(regime_keys),
         "trigger_filters": _sum(trigger_keys),
-        "ml_chop_shield": _sum(ml_chop_keys),
         "tv_paper_eval_gate": _sum(tv_paper_keys),
         "other": other_total,
-    }
-
-
-def _get_last_signal_decision(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Get the last signal decision information."""
-    learning = state.get("learning", {})
-    last_decision = learning.get("last_decision")
-
-    if not last_decision:
-        return None
-
-    return {
-        "signal_type": last_decision.get("signal_type", "unknown"),
-        "ml_probability": last_decision.get("score", 0.0),
-        "action": "execute" if last_decision.get("execute", False) else "skip",
-        "reason": last_decision.get("reason", ""),
-        "timestamp": last_decision.get("at"),
-    }
-
-
-def _get_shadow_counters(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Get shadow mode counters showing what would have been blocked + outcome stats."""
-    circuit_breaker = state.get("trading_circuit_breaker", {})
-    ml_filter = state.get("ml_filter", {})
-    learning = state.get("learning", {})
-
-    # Shadow outcome stats (from circuit breaker's shadow outcome tracker)
-    shadow_outcomes = circuit_breaker.get("shadow_outcomes", {})
-
-    return {
-        "would_block_total": circuit_breaker.get("would_block_total", 0),
-        "would_block_by_reason": circuit_breaker.get("would_block_by_reason", {}),
-        "ml_would_skip": learning.get("total_skips", 0) if learning.get("mode") == "shadow" else 0,
-        "ml_total_decisions": learning.get("total_decisions", 0),
-        "ml_execute_rate": learning.get("execute_rate", 1.0),
-        # Shadow outcome comparison (what happened to blocked vs allowed signals)
-        "blocked_wins": shadow_outcomes.get("blocked_wins", 0),
-        "blocked_losses": shadow_outcomes.get("blocked_losses", 0),
-        "blocked_total": shadow_outcomes.get("blocked_total", 0),
-        "blocked_pnl": shadow_outcomes.get("blocked_pnl", 0.0),
-        "allowed_wins": shadow_outcomes.get("allowed_wins", 0),
-        "allowed_losses": shadow_outcomes.get("allowed_losses", 0),
-        "allowed_total": shadow_outcomes.get("allowed_total", 0),
-        "allowed_pnl": shadow_outcomes.get("allowed_pnl", 0.0),
-        "net_saved": shadow_outcomes.get("net_saved", 0.0),
     }
 
 
@@ -2633,13 +2697,10 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     _require_state_dir()
 
     state = await asyncio.get_event_loop().run_in_executor(None, _read_state_safe)
+    derived = await _load_dashboard_derived_fields(_state_dir)
+    daily_stats = derived["daily_stats"]
 
     if not state:
-        # Agent not running / state.json missing -- still serve persistent
-        # data (challenge, performance, daily stats) so the dashboard is not
-        # blank when the agent is stopped.
-        daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-        recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
         return {
             "running": False,
             "paused": False,
@@ -2653,19 +2714,14 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
             "futures_market_open": False,
             "data_fresh": False,
             "last_updated": _now_et_iso(),
-            "ai_status": None,
             "challenge": _get_challenge_status(_state_dir),
-            "recent_exits": recent_exits,
-            "performance": _compute_performance_stats(_state_dir),
-            "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
-            "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
+            "recent_exits": derived["recent_exits"],
+            "performance": derived["performance"],
+            "equity_curve": derived["equity_curve"],
+            "risk_metrics": derived["risk_metrics"],
             "pearl_ai_available": False,
             "operator_lock_enabled": bool(_operator_enabled),
         }
-
-    # Compute daily stats from actual trades
-    daily_stats = await asyncio.get_event_loop().run_in_executor(None, _compute_daily_stats, _state_dir)
-    recent_exits = await asyncio.get_event_loop().run_in_executor(None, partial(_cached, "recent_exits", 5.0, _get_recent_exits, _state_dir, limit=100))
 
     # Return relevant fields for live chart
     return {
@@ -2685,17 +2741,14 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "data_fresh": state.get("data_fresh", False),
         "last_updated": _now_et_iso(),
 
-        # NEW: AI/ML Status
-        "ai_status": _get_ai_status(state),
-
         # NEW: Challenge Status
         "challenge": _get_challenge_status(_state_dir),
 
         # NEW: Recent exits
-        "recent_exits": recent_exits,
+        "recent_exits": derived["recent_exits"],
 
         # NEW: Performance stats
-        "performance": _compute_performance_stats(_state_dir),
+        "performance": derived["performance"],
 
         # Pearl AI (removed – keys retained for web-app compat)
         "pearl_suggestion": None,
@@ -2709,10 +2762,10 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
         "operator_lock_enabled": bool(_operator_enabled),
 
         # NEW: Equity curve for mini chart
-        "equity_curve": _cached("equity_curve", 10.0, _get_equity_curve, _state_dir, hours=72),
+        "equity_curve": derived["equity_curve"],
 
         # NEW: Risk metrics
-        "risk_metrics": _cached("risk_metrics", 10.0, _get_risk_metrics, _state_dir),
+        "risk_metrics": derived["risk_metrics"],
 
         # NEW: Buy/Sell Pressure (already in state.json)
         "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
@@ -2725,12 +2778,6 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
 
         # NEW: Signal rejections breakdown
         "signal_rejections_24h": _get_signal_rejections_24h(state),
-
-        # NEW: Last signal decision
-        "last_signal_decision": _get_last_signal_decision(state),
-
-        # NEW: Shadow mode counters
-        "shadow_counters": _get_shadow_counters(state),
 
         # NEW: Gateway status (process + port check)
         "gateway_status": _get_gateway_status(),
@@ -2761,10 +2808,9 @@ async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     }
 
 
-@app.get("/api/debug/tradovate-orders")
+@operator_router.get("/api/debug/tradovate-orders", tags=["debug", "operator"])
 async def debug_tradovate_orders(
     limit: int = Query(default=200, ge=1, le=500, description="Max debug rows to return"),
-    _: str = Depends(require_operator_access),
 ):
     """
     Internal debug endpoint for Tradovate order normalization.
@@ -2796,8 +2842,8 @@ async def debug_tradovate_orders(
     }
 
 
-@app.get("/api/operator/ping")
-async def operator_ping(_: str = Depends(require_operator_access)):
+@operator_router.get("/api/operator/ping")
+async def operator_ping():
     """
     Operator-only: verify that operator access is working.
 
@@ -2807,8 +2853,8 @@ async def operator_ping(_: str = Depends(require_operator_access)):
     return {"ok": True}
 
 
-@app.post("/api/kill-switch")
-async def kill_switch(_: str = Depends(require_operator_access)):
+@operator_router.post("/api/kill-switch")
+async def kill_switch():
     """
     Trigger the kill switch (operator action).
 
@@ -2844,8 +2890,8 @@ async def kill_switch(_: str = Depends(require_operator_access)):
         raise HTTPException(status_code=500, detail=f"Failed to write kill flag: {str(e)[:200]}")
 
 
-@app.post("/api/resume")
-async def resume_service(_: str = Depends(require_operator_access)):
+@operator_router.post("/api/resume")
+async def resume_service():
     """
     Request the agent to resume (unpause) after a circuit-breaker or manual pause.
 
@@ -2870,8 +2916,8 @@ async def resume_service(_: str = Depends(require_operator_access)):
         raise HTTPException(status_code=500, detail=f"Failed to write resume flag: {str(e)[:200]}")
 
 
-@app.post("/api/close-all-trades", status_code=202)
-async def close_all_trades(_: str = Depends(require_operator_access)):
+@operator_router.post("/api/close-all-trades", status_code=202)
+async def close_all_trades():
     """
     Request the agent to close ALL virtual trades (status=entered).
 
@@ -2908,10 +2954,9 @@ async def close_all_trades(_: str = Depends(require_operator_access)):
         raise HTTPException(status_code=500, detail=f"Failed to request close-all: {str(e)[:200]}")
 
 
-@app.post("/api/close-trade", status_code=202)
+@operator_router.post("/api/close-trade", status_code=202)
 async def close_trade(
     payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_access),
 ):
     """
     Request the agent to close a specific virtual trade by signal_id.
@@ -2959,10 +3004,9 @@ async def close_trade(
 # Trailing Stop Override API
 # =============================================================================
 
-@app.post("/api/trailing-stop/override")
+@operator_router.post("/api/trailing-stop/override")
 async def trailing_stop_override(
     payload: Dict[str, Any] = Body(default={}),
-    _: str = Depends(require_operator_access),
 ):
     """
     Apply a dynamic trailing stop parameter override.
@@ -3043,8 +3087,8 @@ async def trailing_stop_override(
         raise HTTPException(status_code=500, detail=f"Failed to write override: {str(e)[:200]}")
 
 
-@app.get("/api/trailing-stop/state")
-async def trailing_stop_state(_: str = Depends(require_operator_access)):
+@operator_router.get("/api/trailing-stop/state")
+async def trailing_stop_state():
     """
     Get current trailing stop state for all tracked positions.
 
@@ -3063,8 +3107,8 @@ async def trailing_stop_state(_: str = Depends(require_operator_access)):
         raise HTTPException(status_code=500, detail=f"Failed to read trailing stop state: {str(e)[:200]}")
 
 
-@app.delete("/api/trailing-stop/override")
-async def clear_trailing_stop_override(_: str = Depends(require_operator_access)):
+@operator_router.delete("/api/trailing-stop/override")
+async def clear_trailing_stop_override():
     """Clear any pending or active trailing stop override."""
     _check_rate_limit("trailing-stop-clear")
 
@@ -3090,7 +3134,8 @@ async def clear_trailing_stop_override(_: str = Depends(require_operator_access)
 # Config management endpoints
 # ---------------------------------------------------------------------------
 from pearlalgo.api.config_endpoints import config_router
-app.include_router(config_router, dependencies=[Depends(require_operator_access)])
+operator_router.include_router(config_router)
+app.include_router(operator_router)
 
 
 def _write_operator_request(state_dir: Path, prefix: str, payload: Dict[str, Any]) -> Path:
@@ -3221,6 +3266,13 @@ def _get_year_to_date_start(now: datetime) -> datetime:
     jan1_6pm = now_et.replace(month=1, day=1, hour=18, minute=0, second=0, microsecond=0)
     start_et = jan1_6pm - timedelta(days=1)
     return start_et
+
+
+@app.get("/api/analytics")
+async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
+    """Session/time-of-day analytics for the dashboard trade dock."""
+    _require_state_dir()
+    return await asyncio.get_event_loop().run_in_executor(None, _get_cached_session_analytics, _state_dir)
 
 
 @app.get("/api/performance-summary")
@@ -4131,29 +4183,18 @@ def main():
     if args.data_dir:
         _state_dir = Path(args.data_dir)
         if not _state_dir.exists():
-            print(f"WARNING: --data-dir {_state_dir} does not exist, creating it")
+            logger.warning(f"--data-dir {_state_dir} does not exist, creating it")
             _state_dir.mkdir(parents=True, exist_ok=True)
     else:
         _state_dir = _resolve_state_dir(_market)
 
-    print(f"Starting Pearl Algo Web App API Server")
-    print(f"  Market: {_market}")
-    print(f"  State dir: {_state_dir}")
-    print(f"  Listening: http://{args.host}:{args.port}")
-    print(f"  Auto-reload: {'ON' if args.reload else 'OFF'}")
-    print(f"")
-    print(f"Endpoints:")
-    print(f"  GET /api/candles?symbol=MNQ&timeframe=5m&bars=72")
-    print(f"  GET /api/indicators?symbol=MNQ&timeframe=5m&bars=72")
-    print(f"  GET /api/markers?hours=6")
-    print(f"  GET /api/state")
-    print(f"  GET /api/trades")
-    print(f"  GET /health")
-    print(f"")
-    print(f"Tips:")
-    print(f"  - Use --reload for development (auto-restarts on file changes)")
-    print(f"  - Set API_PORT=8001 to use different port")
-    print(f"  - Kill server: pkill -f 'api_server.py'")
+    logger.info(
+        "Starting Pearl Algo Web App API Server\n"
+        f"  Market: {_market}\n"
+        f"  State dir: {_state_dir}\n"
+        f"  Listening: http://{args.host}:{args.port}\n"
+        f"  Auto-reload: {'ON' if args.reload else 'OFF'}"
+    )
 
     if args.reload:
         # Use uvicorn's reload feature for development

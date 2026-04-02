@@ -610,8 +610,8 @@ class GetLatestBarTask(Task):
                 try:
                     ib.cancelMktData(contract)
                     logger.info("   ✅ Cancelled market data request")
-                except Exception:
-                    pass
+                except Exception as cancel_e:
+                    logger.debug(f"   Note: Error cancelling market data after failure: {cancel_e}")
             ticker = None
 
         # Fallback: Use latest historical bar if real-time data not available
@@ -878,8 +878,8 @@ class GetHistoricalDataTask(Task):
             try:
                 # ib_insync / IB supports includeExpired on futures contracts
                 contract.includeExpired = True  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            except Exception as attr_e:
+                logger.debug(f"Could not set includeExpired on contract: {attr_e}")
             try:
                 # Request contract details which returns all available contracts
                 contracts = ib.reqContractDetails(contract)

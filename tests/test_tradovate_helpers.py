@@ -9,12 +9,14 @@ Covers:
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone, timedelta
 
 import pytest
 
 from pearlalgo.api.tradovate_helpers import (
     estimate_commission_per_trade,
+    get_paired_tradovate_trades,
     normalize_fill,
     summarize_paired_trades_for_period,
     tradovate_performance_summary,
@@ -82,6 +84,141 @@ class TestNormalizeFill:
         result = normalize_fill(fill)
         assert result["order_id"] == 111
         assert result["contract_id"] == 333
+
+
+class TestGetPairedTradovateTrades:
+    def test_filters_by_explicit_pearl_order_ids(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(helpers_mod, "cached", lambda _key, _ttl, fn: fn())
+
+        fills = [
+            {
+                "id": 1,
+                "order_id": 100,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:40:50Z",
+                "action": "Buy",
+                "qty": 1,
+                "price": 23792.25,
+            },
+            {
+                "id": 2,
+                "order_id": 102,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:42:05Z",
+                "action": "Sell",
+                "qty": 1,
+                "price": 23809.0,
+            },
+            {
+                "id": 3,
+                "order_id": 200,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:50:00Z",
+                "action": "Buy",
+                "qty": 3,
+                "price": 23800.0,
+            },
+            {
+                "id": 4,
+                "order_id": 201,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:52:00Z",
+                "action": "Sell",
+                "qty": 3,
+                "price": 23810.0,
+            },
+        ]
+        (tmp_path / "signals.jsonl").write_text(
+            json.dumps(
+                {
+                    "signal_id": "sig-1",
+                    "status": "generated",
+                    "timestamp": "2026-04-02T10:40:45+00:00",
+                    "signal": {
+                        "direction": "long",
+                        "entry_price": 23792.25,
+                        "position_size": 1,
+                        "_execution_order_id": "100",
+                        "_execution_stop_order_id": "101",
+                        "_execution_take_profit_order_id": "102",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        trades = get_paired_tradovate_trades(tmp_path, fills)
+
+        assert len(trades) == 1
+        assert trades[0]["position_size"] == 1
+        assert trades[0]["entry_price"] == 23792.25
+        assert trades[0]["exit_price"] == 23809.0
+
+    def test_matches_trades_to_signal_candidates_without_order_ids(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(helpers_mod, "cached", lambda _key, _ttl, fn: fn())
+
+        fills = [
+            {
+                "id": 1,
+                "order_id": 100,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:40:50Z",
+                "action": "Buy",
+                "qty": 1,
+                "price": 23792.25,
+            },
+            {
+                "id": 2,
+                "order_id": 101,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:42:05Z",
+                "action": "Sell",
+                "qty": 1,
+                "price": 23809.0,
+            },
+            {
+                "id": 3,
+                "order_id": 200,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:50:00Z",
+                "action": "Buy",
+                "qty": 3,
+                "price": 23800.0,
+            },
+            {
+                "id": 4,
+                "order_id": 201,
+                "contract_id": 200,
+                "timestamp": "2026-04-02T10:52:00Z",
+                "action": "Sell",
+                "qty": 3,
+                "price": 23810.0,
+            },
+        ]
+        (tmp_path / "signals.jsonl").write_text(
+            json.dumps(
+                {
+                    "signal_id": "sig-1",
+                    "status": "generated",
+                    "timestamp": "2026-04-02T10:40:45+00:00",
+                    "signal": {
+                        "direction": "long",
+                        "entry_price": 23792.25,
+                        "position_size": 1,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        trades = get_paired_tradovate_trades(tmp_path, fills)
+
+        assert len(trades) == 1
+        assert trades[0]["position_size"] == 1
+        assert trades[0]["entry_price"] == 23792.25
+        assert trades[0]["exit_price"] == 23809.0
 
 
 # ---------------------------------------------------------------------------

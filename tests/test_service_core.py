@@ -53,8 +53,6 @@ MINIMAL_SERVICE_CONFIG = {
     "auto_flat": {},
     "storage": {"sqlite_enabled": False},
     "challenge": {},
-    "ml_filter": {"enabled": False},
-    "learning": {"enabled": False},
     "execution": {"enabled": False},
 }
 
@@ -450,7 +448,7 @@ class TestServiceInit:
     """Tests for MarketAgentService.__init__ with various configurations."""
 
     def test_init_minimal_config(self, mock_data_provider, tmp_path):
-        """Service initializes with no execution, no ML, no Telegram."""
+        """Service initializes with no execution and Telegram disabled."""
         with patch(
             "pearlalgo.market_agent.service.load_service_config",
             return_value=MINIMAL_SERVICE_CONFIG.copy(),
@@ -465,7 +463,6 @@ class TestServiceInit:
         assert svc.running is False
         assert svc.shutdown_requested is False
         assert svc.execution_adapter is None
-        assert svc._ml_filter_enabled is False
         assert svc.telegram_notifier.enabled is False
 
     def test_init_creates_expected_components(self, mock_data_provider, tmp_path):

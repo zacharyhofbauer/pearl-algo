@@ -216,7 +216,7 @@ def rebuild_database(
     
     # Import TradeDatabase (creates fresh schema)
     try:
-        from pearlalgo.learning.trade_database import TradeDatabase
+        from pearlalgo.storage.trade_database import TradeDatabase
     except ImportError:
         print("Error: Could not import TradeDatabase. Make sure pearlalgo is installed.")
         return stats

@@ -107,10 +107,9 @@ CI runs tests, linting, type checking, and architecture boundary checks via `.gi
 - `docs/START_HERE.md`
 - `docs/CURRENT_OPERATING_MODEL.md`
 - `docs/PATH_TRUTH_TABLE.md`
+- `docs/COMPATIBILITY_SURFACES.md`
 - `docs/GATEWAY.md`
 - `docs/TESTING_GUIDE.md`
-
-Historical notes and migration-era material live under `docs/archive/` and should not be treated as runtime truth.
 
 ## TradingView indicators
 

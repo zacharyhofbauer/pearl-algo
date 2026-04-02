@@ -1,12 +1,12 @@
 """
-Trading Circuit Breaker - Risk management module to prevent excessive losses.
+Trading Circuit Breaker - hard-risk containment for live execution.
 
-Implements multiple protective measures:
+Implements protective measures such as:
 1. Consecutive loss limit (pause after N consecutive losses)
-2. Daily drawdown limit (pause after losing $X in a session)
-3. Rolling win rate filter (pause if win rate drops below threshold)
-4. Position clustering prevention (no new entries near existing positions)
-5. Volatility/chop filter (reduce activity in ranging markets)
+2. Daily/session drawdown limits
+3. Daily profit cap
+4. Position/exposure clustering prevention
+5. Tradovate paper-eval rule enforcement
 
 Usage:
     circuit_breaker = TradingCircuitBreaker(config)
@@ -40,7 +40,6 @@ from pearlalgo.market_agent.circuit_breaker_filters import (
     check_direction_gating as _check_direction_gating_fn,
     check_regime_avoidance as _check_regime_avoidance_fn,
     check_trigger_filters as _check_trigger_filters_fn,
-    check_ml_chop_shield as _check_ml_chop_shield_fn,
     check_tv_paper_eval_gate as _check_tv_paper_eval_gate_fn,
     get_current_session as _get_current_session_fn,
 )
@@ -78,7 +77,8 @@ class TradingCircuitBreaker:
         self._would_block_by_reason: Dict[str, int] = {}
         self._last_would_block_at: Optional[str] = None
         
-        # "Would have blocked" counters for shadow measurement (Phase 2 & 3)
+        # Retained for backward-compatible state payloads. These remain zero now
+        # that market-quality gating has been retired from the breaker.
         self._would_have_blocked_regime: int = 0
         self._would_have_blocked_trigger: int = 0
         
@@ -91,15 +91,11 @@ class TradingCircuitBreaker:
         self._shadow_allowed_losses: int = 0
         self._shadow_allowed_pnl: float = 0.0
         
-        # Direction gating statistics
-        self._direction_gating_blocks: int = 0
-        
         logger.info(
             f"TradingCircuitBreaker initialized: "
             f"max_consecutive_losses={self.config.max_consecutive_losses}, "
             f"max_session_drawdown=${self.config.max_session_drawdown}, "
-            f"max_concurrent_positions={self.config.max_concurrent_positions}, "
-            f"direction_gating={self.config.enable_direction_gating}"
+            f"max_concurrent_positions={self.config.max_concurrent_positions}"
         )
     
     def should_allow_signal(
@@ -108,7 +104,6 @@ class TradingCircuitBreaker:
         performance_stats: Optional[Dict[str, Any]] = None,
         active_positions: Optional[List[Dict[str, Any]]] = None,
         market_data: Optional[Dict[str, Any]] = None,
-        ml_stats: Optional[Dict[str, Any]] = None,
     ) -> CircuitBreakerDecision:
         """
         Evaluate whether a new signal should be allowed.
@@ -118,7 +113,6 @@ class TradingCircuitBreaker:
             performance_stats: Recent performance statistics from PerformanceTracker
             active_positions: List of currently open positions
             market_data: Market data including ATR, volatility metrics
-            ml_stats: ML filter statistics for chop shield validation
         
         Returns:
             CircuitBreakerDecision indicating whether the signal is allowed
@@ -136,61 +130,8 @@ class TradingCircuitBreaker:
                 }
             )
         
-        # Short signal filtering: hour-restricted shorts OR full kill switch
-        direction = str(signal.get("direction", "")).lower()
-        if direction in ("short", "sell"):
-            if self.config.allowed_short_hours_et:
-                # Hour-restricted shorts: only allow during data-proven profitable hours
-                current_hour = datetime.now(ET).hour
-                if current_hour not in self.config.allowed_short_hours_et:
-                    logger.info(
-                        "Short hour filter: blocked short at hour %d ET (allowed: %s)",
-                        current_hour, self.config.allowed_short_hours_et
-                    )
-                    self._record_block("short_hour_filter")
-                    return CircuitBreakerDecision(
-                        allowed=False,
-                        reason="short_hour_filter",
-                        severity="warning",
-                        details={
-                            "direction": direction,
-                            "current_hour_et": current_hour,
-                            "allowed_short_hours": self.config.allowed_short_hours_et,
-                            "message": f"Short signals only allowed at hours {self.config.allowed_short_hours_et} ET",
-                        },
-                    )
-                else:
-                    logger.info("Short allowed at hour %d ET (in allowed_short_hours_et)", current_hour)
-            elif self.config.kill_switch_short:
-                # Full kill switch fallback (when no short hours defined)
-                logger.warning(
-                    "Kill switch active: blocked short signal | "
-                    "direction=%s, type=%s", direction, signal.get("type", "unknown")
-                )
-                self._record_block("kill_switch_short")
-                return CircuitBreakerDecision(
-                    allowed=False,
-                    reason="kill_switch_short",
-                    severity="critical",
-                    details={
-                        "direction": direction,
-                        "message": "Short trade kill switch is active - all short/sell signals blocked",
-                    },
-                )
-
-        # Hour-level filter: block signals outside allowed hours (ET)
-        if self.config.enable_hour_filter:
-            decision = self._check_hour_filter()
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-
-        # Weekday filter: block signals on bad days
-        if self.config.blocked_weekdays:
-            decision = self._check_weekday_filter()
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
+        # Strategy selection belongs to the strategy layer, not the breaker.
+        # Legacy time/day and market-quality gates are intentionally inert here.
 
         # Check consecutive losses
         decision = self._check_consecutive_losses()
@@ -229,74 +170,6 @@ class TradingCircuitBreaker:
                 self._record_block(decision.reason)
                 return decision
         
-        # Check volatility/chop filter
-        if self.config.enable_volatility_filter and market_data is not None:
-            decision = self._check_volatility_filter(market_data)
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-        
-        # Check session filter (time-of-day based filtering)
-        if self.config.enable_session_filter:
-            decision = self._check_session_filter()
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-        
-        # =======================================================================
-        # Phase 1: Direction gating by market regime (ENABLED by default)
-        # =======================================================================
-        if self.config.enable_direction_gating:
-            decision = self._check_direction_gating(signal)
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-        
-        # =======================================================================
-        # Phase 2: Regime avoidance (OFF by default - log "would-have-blocked")
-        # =======================================================================
-        if self.config.enable_regime_avoidance:
-            decision = self._check_regime_avoidance(signal)
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-        else:
-            # Log "would-have-blocked" for measurement (only in debug mode)
-            would_block_decision = self._check_regime_avoidance(signal)
-            if not would_block_decision.allowed:
-                self._would_have_blocked_regime = self._would_have_blocked_regime + 1
-                logger.debug(
-                    f"[Phase 2 shadow] Would have blocked: {would_block_decision.reason} | "
-                    f"details={would_block_decision.details}"
-                )
-        
-        # =======================================================================
-        # Phase 3: Trigger filters (OFF by default)
-        # =======================================================================
-        if self.config.enable_trigger_filters:
-            decision = self._check_trigger_filters(signal)
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-        else:
-            # Log "would-have-blocked" for measurement
-            would_block_decision = self._check_trigger_filters(signal)
-            if not would_block_decision.allowed:
-                self._would_have_blocked_trigger = self._would_have_blocked_trigger + 1
-                logger.debug(
-                    f"[Phase 3 shadow] Would have blocked: {would_block_decision.reason} | "
-                    f"details={would_block_decision.details}"
-                )
-        
-        # =======================================================================
-        # Phase 4: ML chop shield (OFF by default - requires proven lift)
-        # =======================================================================
-        if self.config.enable_ml_chop_shield and ml_stats is not None:
-            decision = self._check_ml_chop_shield(signal, ml_stats)
-            if not decision.allowed:
-                self._record_block(decision.reason)
-                return decision
-
         # =======================================================================
         # Tradovate Paper Evaluation Gate (prop firm rule enforcement)
         # =======================================================================
@@ -502,46 +375,7 @@ class TradingCircuitBreaker:
             warnings.append(
                 f"mode={self.config.mode} should be 'warn_only' or 'enforce'"
             )
-        
-        # Phase 1: Direction gating sanity checks
-        if self.config.enable_direction_gating:
-            if not (0.0 <= self.config.direction_gating_min_confidence <= 1.0):
-                warnings.append(
-                    f"direction_gating_min_confidence={self.config.direction_gating_min_confidence} "
-                    "should be between 0.0 and 1.0"
-                )
-        
-        # Phase 2: Regime avoidance sanity checks
-        if self.config.enable_regime_avoidance:
-            if not self.config.blocked_regimes:
-                warnings.append(
-                    "enable_regime_avoidance=true but blocked_regimes is empty"
-                )
-        
-        # Phase 3: Trigger filters sanity checks
-        if self.config.enable_trigger_filters:
-            if not self.config.ema_cross_require_volume and not self.config.low_regime_require_volume:
-                warnings.append(
-                    "enable_trigger_filters=true but both volume requirements are disabled"
-                )
-        
-        # Phase 4: ML chop shield sanity checks
-        if self.config.enable_ml_chop_shield:
-            if self.config.ml_min_scored_trades < 30:
-                warnings.append(
-                    f"ml_min_scored_trades={self.config.ml_min_scored_trades} is low; "
-                    "recommend at least 30-50 for reliable lift validation"
-                )
-            if not (0.0 <= self.config.ml_min_winrate_delta <= 1.0):
-                warnings.append(
-                    f"ml_min_winrate_delta={self.config.ml_min_winrate_delta} "
-                    "should be between 0.0 and 1.0"
-                )
-            if not self.config.ml_chop_shield_regimes:
-                warnings.append(
-                    "enable_ml_chop_shield=true but ml_chop_shield_regimes is empty"
-                )
-        
+
         # Log warnings
         for w in warnings:
             logger.warning(f"[TradingCircuitBreaker config] {w}")
@@ -555,30 +389,12 @@ class TradingCircuitBreaker:
         Returns:
             Dict mapping phase name to rollback instruction
         """
-        return {
-            "phase1_direction_gating": (
-                "Set `enable_direction_gating: false` in config.yaml under trading_circuit_breaker. "
-                "This disables direction gating and allows both longs and shorts in all regimes."
-            ),
-            "phase2_regime_avoidance": (
-                "Set `enable_regime_avoidance: false` in config.yaml under trading_circuit_breaker. "
-                "This disables blocking of signals in ranging/volatile regimes (already OFF by default)."
-            ),
-            "phase3_trigger_filters": (
-                "Set `enable_trigger_filters: false` in config.yaml under trading_circuit_breaker. "
-                "This disables volume requirements for ema_cross and low-regime entries (already OFF by default)."
-            ),
-            "phase4_ml_chop_shield": (
-                "Set `enable_ml_chop_shield: false` in config.yaml under trading_circuit_breaker. "
-                "This disables ML FAIL blocking in ranging/volatile regimes (already OFF by default)."
-            ),
-        }
+        return {}
     
     def get_status(self) -> Dict[str, Any]:
         """Get current circuit breaker status."""
         recent_win_rate = self._calculate_rolling_win_rate()
         current_session, et_hour = self._get_current_session()
-        session_allowed = current_session in self.config.allowed_sessions
         
         return {
             "enabled": True,
@@ -600,26 +416,10 @@ class TradingCircuitBreaker:
             "would_block_total": self._would_block_total,
             "would_block_by_reason": self._would_block_by_reason.copy(),
             "last_would_block_at": self._last_would_block_at,
-            # Session filter status
-            "session_filter_enabled": self.config.enable_session_filter,
+            # Observability only; legacy session gating is retired.
+            "session_filter_enabled": False,
             "current_session": current_session,
             "et_hour": et_hour,
-            "session_allowed": session_allowed,
-            "allowed_sessions": self.config.allowed_sessions,
-            # Phase 1: Direction gating
-            "direction_gating_enabled": self.config.enable_direction_gating,
-            "direction_gating_min_confidence": self.config.direction_gating_min_confidence,
-            # Phase 2: Regime avoidance (shadow measurement)
-            "regime_avoidance_enabled": self.config.enable_regime_avoidance,
-            "blocked_regimes": self.config.blocked_regimes,
-            "would_have_blocked_regime": self._would_have_blocked_regime,
-            # Phase 3: Trigger filters (shadow measurement)
-            "trigger_filters_enabled": self.config.enable_trigger_filters,
-            "would_have_blocked_trigger": self._would_have_blocked_trigger,
-            # Phase 4: ML chop shield
-            "ml_chop_shield_enabled": self.config.enable_ml_chop_shield,
-            "ml_min_scored_trades": self.config.ml_min_scored_trades,
-            "ml_chop_shield_regimes": self.config.ml_chop_shield_regimes,
             # Shadow outcome tracking (what happened to would-block vs allowed signals)
             "shadow_outcomes": self.get_shadow_outcome_stats(),
         }
@@ -910,13 +710,6 @@ class TradingCircuitBreaker:
         """Phase 3: De-risk low-quality trigger types."""
         return _check_trigger_filters_fn(self.config, signal)
     
-    def _check_ml_chop_shield(
-        self, signal: Dict[str, Any], ml_stats: Optional[Dict[str, Any]] = None
-    ) -> CircuitBreakerDecision:
-        """Phase 4: Block ML FAIL signals in poor regimes when lift is proven."""
-        return _check_ml_chop_shield_fn(self.config, signal, ml_stats)
-
-
     def _check_tv_paper_eval_gate(
         self,
         signal: Dict[str, Any],
@@ -941,7 +734,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
     
     cb_config = TradingCircuitBreakerConfig(
         mode=str(config.get("mode", "enforce") or "enforce"),
-        kill_switch_short=config.get("kill_switch_short", False),
+        kill_switch_short=False,
         max_consecutive_losses=config.get("max_consecutive_losses", 5),
         consecutive_loss_cooldown_minutes=config.get("consecutive_loss_cooldown_minutes", 30),
         max_session_drawdown=config.get("max_session_drawdown", 500.0),
@@ -953,7 +746,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         win_rate_cooldown_minutes=config.get("win_rate_cooldown_minutes", 30),
         max_concurrent_positions=config.get("max_concurrent_positions", 5),
         min_price_distance_pct=config.get("min_price_distance_pct", 0.5),
-        enable_volatility_filter=config.get("enable_volatility_filter", True),
+        enable_volatility_filter=False,
         min_atr_ratio=config.get("min_atr_ratio", 0.8),
         max_atr_ratio=config.get("max_atr_ratio", 2.5),
         chop_detection_window=config.get("chop_detection_window", 10),
@@ -961,30 +754,23 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         auto_resume_after_cooldown=config.get("auto_resume_after_cooldown", True),
         require_winning_trade_to_resume=config.get("require_winning_trade_to_resume", False),
         # Session filter settings
-        enable_session_filter=config.get("enable_session_filter", True),
-        allowed_sessions=config.get("allowed_sessions", ["overnight", "midday", "close"]),
+        enable_session_filter=False,
+        allowed_sessions=[],
         # Hour-level filter
-        enable_hour_filter=config.get("enable_hour_filter", False),
-        allowed_short_hours_et=config.get("allowed_short_hours_et", []),
+        enable_hour_filter=False,
+        allowed_short_hours_et=[],
         allowed_trading_hours_et=config.get("allowed_trading_hours_et", list(range(24))),
         # Weekday filter
-        blocked_weekdays=config.get("blocked_weekdays", []),
-        # Phase 1: Direction gating
-        enable_direction_gating=config.get("enable_direction_gating", True),
+        blocked_weekdays=[],
+        # Market-quality gating is retired; keep these disabled for compatibility.
+        enable_direction_gating=False,
         direction_gating_min_confidence=config.get("direction_gating_min_confidence", 0.70),
-        # Phase 2: Regime avoidance
-        enable_regime_avoidance=config.get("enable_regime_avoidance", False),
-        blocked_regimes=config.get("blocked_regimes", ["ranging", "volatile"]),
+        enable_regime_avoidance=False,
+        blocked_regimes=[],
         regime_avoidance_min_confidence=config.get("regime_avoidance_min_confidence", 0.70),
-        # Phase 3: Trigger filters
-        enable_trigger_filters=config.get("enable_trigger_filters", False),
+        enable_trigger_filters=False,
         ema_cross_require_volume=config.get("ema_cross_require_volume", True),
         low_regime_require_volume=config.get("low_regime_require_volume", True),
-        # Phase 4: ML chop shield
-        enable_ml_chop_shield=config.get("enable_ml_chop_shield", False),
-        ml_min_scored_trades=config.get("ml_min_scored_trades", 50),
-        ml_min_winrate_delta=config.get("ml_min_winrate_delta", 0.15),
-        ml_chop_shield_regimes=config.get("ml_chop_shield_regimes", ["ranging", "volatile"]),
         # Tradovate Paper Evaluation Gate
         enable_tv_paper_eval_gate=config.get("enable_tv_paper_eval_gate", False),
         tv_paper_max_contracts_mini=config.get("tv_paper_max_contracts_mini", 5),

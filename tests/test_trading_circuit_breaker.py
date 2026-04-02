@@ -342,10 +342,10 @@ class TestVolatilityFilter:
 
 
 class TestSessionFilter:
-    """Test session time-of-day filter."""
+    """Legacy session filters are ignored by should_allow_signal()."""
 
     def test_allows_overnight_session(self):
-        """Test signal allowed during overnight session."""
+        """Signals remain allowed even when old session config is present."""
         cb = TradingCircuitBreaker(TradingCircuitBreakerConfig(
             enable_session_filter=True,
             allowed_sessions=["overnight", "midday", "close"],
@@ -359,7 +359,7 @@ class TestSessionFilter:
         assert decision.allowed is True
 
     def test_blocks_morning_session(self):
-        """Test signal blocked during morning session (not in allowed list)."""
+        """Signals are no longer blocked by session names."""
         cb = TradingCircuitBreaker(TradingCircuitBreakerConfig(
             enable_session_filter=True,
             allowed_sessions=["overnight", "midday", "close"],
@@ -370,8 +370,7 @@ class TestSessionFilter:
         with patch("pearlalgo.market_agent.circuit_breaker_filters.get_current_session", return_value=("morning", 8)):
             decision = cb.should_allow_signal({"direction": "long"})
 
-        assert decision.allowed is False
-        assert "session_filtered" in decision.reason
+        assert decision.allowed is True
 
 
 class TestDirectionGating:
@@ -539,76 +538,6 @@ class TestTriggerFilters:
         }
 
         decision = cb.should_allow_signal(signal)
-
-        assert decision.allowed is True
-
-
-class TestMLChopShield:
-    """Test ML chop shield (Phase 4)."""
-
-    def test_blocks_ml_fail_in_ranging(self):
-        """Test ML FAIL signal blocked in ranging regime."""
-        cb = TradingCircuitBreaker(TradingCircuitBreakerConfig(
-            enable_ml_chop_shield=True,
-            ml_min_scored_trades=50,
-            ml_min_winrate_delta=0.15,
-            ml_chop_shield_regimes=["ranging", "volatile"],
-            enable_session_filter=False,
-            enable_direction_gating=False,
-        ))
-        signal = {
-            "direction": "long",
-            "market_regime": {"regime": "ranging", "confidence": 0.80},
-            "_ml_prediction": {"pass_filter": False},
-        }
-        ml_stats = {
-            "scored_trades": 100,
-            "pass_win_rate": 0.55,
-            "fail_win_rate": 0.30,  # delta = 0.25 >= 0.15
-        }
-
-        decision = cb.should_allow_signal(signal, ml_stats=ml_stats)
-
-        assert decision.allowed is False
-        assert "ml_chop_shield" in decision.reason
-
-    def test_allows_ml_pass_in_ranging(self):
-        """Test ML PASS signal allowed in ranging regime."""
-        cb = TradingCircuitBreaker(TradingCircuitBreakerConfig(
-            enable_ml_chop_shield=True,
-            ml_min_scored_trades=50,
-            ml_min_winrate_delta=0.15,
-            ml_chop_shield_regimes=["ranging", "volatile"],
-            enable_session_filter=False,
-            enable_direction_gating=False,
-        ))
-        signal = {
-            "direction": "long",
-            "market_regime": {"regime": "ranging", "confidence": 0.80},
-            "_ml_prediction": {"pass_filter": True},
-        }
-        ml_stats = {
-            "scored_trades": 100,
-            "pass_win_rate": 0.55,
-            "fail_win_rate": 0.30,
-        }
-
-        decision = cb.should_allow_signal(signal, ml_stats=ml_stats)
-
-        assert decision.allowed is True
-
-    def test_insufficient_scored_trades_allows(self):
-        """Test insufficient scored trades allows signal."""
-        cb = TradingCircuitBreaker(TradingCircuitBreakerConfig(
-            enable_ml_chop_shield=True,
-            ml_min_scored_trades=50,
-            enable_session_filter=False,
-            enable_direction_gating=False,
-        ))
-        signal = {"direction": "long"}
-        ml_stats = {"scored_trades": 30}  # < 50 required
-
-        decision = cb.should_allow_signal(signal, ml_stats=ml_stats)
 
         assert decision.allowed is True
 
@@ -883,7 +812,6 @@ def _make_breaker(**overrides) -> TradingCircuitBreaker:
         enable_direction_gating=False,
         enable_regime_avoidance=False,
         enable_trigger_filters=False,
-        enable_ml_chop_shield=False,
         enable_tv_paper_eval_gate=False,
     )
     defaults.update(overrides)

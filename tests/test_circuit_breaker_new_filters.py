@@ -1,9 +1,7 @@
-"""Tests for recently-added circuit breaker filters and advanced exit features.
+"""Tests for retired circuit-breaker time filters and advanced exit features.
 
 Covers:
-- Hour filter (allowed_trading_hours_et)
-- Weekday filter (blocked_weekdays)
-- Short hour filter (allowed_short_hours_et)
+- Legacy time/day filters are inert in should_allow_signal()
 - Daily profit cap (max_daily_profit)
 - Max hold exit (AdvancedExitManager.check_max_hold_exit)
 """
@@ -34,7 +32,6 @@ def _make_cb(**overrides) -> TradingCircuitBreaker:
         enable_direction_gating=False,
         enable_regime_avoidance=False,
         enable_trigger_filters=False,
-        enable_ml_chop_shield=False,
         enable_tv_paper_eval_gate=False,
         enable_volatility_filter=False,
         enable_hour_filter=False,
@@ -70,7 +67,7 @@ def _short_signal(**overrides):
 # ============================================================================
 
 class TestHourFilter:
-    """Test enable_hour_filter + allowed_trading_hours_et."""
+    """Legacy hour filters no longer block signals."""
 
     def test_allows_signal_during_configured_hour(self):
         """Signal at hour 10 ET should pass when 10 is in allowed_trading_hours_et."""
@@ -85,7 +82,7 @@ class TestHourFilter:
         assert decision.allowed is True
 
     def test_blocks_signal_outside_configured_hours(self):
-        """Signal at hour 5 ET should be blocked when 5 is not in allowed_trading_hours_et."""
+        """Signal at hour 5 ET should still pass despite old config."""
         cb = _make_cb(enable_hour_filter=True, allowed_trading_hours_et=[9, 10, 11])
         fake_et = datetime(2026, 3, 31, 5, 15, 0, tzinfo=_ET)
 
@@ -94,9 +91,7 @@ class TestHourFilter:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             decision = cb.should_allow_signal(_long_signal())
 
-        assert decision.allowed is False
-        assert decision.reason == "hour_filter"
-        assert decision.details["current_hour_et"] == 5
+        assert decision.allowed is True
 
     def test_disabled_by_default(self):
         """When enable_hour_filter=False, all hours pass."""
@@ -111,10 +106,10 @@ class TestHourFilter:
 # ============================================================================
 
 class TestWeekdayFilter:
-    """Test blocked_weekdays filter."""
+    """Legacy weekday filters no longer block signals."""
 
     def test_blocks_friday(self):
-        """Signal on Friday (weekday=4) should be blocked when 4 is in blocked_weekdays."""
+        """Signal on Friday should still pass despite old blocked_weekdays config."""
         cb = _make_cb(blocked_weekdays=[4])
         # 2026-03-27 is a Friday
         fake_et = datetime(2026, 3, 27, 10, 0, 0, tzinfo=_ET)
@@ -124,9 +119,7 @@ class TestWeekdayFilter:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             decision = cb.should_allow_signal(_long_signal())
 
-        assert decision.allowed is False
-        assert decision.reason == "weekday_filter"
-        assert decision.details["day_name"] == "Friday"
+        assert decision.allowed is True
 
     def test_allows_tuesday(self):
         """Signal on Tuesday (weekday=1) should pass when only Friday is blocked."""
@@ -153,11 +146,7 @@ class TestWeekdayFilter:
 # ============================================================================
 
 class TestShortHourFilter:
-    """Test allowed_short_hours_et for short signals.
-
-    The short hour filter is inline in should_allow_signal() in the main module,
-    so we patch datetime in trading_circuit_breaker (not circuit_breaker_filters).
-    """
+    """Legacy short-hour restrictions no longer block short signals."""
 
     _PATCH_TARGET = "pearlalgo.market_agent.trading_circuit_breaker.datetime"
 
@@ -174,7 +163,7 @@ class TestShortHourFilter:
         assert decision.allowed is True
 
     def test_blocks_short_outside_configured_hours(self):
-        """Short at hour 10 ET should be blocked when 10 is not in allowed_short_hours_et."""
+        """Short at hour 10 ET should still pass despite old short-hour config."""
         cb = _make_cb(allowed_short_hours_et=[3, 4, 18, 21])
         fake_et = datetime(2026, 3, 31, 10, 0, 0, tzinfo=_ET)
 
@@ -183,8 +172,7 @@ class TestShortHourFilter:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             decision = cb.should_allow_signal(_short_signal())
 
-        assert decision.allowed is False
-        assert decision.reason == "short_hour_filter"
+        assert decision.allowed is True
 
     def test_long_signal_ignores_short_hour_filter(self):
         """Long signals should not be affected by allowed_short_hours_et."""

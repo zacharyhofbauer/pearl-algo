@@ -95,7 +95,6 @@ class SQLiteDoctorDB:
             "rejected_order_book",
             "rejected_invalid_prices",
             "rejected_regime_filter",
-            "rejected_ml_filter",
             "adaptive_sizing_applied",
         ]
         select_sql = ", ".join(

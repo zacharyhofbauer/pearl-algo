@@ -38,12 +38,6 @@ python3 scripts/testing/test_all.py arch
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 ```
 
-### Option 2: Multi-market smoke check
-```bash
-# Verify config + state isolation across NQ/ES/GC
-python3 scripts/testing/smoke_multi_market.py
-```
-
 ## ✅ Testing Principles (non-negotiable)
 
 1. **No code duplication**: tests import production code from `src/pearlalgo/` directly.
@@ -557,13 +551,13 @@ python3 scripts/testing/check_architecture_boundaries.py --verbose
 
 The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
 
-- `utils/` does not import from `config`, `data_providers`, `strategies`, `trading_bots`, `execution`, `learning`, or `market_agent`
-- `config/` does not import from `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`; it may import `strategies` for schema/default resolution
-- `data_providers/` does not import from `strategies`, `trading_bots`, `execution`, `learning`, or `market_agent`
+- `utils/` does not import from `config`, `data_providers`, `strategies`, `trading_bots`, `execution`, `storage`, or `market_agent`
+- `config/` does not import from `data_providers`, `trading_bots`, `execution`, `storage`, or `market_agent`; it may import `strategies` for schema/default resolution
+- `data_providers/` does not import from `strategies`, `trading_bots`, `execution`, `storage`, or `market_agent`
 - `strategies/` is the canonical strategy layer and may import `trading_bots` only for compatibility-backed wrappers during the migration
 - `trading_bots/` is a legacy compatibility namespace and does not import from `data_providers`, `execution`, or `market_agent`
-- `execution/` does not import from `data_providers`, `strategies`, `trading_bots`, `learning`, or `market_agent`
-- `learning/` does not import from `data_providers`, `strategies`, `trading_bots`, `execution`, or `market_agent`
+- `execution/` does not import from `data_providers`, `strategies`, `trading_bots`, `storage`, or `market_agent`
+- `storage/` does not import from `data_providers`, `strategies`, `trading_bots`, `execution`, or `market_agent`
 - `market_agent/` may import from any internal layer (it's the orchestration layer)
 
 ### When to Run
@@ -879,6 +873,8 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 - `scripts/testing/smoke_test_ibkr.py` - IBKR connectivity smoke
 - `scripts/testing/check_no_secrets.py` - Secret detection guardrail
 - `scripts/testing/check_doc_references.py` - Doc path/reference audit
+- `scripts/testing/report_orphan_modules.py` - Orphan-module report
+- `scripts/testing/generate_coverage_badge.py` - Coverage badge generation
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/test_service_pause.py` - Service pause: connection failures, consecutive errors, data fetch backoff, manual pause/resume, counter reset, edge cases
@@ -917,23 +913,21 @@ This section summarizes the current test coverage and highlights areas for futur
 #### Tests under `scripts/testing/`
 
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
-- `smoke_multi_market.py` – multi-market config + state isolation smoke test
 - `check_no_secrets.py` – secret detection guardrail
 - `check_doc_references.py` – documentation path reference audit
+- `report_orphan_modules.py` – orphan-module report
+- `generate_coverage_badge.py` – coverage badge generation
 
 #### Tests under `tests/`
 
 - `mock_data_provider.py` – common mock provider for unit/integration tests
 - `test_base_cache.py` – base historical caching behavior (cache hits, buffer shape, timestamp extraction)
-- `test_config_wiring.py` – config propagation from `config.yaml` to `MarketAgentService` and `MarketAgentDataFetcher`
 - `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
 - `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
 - `test_service_pause.py` – comprehensive service pause/resume tests: connection failure pause, consecutive errors pause, data fetch errors (backoff only, not pause), counter reset on success, manual pause/resume, status reflects circuit breaker state, edge cases for thresholds
-- `test_signal_generation_edge_cases.py` – edge cases for signal generation (NaN, inf, extreme prices, malformed data)
-- `test_service_core.py` – 20 targeted tests for the 5 highest-risk service.py methods (VirtualTradeManager, save_state, init, connection failure, stop)
-- `test_tradovate_client.py` – 22 tests for Tradovate REST/WebSocket client with mocked HTTP responses (auth, token refresh, error handling, rate limiting)
-- `test_ibkr_adapter_unit.py` – 10 tests for IBKR adapter with mocked ib_insync (order placement, position management, error handling, fills)
-- `test_signal_pipeline_integration.py` – signal pipeline integration tests, including 5 execution scenarios (adapter called, ML filter rejects, circuit breaker blocks, execution succeeds)
+- `test_service_core.py` – targeted tests for the highest-risk service.py methods (VirtualTradeManager, save_state, init, connection failure, stop)
+- `test_tradovate_client.py` – Tradovate REST/WebSocket client with mocked HTTP responses (auth, token refresh, error handling, rate limiting)
+- `test_signal_pipeline_integration.py` – signal pipeline integration tests, including execution scenarios (adapter called, ML filter rejects, circuit breaker blocks, execution succeeds)
 
 #### Web app tests under `apps/pearl-algo-app/__tests__/`
 
@@ -946,13 +940,13 @@ This section summarizes the current test coverage and highlights areas for futur
 These gaps are **observational only** and do not change behavior.
 
 1. **Market hours edge cases** (`test_edge_cases.py`)
-   - DST transitions are covered (see `test_dst_transitions.py`), but full CME holiday/early-close calendar behavior is not yet comprehensively tested.
+   - Full CME holiday/early-close calendar behavior is not yet comprehensively tested.
 
 2. **Circuit breaker thresholds** (`test_error_recovery.py`, `test_service_pause.py`)
    - Connection-failure pause, consecutive errors pause, data-fetch backoff, manual pause/resume, and counter reset are now tested via `test_service_pause.py`. Edge cases for threshold boundaries are also covered.
 
 3. **IBKR connectivity and fallback behavior**
-   - `smoke_test_ibkr.py` tests basic connectivity. `test_ibkr_adapter_unit.py` now covers adapter-level order placement, position management, and error handling with mocked ib_insync. Detailed reconnection/staleness recovery paths could use further expansion.
+   - `smoke_test_ibkr.py` tests basic connectivity. Detailed reconnection/staleness recovery paths could use further expansion.
 
 4. **Command handler behavior**
    - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing. The handler now uses 6 mixin base classes for code organization, but individual command flow tests are not yet automated.
@@ -961,29 +955,23 @@ These gaps are **observational only** and do not change behavior.
 
 The following gaps have been addressed with explicit test coverage:
 
-1. **Configuration wiring** (`test_config_wiring.py`)
-   - Tests verify that values from `config/config.yaml` and `Settings` correctly propagate into `MarketAgentService` (intervals, thresholds, flags) and `MarketAgentDataFetcher` (buffer sizes, cache settings).
-
-2. **Volume profile edge cases** (`test_signal_generation_edge_cases.py`)
-   - The previously-xfail test for `inf` values is now passing. `VolumeProfile.calculate_profile()` sanitizes non-finite values before computing buckets.
-
-3. **Base historical cache** (`test_base_cache.py`)
+1. **Base historical cache** (`test_base_cache.py`)
    - Tests validate cache hit behavior, dataframe shape consistency (no column accumulation), and historical fallback timestamp extraction from both index-based and column-based dataframes.
 
-4. **Service core methods** (`test_service_core.py`)
-   - 20 targeted tests covering VirtualTradeManager (TP/SL hit, tiebreak, empty data), save_state round-trips, service init with various configs, connection failure handling, and graceful shutdown.
+2. **Service core methods** (`test_service_core.py`)
+   - Targeted tests covering VirtualTradeManager (TP/SL hit, tiebreak, empty data), save_state round-trips, service init with various configs, connection failure handling, and graceful shutdown.
 
-5. **Execution clients** (`test_tradovate_client.py`, `test_ibkr_adapter_unit.py`)
-   - 32 tests covering Tradovate REST/WebSocket client (auth, token refresh, order placement, error codes, rate limiting) and IBKR adapter (bracket orders, positions, fills, disconnect handling).
+3. **Execution clients** (`test_tradovate_client.py`)
+   - Tests covering Tradovate REST/WebSocket client (auth, token refresh, order placement, error codes, rate limiting).
 
-6. **Signal-to-execution pipeline** (`test_signal_pipeline_integration.py`)
-   - Extended with 5 scenarios: execution adapter integration, ML filter rejection, circuit breaker blocking, and full success path with state verification.
+4. **Signal-to-execution pipeline** (`test_signal_pipeline_integration.py`)
+   - Execution adapter integration, ML filter rejection, circuit breaker blocking, and full success path with state verification.
 
-7. **Web app auth and real-time** (`middleware.test.ts`, `useWebSocket.test.ts`, `login-actions.test.ts`)
-   - 74 tests covering Next.js authentication middleware, WebSocket hook (connection/reconnection/cleanup), and login/logout flow (credentials, session cookies, open-redirect prevention).
+5. **Web app auth and real-time** (`middleware.test.ts`, `useWebSocket.test.ts`, `login-actions.test.ts`)
+   - Tests covering Next.js authentication middleware, WebSocket hook (connection/reconnection/cleanup), and login/logout flow (credentials, session cookies, open-redirect prevention).
 
-8. **Circuit breaker / service pause** (`test_service_pause.py`)
-   - Comprehensive tests for connection failure pause, consecutive errors pause, data fetch errors (backoff only, not pause), counter reset on success, manual pause/resume, status reflects circuit breaker state, and edge cases for thresholds. Replaces the former `test_circuit_breaker.py`.
+6. **Circuit breaker / service pause** (`test_service_pause.py`)
+   - Comprehensive tests for connection failure pause, consecutive errors pause, data fetch errors (backoff only, not pause), counter reset on success, manual pause/resume, status reflects circuit breaker state, and edge cases for thresholds.
 
 ### Suggested Future Tests
 

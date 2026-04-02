@@ -63,22 +63,13 @@ strategies:
     adx_period: 14
     adx_trending_threshold: 25.0
     adx_ranging_threshold: 20.0
-    tod_scaling:
-      enabled: true
-      overnight: 0.6
-      premarket_early: 0.75
-      premarket_late: 0.85
-      rth: 1.0
-      post_close: 0.85
-      evening: 0.7
-
 session:
   start_time: '18:00'
   end_time: '17:00'
   timezone: America/New_York
 
 telegram:
-  enabled: true
+  enabled: false
   bot_token: ${TELEGRAM_BOT_TOKEN}
   chat_id: ${TELEGRAM_CHAT_ID}
   notification_tier: debug
@@ -283,9 +274,6 @@ trailing_stop:
   - name: tight_trail
     activation_atr: 3.0
     trail_atr: 1.0
-
-ml_filter:
-  mode: shadow
 
 advanced_exits:
   quick_exit:

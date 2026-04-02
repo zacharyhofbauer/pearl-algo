@@ -62,7 +62,6 @@ def test_canonical_runtime_disables_legacy_signal_gate(tmp_path):
         "data": {"stale_data_threshold_minutes": 10, "buffer_size": 100},
         "storage": {"sqlite_enabled": False},
         "challenge": {},
-        "ml_filter": {"enabled": False},
         "execution": {"enabled": False},
     }
 

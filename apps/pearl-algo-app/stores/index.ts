@@ -2,12 +2,9 @@
 export { useAgentStore, type AgentState } from './agentStore'
 export { useOperatorStore } from './operatorStore'
 export type {
-  AIStatus,
   RiskMetrics,
   MarketRegime,
   SignalRejections,
-  LastSignalDecision,
-  ShadowCounters,
   ErrorSummary,
   DirectionBreakdown,
   StatusBreakdown,
@@ -18,7 +15,6 @@ export type {
   PearlAIHeartbeat,
   ExecutionState,
   CircuitBreakerStatus,
-  MLFilterPerformance,
   SessionContext,
   TradovateAccount,
   TradovateWorkingOrder,
@@ -32,7 +28,6 @@ export {
   selectActiveTradesCount,
   selectPerformance,
   selectChallenge,
-  selectAIStatus,
   selectCadenceMetrics,
   selectGatewayStatus,
   selectAnalytics,
@@ -45,7 +40,6 @@ export {
   // New selectors for enhanced transparency
   selectExecutionState,
   selectCircuitBreaker,
-  selectMLFilterPerformance,
   selectSessionContext,
   selectSignalActivity,
   selectTradovateAccount,

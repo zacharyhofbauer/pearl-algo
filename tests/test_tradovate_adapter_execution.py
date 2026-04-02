@@ -1193,6 +1193,37 @@ class TestGetAccountSummary:
         assert result == {}
 
     @pytest.mark.asyncio
+    async def test_not_connected_with_cached_positions_returns_degraded_summary(self):
+        """Cached broker positions remain visible when auth degrades."""
+        adapter = make_adapter(
+            mode="paper",
+            armed=True,
+            connected=True,
+            client_kwargs={"authenticated": False, "account_name": "DEMO6315448", "account_id": 36869611},
+        )
+        adapter._live_positions = {
+            "4214191": {
+                "contract_id": "4214191",
+                "net_pos": 3,
+                "net_price": 23760.5,
+                "open_pnl": 309.0,
+                "ws_updated_at": time.time() - 2.0,
+            }
+        }
+
+        result = await adapter.get_account_summary()
+
+        assert result["degraded"] is True
+        assert result["degraded_reason"] == "disconnected_or_auth_lost"
+        assert result["account"] == "DEMO6315448"
+        assert result["account_id"] == 36869611
+        assert result["position_count"] == 1
+        assert result["positions"][0]["contract_id"] == "4214191"
+        assert result["positions"][0]["net_pos"] == 3
+        assert result["open_pnl"] == 309.0
+        assert result["authenticated"] is False
+
+    @pytest.mark.asyncio
     async def test_parallel_rest_calls(self):
         """All four REST calls are made."""
         adapter = make_adapter(mode="paper", armed=True, connected=True,

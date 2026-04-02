@@ -225,7 +225,6 @@ class TradeDatabase:
                     rejected_order_book INTEGER,
                     rejected_invalid_prices INTEGER,
                     rejected_regime_filter INTEGER,
-                    rejected_ml_filter INTEGER,
                     adaptive_sizing_applied INTEGER,
                     payload_json TEXT
                 )
@@ -426,7 +425,6 @@ class TradeDatabase:
             "rejected_order_book": _int("rejected_order_book"),
             "rejected_invalid_prices": _int("rejected_invalid_prices"),
             "rejected_regime_filter": _int("rejected_regime_filter"),
-            "rejected_ml_filter": _int("rejected_ml_filter"),
             "adaptive_sizing_applied": _int("adaptive_sizing_applied"),
             "payload_json": self._json_dumps(diag),
         }
@@ -439,14 +437,14 @@ class TradeDatabase:
                     raw_signals, validated_signals, actionable_signals, explore_signals,
                     duplicates_filtered, stop_cap_applied, session_scaling_applied,
                     rejected_market_hours, rejected_confidence, rejected_risk_reward, rejected_quality_scorer,
-                    rejected_order_book, rejected_invalid_prices, rejected_regime_filter, rejected_ml_filter,
+                    rejected_order_book, rejected_invalid_prices, rejected_regime_filter,
                     adaptive_sizing_applied, payload_json
                 ) VALUES (
                     :timestamp, :cycle_count, :quiet_reason,
                     :raw_signals, :validated_signals, :actionable_signals, :explore_signals,
                     :duplicates_filtered, :stop_cap_applied, :session_scaling_applied,
                     :rejected_market_hours, :rejected_confidence, :rejected_risk_reward, :rejected_quality_scorer,
-                    :rejected_order_book, :rejected_invalid_prices, :rejected_regime_filter, :rejected_ml_filter,
+                    :rejected_order_book, :rejected_invalid_prices, :rejected_regime_filter,
                     :adaptive_sizing_applied, :payload_json
                 )
                 """,
@@ -472,7 +470,6 @@ class TradeDatabase:
                 SUM(COALESCE(rejected_order_book, 0)) AS rejected_order_book,
                 SUM(COALESCE(rejected_invalid_prices, 0)) AS rejected_invalid_prices,
                 SUM(COALESCE(rejected_regime_filter, 0)) AS rejected_regime_filter,
-                SUM(COALESCE(rejected_ml_filter, 0)) AS rejected_ml_filter,
                 SUM(COALESCE(adaptive_sizing_applied, 0)) AS adaptive_sizing_applied
             FROM cycle_diagnostics
             WHERE 1=1

@@ -43,6 +43,7 @@ import pearlalgo_web_app.api_server as api_mod  # noqa: E402
 # Real server module: patch this so request handlers see patched globals
 import pearlalgo.api.server as _server_impl  # noqa: E402
 
+from fastapi.routing import APIRoute  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,20 @@ from fastapi.testclient import TestClient  # noqa: E402
 VALID_API_KEY = "test-secret-key-12345"
 INVALID_API_KEY = "wrong-key-99999"
 OPERATOR_PASS = "test-operator-pass"
+
+
+def _get_route_dependency_names(path: str, method: str) -> set[str]:
+    method = method.upper()
+    for route in api_mod.app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path == path and method in route.methods:
+            return {
+                dependency.call.__name__
+                for dependency in route.dependant.dependencies
+                if getattr(dependency, "call", None) is not None
+            }
+    raise AssertionError(f"Route not found for {method} {path}")
 
 # ---------------------------------------------------------------------------
 # Sample state data
@@ -63,11 +78,6 @@ SAMPLE_STATE: Dict[str, Any] = {
     "data_fresh": True,
     "active_trades_count": 1,
     "active_trades_unrealized_pnl": 25.50,
-    "learning": {
-        "model_loaded": True,
-        "last_train": "2025-06-01T12:00:00Z",
-    },
-    "learning_contextual": {},
     "buy_sell_pressure_raw": {"buy": 0.6, "sell": 0.4},
 }
 
@@ -343,6 +353,43 @@ class TestHealthEndpoint:
         assert resp.json()["status"] == "ok"
 
 
+class TestRouteBoundaries:
+    """Route registration should keep operator-only paths explicit and isolated."""
+
+    def test_operator_routes_require_operator_dependency(self):
+        operator_routes = [
+            ("GET", "/api/operator/ping"),
+            ("GET", "/api/debug/tradovate-orders"),
+            ("POST", "/api/kill-switch"),
+            ("POST", "/api/resume"),
+            ("POST", "/api/close-all-trades"),
+            ("POST", "/api/close-trade"),
+            ("POST", "/api/trailing-stop/override"),
+            ("GET", "/api/trailing-stop/state"),
+            ("DELETE", "/api/trailing-stop/override"),
+            ("GET", "/api/config"),
+            ("POST", "/api/config"),
+        ]
+
+        for method, path in operator_routes:
+            dependencies = _get_route_dependency_names(path, method)
+            assert "require_operator_access" in dependencies, f"{method} {path} lost operator gating"
+
+    def test_read_only_routes_do_not_require_operator_dependency(self):
+        read_only_routes = [
+            ("GET", "/health"),
+            ("GET", "/api/state"),
+            ("GET", "/api/analytics"),
+            ("GET", "/api/trades"),
+            ("GET", "/api/signals"),
+            ("GET", "/api/positions"),
+        ]
+
+        for method, path in read_only_routes:
+            dependencies = _get_route_dependency_names(path, method)
+            assert "require_operator_access" not in dependencies, f"{method} {path} should remain read-only"
+
+
 # =========================================================================
 # 3. Core Data Endpoints
 # =========================================================================
@@ -368,7 +415,6 @@ class TestStateEndpoint:
         assert "daily_losses" in body
         assert "active_trades_count" in body
         assert "last_updated" in body
-        assert "ai_status" in body
         assert "operator_lock_enabled" in body
 
     def test_state_handles_missing_state_file(self, client, _patch_globals_empty):
@@ -381,13 +427,12 @@ class TestStateEndpoint:
         assert body["data_fresh"] is False
         assert "daily_pnl" in body
 
-    def test_state_includes_ai_status(self, client, _patch_globals):
-        """State response includes ai_status when learning data is in state."""
+    def test_state_payload_is_compact(self, client, _patch_globals):
+        """State response keeps the compact operator payload."""
         resp = client.get("/api/state")
         body = resp.json()
-        ai = body.get("ai_status")
-        assert ai is not None
-        assert isinstance(ai, dict)
+        assert "running" in body
+        assert "daily_pnl" in body
 
     def test_state_returns_500_when_state_dir_not_configured(self, client):
         """If _state_dir is None, return 500."""
@@ -594,6 +639,53 @@ class TestPerformanceSummaryEndpoint:
         assert summary_calls[0][3] == paired_trades
         assert len(period_calls) == 6
         assert all(call[1] == paired_trades for call in period_calls)
+
+
+class TestAnalyticsEndpoint:
+    """/api/analytics endpoint."""
+
+    def test_analytics_returns_expected_sections(self, client, _patch_globals, state_dir):
+        perf = [
+            {
+                "entry_time": "2025-06-01T14:00:00Z",
+                "exit_time": "2025-06-01T14:30:00Z",
+                "pnl": 50.0,
+                "is_win": True,
+                "direction": "long",
+            }
+        ]
+        (state_dir / "performance.json").write_text(json.dumps(perf))
+
+        resp = client.get("/api/analytics")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "session_performance" in body
+        assert "hold_duration" in body
+        assert "direction_breakdown" in body
+        assert "status_breakdown" in body
+        assert "calendar_data" in body
+
+    def test_analytics_tv_paper_uses_paired_trades(self, client, _patch_globals):
+        paired_trades = [
+            {
+                "entry_time": "2025-06-01T14:00:00Z",
+                "exit_time": "2025-06-01T14:30:00Z",
+                "pnl": 20.0,
+                "is_win": True,
+                "direction": "long",
+            }
+        ]
+
+        with (
+            patch.object(_server_impl, "_is_tv_paper_account", return_value=True),
+            patch.object(_server_impl, "_get_paired_tradovate_trades", return_value=paired_trades),
+        ):
+            resp = client.get("/api/analytics")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["direction_breakdown"]["long"]["count"] == 1
+        assert body["status_breakdown"]["exited"] >= 1
 
 
 # =========================================================================

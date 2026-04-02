@@ -1,26 +1,6 @@
 // Types for agent state and related structures
 // Extracted from stores/agentStore.ts for better organization
 
-export interface AIStatus {
-  bandit_mode: 'off' | 'shadow' | 'live'
-  contextual_mode: 'off' | 'shadow' | 'live'
-  ml_filter: {
-    enabled: boolean
-    mode: string
-    lift: {
-      lift_ok?: boolean
-      lift_win_rate?: number
-      lift_avg_pnl?: number
-    }
-  }
-  direction_gating: {
-    enabled: boolean
-    blocks: number
-    shadow_regime: number
-    shadow_trigger: number
-  }
-}
-
 export interface TvPaperConsistency {
   met: boolean
   best_day_pnl: number
@@ -147,7 +127,6 @@ export interface MarketRegime {
 
 export interface SignalRejections {
   direction_gating: number
-  ml_filter: number
   circuit_breaker: number
   session_filter: number
   max_positions: number
@@ -169,19 +148,6 @@ export interface CircuitBreakerStatus {
   rolling_win_rate?: number
   trip_reason?: string
   trips_today: number
-}
-
-// ML Filter detailed performance
-export interface MLFilterPerformance {
-  enabled: boolean
-  mode: string
-  win_rate_pass?: number
-  win_rate_fail?: number
-  trades_passed: number
-  trades_blocked: number
-  lift_ok: boolean
-  lift_win_rate?: number
-  lift_avg_pnl?: number
 }
 
 // Session context
@@ -209,32 +175,6 @@ export interface SignalActivity {
     executed: number
     blocked: number
   }
-}
-
-export interface LastSignalDecision {
-  signal_type: string
-  ml_probability: number
-  action: 'execute' | 'skip'
-  reason: string
-  timestamp: string | null
-}
-
-export interface ShadowCounters {
-  would_block_total: number
-  would_block_by_reason: Record<string, number>
-  ml_would_skip: number
-  ml_total_decisions: number
-  ml_execute_rate: number
-  // Shadow outcome comparison (what happened to blocked vs allowed signals)
-  blocked_wins: number
-  blocked_losses: number
-  blocked_total: number
-  blocked_pnl: number
-  allowed_wins: number
-  allowed_losses: number
-  allowed_total: number
-  allowed_pnl: number
-  net_saved: number
 }
 
 export interface GatewayStatus {
@@ -447,7 +387,6 @@ export interface AgentState {
   active_trades_unrealized_pnl?: number | null
   futures_market_open: boolean
   data_fresh: boolean
-  ai_status: AIStatus | null
   challenge: ChallengeStatus | null
   recent_exits: RecentExit[]
   performance: PerformanceStats | null
@@ -457,8 +396,6 @@ export interface AgentState {
   cadence_metrics: CadenceMetrics | null
   market_regime: MarketRegime | null
   signal_rejections_24h: SignalRejections | null
-  last_signal_decision: LastSignalDecision | null
-  shadow_counters: ShadowCounters | null
   gateway_status: GatewayStatus | null
   connection_health: ConnectionHealth | null
   error_summary: ErrorSummary | null
@@ -474,7 +411,6 @@ export interface AgentState {
   // New fields for enhanced transparency
   execution_state: ExecutionState | null
   circuit_breaker: CircuitBreakerStatus | null
-  ml_filter_performance: MLFilterPerformance | null
   session_context: SessionContext | null
   signal_activity: SignalActivity | null
   openclaw_status?: { status: string; port?: number } | null

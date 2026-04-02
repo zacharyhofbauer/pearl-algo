@@ -1030,48 +1030,14 @@ def check_key_level_signals(
 
 def check_trading_session(dt: datetime, config: Dict) -> bool:
     """
-    Check if within trading hours - from Trading Sessions.pine.
+    Return whether strategy session gating allows signal generation.
 
-    Supports overnight sessions (e.g., 18:00→15:45) where start > end.
-    In that case, the session spans midnight: current >= start OR current <= end.
-
-    Session hours are resolved from (in priority order):
-    1. ``config["session"]["start_time"]`` / ``config["session"]["end_time"]`` (YAML format "HH:MM")
-    2. ``config["start_hour"]`` / ``config["end_hour"]`` (legacy integer keys)
+    PEARL no longer enforces time-of-day or timezone-based strategy windows.
+    Session config remains in the codebase for observability and historical
+    compatibility, but signal generation should run regardless of local time,
+    timezone conversion quirks, or configured session boundaries.
     """
-    try:
-        strategy_cfg = config.get("strategy", {}) if hasattr(config, "get") else {}
-        if isinstance(strategy_cfg, dict) and strategy_cfg.get("enforce_session_window") is False:
-            return True
-
-        et_tz = ZoneInfo("America/New_York")
-        et_time = dt.astimezone(et_tz) if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(et_tz)
-
-        # Prefer the nested ``session`` dict from YAML config when present.
-        session_cfg = config.get("session") if hasattr(config, "get") else None
-        if isinstance(session_cfg, dict) and "start_time" in session_cfg:
-            # Parse "HH:MM" strings
-            sh, sm = (int(x) for x in str(session_cfg["start_time"]).split(":"))
-            eh, em = (int(x) for x in str(session_cfg["end_time"]).split(":"))
-        else:
-            sh = config["start_hour"]
-            sm = config["start_minute"]
-            eh = config["end_hour"]
-            em = config["end_minute"]
-
-        start_time = dt_time(sh, sm)
-        end_time = dt_time(eh, em)
-        current_time = et_time.time()
-
-        # Handle overnight sessions (start > end means session crosses midnight)
-        if start_time > end_time:
-            # Overnight: in session if current >= start OR current <= end
-            return current_time >= start_time or current_time <= end_time
-        else:
-            # Same-day: in session if start <= current <= end
-            return start_time <= current_time <= end_time
-    except Exception:
-        return False  # Default to block trading if timezone conversion fails
+    return True
 
 
 # ============================================================================
@@ -2124,82 +2090,6 @@ def _check_vwap_2sd_signal(
     }
 
 
-# ============================================================================
-# TIME-OF-DAY CONFIDENCE SCALING
-# ============================================================================
-
-_ET = ZoneInfo("America/New_York")
-
-# Default multipliers keyed by session name
-_TOD_DEFAULTS = {
-    "overnight": 0.60,       # 00:00-03:59 ET
-    "premarket_early": 0.75, # 04:00-05:59 ET
-    "premarket_late": 0.85,  # 06:00-09:29 ET
-    "rth": 1.00,             # 09:30-15:59 ET
-    "post_close": 0.85,      # 16:00-17:59 ET
-    "evening": 0.70,         # 18:00-23:59 ET
-}
-
-
-def _get_time_of_day_multiplier(
-    current_time: Optional[datetime], config: Dict
-) -> float:
-    """Return a confidence multiplier based on the current ET hour.
-
-    Controlled by ``pearl_bot_auto.tod_scaling`` in config.  When disabled
-    (the default in base.yaml) returns 1.0 so behaviour is unchanged.
-    """
-    strategies_cfg = config.get("strategies", {}) or {}
-    strategy_cfg = config.get("strategy", {}) or {}
-    active_strategy = str(strategy_cfg.get("active", "composite_intraday") or "composite_intraday")
-    pba = {}
-    if isinstance(strategies_cfg, dict):
-        nested = strategies_cfg.get(active_strategy, {}) or {}
-        if isinstance(nested, dict):
-            pba = nested
-    if not pba:
-        pba = config.get("pearl_bot_auto", {})
-    if isinstance(pba, ConfigView):
-        tod_cfg = pba.get("tod_scaling", {})
-    else:
-        tod_cfg = pba.get("tod_scaling", {}) if isinstance(pba, dict) else {}
-
-    # Also check top-level for flat config layout
-    if not tod_cfg:
-        tod_cfg = config.get("tod_scaling", {})
-
-    if not tod_cfg or not tod_cfg.get("enabled", False):
-        return 1.0
-
-    if current_time is None:
-        return 1.0
-
-    # Convert to ET
-    if current_time.tzinfo is None:
-        et_time = current_time.replace(tzinfo=_ET)
-    else:
-        et_time = current_time.astimezone(_ET)
-
-    hour = et_time.hour
-    minute = et_time.minute
-
-    # Determine session bucket
-    if 0 <= hour < 4:
-        key = "overnight"
-    elif 4 <= hour < 6:
-        key = "premarket_early"
-    elif 6 <= hour < 9 or (hour == 9 and minute < 30):
-        key = "premarket_late"
-    elif (hour == 9 and minute >= 30) or (10 <= hour < 16):
-        key = "rth"
-    elif 16 <= hour < 18:
-        key = "post_close"
-    else:  # 18-23
-        key = "evening"
-
-    return float(tod_cfg.get(key, _TOD_DEFAULTS.get(key, 1.0)))
-
-
 def generate_signals(
     df: pd.DataFrame,
     config: Optional[Dict] = None,
@@ -2246,9 +2136,8 @@ def generate_signals(
         logger.warning(f"Missing required columns: {required_cols}")
         return signals
     
-    # Time filter
-    if not check_trading_session(current_time, config):
-        return signals
+    # Session windows are observability-only; strategy generation is always on.
+    check_trading_session(current_time, config)
 
     # =====================================================================
     # OPENING RANGE REFERENCE (Upgrade 1)
@@ -2940,22 +2829,11 @@ def generate_signals(
             signal["signal_source"] = "ema_pinescript"
         signal["virtual_broker"] = True  # Mark as virtual - no real execution
         
-        # Apply regime-based confidence adjustment
+        # Apply market-state confidence adjustment only.
         original_confidence = signal.get("confidence", 0.5)
         adjusted_confidence = original_confidence * regime_multiplier
 
-        # Apply time-of-day confidence scaling
-        tod_multiplier = _get_time_of_day_multiplier(current_time, config)
-        adjusted_confidence = adjusted_confidence * tod_multiplier
-
         signal["confidence"] = float(min(adjusted_confidence, 0.99))
-
-        if tod_multiplier < 1.0:
-            et_hour = current_time.astimezone(_ET).strftime("%H:%M") if current_time else "?"
-            logger.info(
-                f"TOD scaling: {et_hour} ET → {tod_multiplier}x confidence "
-                f"({original_confidence:.2f} → {signal['confidence']:.2f})"
-            )
 
         # Add regime information for transparency
         signal["market_regime"] = market_regime.to_dict()
@@ -2964,7 +2842,6 @@ def generate_signals(
         signal["regime_adjustment"] = {
             "original_confidence": original_confidence,
             "multiplier": regime_multiplier,
-            "tod_multiplier": tod_multiplier,
             "adjusted_confidence": signal["confidence"],
         }
     

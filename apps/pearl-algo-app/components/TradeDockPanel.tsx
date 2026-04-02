@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import type { DirectionBreakdown, Position, StatusBreakdown, SignalRejections, LastSignalDecision } from '@/stores'
+import type { DirectionBreakdown, Position, StatusBreakdown, SignalRejections } from '@/stores'
 import { apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
 import OperatorUnlockModal from '@/components/OperatorUnlockModal' // ADDED 2026-03-25
@@ -99,8 +99,6 @@ interface TradeDockPanelProps {
   riskMetrics?: RiskMetrics | null
   /** Signal rejections in last 24h */
   signalRejections?: SignalRejections | null
-  /** Last signal decision made by the agent */
-  lastSignalDecision?: LastSignalDecision | null
   /** Tradovate working orders (SL, TP) */
   workingOrders?: TradovateWorkingOrder[]
   /** Tradovate order stats (filled, rejected, cancelled counts) */
@@ -139,7 +137,6 @@ function TradeDockPanel({
   onRefresh,
   riskMetrics,
   signalRejections,
-  lastSignalDecision,
   workingOrders,
   orderStats,
   recentSignals,
@@ -621,7 +618,6 @@ function TradeDockPanel({
                     <div className="signals-section-title">Signal Rejections (24h)</div>
                     {([
                       ['Direction Gating', signalRejections.direction_gating],
-                      ['ML Filter', signalRejections.ml_filter],
                       ['Circuit Breaker', signalRejections.circuit_breaker],
                       ['Session Filter', signalRejections.session_filter],
                       ['Max Positions', signalRejections.max_positions],
@@ -634,37 +630,7 @@ function TradeDockPanel({
                   </div>
                 )}
 
-                {lastSignalDecision && (
-                  <div className="signals-section">
-                    <div className="signals-section-title">Last Signal Decision</div>
-                    <div className="signals-row">
-                      <span className="signals-label">Action</span>
-                      <span className={`signals-value ${lastSignalDecision.action === 'execute' ? 'positive' : 'negative'}`}>
-                        {lastSignalDecision.action === 'execute' ? 'EXECUTED' : 'SKIPPED'}
-                      </span>
-                    </div>
-                    <div className="signals-row">
-                      <span className="signals-label">Type</span>
-                      <span className="signals-value">{lastSignalDecision.signal_type}</span>
-                    </div>
-                    <div className="signals-row">
-                      <span className="signals-label">ML Prob</span>
-                      <span className="signals-value">{(lastSignalDecision.ml_probability * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="signals-row">
-                      <span className="signals-label">Reason</span>
-                      <span className="signals-value">{lastSignalDecision.reason}</span>
-                    </div>
-                    {lastSignalDecision.timestamp && (
-                      <div className="signals-row">
-                        <span className="signals-label">Time</span>
-                        <span className="signals-value">{formatRelativeTime(lastSignalDecision.timestamp)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {!signalRejections && !lastSignalDecision && displayRecentSignals.length === 0 && (
+                {!signalRejections && displayRecentSignals.length === 0 && (
                   <div className="trade-dock-empty">No signal data available</div>
                 )}
               </div>

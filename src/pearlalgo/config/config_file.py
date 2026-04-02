@@ -370,7 +370,6 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "guardrails",
     "trailing_stop",
     "advanced_exits",
-    "ml_filter",
     "composite_regime",
     "runner_mode",
     "performance",

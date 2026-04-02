@@ -8,6 +8,7 @@ This is the trading agent's lifecycle code -- handle with care.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import signal
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -21,6 +22,26 @@ from pearlalgo.strategies.composite_intraday import check_trading_session
 
 if TYPE_CHECKING:
     pass  # MarketAgentService accessed via self
+
+
+async def _close_resource(resource: object | None, label: str, timeout: float = 10.0) -> None:
+    """Best-effort shutdown for optional service resources with a close() method."""
+    if resource is None:
+        return
+
+    close_method = getattr(resource, "close", None)
+    if not callable(close_method):
+        return
+
+    try:
+        result = close_method()
+        if inspect.isawaitable(result):
+            await asyncio.wait_for(result, timeout=timeout)
+        logger.info(f"{label} closed")
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout closing {label.lower()}")
+    except Exception as e:
+        logger.warning(f"Error closing {label.lower()}: {e}")
 
 
 class ServiceLifecycleMixin:
@@ -227,6 +248,10 @@ class ServiceLifecycleMixin:
                 logger.info("Execution adapter disconnected")
             except Exception as e:
                 logger.warning(f"Error disconnecting execution adapter: {e}")
+
+        # Close long-lived market data resources so provider-owned threads
+        # do not keep the process alive after the service reports "stopped".
+        await _close_resource(getattr(self, "data_fetcher", None), "Data fetcher")
 
         self.running = False
         # Persist a final state with running=False so /start doesn't show stale "ON"

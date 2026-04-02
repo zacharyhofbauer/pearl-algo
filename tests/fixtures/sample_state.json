@@ -103,53 +103,6 @@
     "armed": false,
     "mode": "disabled"
   },
-  "learning": {
-    "enabled": true,
-    "mode": "shadow",
-    "decision_threshold": 0.3,
-    "min_samples": 10,
-    "explore_rate": 0.1,
-    "total_decisions": 50,
-    "total_executes": 48,
-    "total_skips": 2,
-    "execute_rate": 0.96,
-    "signal_types_tracked": 1,
-    "last_decision": {
-      "signal_type": "pearlbot_pinescript",
-      "execute": true,
-      "score": 0.42,
-      "reason": "thompson_pass:0.42>=0.3",
-      "at": "2026-01-15T16:25:00+00:00"
-    }
-  },
-  "learning_contextual": {
-    "enabled": true,
-    "mode": "shadow",
-    "total_decisions": 0,
-    "total_executes": 0,
-    "total_skips": 0,
-    "execute_rate": 0.0,
-    "unique_contexts": 0,
-    "signal_types_tracked": 0
-  },
-  "ml_filter": {
-    "enabled": true,
-    "mode": "shadow",
-    "trained": true,
-    "require_lift_to_block": true,
-    "blocking_allowed": false,
-    "lift": {
-      "status": "insufficient_data",
-      "scored_trades": 10,
-      "min_trades": 50,
-      "pass_trades": 1,
-      "fail_trades": 9,
-      "lift_ok": false,
-      "blocking_allowed": false,
-      "pass_threshold_used": 0.8
-    },
-    "last_eval_at": "2026-01-15T14:00:05+00:00"
-  },
   "notification_queue": {
     "enqueued": 5,
     "delivered": 5,

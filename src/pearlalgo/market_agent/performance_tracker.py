@@ -39,7 +39,7 @@ from pearlalgo.utils.state_io import (
 )
 
 try:
-    from pearlalgo.learning.trade_database import TradeDatabase
+    from pearlalgo.storage.trade_database import TradeDatabase
     SQLITE_AVAILABLE = True
 except Exception:
     SQLITE_AVAILABLE = False
@@ -241,6 +241,65 @@ class PerformanceTracker:
             },
             preserve_signal=signal_data,
         )
+
+    def update_signal_execution_metadata(self, signal_id: str, signal: Dict) -> None:
+        """Persist execution metadata onto the base signal record.
+
+        ``track_signal_generated()`` runs before execution on the main pipeline,
+        so Tradovate order IDs would otherwise never reach ``signals.jsonl``.
+        This post-execution patch keeps PEARL-owned broker order IDs durable for
+        later reconciliation and API attribution.
+        """
+        if not signal_id or not self.signals_file.exists():
+            return
+
+        exec_keys = (
+            "_execution_status",
+            "_execution_order_id",
+            "_execution_stop_order_id",
+            "_execution_take_profit_order_id",
+        )
+        execution_fields = {
+            key: signal.get(key)
+            for key in exec_keys
+            if signal.get(key) not in (None, "")
+        }
+        if not execution_fields:
+            return
+
+        lock_path = Path(str(self.signals_file) + ".lock")
+        try:
+            with file_lock(lock_path):
+                records: List[Dict] = []
+                with open(self.signals_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            records.append(json.loads(line.strip()))
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+
+                updated = False
+                for record in records:
+                    if record.get("signal_id") != signal_id:
+                        continue
+                    nested_signal = record.get("signal") or {}
+                    if not isinstance(nested_signal, dict):
+                        nested_signal = {}
+                    nested_signal.update(execution_fields)
+                    record["signal"] = _to_json_safe(nested_signal)
+                    updated = True
+                    break
+
+                if not updated:
+                    logger.warning(f"Signal {signal_id} not found for execution metadata update")
+                    return
+
+                atomic_write_jsonl(self.signals_file, records)
+        except Exception as e:
+            ErrorHandler.log_and_continue(
+                "update_signal_execution_metadata", e, level="warning", category="file_io",
+            )
+
     def update_signal_prices(
         self,
         signal_id: str,
@@ -585,62 +644,6 @@ class PerformanceTracker:
                         "track_exit feature extraction", e, level="warning", category="sqlite",
                     )
                     features = {}
-
-                # Attach ML prediction fields (for shadow A/B lift measurement).
-                # These are stored on the signal as `_ml_prediction` by the signal generator.
-                try:
-                    ml_pred = signal.get("_ml_prediction")
-                    if isinstance(ml_pred, dict):
-                        try:
-                            features["ml_win_probability"] = float(ml_pred.get("win_probability", 0.0) or 0.0)
-                        except Exception as e:
-                            ErrorHandler.log_and_continue(
-                                "track_exit ml_win_probability", e, category="sqlite",
-                            )
-                        # Use shadow lift flag when available (separate threshold for measurement only).
-                        shadow_pf = signal.get("_ml_shadow_pass_filter", None)
-                        shadow_thr = signal.get("_ml_shadow_threshold", None)
-                        if shadow_pf is not None:
-                            try:
-                                features["ml_pass_filter"] = 1.0 if bool(shadow_pf) else 0.0
-                            except Exception as e:
-                                ErrorHandler.log_and_continue(
-                                    "track_exit ml_pass_filter", e, category="sqlite",
-                                )
-                            try:
-                                if shadow_thr is not None:
-                                    features["ml_pass_threshold"] = float(shadow_thr)
-                            except Exception as e:
-                                ErrorHandler.log_and_continue(
-                                    "track_exit ml_pass_threshold", e, category="sqlite",
-                                )
-                        else:
-                            try:
-                                features["ml_pass_filter"] = 1.0 if bool(ml_pred.get("pass_filter", True)) else 0.0
-                            except Exception as e:
-                                ErrorHandler.log_and_continue(
-                                    "track_exit ml_pass_filter fallback", e, category="sqlite",
-                                )
-                        try:
-                            features["ml_fallback_used"] = 1.0 if bool(ml_pred.get("fallback_used", False)) else 0.0
-                        except Exception as e:
-                            ErrorHandler.log_and_continue(
-                                "track_exit ml_fallback_used", e, category="sqlite",
-                            )
-                        # Confidence level bucket (low/medium/high) -> numeric (0/1/2) for easy aggregation.
-                        try:
-                            level = str(ml_pred.get("confidence_level", "") or "").lower()
-                            level_map = {"low": 0.0, "medium": 1.0, "high": 2.0}
-                            if level in level_map:
-                                features["ml_confidence_level"] = float(level_map[level])
-                        except Exception as e:
-                            ErrorHandler.log_and_continue(
-                                "track_exit ml_confidence_level", e, category="sqlite",
-                            )
-                except Exception as e:
-                    ErrorHandler.log_and_continue(
-                        "track_exit ML prediction features", e, level="warning", category="sqlite",
-                    )
 
                 # Use async queue if available (injected from service.py), else blocking write
                 if self._async_sqlite_queue is not None:

@@ -1013,33 +1013,6 @@ class MarketAgentTelegramNotifier:
             )
 
             # ------------------------------------------------------------------
-            # ML status (compact one-liner)
-            # ------------------------------------------------------------------
-            try:
-                bandit = status.get("learning") or {}
-                bandit_mode = str(bandit.get("mode") or "off").lower()
-
-                ctx = status.get("learning_contextual") or {}
-                ctx_mode = str(ctx.get("mode") or "off").lower() or "off"
-
-                ml_label = "?"
-                try:
-                    ml_state = status.get("ml_filter") or {}
-                    if isinstance(ml_state, dict) and "enabled" in ml_state:
-                        if bool(ml_state.get("enabled", False)):
-                            mm = str(ml_state.get("mode") or "on").lower()
-                            ml_label = mm if mm in ("shadow", "live") else "on"
-                        else:
-                            ml_label = "off"
-                except Exception as e:
-                    logger.debug(f"Non-critical: {e}")
-                    ml_label = "?"
-
-                message += f"\n🧠 Bandit {bandit_mode} · Ctx {ctx_mode} · ML {ml_label}"
-            except Exception as e:
-                logger.debug(f"Non-critical: {e}")
-
-            # ------------------------------------------------------------------
             # 24h + 72h performance (match /start dashboard semantics)
             # ------------------------------------------------------------------
             try:

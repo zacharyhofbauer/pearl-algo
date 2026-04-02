@@ -28,7 +28,6 @@ REQUIRED_WS_KEYS = {
     "futures_market_open",
     "data_fresh",
     "last_updated",
-    "ai_status",
     "challenge",
     "recent_exits",
     "performance",
@@ -41,12 +40,9 @@ REQUIRED_WS_KEYS = {
     "market_regime",
     "buy_sell_pressure",
     "signal_rejections_24h",
-    "last_signal_decision",
-    "shadow_counters",
     "execution_state",
     "tradovate_account",
     "circuit_breaker",
-    "ml_filter_performance",
     "session_context",
     "signal_activity",
     "gateway_status",
@@ -77,7 +73,6 @@ class TestBroadcastPayloadContract:
             "execution_state": {"mode": "shadow"},
             "tradovate_account": {"equity": 50020.0},
             "circuit_breaker": {"armed": False},
-            "ml_filter_performance": {"lift": 1.1},
             "session_context": {"session": "ny"},
             "signal_activity": {"generated": 2},
         }
@@ -94,7 +89,6 @@ class TestBroadcastPayloadContract:
                 "tradovate_positions": 1,
                 "tradovate_open_pnl": 3.5,
             }))
-            stack.enter_context(patch.object(server_mod, "_get_ai_status", return_value={"bandit_mode": "off"}))
             stack.enter_context(patch.object(server_mod, "_get_challenge_status", return_value={"enabled": True}))
             stack.enter_context(patch.object(server_mod, "_get_recent_exits", return_value=[]))
             stack.enter_context(
@@ -113,12 +107,6 @@ class TestBroadcastPayloadContract:
             )
             stack.enter_context(
                 patch.object(server_mod, "_get_signal_rejections_24h", return_value={"direction_gating": 1})
-            )
-            stack.enter_context(
-                patch.object(server_mod, "_get_last_signal_decision", return_value={"allowed": True})
-            )
-            stack.enter_context(
-                patch.object(server_mod, "_get_shadow_counters", return_value={"generated": 1})
             )
             stack.enter_context(patch.object(server_mod, "_get_gateway_status", return_value={"connected": True}))
             stack.enter_context(

@@ -1,7 +1,7 @@
-"""Integration smoke tests for circuit breaker filter chain.
+"""Integration smoke tests for the still-active circuit breaker chain.
 
-Verifies that the full should_allow_signal() chain works correctly when
-multiple filters are enabled simultaneously — matching production config.
+Verifies that drawdown/profit/regime checks still work while legacy time/day
+filters are ignored even if stale config still enables them.
 """
 
 from datetime import datetime
@@ -22,12 +22,10 @@ def _production_like_config(**overrides) -> TradingCircuitBreakerConfig:
     """Config matching production tradovate_paper.yaml settings."""
     defaults = dict(
         mode="enforce",
-        # Hour filter — same hours as production
+        # Legacy time/day filters intentionally ignored
         enable_hour_filter=True,
         allowed_trading_hours_et=[1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20],
-        # Weekday filter — Friday blocked
         blocked_weekdays=[4],
-        # Short hour filter
         allowed_short_hours_et=[3, 4, 18, 21],
         kill_switch_short=False,
         # Drawdown/loss limits
@@ -44,10 +42,9 @@ def _production_like_config(**overrides) -> TradingCircuitBreakerConfig:
         enable_regime_avoidance=True,
         blocked_regimes=["ranging", "volatile"],
         regime_avoidance_min_confidence=0.7,
-        # Other filters OFF (matching production)
+        # Other filters OFF
         enable_session_filter=False,
         enable_trigger_filters=False,
-        enable_ml_chop_shield=False,
         enable_tv_paper_eval_gate=False,
         enable_volatility_filter=False,
         auto_resume_after_cooldown=True,
@@ -119,7 +116,7 @@ class TestProductionConfigSmokeTests:
         assert "cooldown" in decision.reason.lower()
 
     def test_friday_blocked_regardless_of_signal_quality(self):
-        """Even a perfect signal on Friday should be blocked (weekday filter)."""
+        """Friday is no longer blocked by stale weekday config."""
         config = _production_like_config()
         cb = TradingCircuitBreaker(config)
 
@@ -131,11 +128,10 @@ class TestProductionConfigSmokeTests:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             decision = cb.should_allow_signal(_good_long_signal())
 
-        assert decision.allowed is False
-        assert decision.reason == "weekday_filter"
+        assert decision.allowed is True
 
     def test_short_at_disallowed_hour_blocked(self):
-        """Short signal at 10am ET (not in [3,4,18,21]) should be blocked."""
+        """Short signal at 10am ET should pass despite stale hour config."""
         config = _production_like_config()
         cb = TradingCircuitBreaker(config)
 
@@ -148,8 +144,7 @@ class TestProductionConfigSmokeTests:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             decision = cb.should_allow_signal(_good_short_signal())
 
-        assert decision.allowed is False
-        assert decision.reason == "short_hour_filter"
+        assert decision.allowed is True
 
     def test_short_at_allowed_hour_in_downtrend_passes(self):
         """Short signal at 18:00 ET on Tuesday in trending_down should pass all filters."""
