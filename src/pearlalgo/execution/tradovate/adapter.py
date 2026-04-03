@@ -1115,7 +1115,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 "WebSocket reconnected -- reconciling order status via REST"
             )
             try:
-                asyncio.create_task(self._poll_order_status())
+                self._create_tracked_task(
+                    self._poll_order_status(), name="post_reconnect_poll",
+                )
             except Exception as e:
                 logger.error(f"Failed to schedule post-reconnect poll: {e}")
             return
@@ -1418,7 +1420,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         and not self._reconnect_task.done()
                     )
                     if not reconnect_running and not self._reconnect_gave_up:
-                        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+                        self._reconnect_task = self._create_tracked_task(
+                            self._reconnect_loop(), name="reconnect_loop",
+                        )
                 else:
                     # Connection restored — reset gave_up flag
                     self._reconnect_gave_up = False
