@@ -59,7 +59,6 @@ class TestServiceDependenciesDefaults:
         assert deps.data_fetcher is None
         assert deps.state_manager is None
         assert deps.performance_tracker is None
-        assert deps.telegram_notifier is None
         assert deps.notification_queue is None
         assert deps.health_monitor is None
         assert deps.state_dir is None
@@ -79,7 +78,6 @@ class TestResolveDefaults:
     @patch("pearlalgo.market_agent.service_factory.load_service_config")
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
@@ -88,7 +86,6 @@ class TestResolveDefaults:
         mock_fetcher_cls,
         mock_state_mgr_cls,
         mock_perf_cls,
-        mock_tg_cls,
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
@@ -111,14 +108,12 @@ class TestResolveDefaults:
         assert deps.data_fetcher is not None
         assert deps.state_manager is not None
         assert deps.performance_tracker is not None
-        assert deps.telegram_notifier is not None
         assert deps.notification_queue is not None
         assert deps.health_monitor is not None
 
     @patch("pearlalgo.market_agent.service_factory.load_service_config")
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
@@ -127,7 +122,6 @@ class TestResolveDefaults:
         mock_fetcher_cls,
         mock_state_mgr_cls,
         mock_perf_cls,
-        mock_tg_cls,
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
@@ -153,14 +147,12 @@ class TestResolveDefaults:
     @patch("pearlalgo.market_agent.service_factory.load_service_config")
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     def test_loads_service_config_when_empty(
         self,
         mock_state_mgr_cls,
         mock_perf_cls,
-        mock_tg_cls,
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
@@ -189,7 +181,6 @@ class TestBuildServiceDependencies:
     @patch("pearlalgo.market_agent.service_factory.load_service_config")
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
@@ -198,7 +189,6 @@ class TestBuildServiceDependencies:
         mock_fetcher_cls,
         mock_state_mgr_cls,
         mock_perf_cls,
-        mock_tg_cls,
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
@@ -211,8 +201,6 @@ class TestBuildServiceDependencies:
             data_provider=_mock_data_provider(),
             config=_minimal_config(),
             state_dir=tmp_path,
-            telegram_bot_token="tok",
-            telegram_chat_id="cid",
             service_config=_stub_service_config(),
         )
 
@@ -220,48 +208,12 @@ class TestBuildServiceDependencies:
         assert deps.data_fetcher is not None
         assert deps.state_manager is not None
         assert deps.performance_tracker is not None
-        assert deps.telegram_notifier is not None
         assert deps.notification_queue is not None
         assert deps.health_monitor is not None
 
     @patch("pearlalgo.market_agent.service_factory.load_service_config")
     @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
     @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
-    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_build_service_dependencies_honors_telegram_enabled_flag(
-        self,
-        mock_fetcher_cls,
-        mock_state_mgr_cls,
-        mock_perf_cls,
-        mock_tg_cls,
-        mock_nq_cls,
-        mock_health_cls,
-        mock_load_cfg,
-        tmp_path: Path,
-    ) -> None:
-        mock_load_cfg.return_value = _stub_service_config()
-        mock_state_mgr_cls.return_value.state_dir = tmp_path
-        service_cfg = _stub_service_config(telegram={"enabled": False, "notification_tier": "important"})
-
-        build_service_dependencies(
-            data_provider=_mock_data_provider(),
-            config=_minimal_config(),
-            state_dir=tmp_path,
-            telegram_bot_token="tok",
-            telegram_chat_id="cid",
-            service_config=service_cfg,
-        )
-
-        mock_tg_cls.assert_called_once()
-        assert mock_tg_cls.call_args.kwargs["enabled"] is False
-
-    @patch("pearlalgo.market_agent.service_factory.load_service_config")
-    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
-    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
     @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
     @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
@@ -270,7 +222,6 @@ class TestBuildServiceDependencies:
         mock_fetcher_cls,
         mock_state_mgr_cls,
         mock_perf_cls,
-        mock_tg_cls,
         mock_nq_cls,
         mock_health_cls,
         mock_load_cfg,
@@ -296,83 +247,8 @@ class TestBuildServiceDependencies:
 # ---------------------------------------------------------------------------
 
 class TestAccountLabel:
-    """The factory derives the Telegram account_label from challenge.stage."""
-
-    @pytest.mark.parametrize(
-        "stage",
-        ["tv_paper_eval", "evaluation", "sim_funded", "live"],
-    )
-    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
-    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
-    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_tv_paper_stages_produce_tv_paper_label(
-        self,
-        mock_fetcher_cls,
-        mock_state_mgr_cls,
-        mock_perf_cls,
-        mock_tg_cls,
-        mock_nq_cls,
-        mock_health_cls,
-        stage: str,
-        tmp_path: Path,
-    ) -> None:
-        mock_state_mgr_cls.return_value.state_dir = tmp_path
-        svc_cfg = _stub_service_config(challenge={"stage": stage})
-
-        build_service_dependencies(
-            data_provider=_mock_data_provider(),
-            config=_minimal_config(),
-            state_dir=tmp_path,
-            service_config=svc_cfg,
-        )
-
-        # The notifier should have been constructed with account_label="TV-PAPER"
-        mock_tg_cls.assert_called_once()
-        call_kwargs = mock_tg_cls.call_args
-        assert call_kwargs.kwargs.get("account_label") == "TV-PAPER" or (
-            call_kwargs.args and "TV-PAPER" in call_kwargs.args
-        )
-
-    @pytest.mark.parametrize(
-        "stage",
-        ["ibkr_virtual", "", "unknown", "paper"],
-    )
-    @patch("pearlalgo.market_agent.service_factory.HealthMonitor")
-    @patch("pearlalgo.market_agent.service_factory.NotificationQueue")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentTelegramNotifier")
-    @patch("pearlalgo.market_agent.service_factory.PerformanceTracker")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentStateManager")
-    @patch("pearlalgo.market_agent.service_factory.MarketAgentDataFetcher")
-    def test_non_tv_paper_stages_produce_tv_paper_label_too(
-        self,
-        mock_fetcher_cls,
-        mock_state_mgr_cls,
-        mock_perf_cls,
-        mock_tg_cls,
-        mock_nq_cls,
-        mock_health_cls,
-        stage: str,
-        tmp_path: Path,
-    ) -> None:
-        """After Tradovate-only consolidation, all stages produce TV-PAPER."""
-        mock_state_mgr_cls.return_value.state_dir = tmp_path
-        svc_cfg = _stub_service_config(challenge={"stage": stage})
-
-        build_service_dependencies(
-            data_provider=_mock_data_provider(),
-            config=_minimal_config(),
-            state_dir=tmp_path,
-            service_config=svc_cfg,
-        )
-
-        mock_tg_cls.assert_called_once()
-        call_kwargs = mock_tg_cls.call_args
-        assert call_kwargs.kwargs.get("account_label") == "TV-PAPER" or (
-            call_kwargs.args and "TV-PAPER" in call_kwargs.args
-        )
+    """Account label tests removed — Telegram notifier has been deleted."""
+    pass
 
 
 # ---------------------------------------------------------------------------

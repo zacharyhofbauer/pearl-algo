@@ -22,7 +22,7 @@ fi
 
 # Add cron job (runs every 5 minutes)
 echo "Adding monitor cron job..."
-(crontab -l 2>/dev/null || true; echo "*/5 * * * * cd $PROJECT_ROOT && $PYTHON $MONITOR --market NQ --telegram >> /tmp/pearlalgo-monitor.log 2>&1") | crontab -
+(crontab -l 2>/dev/null || true; echo "*/5 * * * * cd $PROJECT_ROOT && $PYTHON $MONITOR --market NQ >> /tmp/pearlalgo-monitor.log 2>&1") | crontab -
 
 echo ""
 echo "=== Cron Job Added ==="

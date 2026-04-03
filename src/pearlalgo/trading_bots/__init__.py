@@ -8,7 +8,7 @@ modules that have not been fully retired yet.
 Do not add new strategy entrypoints or product logic here.
 """
 
-from .pearl_bot_auto import generate_signals, run_pearlbot, VirtualBroker, CONFIG
+from .signal_generator import generate_signals, run_pearlbot, VirtualBroker, CONFIG
 
 # Alias for backward compatibility
 PEARL_BOT_CONFIG = CONFIG

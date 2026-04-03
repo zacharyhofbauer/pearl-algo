@@ -479,9 +479,71 @@ class TradingCircuitBreaker:
         }
     
     # =========================================================================
+    # State persistence (Issue 2)
+    # =========================================================================
+
+    def get_persisted_state(self) -> Dict[str, Any]:
+        """Return critical CB state for persistence to state.json.
+
+        Only the fields that must survive an agent restart are included:
+        cooldown, daily P&L, consecutive losses, and session P&L.
+        """
+        return {
+            "cooldown_until": self._cooldown_until.isoformat() if self._cooldown_until else None,
+            "cooldown_reason": self._cooldown_reason,
+            "daily_pnl": self._daily_pnl,
+            "session_pnl": self._session_pnl,
+            "consecutive_losses": self._consecutive_losses,
+        }
+
+    def restore_persisted_state(self, data: Optional[Dict[str, Any]]) -> None:
+        """Restore CB state from a previously persisted snapshot.
+
+        Called after ``__init__`` and ``hydrate_daily_pnl``.  Hydration from
+        Tradovate fills takes precedence for ``daily_pnl`` if it produced a
+        non-zero value; otherwise the persisted value is used as fallback.
+        """
+        if not data:
+            return
+
+        # Cooldown — restore only if the saved cooldown hasn't expired yet.
+        saved_until = data.get("cooldown_until")
+        if saved_until:
+            try:
+                cooldown_dt = datetime.fromisoformat(saved_until)
+                if cooldown_dt > datetime.now(timezone.utc):
+                    self._cooldown_until = cooldown_dt
+                    self._cooldown_reason = data.get("cooldown_reason")
+                    remaining = (cooldown_dt - datetime.now(timezone.utc)).total_seconds() / 60
+                    logger.info(
+                        "Restored CB cooldown: reason=%s, remaining=%.1f min",
+                        self._cooldown_reason, remaining,
+                    )
+                else:
+                    logger.debug("Persisted cooldown already expired, ignoring")
+            except (ValueError, TypeError) as exc:
+                logger.warning("Could not parse persisted cooldown_until: %s", exc)
+
+        # Daily P&L — hydrate_daily_pnl already ran; only use persisted value
+        # as fallback when hydration returned zero (e.g. no fills file yet).
+        if self._daily_pnl == 0.0 and data.get("daily_pnl"):
+            self._daily_pnl = float(data["daily_pnl"])
+            logger.info("Restored CB daily_pnl=$%.2f from persisted state", self._daily_pnl)
+
+        # Session P&L
+        if data.get("session_pnl"):
+            self._session_pnl = float(data["session_pnl"])
+
+        # Consecutive losses
+        saved_losses = data.get("consecutive_losses", 0)
+        if saved_losses and saved_losses > self._consecutive_losses:
+            self._consecutive_losses = int(saved_losses)
+            logger.info("Restored CB consecutive_losses=%d from persisted state", self._consecutive_losses)
+
+    # =========================================================================
     # Private methods
     # =========================================================================
-    
+
     def _is_in_cooldown(self) -> bool:
         """Check if currently in cooldown period."""
         if self._cooldown_until is None:

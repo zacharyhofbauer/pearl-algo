@@ -3,7 +3,6 @@ pearlalgo.data_providers
 pearlalgo.data_providers.ibkr
 pearlalgo.execution
 pearlalgo.execution.tradovate
-pearlalgo.notifications
+pearlalgo.market_agent
 pearlalgo.storage
-pearlalgo.strategies.types
 pearlalgo.utils

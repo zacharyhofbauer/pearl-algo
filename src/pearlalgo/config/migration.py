@@ -1,5 +1,10 @@
 """
 Helpers for migrating legacy PEARL config shapes to the canonical runtime model.
+
+DEPRECATED: This module exists only to bridge legacy config formats.
+Scheduled for removal once all configs use the canonical structure.
+New configs should be authored directly in the canonical format
+(see config/live/tradovate_paper.yaml as reference).
 """
 
 from __future__ import annotations
@@ -8,6 +13,9 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from pearlalgo.strategies.registry import ACTIVE_STRATEGY
+from pearlalgo.utils.logger import logger
+
+_DEPRECATION_LOGGED = False
 
 
 def migrate_legacy_runtime_config(raw: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -15,7 +23,12 @@ def migrate_legacy_runtime_config(raw: Mapping[str, Any] | None) -> dict[str, An
 
     This keeps legacy files readable during the transition while making the
     active runtime, API, and strategy loader converge on one structure.
+
+    .. deprecated::
+        This function will be removed in a future release. Migrate your
+        config files to the canonical format.
     """
+    global _DEPRECATION_LOGGED
     migrated = deepcopy(dict(raw or {}))
 
     strategy_cfg = migrated.get("strategy", {}) or {}
@@ -32,6 +45,13 @@ def migrate_legacy_runtime_config(raw: Mapping[str, Any] | None) -> dict[str, An
     if ACTIVE_STRATEGY not in strategies_cfg:
         legacy_params = migrated.get("pearl_bot_auto", {}) or {}
         strategies_cfg[ACTIVE_STRATEGY] = deepcopy(legacy_params if isinstance(legacy_params, dict) else {})
+        if legacy_params and not _DEPRECATION_LOGGED:
+            _DEPRECATION_LOGGED = True
+            logger.warning(
+                "DEPRECATED: config uses legacy 'pearl_bot_auto' section — "
+                "migrate to 'strategies.composite_intraday' in your YAML config. "
+                "This compatibility bridge will be removed in a future release."
+            )
 
     migrated["strategies"] = strategies_cfg
 

@@ -40,7 +40,7 @@ def test_composite_intraday_strategy_delegates_to_legacy_core():
         }
     )
 
-    with patch("pearlalgo.trading_bots.pearl_bot_auto.generate_signals", return_value=[{"type": "pearlbot_pinescript"}]) as mock_generate:
+    with patch("pearlalgo.trading_bots.signal_generator.generate_signals", return_value=[{"type": "pearlbot_pinescript"}]) as mock_generate:
         result = strategy.analyze(df, current_time=datetime.now(timezone.utc))
 
     assert result == [{"type": "pearlbot_pinescript"}]

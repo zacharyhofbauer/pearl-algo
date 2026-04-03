@@ -6,7 +6,7 @@ from pearlalgo.market_agent.main import _load_new_config, _deep_merge
 from pearlalgo.config.schema_v2 import validate_config
 from pearlalgo.config.config_loader import build_strategy_config
 from pearlalgo.config.config_view import ConfigView
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.signal_generator import CONFIG as PEARL_BOT_CONFIG
 
 PROJECT_ROOT = Path(__file__).parent.parent
 

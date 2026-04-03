@@ -12,7 +12,7 @@ const CATEGORIES = [
   { id: 'Auto Flat', label: 'Auto Flat' },
   { id: 'Advanced Exits', label: 'Advanced Exits' },
   { id: 'Service', label: 'Service' },
-  { id: 'Contract Scaling', label: 'Contract Scaling' },  // ADDED 2026-03-25: confidence scaling
+  { id: 'Contract Scaling', label: 'Contract Scaling' },
 ]
 
 export default function SettingsSidebar() {

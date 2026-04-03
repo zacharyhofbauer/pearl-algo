@@ -122,7 +122,7 @@ def generate_metrics(state: dict[str, Any]) -> str:
     - pearlalgo_consecutive_errors: Current streak
     - pearlalgo_connection_failures: Connection failures
     - pearlalgo_data_fetch_errors: Data fetch errors
-    - pearlalgo_signals_send_failures_total: Telegram failures
+    - pearlalgo_signals_send_failures_total: Notification delivery failures
     
     **Circuit Breaker:**
     - pearlalgo_circuit_breaker_active: CB paused flag
@@ -241,7 +241,7 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_signals_session_total gauge",
         f"pearlalgo_signals_session_total {signals_session}",
         "",
-        "# HELP pearlalgo_signals_sent_total Signals successfully sent to Telegram",
+        "# HELP pearlalgo_signals_sent_total Signals successfully handed to the notification layer",
         "# TYPE pearlalgo_signals_sent_total counter",
         f"pearlalgo_signals_sent_total {signals_sent}",
         "",
@@ -321,7 +321,7 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_data_fetch_errors gauge",
         f"pearlalgo_data_fetch_errors {data_fetch_errors}",
         "",
-        "# HELP pearlalgo_signals_send_failures_total Telegram send failures (all-time)",
+        "# HELP pearlalgo_signals_send_failures_total Notification delivery failures (all-time)",
         "# TYPE pearlalgo_signals_send_failures_total counter",
         f"pearlalgo_signals_send_failures_total {signals_send_failures}",
         "",

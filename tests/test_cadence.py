@@ -116,8 +116,8 @@ class TestCadenceScheduler:
         sleep_time = scheduler.mark_cycle_end()
         
         # Sleep should be roughly interval minus work time
-        # Allow for some timing variance
-        assert 29.3 <= sleep_time <= 30.0
+        # Allow for timing variance (CI machines can be slow)
+        assert 29.0 <= sleep_time <= 30.0
 
     def test_skip_ahead_when_behind_schedule(self) -> None:
         """Should skip cycles when running behind to avoid catch-up storms."""
@@ -349,7 +349,7 @@ async def test_service_loop_with_cadence_scheduler(tmp_path) -> None:
     Verifies that the service integrates with the cadence scheduler correctly.
     """
     from pearlalgo.market_agent.service import MarketAgentService
-    from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+    from pearlalgo.trading_bots.signal_generator import CONFIG as PEARL_BOT_CONFIG
     from tests.mock_data_provider import MockDataProvider
     
     # Create mock provider

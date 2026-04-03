@@ -27,10 +27,11 @@ from pearlalgo.config.runtime_validation import (
     collect_runtime_config_warnings,
     validate_runtime_config,
 )
+from pearlalgo.utils.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = get_project_root()
 LIVE_YAML_PATH = PROJECT_ROOT / "config" / "live" / "tradovate_paper.yaml"
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ echo ""
 echo "All tests use actual production code from src/pearlalgo/"
 echo "No code duplication - tests import directly from installed package"
 echo ""
-echo "Tip: For integration-style validation (Telegram/signals/service/arch), use:"
+echo "Tip: For integration-style validation (signals/service/arch), use:"
 echo "  python3 scripts/testing/test_all.py [mode]"
 echo ""
 
@@ -75,4 +75,3 @@ fi
 # - Tests import actual code from src/pearlalgo/
 # - No file duplication needed
 "$PYTHON_BIN" -m pytest "$@"
-

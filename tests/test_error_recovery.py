@@ -21,7 +21,7 @@ from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.state_reader import StateReader
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.signal_generator import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.config.config_loader import load_service_config
 
 

@@ -230,7 +230,6 @@ The repository includes systemd service files in `scripts/systemd/` for producti
 - `pearlalgo-agent.service` — Market agent service
 - `pearlalgo-api.service` — API server service
 - `pearlalgo-webapp.service` — Web app service
-- `pearlalgo-telegram.service` — Telegram handler service
 - `pearlalgo-monitor.service` / `.timer` — Health monitoring
 
 ### Path Customization

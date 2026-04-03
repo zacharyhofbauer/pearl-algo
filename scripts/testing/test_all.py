@@ -3,13 +3,12 @@
 # Category: Testing
 # Purpose: Unified test runner for Market Agent (canonical entry point)
 # Usage: python3 scripts/testing/test_all.py [mode]
-# Modes: all (default), telegram, signals, service, arch
+# Modes: all (default), signals, service, arch
 # ============================================================================
 """
 Unified Test Runner for Market Agent
 
 Runs the canonical test/validation modes for this repo:
-- Telegram notification formatting + send
 - Strategy signal generation with the mock provider
 - Short-run service lifecycle with the mock provider
 - Architecture boundary enforcement
@@ -19,7 +18,6 @@ Usage:
     
 Modes:
     all          - Run all tests (default)
-    telegram     - Test Telegram notifications only
     signals      - Test signal generation only
     service      - Test full service with mock data
     arch         - Test module boundary rules
@@ -71,109 +69,8 @@ except ImportError:
     MockDataProvider = mock_data_provider.MockDataProvider
 
 from pearlalgo.market_agent.service import MarketAgentService  # noqa: E402
-from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier  # noqa: E402
 from pearlalgo.strategies import create_strategy, get_strategy_defaults  # noqa: E402
 from pearlalgo.utils.logging_config import setup_logging  # noqa: E402
-
-
-async def test_telegram_notifications():
-    """Test all Telegram notification types."""
-    print("=" * 60)
-    print("Telegram Notifications Test")
-    print("=" * 60)
-    print()
-    
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    
-    if not bot_token or not chat_id:
-        print("❌ ERROR: Telegram credentials not set")
-        print("   Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
-        return False
-    
-    notifier = MarketAgentTelegramNotifier(
-        bot_token=bot_token,
-        chat_id=chat_id,
-        enabled=True,
-    )
-    
-    if not notifier.enabled:
-        print("❌ ERROR: Telegram notifier not enabled")
-        return False
-    
-    print("✅ Telegram notifier initialized")
-    print()
-    
-    # Test all notification types
-    tests = [
-        ("Entry", lambda: notifier.send_entry_notification(
-            signal_id="test_entry_001",
-            entry_price=17500.0,
-            signal={
-                "symbol": "MNQ", "direction": "long", "entry_price": 17500.0,
-                "stop_loss": 17450.0, "take_profit": 17600.0, "confidence": 0.75,
-                "reason": "Test entry", "strategy": "composite_intraday", "type": "breakout",
-            },
-        )),
-        ("Heartbeat", lambda: notifier.send_heartbeat({
-            "running": True, "uptime": {"hours": 1, "minutes": 30},
-            "cycle_count": 100, "signal_count": 5, "error_count": 0,
-            "buffer_size": 56, "last_successful_cycle": datetime.now(timezone.utc).isoformat(),
-        })),
-        ("Enhanced Status", lambda: notifier.send_enhanced_status({
-            "running": True, "uptime": {"hours": 1, "minutes": 30},
-            "cycle_count": 100, "signal_count": 5, "error_count": 0,
-            "buffer_size": 56, "performance": {"wins": 3, "losses": 2, "win_rate": 0.6},
-        })),
-        ("Data Quality Alert", lambda: notifier.send_data_quality_alert(
-            "stale_data", "Data is 15.3 minutes old (test)", {"age_minutes": 15.3}
-        )),
-        ("Dashboard", lambda: notifier.send_dashboard({
-            "symbol": "MNQ",
-            "current_time": datetime.now(timezone.utc).isoformat(),
-            "futures_market_open": True,
-            "strategy_session_open": True,
-            "cycle_count": 0,
-            "signal_count": 0,
-            "signals_sent": 0,
-            "signals_send_failures": 0,
-            "error_count": 0,
-            "buffer_size": 0,
-            "buffer_size_target": 300,
-        })),
-        ("Daily Summary", lambda: notifier.send_daily_summary({
-            "total_pnl": 150.0, "wins": 5, "losses": 3, "win_rate": 0.625,
-        })),
-        ("Weekly Summary", lambda: notifier.send_weekly_summary({
-            "total_signals": 25, "exited_signals": 10, "wins": 6, "losses": 4,
-            "win_rate": 0.6, "total_pnl": 300.0, "avg_pnl": 30.0, "avg_hold_minutes": 45.2,
-        })),
-        ("Circuit Breaker", lambda: notifier.send_circuit_breaker_alert(
-            "Too many consecutive errors (test)", {"consecutive_errors": 10}
-        )),
-        ("Recovery", lambda: notifier.send_recovery_notification({
-            "issue": "Consecutive errors resolved (test)", "recovery_time_seconds": 30,
-        })),
-        ("Shutdown", lambda: notifier.send_shutdown_notification({
-            "uptime_hours": 2, "uptime_minutes": 30, "cycle_count": 150,
-            "signal_count": 8, "error_count": 1,
-        })),
-    ]
-    
-    for name, test_func in tests:
-        print(f"Test: {name}...", end=" ")
-        try:
-            result = await test_func()
-            print("✅" if result else "❌")
-            await asyncio.sleep(1)
-        except Exception as e:
-            print(f"❌ Error: {e}")
-    
-    print()
-    print("=" * 60)
-    print("✅ Telegram notification tests completed!")
-    print("=" * 60)
-    return True
 
 
 async def test_signal_generation():
@@ -246,14 +143,6 @@ async def test_service_with_mock():
     print("=" * 60)
     print()
     
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    
-    if not telegram_bot_token or not telegram_chat_id:
-        print("⚠️  WARNING: Telegram credentials not set")
-        print("   Notifications will be disabled")
-        print()
-    
     print("Creating mock data provider...")
     print("⚠️  NOTE: Using synthetic mock data - prices are NOT real market data")
     mock_provider = MockDataProvider(
@@ -275,8 +164,6 @@ async def test_service_with_mock():
     service = MarketAgentService(
         data_provider=mock_provider,
         config=config,
-        telegram_bot_token=telegram_bot_token,
-        telegram_chat_id=telegram_chat_id,
     )
     print("✅ Service created")
     print()
@@ -390,7 +277,7 @@ async def main():
         "mode",
         nargs="?",
         default="all",
-        choices=["all", "telegram", "signals", "service", "arch"],
+        choices=["all", "signals", "service", "arch"],
         help="Test mode to run (default: all)",
     )
     args = parser.parse_args()
@@ -402,11 +289,6 @@ async def main():
     print()
     
     results = {}
-    
-    if args.mode in ["all", "telegram"]:
-        print("\n" + "=" * 60)
-        results["telegram"] = await test_telegram_notifications()
-        print()
     
     if args.mode in ["all", "signals"]:
         print("\n" + "=" * 60)
@@ -439,7 +321,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

@@ -657,7 +657,7 @@ class TestGetHistoricalDataTask:
     @patch("pearlalgo.data_providers.ibkr_data_executor.load_service_config", return_value={})
     def test_futures_historical_selects_contract(self, mock_config):
         ib = MagicMock()
-        cd = _make_contract_details(exp="20260320", con_id=100)
+        cd = _make_contract_details(exp="20261220", con_id=100)
         ib.reqContractDetails.return_value = [cd]
 
         bars = [_make_bar(20900, 21000, 20800, 20950, 3000)]

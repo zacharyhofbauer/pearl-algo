@@ -5,7 +5,7 @@ import { DataPanel } from './DataPanelsContainer'
 import type { DirectionBreakdown, Position, StatusBreakdown, SignalRejections } from '@/stores'
 import { apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
-import OperatorUnlockModal from '@/components/OperatorUnlockModal' // ADDED 2026-03-25
+import OperatorUnlockModal from '@/components/OperatorUnlockModal'
 import {
   getUsdPerPoint,
   formatPrice,
@@ -327,9 +327,9 @@ function TradeDockPanel({
   }
 
   const operatorUnlocked = useOperatorStore((s) => s.isUnlocked)
-  const [showUnlockModal, setShowUnlockModal] = useState(false) // ADDED 2026-03-25
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
 
-  // Gate helper: if locked, show unlock modal; if unlocked, call the action. ADDED 2026-03-25
+  // Gate helper: if locked, show unlock modal; if unlocked, call the action.
   const withOperatorUnlock = (action: () => void) => () => {
     if (!operatorUnlocked) { setShowUnlockModal(true); return }
     action()

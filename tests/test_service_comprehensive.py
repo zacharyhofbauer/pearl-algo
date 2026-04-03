@@ -1091,7 +1091,7 @@ class TestComputeEffectiveInterval:
         svc.paused = False
         with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
-            with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.trading_bots.signal_generator.check_trading_session", return_value=True):
                 svc.data_fetcher._last_market_data = {
                     "latest_bar": {"timestamp": datetime.now(timezone.utc).isoformat()},
                     "df": _make_df(n=5),
@@ -1106,7 +1106,7 @@ class TestComputeEffectiveInterval:
         svc._velocity_mode_enabled = False
         with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
-            with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=False):
+            with patch("pearlalgo.trading_bots.signal_generator.check_trading_session", return_value=False):
                 svc.data_fetcher._last_market_data = {
                     "latest_bar": {"timestamp": datetime.now(timezone.utc).isoformat()},
                 }

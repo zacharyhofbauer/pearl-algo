@@ -701,7 +701,6 @@ class TestConfigToServiceStartup:
         # All core dependencies should have been created
         assert deps.state_manager is not None
         assert deps.performance_tracker is not None
-        assert deps.telegram_notifier is not None
         assert deps.notification_queue is not None
         assert deps.health_monitor is not None
         assert deps.data_fetcher is not None
@@ -745,7 +744,6 @@ class TestConfigToServiceStartup:
         assert service.timeframe == "5m"
         assert service.state_manager is not None
         assert service.performance_tracker is not None
-        assert service.telegram_notifier is not None
         assert service.notification_queue is not None
         assert service.running is False
         assert service.signal_count >= 0
@@ -774,7 +772,7 @@ class TestRealWiringPipeline:
         from datetime import timedelta
 
         from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-        from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
+        from pearlalgo.trading_bots.signal_generator import generate_signals
 
         # 1. Fetch data via the real (mock) data provider
         end = datetime.now(timezone.utc)

@@ -3,8 +3,8 @@
 ![Coverage](docs/assets/coverage-badge.svg)
 
 Production-ready market trading agent with a modular architecture:
-data providers (IBKR), strategy/signal generation with aggressive entry triggers, state + metrics, Telegram UI,
-and execution via Tradovate.
+data providers (IBKR), strategy/signal generation with aggressive entry triggers, state + metrics,
+and execution via Tradovate. Canonical frontend: Next.js dashboard web app.
 
 The current operating model is intentionally narrow:
 - market data from IBKR
@@ -18,20 +18,18 @@ otherwise. Use `docs/START_HERE.md` for the live path and
 `docs/COMPATIBILITY_SURFACES.md` for retained legacy bridges, wrappers, and
 fallbacks.
 
-## Pearl Algo Web App (Telegram + Mini App)
+## Pearl Algo Web App
 
-![Telegram dashboard](docs/assets/telegram-dashboard.png)
-
-See `docs/PEARL_WEB_APP.md` for Mini App setup (public HTTPS required) and screenshot capture.
-The canonical frontend lives in `apps/pearl-algo-app/`.
+The canonical frontend is a Next.js application in `apps/pearl-algo-app/`.
+Run with `./pearl.sh start` to launch on port 3001.
 
 ## Quick start (local)
 
 ### Prereqs
 
 - Python **3.12+**
+- Node.js **20+** (for frontend)
 - IBKR Gateway reachable (see `docs/GATEWAY.md`)
-- Telegram bot credentials (see `env.example`)
 
 ### Install
 
@@ -46,7 +44,7 @@ pip install -e ".[dev]"
 
 ```bash
 cp env.example .env
-# Edit .env with TELEGRAM_* and IBKR_* values
+# Edit .env with IBKR_* values for account access
 ```
 
 Service behavior is configured in `config/live/tradovate_paper.yaml` (use `--config config/live/tradovate_paper.yaml` when starting the agent).
@@ -76,6 +74,7 @@ python3 scripts/ops/audit_runtime_paths.py
 
 - **Operator entrypoint**: `./pearl.sh`
 - **Canonical config**: `config/live/tradovate_paper.yaml`
+- **Runtime topology**: singleton agent lock; `--market` selects the state/log namespace, not concurrent agents
 - **Service**: `src/pearlalgo/market_agent/service.py`
 - **Strategy**: `src/pearlalgo/strategies/composite_intraday/`
 - **Execution**: `src/pearlalgo/execution/tradovate/`
@@ -91,7 +90,7 @@ legacy wrappers or compatibility namespaces.
 # Unit tests (pytest)
 ./scripts/testing/run_tests.sh
 
-# Validation runner (telegram/signals/service/arch)
+# Validation runner (signals/service/arch)
 python3 scripts/testing/test_all.py
 
 # Type checking (mypy)
@@ -120,10 +119,9 @@ make audit
 ### CI
 
 GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs:
-- Unit tests (skipping IBKR / Telegram-credential tests)
+- Unit tests (skipping environment-dependent IBKR integration paths)
 - Architecture boundary enforcement
 - Secret scan on tracked files
-CI runs tests, linting, type checking, and architecture boundary checks via `.github/workflows/ci.yml`.
 
 ## Docs (start here)
 

@@ -170,7 +170,7 @@ class TestStartStrategySessionFailure:
         svc = _make_service()
         with patch("pearlalgo.market_agent.service_lifecycle.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
-            with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", side_effect=RuntimeError("bad")):
+            with patch("pearlalgo.trading_bots.signal_generator.check_trading_session", side_effect=RuntimeError("bad")):
                 await svc.start()
         svc.notification_queue.enqueue_startup.assert_called_once()
         config_dict = svc.notification_queue.enqueue_startup.call_args[0][0]
@@ -525,4 +525,68 @@ class TestStopSetsRunningFalse:
         await svc.stop("test")
         assert svc.running is False
         # _save_state called twice: line 183 and line 236
+        assert svc._save_state.call_count == 2
+
+
+# ===================================================================
+# Resource cleanup verification
+# ===================================================================
+
+
+class TestStopResourceCleanup:
+    """Verify that all subsystems are properly cleaned up after stop()."""
+
+    @pytest.mark.asyncio
+    async def test_all_subsystems_stopped(self):
+        """After stop(), all subsystems should have had their cleanup methods called."""
+        queue = MagicMock()
+        queue.stop = MagicMock()
+        adapter = AsyncMock()
+        adapter.disconnect = AsyncMock()
+        svc = _make_service(
+            running=True,
+            start_time=datetime.now(timezone.utc),
+            execution_adapter=adapter,
+            _async_sqlite_queue=queue,
+        )
+        await svc.stop("cleanup_test")
+
+        assert svc.running is False
+        svc.audit_logger.stop.assert_called_once()
+        queue.stop.assert_called_once_with(timeout=5.0)
+        svc.notification_queue.stop.assert_called_once()
+        svc.data_fetcher.close.assert_called_once()
+        adapter.disconnect.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_resilient_when_all_subsystems_fail(self):
+        """Even if every subsystem's cleanup fails, stop() should complete
+        and set running=False."""
+        queue = MagicMock()
+        queue.stop = MagicMock(side_effect=RuntimeError("db busy"))
+        adapter = AsyncMock()
+        adapter.disconnect = AsyncMock(side_effect=RuntimeError("conn reset"))
+        svc = _make_service(
+            running=True,
+            start_time=datetime.now(timezone.utc),
+            execution_adapter=adapter,
+            _async_sqlite_queue=queue,
+        )
+        svc.audit_logger.stop.side_effect = RuntimeError("flush")
+        svc.notification_queue.stop = AsyncMock(side_effect=RuntimeError("timeout"))
+        svc.data_fetcher.close = AsyncMock(side_effect=RuntimeError("closed"))
+        svc.telegram_notifier.send_shutdown_notification = AsyncMock(side_effect=RuntimeError("unreachable"))
+
+        await svc.stop("resilience_test")
+
+        # The critical assertion: running must be False even if everything else fails
+        assert svc.running is False
+        # State should still have been saved (at least attempted)
+        assert svc._save_state.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_stop_saves_state_before_and_after_cleanup(self):
+        """State is saved both at the start and end of shutdown."""
+        svc = _make_service(running=True, start_time=datetime.now(timezone.utc))
+        await svc.stop("save_test")
         assert svc._save_state.call_count == 2

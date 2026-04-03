@@ -8,6 +8,7 @@ Extracted from service.py for better code organization.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -23,7 +24,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.performance_tracker import PerformanceTracker
     from pearlalgo.market_agent.trading_circuit_breaker import TradingCircuitBreaker
     from pearlalgo.market_agent.notification_queue import NotificationQueue
-    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 
 
 class VirtualPositionTracker:
@@ -43,7 +43,7 @@ class VirtualPositionTracker:
         state_manager: "MarketAgentStateManager",
         performance_tracker: "PerformanceTracker",
         notification_queue: "NotificationQueue",
-        telegram_notifier: "MarketAgentTelegramNotifier",
+        telegram_notifier: Any,
         config: Any,
         *,
         trading_circuit_breaker: Optional["TradingCircuitBreaker"] = None,
@@ -55,8 +55,8 @@ class VirtualPositionTracker:
         Args:
             state_manager: For reading/writing signal state
             performance_tracker: For tracking trade performance
-            notification_queue: For sending Telegram notifications
-            telegram_notifier: Telegram notifier instance
+            notification_queue: For sending runtime notifications
+            telegram_notifier: Legacy notifier compatibility instance
             config: Service configuration
             trading_circuit_breaker: Optional circuit breaker for risk management
             execution_adapter: Optional execution adapter for order management
@@ -94,6 +94,21 @@ class VirtualPositionTracker:
         self._auto_flat_daily_time: tuple[int, int] = (15, 55)
         self._auto_flat_friday_time: tuple[int, int] = (15, 55)
         self._auto_flat_last_dates: Dict[str, Any] = {}
+
+    def _schedule_notification_task(self, coroutine: Any, *, context: str) -> None:
+        """Queue a background notification when an event loop is available."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            close = getattr(coroutine, "close", None)
+            if callable(close):
+                close()
+            logger.debug("%s skipped: no running event loop", context)
+            return
+
+        task = loop.create_task(coroutine)
+        if inspect.isawaitable(task):
+            return
 
     def configure_auto_flat(
         self,
@@ -266,15 +281,15 @@ class VirtualPositionTracker:
                 if entry_time_str:
                     try:
                         entry_time = parse_utc_timestamp(str(entry_time_str))  # FIXED 2026-03-25: returns naive ET
-                    except Exception:
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.debug("Could not parse entry_time '%s': %s", entry_time_str, e)
 
                 sig = rec.get("signal", {}) or {}
                 direction = str(sig.get("direction") or "long").lower()
                 try:
                     stop = float(sig.get("stop_loss") or 0.0)
                     target = float(sig.get("take_profit") or 0.0)
-                except Exception:
+                except (ValueError, TypeError):
                     continue
                 if stop <= 0 or target <= 0:
                     continue
@@ -476,7 +491,7 @@ class VirtualPositionTracker:
                     f"exit={exit_price:.2f} | reason={exit_reason} | pnl=${pnl_value:.2f}"
                 )
 
-                asyncio.create_task(
+                self._schedule_notification_task(
                     self.notification_queue.enqueue_exit(
                         signal_id=str(sig_id),
                         exit_price=float(exit_price),
@@ -486,7 +501,8 @@ class VirtualPositionTracker:
                         hold_duration_minutes=hold_mins,
                         buffer_data=df,
                         priority=Priority.HIGH,
-                    )
+                    ),
+                    context="Exit notification",
                 )
         except Exception as e:
             logger.error(f"Could not schedule exit notification for {sig_id[:16]}: {e}", exc_info=True)
@@ -530,10 +546,11 @@ class VirtualPositionTracker:
                     msg += "Consider taking a break.\n"
                     msg += "Circuit breaker is monitoring."
 
-                asyncio.create_task(
+                self._schedule_notification_task(
                     self.notification_queue.enqueue_raw_message(
                         msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM
-                    )
+                    ),
+                    context="Streak alert",
                 )
                 logger.info(f"Streak alert sent: {self._streak_type} x{self._streak_count}")
         except Exception as streak_err:
@@ -588,8 +605,8 @@ class VirtualPositionTracker:
             if isinstance(perf, dict):
                 try:
                     total_pnl += float(perf.get("pnl") or 0.0)
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug("Could not parse pnl from trade exit: %s", e)
 
         # Update state
         try:
@@ -598,8 +615,8 @@ class VirtualPositionTracker:
                 state["active_trades_count"] = 0
                 state["active_trades_unrealized_pnl"] = 0.0
                 self.state_manager.save_state(state)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to update state after close_all: %s", e)
 
         self._last_close_all_at = now.isoformat()
         self._last_close_all_reason = str(reason)
@@ -618,8 +635,8 @@ class VirtualPositionTracker:
                 },
                 level="warning",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to log close_all_trades event: %s", e)
 
         if self._auto_flat_notify and self.telegram_notifier.enabled:
             try:
@@ -632,8 +649,8 @@ class VirtualPositionTracker:
                 await self.notification_queue.enqueue_raw_message(
                     msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to send close_all notification: %s", e)
 
         return closed_count
 

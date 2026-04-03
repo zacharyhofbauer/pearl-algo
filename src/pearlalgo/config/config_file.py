@@ -39,11 +39,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pearlalgo.config.migration import migrate_legacy_runtime_config
 from pearlalgo.utils.dict_utils import deep_merge as _deep_merge
+from pearlalgo.utils.paths import get_project_root
 
 
 def _project_root() -> Path:
     """Return the repository root for config resolution."""
-    return Path(__file__).parent.parent.parent.parent
+    return get_project_root()
 
 
 def _canonical_live_config_path(project_root: Path) -> Path:
@@ -357,8 +358,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "timeframe",
     "scan_interval",
     "session",
-    "telegram",
-    "telegram_ui",  # Home Card / dashboard UI formatting options
+    "telegram",  # legacy key (ignored, kept for config compat)
     "risk",
     "service",
     "circuit_breaker",

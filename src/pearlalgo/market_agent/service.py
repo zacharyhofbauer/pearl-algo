@@ -417,6 +417,12 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self.last_signal_sent_at: Optional[str] = saved_state.get("last_signal_sent_at")
         self.last_signal_id_prefix: Optional[str] = saved_state.get("last_signal_id_prefix")
 
+        # Restore circuit breaker state from persisted state.json (Issue 2)
+        if self.trading_circuit_breaker is not None:
+            self.trading_circuit_breaker.restore_persisted_state(
+                saved_state.get("circuit_breaker_persisted")
+            )
+
         # Session baselines (initialized on start)
         self._cycle_count_at_start: Optional[int] = None
         self._signal_count_at_start: Optional[int] = None

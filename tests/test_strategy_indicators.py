@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pearlalgo.trading_bots.pearl_bot_auto import (
+from pearlalgo.trading_bots.signal_generator import (
     CONFIG,
     safe_check,
     calculate_sr_power_channel,

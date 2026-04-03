@@ -11,7 +11,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 ## Market Agent Service
 
-- **Logical component**: Market Agent Service (one process per market; production trading loop)
+- **Logical component**: Market Agent Service (singleton production trading loop; selected market/state dir)
 - **Python entry module**: `pearlalgo.market_agent.main`
 - **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService`
 - **Supporting modules**:
@@ -27,28 +27,26 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.market_agent.signal_handler` – signal normalization and execution handoff
   - `pearlalgo.market_agent.order_manager` – order/position control helpers
   - `pearlalgo.market_agent.operator_handler` – operator command handling
-  - `pearlalgo.market_agent.telegram_notifier` – Telegram notifications
   - `pearlalgo.market_agent.health_monitor` – Health monitoring
   - `pearlalgo.market_agent.live_chart_screenshot` – Live chart screenshot export (Playwright)
-  - `pearlalgo.market_agent.notification_queue` – Notification queuing
+  - `pearlalgo.market_agent.notification_queue` – no-op notification compatibility surface
   - `pearlalgo.market_agent.tv_paper_eval_tracker` – prop-firm evaluation tracking
   - `pearlalgo.market_agent.trading_circuit_breaker` – runtime guardrail and signal-veto evaluation
 - **Lifecycle scripts**:
-  - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
-  - `scripts/ops/status.sh` (manual CLI health check; `--market NQ|ES|GC`)
+  - `scripts/lifecycle/agent.sh` (start/stop/status; `--market <MARKET>` selects state/log namespace, but runtime stays singleton)
+  - `scripts/ops/status.sh` (manual CLI health check; `--market <MARKET>`)
 - **Docs**:
   - `docs/START_HERE.md`
   - `docs/PATH_TRUTH_TABLE.md`
 
-## Telegram Notifications
+## Notifications
 
-- **Logical component**: Telegram notification delivery
+- **Logical component**: Runtime notification compatibility surface
 - **Python modules**:
-  - `pearlalgo.market_agent.telegram_notifier` – outbound Telegram trade/status notifications
-  - `pearlalgo.market_agent.telegram_formatters` – message formatting helpers
+  - `pearlalgo.market_agent.notification_queue` – no-op queue retained so service/runtime callers keep a stable contract
 - **Notes**:
-  - The current repo no longer contains a dedicated Telegram shell-script control surface.
-  - Telegram behavior is driven from the market-agent runtime plus config/secrets.
+  - Active Telegram delivery modules were removed.
+  - New runtime work should not depend on outbound notification delivery.
 
 ## IBKR Gateway / API
 
@@ -73,10 +71,10 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Retained bridge namespace: `pearlalgo.trading_bots` (legacy implementation surface; do not add new strategy entrypoints there)
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
-  - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
+  - `strategy_selection.py` – generates strategy selection exports for operator review flows and dashboards
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
-  - `test_all.py` – unified validation runner (telegram / signals / service)
+  - `test_all.py` – unified validation runner (signals / service / arch)
   - `check_architecture_boundaries.py` – module boundary enforcement (warn-only by default)
   - `smoke_test_ibkr.py`
   - `check_no_secrets.py` – secret detection guardrail
@@ -135,7 +133,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: External watchdog / state freshness validator + optional localhost status server
 - **Scripts**:
-  - `scripts/monitoring/monitor.py` – automated health monitor with Telegram alerts and exit codes (replaces `health_check.py` + `watchdog_agent.py`)
+  - `scripts/monitoring/monitor.py` – automated health monitor with structured exit codes and optional legacy alert bridge
   - `scripts/monitoring/serve_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
   - `scripts/monitoring/incident_report.py` – incident report generation
@@ -169,7 +167,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.cadence` – Cadence scheduler and metrics
   - `pearlalgo.utils.sparkline` – Progress bar rendering helpers
   - `pearlalgo.utils.volume_pressure` – Signed-volume pressure computations
-  - `pearlalgo.utils.telegram_alerts` – backward-compatible notification re-export; prefer `pearlalgo.notifications`
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:

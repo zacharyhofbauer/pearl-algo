@@ -139,7 +139,7 @@ class TestSignalPipeline:
 
     def test_signal_generation_produces_valid_output(self):
         """generate_signals() with realistic data returns well-formed signals."""
-        from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
+        from pearlalgo.trading_bots.signal_generator import generate_signals
 
         df = _build_realistic_ohlcv(n=200)
         trading_time = datetime(2024, 6, 10, 15, 0, 0, tzinfo=timezone.utc)
@@ -367,8 +367,6 @@ class TestConfigToServiceInit:
         svc = MarketAgentService(
             data_provider=mock_dp,
             state_dir=state_dir,
-            telegram_bot_token=None,
-            telegram_chat_id=None,
         )
         return svc
 

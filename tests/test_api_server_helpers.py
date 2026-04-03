@@ -752,20 +752,23 @@ class TestComputePerformanceStats:
     @patch.object(srv, "_read_state_for_dir", return_value={})
     @patch.object(srv, "_is_tv_paper_account_new", return_value=False)
     def test_computes_from_performance_json(self, _mock1, _mock2, tmp_path: Path):
-        now = datetime.now(timezone.utc)
+        # Use naive ET timestamps (matching production format) and mock _now_et_naive
+        # so cutoff calculations are relative to our test "now".
+        fake_now_et = datetime(2026, 4, 2, 14, 0, 0)  # naive ET
         perf_file = tmp_path / "performance.json"
         trades = [
             {
-                "exit_time": (now - timedelta(hours=2)).isoformat(),
+                "exit_time": (fake_now_et - timedelta(hours=2)).isoformat(),
                 "pnl": 100.0, "is_win": True,
             },
             {
-                "exit_time": (now - timedelta(hours=1)).isoformat(),
+                "exit_time": (fake_now_et - timedelta(hours=1)).isoformat(),
                 "pnl": -40.0, "is_win": False,
             },
         ]
         perf_file.write_text(json.dumps(trades))
-        result = srv._compute_performance_stats(tmp_path)
+        with patch.object(srv, "_now_et_naive", return_value=fake_now_et):
+            result = srv._compute_performance_stats(tmp_path)
         assert result["24h"]["trades"] == 2
         assert result["24h"]["pnl"] == 60.0
         assert result["24h"]["wins"] == 1

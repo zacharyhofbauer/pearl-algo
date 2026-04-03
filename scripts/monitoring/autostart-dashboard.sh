@@ -1,5 +1,5 @@
 #!/bin/sh
-# Autostart: open 2–3 terminals with live logs (agent, API, telegram) and transparency.
+# Autostart: open 2-3 terminals with live logs (agent, API) and transparency.
 # Run by session via ~/.config/autostart/pearlalgo-dashboard.desktop
 
 sleep 5

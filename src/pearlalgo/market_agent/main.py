@@ -36,10 +36,10 @@ from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.market_agent.service_factory import build_service_dependencies
 from pearlalgo.strategies.registry import get_strategy_defaults
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
-from pearlalgo.utils.paths import ensure_state_dir
+from pearlalgo.utils.paths import ensure_state_dir, get_project_root
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent.parent
+project_root = get_project_root()
 sys.path.insert(0, str(project_root))
 
 # Load .env files if they exist.
@@ -132,9 +132,8 @@ async def main():
         _lock_file.write(str(os.getpid()))
         _lock_file.flush()
     except BlockingIOError:
-        print(
-            f"FATAL: Another agent is already running (lock held by PID in {lock_path}). Exiting.",
-            file=sys.stderr,
+        logger.critical(
+            f"Another agent is already running (lock held by PID in {lock_path}). Exiting."
         )
         sys.exit(1)
 
@@ -162,18 +161,6 @@ async def main():
     except Exception as e:
         logger.error(f"Config validation failed: {e}")
         return
-
-    # Telegram config: env vars take precedence
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    telegram_thread_id_str = os.getenv("TELEGRAM_THREAD_ID")
-    telegram_thread_id = int(telegram_thread_id_str) if telegram_thread_id_str else None
-
-    if not telegram_bot_token or not telegram_chat_id:
-        telegram_config = config_data.get("telegram", {})
-        if telegram_config.get("enabled", True):
-            telegram_bot_token = telegram_bot_token or telegram_config.get("bot_token")
-            telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
 
     # Build strategy config
     strategy_config = build_strategy_config(get_strategy_defaults(), config_data)
@@ -208,9 +195,6 @@ async def main():
         data_provider=data_provider,
         config=config,
         state_dir=state_dir,
-        telegram_bot_token=telegram_bot_token,
-        telegram_chat_id=telegram_chat_id,
-        telegram_thread_id=telegram_thread_id,
         service_config=config_data,
     )
     service = MarketAgentService(deps=deps)

@@ -53,7 +53,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, detect_market_regime, CONFIG
+from pearlalgo.trading_bots.signal_generator import generate_signals, detect_market_regime, CONFIG
 
 # ---------------------------------------------------------------------------
 # Circuit breaker simulator (backtest-safe, no logger/market_hours imports)

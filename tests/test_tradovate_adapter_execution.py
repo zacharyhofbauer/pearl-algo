@@ -1358,6 +1358,34 @@ class TestPollOrderStatus:
         await adapter._poll_order_status()
         assert "42" not in adapter._open_orders
 
+    @pytest.mark.asyncio
+    async def test_cancelled_error_propagates(self):
+        """Cancellation should propagate to avoid swallowing task shutdown."""
+        adapter = make_adapter(mode="paper", armed=True, connected=True,
+                               client_kwargs={"authenticated": True})
+        adapter._client.get_orders = AsyncMock(side_effect=asyncio.CancelledError())
+        with pytest.raises(asyncio.CancelledError):
+            await adapter._poll_order_status()
+
+
+class TestCancellationSemantics:
+    """Tests for cancellation handling in critical async execution paths."""
+
+    @pytest.mark.asyncio
+    async def test_place_bracket_cancelled_error_propagates(self):
+        """place_bracket should re-raise CancelledError for clean shutdown."""
+        adapter = make_adapter(
+            mode="paper",
+            armed=True,
+            connected=True,
+            contract_symbol="MNQM6",
+            client_kwargs={"authenticated": True, "positions": []},
+        )
+        adapter._client.place_oso = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await adapter.place_bracket(make_signal())
+
 
 # ---------------------------------------------------------------------------
 # TestGetLivePositionsWithPnl

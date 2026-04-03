@@ -79,8 +79,13 @@ def _candle_cache_set(key: str, value: List[Dict[str, Any]]) -> None:
         while len(_candle_cache) > _CANDLE_CACHE_MAX_ENTRIES:
             _candle_cache.popitem(last=False)
 
-# Project root: src/pearlalgo/api/server.py -> src/pearlalgo/api -> src/pearlalgo -> src -> project root
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+# Project root: resolved via shared utility
+try:
+    from pearlalgo.utils.paths import get_project_root
+    PROJECT_ROOT = get_project_root()
+except Exception:
+    # Fallback if import fails
+    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
 try:
     from fastapi import APIRouter, FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Body, Request
@@ -116,6 +121,7 @@ from pearlalgo.api.data_layer import (
     get_cached_performance_data as _get_cached_performance_data_new,
     load_performance_data as _load_performance_data_new,
     get_signals as _get_signals,
+    get_signals_paginated as _get_signals_paginated,
     TvPaperChallengeState,
 )
 from pearlalgo.api.tradovate_helpers import (
@@ -1805,13 +1811,9 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
             })
         return recent
 
-    signals_file = state_dir / "signals.jsonl"
-    if not signals_file.exists():
-        return []
-
     exits = []
     try:
-        signals = _load_jsonl_file(signals_file, max_lines=200)
+        signals = _get_recent_signal_rows(state_dir, limit=200)
         for s in signals:
             if s.get("status") != "exited":
                 continue
@@ -1852,14 +1854,17 @@ def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
     return exits[:limit]
 
 
+def _get_recent_signal_rows(state_dir: Path, limit: int) -> List[Dict[str, Any]]:
+    """Return the latest signal rows using the shared paginated reader."""
+    page = _get_signals_paginated(state_dir, limit=limit, cursor="latest")
+    rows = page.get("signals", [])
+    return rows if isinstance(rows, list) else []
+
+
 def _get_recent_signals(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]]:
     """Get recent signal lifecycle events from append-only signals.jsonl."""
-    signals_file = state_dir / "signals.jsonl"
-    if not signals_file.exists():
-        return []
-
     try:
-        rows = _load_jsonl_file(signals_file, max_lines=min(max(limit * 8, 300), 4000))
+        rows = _get_recent_signal_rows(state_dir, limit=min(max(limit * 8, 300), 4000))
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
         return []
@@ -3200,10 +3205,9 @@ async def get_trades(
 
     # IBKR Virtual: existing signals.jsonl logic
     # Optimize: only read enough lines to get 'limit' exited trades (typically need ~2-3x limit)
-    signals_file = _state_dir / "signals.jsonl"
     # Read from tail: start with limit*3, but cap at 1000 to avoid reading entire file
     read_lines = min(max(limit * 3, 100), 1000)
-    signals = _load_jsonl_file(signals_file, max_lines=read_lines)
+    signals = _get_recent_signal_rows(_state_dir, limit=read_lines)
     
     trades = []
     for s in signals:
@@ -3384,9 +3388,8 @@ async def get_positions(
         # Enrich with TP/SL from virtual signals (signals.jsonl has bracket levels)
         if positions:
             try:
-                signals_file = _state_dir / "signals.jsonl"
                 # Read enough append-only records to recover latest generated+entered pairs.
-                signals = _load_jsonl_file(signals_file, max_lines=500)
+                signals = _get_recent_signal_rows(_state_dir, limit=500)
                 _enrich_positions_with_signal_brackets(positions, signals)
             except Exception as e:
                 logger.debug(f"Non-critical: could not enrich Tradovate Paper positions with TP/SL: {e}")
@@ -3394,8 +3397,7 @@ async def get_positions(
         return positions
 
     # IBKR Virtual: existing signals.jsonl logic
-    signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=500)
+    signals = _get_recent_signal_rows(_state_dir, limit=500)
 
     positions = []
     for s in signals:
@@ -3469,8 +3471,7 @@ async def get_markers(
     """Get trade entry/exit markers for chart overlay with tooltip metadata."""
     _require_state_dir()
 
-    signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=2000)
+    signals = _get_recent_signal_rows(_state_dir, limit=2000)
     
     now = _now_et_naive()
     cutoff = now - timedelta(hours=hours)

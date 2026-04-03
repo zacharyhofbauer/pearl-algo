@@ -1,11 +1,14 @@
 #!/bin/bash
 # ============================================================================
 # Category: Lifecycle
-# Purpose: Start/Stop/Status for market-specific agent instances
+# Purpose: Start/Stop/Status for the singleton agent runtime using a selected market state dir
 # Usage:
 #   ./scripts/lifecycle/agent.sh start --market NQ [--background]
 #   ./scripts/lifecycle/agent.sh stop --market NQ
 #   ./scripts/lifecycle/agent.sh status --market NQ
+# Notes:
+#   --market selects the state/log namespace. The Python runtime itself is
+#   singleton-locked and does not support concurrent multi-market agents.
 # ============================================================================
 
 set -euo pipefail
@@ -132,8 +135,7 @@ if [ "$COMMAND" = "stop" ]; then
         rm -f "$PID_FILE"
     fi
     
-    # Also kill orphan processes for THIS market only (check env/cmdline for state dir)
-    # Avoids killing other market agents (e.g., TV_PAPER_EVAL when stopping NQ)
+    # Also kill orphan processes for the selected state dir only.
     ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
     if [ -n "$ORPHAN_PIDS" ]; then
         for OPID in $ORPHAN_PIDS; do
@@ -171,8 +173,8 @@ if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     exit 1
 fi
 
-# Pre-start cleanup: kill stale agent processes for THIS market only
-# (avoids killing other market agents like TV_PAPER_EVAL when restarting NQ)
+# Pre-start cleanup: kill stale agent processes for the selected state dir only
+# so we avoid clobbering unrelated manual runs that happen to use other paths.
 ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
 CLEANED=false
 if [ -n "$ORPHAN_PIDS" ]; then
@@ -221,6 +223,32 @@ fi
 if ! "$PYTHON_CMD" -c "import pearlalgo" 2>/dev/null; then
     echo "❌ ERROR: pearlalgo package not found!"
     echo "   Install it with: pip install -e ."
+    exit 1
+fi
+
+# Pre-start: detect duplicate YAML keys (last-key-wins is silent and dangerous)
+if ! "$PYTHON_CMD" -c "
+import yaml, sys
+
+class DupKeyLoader(yaml.SafeLoader):
+    pass
+
+def check_dup(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            print(f'ERROR: Duplicate YAML key \"{key}\" in {sys.argv[1]}', file=sys.stderr)
+            sys.exit(1)
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+DupKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, check_dup)
+with open(sys.argv[1]) as f:
+    yaml.load(f, Loader=DupKeyLoader)
+" "$CONFIG_PATH"; then
+    echo "❌ ERROR: YAML config validation failed (duplicate keys detected)!"
+    echo "   Fix: $CONFIG_PATH"
     exit 1
 fi
 

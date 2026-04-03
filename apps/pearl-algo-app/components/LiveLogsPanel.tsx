@@ -1,7 +1,5 @@
 'use client'
 
-// ADDED 2026-03-25: live log streaming for dashboard
-
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { getApiUrl } from '@/lib/api'
 

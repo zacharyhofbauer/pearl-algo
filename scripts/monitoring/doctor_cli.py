@@ -5,7 +5,7 @@ Doctor CLI - 24h rollup for local/ops use.
 CLI wrapper for the doctor report business logic.
 Business logic is in: src/pearlalgo/analytics/doctor_report.py
 
-Mirrors the Telegram `/doctor` view:
+Mirrors the operator `/doctor` rollup view:
 - signal event counts (generated/entered/exited/expired)
 - trade exit summary (WR, P&L, avg hold)
 - cycle diagnostics aggregates (rejections, stop caps, etc.)

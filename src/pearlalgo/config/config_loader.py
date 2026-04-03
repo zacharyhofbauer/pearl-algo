@@ -47,6 +47,7 @@ from pearlalgo.config import defaults
 from pearlalgo.strategies.registry import get_strategy_param_fields
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import get_project_root
 
 
 # Schema validation: use schema_v2 for the --config path.
@@ -150,7 +151,7 @@ def _resolve_config_path(config_path: Optional[Path] = None) -> str:
     """Resolve the effective config file path for mtime-based caching."""
     if config_path is not None:
         return str(Path(config_path).resolve())
-    project_root = Path(__file__).parent.parent.parent.parent
+    project_root = get_project_root()
     canonical = project_root / "config" / "live" / "tradovate_paper.yaml"
     if canonical.exists():
         return str(canonical.resolve())

@@ -138,8 +138,8 @@ def _detect_tv_paper_account(state_dir: Path) -> bool:
         fills_file = state_dir / "tradovate_fills.json"
         if fills_file.exists() and fills_file.stat().st_size > 10:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not check fills file: %s", e)
 
     return False
 
@@ -394,7 +394,9 @@ def get_signals_paginated(
 
     # If no cursor (or "latest"), read the last N entries via tail-read
     if start_offset <= 0 or cursor == "latest" or cursor is None:
-        entries = _load_jsonl_file(signals_file, max_lines=limit)
+        # Reuse the shared TTL-cached tail reader for the common "latest page"
+        # path so hot endpoints do not each rescan ``signals.jsonl`` directly.
+        entries = get_signals(state_dir, max_lines=limit)
         new_cursor = str(file_size)
         return {
             "signals": entries,
@@ -433,5 +435,4 @@ def get_signals_paginated(
         "cursor": str(file_size),
         "has_more": len(entries) >= limit,
     }
-
 

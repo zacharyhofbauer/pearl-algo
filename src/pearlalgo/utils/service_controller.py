@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import get_project_root
 
 
 class ServiceController:
@@ -26,8 +27,8 @@ class ServiceController:
             project_root: Project root directory (auto-detected if None)
         """
         if project_root is None:
-            # Auto-detect project root (assumes this file is in src/pearlalgo/utils/)
-            project_root = Path(__file__).parent.parent.parent.parent
+            # Auto-detect project root using shared utility
+            project_root = get_project_root()
 
         self.project_root = Path(project_root).resolve()
         self.scripts_dir = self.project_root / "scripts"

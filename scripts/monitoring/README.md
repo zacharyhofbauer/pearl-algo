@@ -27,6 +27,6 @@
 
 ## Other
 
-- **`monitor.py`** – One-shot health check (agent, gateway, API, webapp); optional Telegram.
+- **`monitor.py`** – One-shot health check (agent, gateway, API, webapp) with structured exit codes.
 - **`dashboard.sh`** – One-shot status (services + monitor + doctor).
 - **`start-dashboard-terminal.sh`** – Opens one terminal with refreshing dashboard (replaced by live logs at login).

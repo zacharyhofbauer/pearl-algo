@@ -4,7 +4,7 @@
 
 Pearl Algo uses a **dual-write state management pattern** to balance multiple requirements:
 - Fast runtime access for the trading loop
-- Mobile/Telegram compatibility
+- Browser/API compatibility
 - Analytics and queryability
 - Durability and recovery
 
@@ -22,7 +22,7 @@ Files:
 **Why JSON?**
 1. Human-readable for debugging
 2. Portable - works on any system
-3. Mobile/Telegram bot compatible (can read without SQLite)
+3. Browser/API compatible (can read without SQLite)
 4. Fast atomic writes using temp file + rename pattern
 
 ### Secondary Store: SQLite Database
@@ -145,4 +145,4 @@ python scripts/maintenance/rebuild_sqlite_from_json.py
 3. **For real-time state, read JSON** - It's always up-to-date
 4. **After crashes, check consistency** - Run integrity check script
 5. **In async contexts, use async wrappers** - `state_reader.async_read_state()`, `state_manager.async_get_recent_signals()`
-6. **Operator actions use flag files** - Telegram and web API write `.flag` files; the agent processes them in the next cycle (avoids direct state.json race conditions)
+6. **Operator actions use flag files** - operator workflows and the web API write `.flag` files; the agent processes them in the next cycle (avoids direct state.json race conditions)

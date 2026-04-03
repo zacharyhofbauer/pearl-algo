@@ -29,7 +29,6 @@ This guide covers testing procedures from quick validation to comprehensive stra
 python3 scripts/testing/test_all.py
 
 # Run specific test mode
-python3 scripts/testing/test_all.py telegram
 python3 scripts/testing/test_all.py signals
 python3 scripts/testing/test_all.py service
 python3 scripts/testing/test_all.py arch
@@ -42,10 +41,10 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 
 1. **No code duplication**: tests import production code from `src/pearlalgo/` directly.
 2. **Development mode required**: install with `pip install -e .` so imports resolve.
-3. **Mock external services**: IBKR/Telegram mocked; internal logic uses real code.
+3. **Mock external services**: external broker/network dependencies are mocked or disabled; internal logic uses real code.
 4. **Type safety**: Run mypy to catch type errors before runtime.
 
-### Option 3: Automated Test Script
+### Option 2: Automated Test Script
 ```bash
 # Run unit tests (pytest)
 ./scripts/testing/run_tests.sh
@@ -54,7 +53,7 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 pytest tests/
 ```
 
-### Option 4: Pearl AI prompt regression eval (fast, no API calls)
+### Option 3: Pearl AI prompt regression eval (fast, no API calls)
 ```bash
 # Core golden suite (mock mode)
 python3 -m pearlalgo.pearl_ai.eval.ci --mock
@@ -71,7 +70,7 @@ python3 -m pearlalgo.pearl_ai.eval.ci --changed-only --mock
 ln -sf ../../scripts/pre-commit-eval.sh .git/hooks/pre-commit
 ```
 
-### Option 5: IBKR vs Tradovate data quality comparison
+### Option 4: IBKR vs Tradovate data quality comparison
 Run this before going full Tradovate (data + execution) to see if Tradovate’s bars match IBKR.
 
 **Prerequisites:**
@@ -149,22 +148,7 @@ Generating signals...
 - Try increasing volatility or trend in the mock data
 - Signals are filtered by quality thresholds
 
-### Test 2: Telegram Notifications
-**Time:** 1 minute  
-**Command:**
-```bash
-python3 scripts/testing/test_all.py telegram
-```
-
-**What to Check:**
-- ✅ All notification types are sent
-- ✅ Messages appear in Telegram
-- ✅ Formatting looks correct
-- ✅ No errors in output
-
-**Expected:** 10 different notification types sent to Telegram
-
-### Test 3: Full Service Test
+### Test 2: Full Service Test
 **Time:** 2 minutes  
 **Command:**
 ```bash
@@ -173,10 +157,9 @@ python3 scripts/testing/test_all.py service
 
 **What to Check:**
 - ✅ Service starts successfully
-- ✅ Startup notification received
-- ✅ Status updates appear
+- ✅ Status updates appear in logs/state
 - ✅ Service runs without crashes
-- ✅ Shutdown notification received
+- ✅ Graceful shutdown completes
 
 **Expected Output:**
 ```
@@ -308,7 +291,7 @@ python3 scripts/testing/test_all.py service
 - Number of signals generated
 - Error rate (should be 0)
 - Buffer size (should be stable)
-- Telegram notifications received
+- State/log updates emitted as expected
 
 ---
 
@@ -317,7 +300,7 @@ python3 scripts/testing/test_all.py service
 ### Prerequisites
 1. IB Gateway running and connected
 2. Agent service running
-3. Telegram notifications enabled
+3. State/log paths aligned with the running agent
 
 ### Validation Checklist
 
@@ -359,7 +342,7 @@ Monitor logs for:
 - During active trading periods (avoid lunch lull)
 
 **What to Monitor:**
-- Telegram for signal notifications
+- Browser dashboard or logs for signal activity
 - Logs for signal generation
 - Status updates showing signal count
 
@@ -371,7 +354,7 @@ Monitor logs for:
   - Risk/reward >= 1.5:1
 
 #### 4. Dashboard Updates
-Check Telegram for periodic dashboard updates (hourly by default):
+Check the browser dashboard and state files for periodic updates:
 
 **What to Verify:**
 - ✅ Dashboard shows "RUNNING" status
@@ -417,7 +400,7 @@ Monitor:
 
 ### Performance Dashboard
 
-Check performance metrics via Telegram weekly summary or state file:
+Check performance metrics via the browser dashboard or state file:
 
 ```bash
 # Check state file
@@ -683,18 +666,6 @@ config.get("foo", default_value)
 2. Check port: `netstat -tlnp | grep 4001`
 3. Verify connection: `./scripts/gateway/gateway.sh status`
 
-### Telegram Notifications Not Working
-
-**Possible Causes:**
-1. Missing credentials
-2. Invalid bot token
-3. Chat ID incorrect
-
-**Solutions:**
-1. Check env vars: `echo $TELEGRAM_BOT_TOKEN`
-2. Test connection: `python3 scripts/testing/test_all.py telegram`
-3. Verify bot is started in Telegram
-
 ### Service Won't Start
 
 **Possible Causes:**
@@ -725,7 +696,6 @@ config.get("foo", default_value)
 - [ ] All unit tests pass
 - [ ] Integration tests pass
 - [ ] Signal generation works with mock data
-- [ ] Telegram notifications work
 - [ ] IB Gateway connection works
 - [ ] Data fetching works
 - [ ] Status updates work
@@ -736,7 +706,6 @@ config.get("foo", default_value)
 ### During Live Operation
 
 - [ ] Monitor logs daily
-- [ ] Check Telegram notifications
 - [ ] Verify signal quality
 - [ ] Track performance metrics
 - [ ] Monitor error rates
@@ -822,7 +791,7 @@ Decision: Keep change
 
 2. **Monitor Continuously**
    - Check logs regularly
-   - Monitor Telegram notifications
+   - Monitor browser/API state and logs
    - Track performance metrics
 
 3. **Validate Signal Quality**
@@ -901,14 +870,14 @@ This section summarizes the current test coverage and highlights areas for futur
 
 **Modes:**
 - `all` – runs all integrated tests
-- `telegram` – runs `test_telegram_notifications()`
 - `signals` – runs `test_signal_generation()` with `MockDataProvider`
 - `service` – runs service‑level tests with mock data
+- `arch` – runs the architecture boundary check
 
 **Exercises:**
-- Telegram notifier formatting and sending
 - Strategy signal generation with mock data
 - NQ Agent service with mock provider
+- Architecture boundary enforcement
 
 #### Tests under `scripts/testing/`
 
@@ -948,9 +917,6 @@ These gaps are **observational only** and do not change behavior.
 3. **IBKR connectivity and fallback behavior**
    - `smoke_test_ibkr.py` tests basic connectivity. Detailed reconnection/staleness recovery paths could use further expansion.
 
-4. **Command handler behavior**
-   - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing. The handler now uses 6 mixin base classes for code organization, but individual command flow tests are not yet automated.
-
 ### Recently Resolved Gaps
 
 The following gaps have been addressed with explicit test coverage:
@@ -983,13 +949,13 @@ The following gaps have been addressed with explicit test coverage:
      - `connection_failures` threshold triggers pause
      - consecutive error pause triggers when strategy/processing raises repeatedly
      - data-fetch error backoff behavior activates at `max_data_fetch_errors`
-     - Telegram circuit‑breaker alerts are sent (using a mock notifier).
+     - the no-op notification compatibility contract remains callable.
 
 3. **Command handler tests**
-   - Async tests for `TelegramCommandHandler` that mock Telegram `Update` objects and verify:
-     - `/status` returns correctly formatted status and buttons
-     - `/stats`, `/health`, `/doctor`, `/signals` fetch from `/api/state` and render expected output
-     - Unauthorized chat IDs are rejected.
+   - Async tests for operator-facing command/control surfaces should verify:
+     - status and health summaries render correctly
+     - dashboard/API rollups fetch from `/api/state` and related endpoints as expected
+     - unauthorized operator actions are rejected
 
 4. **Market hours / data quality edge cases**
    - Add DST/holiday tests using mocked `market_hours` and timestamped data frames (no placeholders).
@@ -1003,8 +969,8 @@ The following gaps have been addressed with explicit test coverage:
 
 ## 📚 Additional Resources
 
-- **[CURRENT_OPERATING_MODEL.md](CURRENT_OPERATING_MODEL.md)** - Current runtime/configuration reference
-- **[PATH_TRUTH_TABLE.md](PATH_TRUTH_TABLE.md)** - Canonical module and path mapping
+- **[PATH_TRUTH_TABLE.md](PATH_TRUTH_TABLE.md)** - Canonical module and path mapping (source of truth)
+- **[START_HERE.md](START_HERE.md)** - Operating model overview
 - **[GATEWAY.md](GATEWAY.md)** - IBKR Gateway setup
 - **[MOCK_DATA_WARNING.md](MOCK_DATA_WARNING.md)** - Mock data limitations
 

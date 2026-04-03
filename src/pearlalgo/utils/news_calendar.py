@@ -18,6 +18,8 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from pearlalgo.utils.paths import get_project_root
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -54,7 +56,7 @@ class NewsCalendar:
             # Try default location relative to project root
             for candidate in [
                 Path("data/t1_news_2026.json"),
-                Path(__file__).parent.parent.parent.parent / "data" / "t1_news_2026.json",
+                get_project_root() / "data" / "t1_news_2026.json",
             ]:
                 if candidate.exists():
                     self._load_events(candidate)

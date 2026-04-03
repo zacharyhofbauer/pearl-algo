@@ -1770,6 +1770,22 @@ class TestGetSignalsPaginated:
         assert isinstance(result["signals"], list)
         assert "cursor" in result
 
+    def test_paginated_cursor_returns_only_new_rows(self, tmp_path):
+        signals_file = tmp_path / "signals.jsonl"
+        _write_jsonl(signals_file, SAMPLE_SIGNAL_ROWS[:2])
+
+        first_page = data_layer_mod.get_signals_paginated(tmp_path, limit=10)
+        first_cursor = first_page["cursor"]
+
+        with open(signals_file, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(SAMPLE_SIGNAL_ROWS[2]) + "\n")
+
+        next_page = data_layer_mod.get_signals_paginated(tmp_path, limit=10, cursor=first_cursor)
+
+        assert [row["signal_id"] for row in next_page["signals"]] == ["comp_003"]
+        assert next_page["cursor"] != first_cursor
+        assert next_page["has_more"] is False
+
 
 # ===========================================================================
 # 70. server.py: _get_challenge_status
@@ -1834,6 +1850,76 @@ class TestGetRecentSignals:
     def test_no_file(self, tmp_path):
         result = server_mod._get_recent_signals(tmp_path, limit=10)
         assert result == []
+
+    def test_uses_shared_paginated_reader_and_preserves_event_shape(self):
+        rows = [
+            {
+                "signal_id": "sig-100",
+                "status": "generated",
+                "timestamp": "2025-06-01T10:00:00Z",
+                "signal": {
+                    "direction": "long",
+                    "symbol": "MNQ",
+                    "entry_price": 20000.0,
+                    "stop_loss": 19980.0,
+                    "take_profit": 20030.0,
+                    "confidence": 0.85,
+                    "reason": "trend_follow",
+                    "type": "trend",
+                },
+            },
+            {
+                "signal_id": "sig-100",
+                "status": "exited",
+                "entry_time": "2025-06-01T10:05:00Z",
+                "exit_time": "2025-06-01T10:20:00Z",
+                "pnl": 30.0,
+                "exit_reason": "take_profit",
+            },
+        ]
+
+        with patch.object(
+            server_mod,
+            "_get_signals_paginated",
+            return_value={"signals": rows, "cursor": "42", "has_more": False},
+        ) as paginated_mock:
+            result = server_mod._get_recent_signals(Path("/tmp/state"), limit=5)
+
+        paginated_mock.assert_called_once_with(Path("/tmp/state"), limit=300, cursor="latest")
+        assert result == [
+            {
+                "signal_id": "sig-100",
+                "status": "exited",
+                "timestamp": "2025-06-01T10:05:00Z",
+                "direction": "long",
+                "symbol": "MNQ",
+                "entry_price": 20000.0,
+                "stop_loss": 19980.0,
+                "take_profit": 20030.0,
+                "confidence": 0.85,
+                "reason": "trend_follow",
+                "exit_reason": "take_profit",
+                "pnl": 30.0,
+                "signal_type": "trend",
+                "duplicate": False,
+            },
+            {
+                "signal_id": "sig-100",
+                "status": "generated",
+                "timestamp": "2025-06-01T10:00:00Z",
+                "direction": "long",
+                "symbol": "MNQ",
+                "entry_price": 20000.0,
+                "stop_loss": 19980.0,
+                "take_profit": 20030.0,
+                "confidence": 0.85,
+                "reason": "trend_follow",
+                "exit_reason": None,
+                "pnl": None,
+                "signal_type": "trend",
+                "duplicate": False,
+            },
+        ]
 
 
 # ===========================================================================

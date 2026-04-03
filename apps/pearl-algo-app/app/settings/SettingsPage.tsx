@@ -5,11 +5,11 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import SettingsSidebar from '@/components/settings/SettingsSidebar'
 import SettingsCategory from '@/components/settings/SettingsCategory'
 import SettingsConfirmDialog from '@/components/settings/SettingsConfirmDialog'
-import ContractScalingCard from '@/components/settings/ContractScalingCard' // ADDED 2026-03-25: confidence scaling
+import ContractScalingCard from '@/components/settings/ContractScalingCard'
 
 export default function SettingsPage() {
   const { fetchConfig, isDirty, isLoading, isSaving, error, pendingChanges, resetAll } = useSettingsStore()
-  const activeCategory = useSettingsStore((s) => s.activeCategory) // ADDED 2026-03-25: confidence scaling
+  const activeCategory = useSettingsStore((s) => s.activeCategory)
   const [showConfirm, setShowConfirm] = useState(false)
 
   useEffect(() => {

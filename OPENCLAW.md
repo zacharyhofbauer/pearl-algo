@@ -111,7 +111,7 @@ Every trade decision (taken or skipped) must log its rationale, including which 
 | File | Purpose |
 |---|---|
 | `src/pearlalgo/strategies/composite_intraday/engine.py` | Canonical live strategy bundle |
-| `src/pearlalgo/trading_bots/pearl_bot_auto.py` | Legacy implementation bridge behind the canonical strategy wrappers |
+| `src/pearlalgo/trading_bots/signal_generator.py` | Core signal generation engine (indicators, regime detection, entry logic) |
 | `src/pearlalgo/market_agent/signal_handler.py` | 10-stage signal processing pipeline |
 | `src/pearlalgo/market_agent/main.py` | Agent entry point |
 | `src/pearlalgo/market_agent/performance_tracker.py` | Trade performance tracking |
@@ -124,7 +124,6 @@ Every trade decision (taken or skipped) must log its rationale, including which 
 
 ## Further Reading
 
-- `docs/START_HERE.md` — Operator entry point
-- `docs/CURRENT_OPERATING_MODEL.md` — Current runtime and service truth
-- `docs/PATH_TRUTH_TABLE.md` — Canonical path and component map
+- `docs/START_HERE.md` — Operator entry point and quick reference
+- `docs/PATH_TRUTH_TABLE.md` — Canonical path and component map (source of truth)
 - `docs/TESTING_GUIDE.md` — Validation and test workflow

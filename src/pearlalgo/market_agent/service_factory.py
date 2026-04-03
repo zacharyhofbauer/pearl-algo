@@ -14,8 +14,6 @@ Usage (production — ``main.py``)::
         data_provider=data_provider,
         config=config,
         state_dir=state_dir,
-        telegram_bot_token=token,
-        telegram_chat_id=chat_id,
     )
     service = MarketAgentService(deps=deps)
 
@@ -45,56 +43,20 @@ from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.notification_queue import NotificationQueue
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.strategies.registry import get_strategy_defaults
 from pearlalgo.utils.logger import logger
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers (eliminate duplication between resolve_defaults & factory)
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 _TV_PAPER_STAGES = ("tv_paper_eval", "evaluation", "sim_funded", "live")
 
 
-def _get_account_label(service_config: Dict[str, Any]) -> str:
-    """Derive the Telegram account label from challenge config."""
-    challenge_cfg = service_config.get("challenge", {}) or {}
-    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-    accounts_cfg = service_config.get("accounts", {}) or {}
-    if tv_paper_stage in _TV_PAPER_STAGES:
-        return accounts_cfg.get("tv_paper", {}).get("telegram_prefix") or "TV-PAPER"
-    return accounts_cfg.get("tradovate_paper", {}).get("telegram_prefix") or "TV-PAPER"
-
-
 def _get_audit_account_type(service_config: Dict[str, Any]) -> str:
     """Return audit account type; single-account model uses tradovate_paper."""
-    challenge_cfg = service_config.get("challenge", {}) or {}
-    tv_paper_stage = str(challenge_cfg.get("stage", "") or "").strip().lower()
-    return "tradovate_paper" if tv_paper_stage in _TV_PAPER_STAGES else "tradovate_paper"
-
-
-def _build_notification_queue(
-    telegram_notifier: MarketAgentTelegramNotifier,
-    service_config: Dict[str, Any],
-) -> NotificationQueue:
-    """Build a :class:`NotificationQueue` from service config with sensible defaults."""
-    telegram_settings = service_config.get("telegram", {}) or {}
-    notification_cfg = telegram_settings.get("notification_queue", {}) or {}
-    min_tier = str(telegram_settings.get("notification_tier", "important") or "important")
-    return NotificationQueue(
-        telegram_notifier=telegram_notifier,
-        max_queue_size=int(notification_cfg.get("max_queue_size", 1000)),
-        batch_delay_seconds=float(notification_cfg.get("batch_delay_seconds", 0.5)),
-        max_retries=int(notification_cfg.get("max_retries", 3)),
-        min_tier=min_tier,
-    )
-
-
-def _telegram_enabled(service_config: Dict[str, Any]) -> bool:
-    """Whether Telegram notifications are enabled for this runtime."""
-    telegram_settings = service_config.get("telegram", {}) or {}
-    return bool(telegram_settings.get("enabled", True))
+    return "tradovate_paper"
 
 
 @dataclass
@@ -120,8 +82,7 @@ class ServiceDependencies:
     state_manager: Optional[MarketAgentStateManager] = None
     performance_tracker: Optional[PerformanceTracker] = None
 
-    # ---- telegram ----
-    telegram_notifier: Optional[MarketAgentTelegramNotifier] = None
+    # ---- notifications (no-op stub, Telegram removed) ----
     notification_queue: Optional[NotificationQueue] = None
 
     # ---- monitoring ----
@@ -130,17 +91,8 @@ class ServiceDependencies:
     # ---- audit ----
     audit_logger: Optional[AuditLogger] = None
 
-    # ---- credentials (passed through for lazy construction) ----
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    telegram_thread_id: Optional[int] = None
-
     def resolve_defaults(self) -> "ServiceDependencies":
         """Fill in ``None`` fields with sensible production defaults.
-
-        This eliminates the dual construction path in
-        ``MarketAgentService.__init__`` — the service now always receives
-        a fully-populated ``ServiceDependencies``.
 
         Returns ``self`` for convenience (mutates in place).
         """
@@ -169,20 +121,8 @@ class ServiceDependencies:
                 state_manager=self.state_manager,
             )
 
-        if self.telegram_notifier is None:
-            self.telegram_notifier = MarketAgentTelegramNotifier(
-                bot_token=self.telegram_bot_token,
-                chat_id=self.telegram_chat_id,
-                state_dir=self.state_dir,
-                enabled=_telegram_enabled(self.service_config),
-                account_label=_get_account_label(self.service_config),
-                message_thread_id=self.telegram_thread_id,
-            )
-
         if self.notification_queue is None:
-            self.notification_queue = _build_notification_queue(
-                self.telegram_notifier, self.service_config,
-            )
+            self.notification_queue = NotificationQueue()
 
         if self.health_monitor is None:
             self.health_monitor = HealthMonitor(state_dir=self.state_dir)
@@ -204,16 +144,15 @@ def build_service_dependencies(
     config: ConfigView,
     *,
     state_dir: Optional[Path] = None,
+    service_config: Optional[Dict[str, Any]] = None,
+    # Legacy kwargs (ignored — Telegram removed)
     telegram_bot_token: Optional[str] = None,
     telegram_chat_id: Optional[str] = None,
     telegram_thread_id: Optional[int] = None,
-    service_config: Optional[Dict[str, Any]] = None,
 ) -> ServiceDependencies:
     """Construct a fully-populated :class:`ServiceDependencies`.
 
-    This is the production construction path.  The service is free to
-    override or extend any dependency it receives — the factory just
-    provides the *initial* wiring.
+    This is the production construction path.
     """
 
     if service_config is None:
@@ -235,16 +174,7 @@ def build_service_dependencies(
         state_manager=state_manager,
     )
 
-    telegram_notifier = MarketAgentTelegramNotifier(
-        bot_token=telegram_bot_token,
-        chat_id=telegram_chat_id,
-        state_dir=state_dir,
-        enabled=_telegram_enabled(service_config),
-        account_label=_get_account_label(service_config),
-        message_thread_id=telegram_thread_id,
-    )
-
-    notification_queue = _build_notification_queue(telegram_notifier, service_config)
+    notification_queue = NotificationQueue()
 
     health_monitor = HealthMonitor(state_dir=state_dir)
 
@@ -267,11 +197,7 @@ def build_service_dependencies(
         data_fetcher=data_fetcher,
         state_manager=state_manager,
         performance_tracker=performance_tracker,
-        telegram_notifier=telegram_notifier,
         notification_queue=notification_queue,
         health_monitor=health_monitor,
         audit_logger=audit_logger,
-        telegram_bot_token=telegram_bot_token,
-        telegram_chat_id=telegram_chat_id,
-        telegram_thread_id=telegram_thread_id,
     )

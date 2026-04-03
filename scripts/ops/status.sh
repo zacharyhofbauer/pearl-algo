@@ -48,12 +48,6 @@ else
   echo "  ❌ Agent (${MARKET}): NOT RUNNING (no PID file)"
 fi
 
-if pgrep -f "pearlalgo.telegram.main" > /dev/null 2>&1; then
-  echo "  ✅ Telegram Handler: RUNNING"
-else
-  echo "  ❌ Telegram Handler: NOT RUNNING"
-fi
-
 # ── 2. IBKR Gateway ──────────────────────────────────────────────────────────
 echo ""
 echo "🔌 Gateway:"

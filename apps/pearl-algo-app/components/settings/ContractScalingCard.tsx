@@ -1,6 +1,5 @@
 'use client'
 
-// ADDED 2026-03-25: confidence scaling
 import { useEffect, useState, useCallback } from 'react'
 import { apiFetchJson } from '@/lib/api'
 
@@ -20,7 +19,6 @@ interface ConfidenceScalingConfig {
 /**
  * ContractScalingCard — Settings card for confidence-based contract scaling.
  * GATED: enabled flag stays false until 200+ clean baseline trades.
- * ADDED 2026-03-25: confidence scaling
  */
 export default function ContractScalingCard() {
   const [config, setConfig] = useState<ConfidenceScalingConfig | null>(null)

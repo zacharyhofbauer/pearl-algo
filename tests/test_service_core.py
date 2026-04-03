@@ -550,6 +550,17 @@ class TestHandleConnectionFailure:
     """Tests for MarketAgentService._handle_connection_failure."""
 
     @pytest.mark.asyncio
+    async def test_default_notification_queue_accepts_alert_contract(self, service):
+        """The production no-op queue must implement the alert method used by service code."""
+        service.connection_failures = 1
+        service.last_connection_failure_alert = None
+
+        await service._handle_connection_failure()
+
+        assert service.last_connection_failure_alert is not None
+        assert service.notification_queue.enabled is False
+
+    @pytest.mark.asyncio
     async def test_sends_alert_on_first_failure(self, service):
         """First connection failure should trigger a data quality alert."""
         service.connection_failures = 1

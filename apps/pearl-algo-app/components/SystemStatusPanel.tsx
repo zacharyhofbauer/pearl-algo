@@ -12,7 +12,7 @@ import type {
 } from '@/stores'
 import { apiFetch, apiFetchJson } from '@/lib/api'
 import { useOperatorStore } from '@/stores'
-import OperatorUnlockModal from '@/components/OperatorUnlockModal' // ADDED 2026-03-25
+import OperatorUnlockModal from '@/components/OperatorUnlockModal'
 import { formatTimeRemaining } from '@/lib/formatters'
 
 interface SystemStatusPanelProps {
@@ -94,7 +94,7 @@ export default function SystemStatusPanel({
   const errorTrend = getErrorTrend()
 
   const canUseKillSwitch = useOperatorStore((s) => s.isUnlocked)
-  const [showUnlockModal, setShowUnlockModal] = useState(false) // ADDED 2026-03-25
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
 
   const requestKillSwitch = async () => {
     setKillBusy(true)

@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from pearlalgo.market_agent.service import MarketAgentService
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.signal_generator import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.config.config_loader import load_service_config
 
 
@@ -80,7 +80,7 @@ class TestQuietReasonStrategySession:
     
     def test_returns_strategy_session_closed_when_outside_session(self, mock_service):
         """When scanner.is_market_hours() returns False, should return StrategySessionClosed."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=False):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=False):
             reason = mock_service._get_quiet_reason(
                 market_data=make_market_data(), has_data=True, no_signals=True
             )
@@ -88,7 +88,7 @@ class TestQuietReasonStrategySession:
     
     def test_strategy_session_checked_first(self, mock_service):
         """Strategy session is checked before futures market hours."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=False):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=False):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True  # Futures open
                 
@@ -103,7 +103,7 @@ class TestQuietReasonFuturesMarket:
     
     def test_returns_futures_market_closed_when_market_closed(self, mock_service):
         """When futures market is closed, should return FuturesMarketClosed."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = False
                 
@@ -118,7 +118,7 @@ class TestQuietReasonNoData:
     
     def test_returns_no_data_when_has_data_false(self, mock_service):
         """When has_data=False, should return NoData."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -132,7 +132,7 @@ class TestQuietReasonNoData:
     
     def test_returns_no_data_when_df_is_empty(self, mock_service):
         """When df is empty, should return NoData."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -147,7 +147,7 @@ class TestQuietReasonDataGap:
     
     def test_returns_data_gap_when_recent_gap(self, mock_service):
         """When last_successful_cycle is between 60s and stale threshold, should return DataGap."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -168,7 +168,7 @@ class TestQuietReasonStaleData:
     
     def test_returns_stale_data_when_no_data_and_past_threshold(self, mock_service):
         """When no data and last cycle exceeds stale threshold, should return StaleData."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -185,7 +185,7 @@ class TestQuietReasonStaleData:
     
     def test_returns_stale_data_when_latest_bar_old(self, mock_service):
         """When latest_bar timestamp exceeds stale threshold, should return StaleData."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -206,7 +206,7 @@ class TestQuietReasonNoOpportunity:
     
     def test_returns_no_opportunity_when_data_fresh_no_signals(self, mock_service):
         """When data is fresh but no signals generated, should return NoOpportunity."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -223,7 +223,7 @@ class TestQuietReasonNoOpportunity:
     
     def test_returns_no_opportunity_when_no_latest_bar_but_df_present(self, mock_service):
         """When df is present but no latest_bar, should return NoOpportunity."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -241,7 +241,7 @@ class TestQuietReasonActive:
     
     def test_returns_active_when_not_quiet(self, mock_service):
         """When conditions are normal and signals could be generated, should return Active."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -261,7 +261,7 @@ class TestQuietReasonExceptionHandling:
     def test_returns_unknown_on_exception(self, mock_service):
         """When an exception occurs, should return Unknown."""
         with patch(
-            'pearlalgo.trading_bots.pearl_bot_auto.check_trading_session',
+            'pearlalgo.trading_bots.signal_generator.check_trading_session',
             side_effect=Exception("Test error"),
         ):
             reason = mock_service._get_quiet_reason(
@@ -275,7 +275,7 @@ class TestQuietReasonTimestampFormats:
     
     def test_handles_datetime_timestamp(self, mock_service):
         """Should handle datetime object timestamps."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
@@ -292,7 +292,7 @@ class TestQuietReasonTimestampFormats:
     
     def test_handles_naive_datetime_timestamp(self, mock_service):
         """Should handle naive datetime (assumes UTC)."""
-        with patch('pearlalgo.trading_bots.pearl_bot_auto.check_trading_session', return_value=True):
+        with patch('pearlalgo.trading_bots.signal_generator.check_trading_session', return_value=True):
             with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 

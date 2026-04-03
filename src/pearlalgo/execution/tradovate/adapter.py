@@ -95,6 +95,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Background reconciliation task
         self._reconciliation_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        # Track all background tasks for cleanup on disconnect (Issue 7)
+        self._background_tasks: List[asyncio.Task] = []
 
         # Rate limit backoff state
         self._rate_limit_backoff: float = 0.0  # extra delay after 429

@@ -88,6 +88,11 @@ class TradovateClient:
         # Token renewal task
         self._renewal_task: Optional[asyncio.Task] = None
 
+        # Contract lookup cache (TTL-based, avoids redundant API calls)
+        self._contract_cache: Dict[str, str] = {}  # product -> symbol
+        self._contract_cache_ts: Dict[str, float] = {}  # product -> timestamp
+        self._contract_cache_ttl: float = 86400.0  # 24 hours
+
     # ── Properties ────────────────────────────────────────────────────
 
     @property
@@ -539,18 +544,37 @@ class TradovateClient:
 
         E.g. "MNQ" -> "MNQH6"
 
+        Results are cached for 24 hours to avoid redundant API calls.
+
         Tries multiple strategies:
         1. contract/suggest (most reliable on demo)
         2. contract/rollcontract
         3. contract/find
         """
+        # Check cache first
+        cached = self._contract_cache.get(product)
+        if cached:
+            cache_age = time.monotonic() - self._contract_cache_ts.get(product, 0)
+            if cache_age < self._contract_cache_ttl:
+                logger.debug(f"Contract cache hit: {product} -> {cached} (age: {cache_age:.0f}s)")
+                return cached
+            else:
+                # Cache expired
+                del self._contract_cache[product]
+                del self._contract_cache_ts[product]
+
+        def _cache_result(resolved_name: str) -> str:
+            self._contract_cache[product] = resolved_name
+            self._contract_cache_ts[product] = time.monotonic()
+            return resolved_name
+
         # Strategy 1: suggest (works on demo, returns sorted by nearest expiry)
         try:
             suggestions = await self.suggest_contracts(product, limit=1)
             if suggestions and isinstance(suggestions, list) and suggestions[0].get("name"):
                 name = suggestions[0]["name"]
                 logger.info(f"Resolved {product} -> {name} via contract/suggest")
-                return name
+                return _cache_result(name)
         except Exception as e:
             logger.debug(f"contract/suggest failed for {product}: {e}")
 
@@ -561,7 +585,7 @@ class TradovateClient:
             name = contract.get("name")
             if name:
                 logger.info(f"Resolved {product} -> {name} via contract/rollcontract")
-                return name
+                return _cache_result(name)
         except Exception as e:
             logger.debug(f"roll_contract failed for {product}: {e}")
 
@@ -570,10 +594,9 @@ class TradovateClient:
             result = await self.find_contract(product)
             name = result.get("name")
             if name:
-                return name
+                return _cache_result(name)
         except Exception:
             logger.debug("Direct find_contract failed for %s", product, exc_info=True)
-            pass
 
         raise TradovateAPIError(f"Could not resolve front-month contract for {product}")
 

@@ -1,13 +1,15 @@
-# Pearl Algo Web App + Telegram Mini App
+# Pearl Algo Web App
 
 This repo's **canonical chart** is the web-based **Pearl Algo Web App** (`apps/pearl-algo-app/`).
 
 It powers:
 - A **browser dashboard** (local or deployed)
-- A **Telegram dashboard screenshot** (`exports/dashboard_telegram_latest.png`)
-- A **Telegram Mini App** (in-app "web_app" view)
+- API-backed charting and dashboard panels
+- Operator workflows exposed through the web UI and API
 
-![Telegram dashboard](assets/telegram-dashboard.png)
+Historical Telegram screenshot assets and mini-app notes were archived during
+the 2026-04-03 documentation cleanup under `docs/legacy/telegram/` and
+`resources/legacy/`. The active product surface is the browser dashboard.
 
 ---
 
@@ -237,52 +239,10 @@ also require the `X-PEARL-OPERATOR` header and will reject browser API keys.
 
 ---
 
-## Telegram dashboard screenshot (optional)
-
-The Market Agent Service + Telegram Command Handler will attach a PNG screenshot stored at:
-
-- `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
-
-Screenshot capture requirements:
-
-```bash
-pip install playwright
-playwright install chromium
-```
-
-Runtime env:
-- **`PEARL_LIVE_CHART_URL`**: URL that Playwright will screenshot (default `http://localhost:3001`)
-
----
-
-## Telegram Mini App ("Open App" stays inside Telegram)
-
-Telegram requires a **public HTTPS URL** (BotFather rejects `localhost`).
-
-![BotFather requires HTTPS](assets/botfather-miniapp-url.png)
-
-### Option A: Quick Tunnel (ephemeral, for testing)
-
-```bash
-cloudflared tunnel --url http://localhost:3001
-```
-
-This gives you a random URL like `https://xxx-yyy-zzz.trycloudflare.com` (changes each run).
-
-### Option B: Named Tunnel (persistent, for production)
-
-A named tunnel gives you a **persistent HTTPS URL** that survives restarts.
-
-See cloudflared tunnel setup documentation for details.
-
----
-
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL for Playwright screenshot capture |
-| `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL shown as "📈 Live" button |
 | `PEARL_API_PORT` | `8001` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
 | `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | CORS origins for API (comma-separated) |

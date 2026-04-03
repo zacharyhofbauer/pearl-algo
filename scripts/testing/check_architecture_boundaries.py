@@ -92,7 +92,7 @@ def get_layer(module_path: str) -> Optional[str]:
     Examples:
         pearlalgo.utils.logger         -> utils
         pearlalgo.strategies.registry  -> strategies
-        pearlalgo.trading_bots.pearl_bot_auto -> trading_bots
+        pearlalgo.trading_bots.signal_generator -> trading_bots
         pearlalgo.market_agent.service  -> market_agent
         pandas                          -> None (external)
     """

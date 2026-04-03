@@ -8,7 +8,7 @@ Part of the Arch-2 decomposition: service.py → orchestrator classes.
 **Already migrated:**
 - ``track_performance()`` — signal outcome recording
 - ``get_daily_performance()`` — daily metrics aggregation
-- ``send_notification()`` — enqueue Telegram messages
+- ``send_notification()`` — enqueue runtime notifications
 - ``get_daily_summary()`` — dashboard-ready summary
 - ``notify_error()`` — error notification via queue
 - ``compute_quiet_period_minutes()`` — time since last signal
@@ -27,7 +27,6 @@ from pearlalgo.utils.logger import logger
 if TYPE_CHECKING:
     from pearlalgo.market_agent.performance_tracker import PerformanceTracker
     from pearlalgo.market_agent.notification_queue import NotificationQueue
-    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 
 
@@ -41,8 +40,8 @@ class ObservabilityOrchestrator:
     Scope:
     - ``track_performance()``: delegates to PerformanceTracker
     - ``send_notification()``: delegates to NotificationQueue
-    - ``get_daily_summary()``: aggregates metrics for dashboard / Telegram
-    - ``generate_dashboard_chart()``: chart capture + export for Telegram
+    - ``get_daily_summary()``: aggregates metrics for dashboard / operator views
+    - ``generate_dashboard_chart()``: chart capture + export for dashboard consumers
     - ``notify_error()``: error notification via queue
     - ``compute_quiet_period_minutes()``: time since last signal
     """
@@ -52,7 +51,7 @@ class ObservabilityOrchestrator:
         *,
         performance_tracker: "PerformanceTracker",
         notification_queue: "NotificationQueue",
-        telegram_notifier: "MarketAgentTelegramNotifier",
+        telegram_notifier: Any,
         state_manager: "MarketAgentStateManager",
     ):
         self._performance_tracker = performance_tracker
@@ -100,7 +99,7 @@ class ObservabilityOrchestrator:
         priority: Optional[Any] = None,
     ) -> None:
         """
-        Enqueue a raw Telegram notification via the notification queue.
+        Enqueue a raw notification via the notification queue.
 
         Args:
             message: Notification text.
@@ -186,7 +185,7 @@ class ObservabilityOrchestrator:
 
     async def generate_dashboard_chart(self) -> Optional[Path]:
         """
-        Capture the Live Main Chart and export it for Telegram/UI use.
+        Capture the Live Main Chart and export it for UI/export use.
 
         This produces (atomically) a PNG at:
           ``data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png``

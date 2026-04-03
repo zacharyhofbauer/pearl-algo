@@ -8,8 +8,8 @@ This document standardizes the roles of all scripts under `scripts/` and identif
   - **Role**: Canonical top-level operator entrypoint for start/stop/restart/status.
   - **Behavior**: Orchestrates gateway, agent, API, and web app using the active market and aligned runtime paths.
 - `agent.sh`
-  - **Role**: Canonical market-aware agent lifecycle CLI (start/stop/restart/status).
-  - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
+  - **Role**: Canonical singleton-agent lifecycle CLI (start/stop/status).
+  - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log names by market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`, but the Python runtime itself remains singleton-locked.
 - `tv_paper_eval.sh`
   - **Role**: Tradovate Paper compatibility lifecycle wrapper for the fixed MNQ paper-eval instance.
   - **Behavior**: Uses `config/live/tradovate_paper.yaml`, runs the API on port `8001`, and writes state to the active `data/agent_state/MNQ/` root unless overridden by environment.
@@ -22,28 +22,18 @@ Canonical script:
 
 - `gateway.sh` – consolidated gateway CLI (subcommands for start/stop/status/2FA/VNC/setup).
 
-## Telegram
-
-Telegram support currently lives inside the Python runtime rather than a dedicated
-Telegram scripts directory.
-
-- `src/pearlalgo/market_agent/telegram_notifier.py`
-  - **Role**: Outbound Telegram notifications from the market agent.
-- `src/pearlalgo/market_agent/telegram_formatters.py`
-  - **Role**: Telegram message formatting helpers.
-
 ## Backtesting (`scripts/backtesting/`)
 
 Backtesting scripts for strategy validation on historical data.
 
 - `strategy_selection.py`
-  - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
+  - **Role**: Generate `strategy_selection_*.json` exports used by operator review flows and dashboards.
   - **Usage**: `python3 scripts/backtesting/strategy_selection.py --signals-path data/agent_state/MNQ/signals.jsonl`
 
 ## Testing (`scripts/testing/`)
 
 - `test_all.py`
-  - **Role**: Unified validation runner supporting modes: `telegram`, `signals`, `service`.
+  - **Role**: Unified validation runner supporting modes: `signals`, `service`, `arch`.
 - `run_tests.sh`
   - **Role**: Developer convenience script to run the pytest unit suite under `tests/` (uses `.venv` when present).
 - `check_architecture_boundaries.py`
@@ -79,9 +69,9 @@ External safety nets intended for cron/systemd timers. These scripts validate ru
 they do **not** contain trading or strategy logic.
 
 - `monitor.py`
-  - **Role**: Automated health monitor with Telegram alerts and structured exit codes. Replaces the former `health_check.py` and `watchdog_agent.py`.
-  - **Behavior**: Uses `HealthEvaluator` to check agent state freshness; also probes IBKR Gateway, API server, and web app. Supports alert deduplication via `alert_state.json` and sends Telegram notifications on new failures / recoveries.
-  - **Usage**: `python3 scripts/monitoring/monitor.py --market NQ [--telegram] [--verbose] [--json]`
+  - **Role**: Automated health monitor with structured exit codes. Replaces the former `health_check.py` and `watchdog_agent.py`.
+  - **Behavior**: Uses `HealthEvaluator` to check agent state freshness; also probes IBKR Gateway, API server, and web app. Supports alert deduplication via `alert_state.json`; the optional `--telegram` bridge is legacy-only and not part of the canonical live path.
+  - **Usage**: `python3 scripts/monitoring/monitor.py --market NQ [--verbose] [--json]`
   - **Exit codes**: 0=OK, 1=WARNING, 2=CRITICAL, 3=ERROR
 
 - `serve_agent_status.py`
@@ -119,7 +109,7 @@ Web-based TradingView chart interface for real-time market visualization. Uses N
   - **Role**: Next.js 14 frontend with TypeScript, Zustand state management, and WebSocket real-time updates.
   - **Port**: 3001 (default)
 
-**Note**: The Pearl Algo Web App provides an interactive web view and can be used for Telegram screenshot captures via Playwright. See `docs/PEARL_WEB_APP.md` for details.
+**Note**: The Pearl Algo Web App provides the canonical browser dashboard. See `docs/PEARL_WEB_APP.md` for details.
 
 ## Ops (`scripts/ops/`)
 
@@ -129,7 +119,7 @@ Quick operational utilities for manual/interactive use.
   - **Role**: Manual CLI health check — shows process, gateway, state, signal, and log status. Replaces the former `quick_status.sh` and `lifecycle/check_agent_status.sh`.
   - **Usage**: `./scripts/ops/status.sh [--market NQ]`
   - **Requires**: `jq` (optional but recommended for pretty state output).
-  - **Note**: For automated monitoring with Telegram alerts, use `scripts/monitoring/monitor.py` instead.
+  - **Note**: For automated monitoring, use `scripts/monitoring/monitor.py` instead.
 
 ## General Guidelines
 

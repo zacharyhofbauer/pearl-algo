@@ -373,6 +373,12 @@ class StateBuilder:
             if self.service.trading_circuit_breaker is not None
             else {"enabled": False}
         )
+        # Persist critical CB state for crash recovery (Issue 2)
+        state["circuit_breaker_persisted"] = (
+            self.service.trading_circuit_breaker.get_persisted_state()
+            if self.service.trading_circuit_breaker is not None
+            else {}
+        )
 
         # ==========================================================================
         # Virtual positions (signals.jsonl status="entered") for Telegram command UI

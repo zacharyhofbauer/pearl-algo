@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from pearlalgo.trading_bots import pearl_bot_auto as legacy
+from pearlalgo.trading_bots import signal_generator as legacy
 
 
 StrategyParams = legacy.StrategyParams

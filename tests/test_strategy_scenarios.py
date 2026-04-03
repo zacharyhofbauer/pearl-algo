@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pearlalgo.trading_bots.pearl_bot_auto import (
+from pearlalgo.trading_bots.signal_generator import (
     StrategyParams,
     _load_strategy_params,
     generate_signals,

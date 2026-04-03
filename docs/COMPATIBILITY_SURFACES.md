@@ -29,9 +29,14 @@ reason it still exists.
 - `NEXT_PUBLIC_API_KEY` and websocket `?api_key=...`
   Legacy frontend auth fallbacks retained while the preferred names remain
   `NEXT_PUBLIC_READONLY_API_KEY` and the websocket auth message.
-- `src/pearlalgo/utils/telegram_alerts.py`
-  Backward-compatible re-export surface. New imports should use
-  `pearlalgo.notifications.*`.
+- `telegram_bot_token`, `telegram_chat_id`, and `telegram_thread_id` kwargs on
+  `MarketAgentService` / `build_service_dependencies()`
+  Ignored legacy constructor arguments retained so older call sites do not
+  break while runtime notifications remain disabled.
+- `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
+  Historical export filename retained in parts of the runtime and operator
+  workflow. The browser dashboard is canonical; treat this filename as a legacy
+  compatibility artifact, not a product surface.
 
 ## Removal standard
 

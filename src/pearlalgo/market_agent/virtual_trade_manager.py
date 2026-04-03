@@ -11,6 +11,7 @@ Extracted from service.py for better code organization and testability.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -83,6 +84,21 @@ class VirtualTradeManager:
         # Dedup: track signal_ids already processed as exits to prevent
         # duplicate exit records in JSONL before performance_tracker persists status.
         self._processed_exits: set = set()
+
+    def _schedule_notification_task(self, coroutine: Any, *, context: str) -> None:
+        """Queue a background notification when an event loop is available."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            close = getattr(coroutine, "close", None)
+            if callable(close):
+                close()
+            logger.debug("%s skipped: no running event loop", context)
+            return
+
+        task = loop.create_task(coroutine)
+        if inspect.isawaitable(task):
+            return
 
     # ------------------------------------------------------------------
     # Public API
@@ -450,7 +466,7 @@ class VirtualTradeManager:
                 if len(self._notified_exits) > 500:
                     self._notified_exits = set(list(self._notified_exits)[-250:])
 
-                asyncio.create_task(
+                self._schedule_notification_task(
                     self.notification_queue.enqueue_exit(
                         signal_id=str(sig_id),
                         exit_price=float(exit_price),
@@ -460,7 +476,8 @@ class VirtualTradeManager:
                         hold_duration_minutes=hold_mins,
                         buffer_data=df,
                         priority=Priority.HIGH,
-                    )
+                    ),
+                    context="Exit notification",
                 )
         except Exception as e:
             logger.error(f"Could not schedule exit notification for {sig_id[:16]}: {e}", exc_info=True)
@@ -500,10 +517,11 @@ class VirtualTradeManager:
                 else:
                     msg = f"{_atag}❄️ *{self._streak_count} Loss Streak*\n\nConsider taking a break.\nCircuit breaker is monitoring."
 
-                asyncio.create_task(
+                self._schedule_notification_task(
                     self.notification_queue.enqueue_raw_message(
                         msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM,
-                    )
+                    ),
+                    context="Streak alert",
                 )
                 logger.info(f"Streak alert sent: {self._streak_type} x{self._streak_count}")
         except Exception as streak_err:
