@@ -112,6 +112,30 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             f"env={self._tv_config.env}, mode={config.mode.value}"
         )
 
+    # ── Task lifecycle (Issue 7) ────────────────────────────────────
+
+    def _create_tracked_task(self, coro, *, name: str) -> asyncio.Task:
+        """Create a background task with error logging and lifecycle tracking.
+
+        Ensures that unhandled exceptions in background coroutines are logged
+        at CRITICAL level instead of being silently swallowed.  All tracked
+        tasks are cancelled during ``disconnect()``.
+        """
+        async def _wrapper():
+            try:
+                return await coro
+            except asyncio.CancelledError:
+                logger.debug("Background task cancelled: %s", name)
+            except Exception:
+                logger.critical(
+                    "Unhandled error in background task '%s'", name, exc_info=True,
+                )
+
+        task = asyncio.create_task(_wrapper(), name=name)
+        self._background_tasks = [t for t in self._background_tasks if not t.done()]
+        self._background_tasks.append(task)
+        return task
+
     # ── Connection lifecycle ──────────────────────────────────────────
 
     async def connect(self) -> bool:
@@ -146,8 +170,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             self._connected = True
 
             # Start background reconciliation (polls orders when WS is down)
-            self._reconciliation_task = asyncio.create_task(
-                self._reconciliation_loop()
+            self._reconciliation_task = self._create_tracked_task(
+                self._reconciliation_loop(), name="reconciliation_loop",
             )
             logger.info(
                 f"Tradovate connected: account={self._client.account_name}, "
@@ -157,7 +181,10 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             # FIXED 2026-03-25: Check for orphaned positions (open position with no exchange SL)
             # This happens when agent restarts mid-trade. Place a hard stop immediately.
             # FIXED 2026-03-25: use retry wrapper to handle Tradovate maintenance window
-            asyncio.create_task(self._reattach_orphaned_stop_on_connect_with_retry())
+            self._create_tracked_task(
+                self._reattach_orphaned_stop_on_connect_with_retry(),
+                name="orphaned_stop_reattach",
+            )
 
             return True
 
