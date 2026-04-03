@@ -251,9 +251,10 @@ class TestBrokerPositionGuardMax:
 
     @pytest.mark.asyncio
     async def test_position_guard_falls_back_to_rest(self):
-        """When _live_positions is empty, REST get_positions is used."""
+        """When _live_positions is empty and stale, REST get_positions is used."""
         adapter = _make_adapter(allow_reversal_on_opposite_signal=False)
         adapter._live_positions = {}  # Empty WS cache
+        adapter._live_positions_updated_at = 0.0  # Stale — force REST fallback
         adapter._client.get_positions = AsyncMock(return_value=[
             {"netPos": -2, "contractId": 999}
         ])

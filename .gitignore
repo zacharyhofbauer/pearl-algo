@@ -19,6 +19,10 @@ dist/
 
 src/pearlalgo_dev_ai_agents.egg-info/
 legacy/
+!docs/legacy/
+!docs/legacy/**
+!resources/legacy/
+!resources/legacy/**
 *.egg-info/
 
 # Data and outputs
@@ -50,6 +54,9 @@ ibkr/*
 Jts/
 ibc/
 ibgateway-latest-standalone-linux-x64.sh
+
+# Webapp local env (secrets, API keys — never commit)
+apps/pearl-algo-app/.env.local
 
 # Node.js (live-chart dashboard)
 node_modules/

@@ -46,6 +46,8 @@ class MockDataProvider(DataProvider):
             simulate_timeouts: If True, simulates occasional timeouts (5% chance per call)
             simulate_connection_issues: If True, simulates connection issues (2% chance per call)
         """
+        # Seed random for deterministic test data across runs
+        random.seed(42)
         self.base_price = base_price
         self.volatility = volatility
         self.trend = trend

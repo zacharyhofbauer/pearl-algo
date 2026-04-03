@@ -15,13 +15,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Union
 
-from zoneinfo import ZoneInfo
-
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir
 
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 
 
 @dataclass
@@ -167,8 +165,8 @@ class TradeDatabase:
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
-                except Exception:
-                    pass
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
 
             cursor.execute(
                 """
@@ -731,3 +729,24 @@ class TradeDatabase:
             }
             for row in rows
         }
+
+    def run_cycle_diagnostics_retention(self, retention_days: int = 30) -> int:
+        """Delete cycle_diagnostics rows older than *retention_days*.
+
+        Returns the number of rows deleted.
+        """
+        cutoff = (datetime.now(_ET) - timedelta(days=retention_days)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM cycle_diagnostics WHERE timestamp < ?", (cutoff,)
+            )
+            deleted = cursor.rowcount
+            conn.commit()
+        if deleted > 0:
+            logger.info(
+                f"Cycle diagnostics retention: deleted {deleted} rows "
+                f"older than {retention_days} days"
+            )
+        return deleted

@@ -17,7 +17,7 @@ non-canonical and check `docs/COMPATIBILITY_SURFACES.md` before using it.
 - **Strategy**: `src/pearlalgo/strategies/composite_intraday/` (canonical live strategy bundle)
 - **Execution**: `src/pearlalgo/execution/tradovate/` (Tradovate Paper only; IBKR execution is inactive)
 - **Eval tracker**: `src/pearlalgo/market_agent/tv_paper_eval_tracker.py` (prop firm rule enforcement)
-- **Ops/UI**: Telegram notifier + command handler, Next.js web app in `apps/pearl-algo-app/` (pearlalgo.io)
+- **Ops/UI**: `./pearl.sh`, operator CLI/web controls, and the Next.js web app in `apps/pearl-algo-app/`
 
 No new live trading logic should be added outside those paths unless the
 operating model itself is being expanded.
@@ -31,6 +31,15 @@ Pearl runs a **single active trading account**: **Tradovate Paper** (50K Rapid E
 | **Tradovate Paper** | Prop firm eval, paper trading | Tradovate (paper) | explicit `--data-dir` for the running agent/API; keep them aligned | `config/live/tradovate_paper.yaml` |
 
 **Config**: Canonical live runtime config in `config/live/tradovate_paper.yaml`. Start the agent with `--config config/live/tradovate_paper.yaml`.
+
+### Runtime topology
+
+The live runtime is a **singleton agent process**. The Python entrypoint takes a
+global lock, so only one market-agent process is supported at a time.
+
+- `--market` selects the state directory, log naming, and client-id defaults
+- it does **not** enable concurrent multi-market agents
+- if you need to switch markets, stop the running agent first and restart with the new state dir
 
 ### Canonical directory layout
 
@@ -66,7 +75,7 @@ out of new feature work.
 | SPOF | Impact | Mitigation |
 |------|--------|-----------|
 | IBKR Gateway (localhost:4001) | Market data stops, no signals generated | Connection circuit breaker, auto-reconnect every 60s |
-| Tradovate API | Orders cannot be placed, open positions can't exit | No failover; logs alert, manual kill-switch via Telegram |
+| Tradovate API | Orders cannot be placed, open positions can't exit | No failover; logs alert, use `./pearl.sh stop` or the operator controls |
 | Agent process (single PID) | All trading halts | Systemd `Restart=always, RestartSec=10` |
 | Local filesystem (/home/pearlalgo/var/) | State lost on crash | No redundancy; ensure reliable storage |
 
@@ -100,14 +109,18 @@ python3 scripts/ops/audit_runtime_paths.py
 - **SystemStatusPanel**: Readiness (Offline/Paused/Cooldown/Disarmed/Armed), kill switch, session P&L
 - **Pull-to-refresh** on mobile
 
-### Telegram
-
-- `/start` shows status and dashboard; `[TV-PAPER]` prefix on notifications
-
 ### Configuration
 
 - `config/live/tradovate_paper.yaml` (canonical Tradovate Paper runtime config)
 - `~/.config/pearlalgo/secrets.env` (credentials -- never committed)
+
+### Known dependency risks
+
+- **`ib-insync`** (pinned `>=0.9.86,<1.0`): Last PyPI release was December 2022.
+  Works on Python 3.12 but has no upstream maintenance. The community fork
+  `ib_async` is actively maintained and should be evaluated when upgrading
+  Python beyond 3.12. IBKR is data-only so the blast radius of a breakage is
+  limited to market data ingestion.
 
 ### Where to go next
 

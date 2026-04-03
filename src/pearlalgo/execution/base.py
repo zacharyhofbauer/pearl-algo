@@ -12,9 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from zoneinfo import ZoneInfo
-
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 from enum import Enum
 from typing import Any, Dict, List, Optional
 

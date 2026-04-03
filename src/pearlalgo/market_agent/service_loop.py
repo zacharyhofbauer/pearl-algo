@@ -63,6 +63,7 @@ class ServiceLoopMixin:
 
             # Audit scheduled tasks: retention + equity snapshot (once per day each)
             await self.scheduled_tasks.check_audit_retention()
+            await self.scheduled_tasks.check_cycle_diagnostics_retention()
             await self.scheduled_tasks.check_equity_snapshot()
 
             # Adaptive cadence: compute effective interval for this cycle (includes velocity mode)
@@ -190,12 +191,29 @@ class ServiceLoopMixin:
                                 # Guard: only send the circuit breaker notification once per event
                                 if not self._cb_connection_notified:
                                     self._cb_connection_notified = True
+                                    # Check for open positions — escalate alert if any exist
+                                    active_trades = self.execution_orchestrator.get_active_virtual_trades(limit=50)
+                                    if active_trades:
+                                        position_details = "; ".join(
+                                            f"{t.get('signal', {}).get('direction', '?')} @ "
+                                            f"{t.get('signal', {}).get('entry_price', 0):.2f}"
+                                            for t in active_trades[:5]
+                                        )
+                                        title = f"CRITICAL: IBKR DOWN - {len(active_trades)} position(s) open"
+                                        action = (
+                                            f"Service paused - IBKR Gateway down with open positions: "
+                                            f"{position_details}. Manual intervention required."
+                                        )
+                                    else:
+                                        title = "IB Gateway connection lost"
+                                        action = "Service paused - IB Gateway appears to be down"
                                     await self.notification_queue.enqueue_circuit_breaker(
-                                        "IB Gateway connection lost",
+                                        title,
                                         {
                                             "connection_failures": self.connection_failures,
                                             "error_type": "connection",
-                                            "action_taken": "Service paused - IB Gateway appears to be down",
+                                            "open_positions": len(active_trades) if active_trades else 0,
+                                            "action_taken": action,
                                         },
                                         priority=Priority.CRITICAL,
                                     )

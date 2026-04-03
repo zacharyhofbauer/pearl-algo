@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import signal
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -36,12 +37,34 @@ async def _close_resource(resource: object | None, label: str, timeout: float = 
     try:
         result = close_method()
         if inspect.isawaitable(result):
-            await asyncio.wait_for(result, timeout=timeout)
+            close_task = asyncio.create_task(result)
+            try:
+                await asyncio.wait_for(close_task, timeout=timeout)
+            except Exception:
+                await _drain_task(close_task, label)
+                raise
         logger.info(f"{label} closed")
     except asyncio.TimeoutError:
         logger.warning(f"Timeout closing {label.lower()}")
     except Exception as e:
         logger.warning(f"Error closing {label.lower()}: {e}")
+
+
+async def _drain_task(task: asyncio.Task[object] | None, label: str) -> None:
+    """Drain a task so shutdown-time exceptions do not leak unobserved coroutines."""
+    if task is None:
+        return
+
+    cancelled = False
+    if not task.done():
+        task.cancel()
+        cancelled = True
+
+    with suppress(asyncio.CancelledError, Exception):
+        await task
+
+    if cancelled:
+        logger.debug(f"Cancelled pending {label.lower()} task")
 
 
 class ServiceLifecycleMixin:
@@ -77,7 +100,7 @@ class ServiceLifecycleMixin:
                 {"symbol": self.symbol, "timeframe": self.timeframe},
             )
 
-        # Start notification queue for async Telegram delivery
+        # Start the async notification compatibility layer
         await self.notification_queue.start()
 
         # Startup flow:
@@ -228,24 +251,33 @@ class ServiceLifecycleMixin:
 
             # Send with timeout to ensure it doesn't hang, but log if it fails
             logger.info(f"Sending shutdown notification: {shutdown_reason}")
+            shutdown_task: asyncio.Task[object] | None = None
             try:
-                await asyncio.wait_for(
-                    self.telegram_notifier.send_shutdown_notification(summary),
-                    timeout=10.0
+                shutdown_task = asyncio.create_task(
+                    self.telegram_notifier.send_shutdown_notification(summary)
                 )
+                await asyncio.wait_for(shutdown_task, timeout=10.0)
                 logger.info("Shutdown notification sent to Telegram")
             except asyncio.TimeoutError:
+                await _drain_task(shutdown_task, "shutdown notification")
                 logger.error("Timeout sending shutdown notification - Telegram may be slow or unreachable")
+            except Exception:
+                await _drain_task(shutdown_task, "shutdown notification")
+                raise
         except Exception as e:
             logger.error(f"Error sending shutdown notification: {e}", exc_info=True)
 
-        # Disconnect execution adapter
+        # Disconnect execution adapter (with timeout to prevent hang on shutdown)
         if self.execution_adapter is not None:
             try:
                 # Disarm first as safety measure
-                self.execution_adapter.disarm()
-                await self.execution_adapter.disconnect()
+                disarm_result = self.execution_adapter.disarm()
+                if inspect.isawaitable(disarm_result):
+                    await disarm_result
+                await asyncio.wait_for(self.execution_adapter.disconnect(), timeout=15.0)
                 logger.info("Execution adapter disconnected")
+            except asyncio.TimeoutError:
+                logger.error("Execution adapter disconnect timed out (15s) - forcing shutdown")
             except Exception as e:
                 logger.warning(f"Error disconnecting execution adapter: {e}")
 

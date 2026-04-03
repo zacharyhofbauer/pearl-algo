@@ -93,6 +93,7 @@ def _make_service_mock():
     svc.scheduled_tasks.check_market_close_summary = AsyncMock()
     svc.scheduled_tasks.check_signal_pruning = AsyncMock()
     svc.scheduled_tasks.check_audit_retention = AsyncMock()
+    svc.scheduled_tasks.check_cycle_diagnostics_retention = AsyncMock()
     svc.scheduled_tasks.check_equity_snapshot = AsyncMock()
 
     svc.execution_orchestrator = MagicMock()

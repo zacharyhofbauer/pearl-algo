@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from pearlalgo.market_agent.notification_queue import NotificationQueue
     from pearlalgo.market_agent.performance_tracker import PerformanceTracker
     from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 
 
 def _trade_is_in_trading_day(trade: Dict[str, Any], trading_day_start_utc: datetime) -> bool:
@@ -80,7 +79,7 @@ class ScheduledTasks:
     def __init__(
         self,
         *,
-        telegram_notifier: MarketAgentTelegramNotifier,
+        telegram_notifier: Any,
         notification_queue: NotificationQueue,
         state_manager: MarketAgentStateManager,
         performance_tracker: PerformanceTracker,
@@ -111,6 +110,10 @@ class ScheduledTasks:
 
         # Audit retention (once per day)
         self._last_audit_retention_date: Optional[str] = None
+
+        # Cycle diagnostics retention (once per day)
+        self._last_cycle_diag_retention_date: Optional[str] = None
+        self._trade_db: Any = None  # set externally if SQLite enabled
 
         # Equity snapshot (once per day at market close)
         self._last_equity_snapshot_date: Optional[str] = None
@@ -392,6 +395,9 @@ class ScheduledTasks:
     # Signal History Pruning
     # ------------------------------------------------------------------
 
+    # Maximum signals.jsonl size before forced pruning (50 MB).
+    _MAX_SIGNALS_FILE_BYTES: int = 50 * 1024 * 1024
+
     async def check_signal_pruning(self) -> None:
         """Prune signals older than retention period from signals.jsonl.
 
@@ -400,17 +406,32 @@ class ScheduledTasks:
         The write is atomic (temp file + ``os.replace``) to avoid corruption.
 
         Non-blocking: the file I/O is offloaded to a thread.
+
+        Also triggers an immediate prune (bypassing the once-per-day guard)
+        if the file exceeds ``_MAX_SIGNALS_FILE_BYTES`` (50 MB).
         """
         try:
             now_utc = datetime.now(timezone.utc)
             today_str = now_utc.strftime("%Y-%m-%d")
 
-            # Once-per-day guard
-            if self._last_pruning_date == today_str:
+            # Force prune if file is too large, regardless of daily guard
+            signals_file = self.state_manager.signals_file
+            force_prune = False
+            if signals_file.exists():
+                try:
+                    if signals_file.stat().st_size > self._MAX_SIGNALS_FILE_BYTES:
+                        logger.warning(
+                            f"signals.jsonl exceeds {self._MAX_SIGNALS_FILE_BYTES // (1024*1024)}MB — forcing prune"
+                        )
+                        force_prune = True
+                except OSError:
+                    pass
+
+            # Once-per-day guard (bypassed on force prune)
+            if self._last_pruning_date == today_str and not force_prune:
                 return
             self._last_pruning_date = today_str
 
-            signals_file = self.state_manager.signals_file
             if not signals_file.exists():
                 return
 
@@ -510,6 +531,25 @@ class ScheduledTasks:
                 logger.info(f"Audit retention complete: {result}")
         except Exception as e:
             logger.debug(f"Audit retention error: {e}")
+
+    async def check_cycle_diagnostics_retention(self) -> None:
+        """Delete cycle_diagnostics rows older than 30 days, once per day."""
+        if self._trade_db is None:
+            return
+        try:
+            now_utc = datetime.now(timezone.utc)
+            today_str = now_utc.strftime("%Y-%m-%d")
+            if self._last_cycle_diag_retention_date == today_str:
+                return
+            self._last_cycle_diag_retention_date = today_str
+
+            deleted = await asyncio.to_thread(
+                self._trade_db.run_cycle_diagnostics_retention, 30
+            )
+            if deleted and deleted > 0:
+                logger.info(f"Cycle diagnostics retention: {deleted} rows deleted")
+        except Exception as e:
+            logger.debug(f"Cycle diagnostics retention error: {e}")
 
     # ------------------------------------------------------------------
     # Equity Snapshot

@@ -9,9 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
-from zoneinfo import ZoneInfo
-
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 
 logger = logging.getLogger(__name__)
 

@@ -42,7 +42,6 @@ from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
-from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.market_agent.notification_queue import NotificationQueue, NotificationTier, Priority
 from pearlalgo.market_agent.trading_circuit_breaker import (
     TradingCircuitBreaker,
@@ -177,8 +176,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 config=ConfigView(config or get_strategy_defaults()) if config is not None else None,
                 service_config=load_service_config(),
                 state_dir=state_dir,
-                telegram_bot_token=telegram_bot_token,
-                telegram_chat_id=telegram_chat_id,
             )
 
         deps.resolve_defaults()
@@ -186,8 +183,6 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self.config = deps.config
         service_config = deps.service_config
         state_dir = deps.state_dir
-        telegram_bot_token = deps.telegram_bot_token
-        telegram_chat_id = deps.telegram_chat_id
 
         self.symbol = str(self.config.get("symbol", "MNQ"))
         self.timeframe = str(self.config.get("timeframe", "5m"))
@@ -202,22 +197,15 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         self.data_fetcher = deps.data_fetcher
         self.state_manager = deps.state_manager
         self.performance_tracker = deps.performance_tracker
-        self.telegram_notifier = deps.telegram_notifier
         self.notification_queue = deps.notification_queue
 
-        # Log Telegram configuration status
-        if self.telegram_notifier.enabled:
-            logger.info(
-                f"Telegram notifications enabled: bot_token={'***' if telegram_bot_token else 'MISSING'}, "
-                f"chat_id={'***' if telegram_chat_id else 'MISSING'}, "
-                f"telegram_instance={self.telegram_notifier.telegram is not None}"
-            )
-        else:
-            logger.warning(
-                "Telegram notifications DISABLED - signals will not be sent to Telegram. "
-                f"bot_token={'present' if telegram_bot_token else 'MISSING'}, "
-                f"chat_id={'present' if telegram_chat_id else 'MISSING'}"
-            )
+        # Telegram notifier stub (Telegram removed — kept as no-op for callers)
+        self.telegram_notifier = type("_NoOpNotifier", (), {
+            "enabled": False, "telegram": None, "account_label": None,
+            "_get_prefs": lambda self: type("P", (), {"pearl_suggestions_enabled": False, "pearl_check_ins_enabled": False})(),
+            "send_pearl_notification": lambda self, *a, **kw: None,
+            "send_shutdown_notification": lambda self, *a, **kw: None,
+        })()
 
         self.health_monitor = deps.health_monitor
         self.audit_logger: Optional[AuditLogger] = deps.audit_logger
@@ -506,6 +494,8 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         )
         if self.audit_logger is not None:
             self.scheduled_tasks.set_audit_logger(self.audit_logger)
+        if self._trade_db is not None:
+            self.scheduled_tasks._trade_db = self._trade_db
         self.operator_handler = OperatorHandler(
             state_manager=self.state_manager,
             notification_queue=self.notification_queue,

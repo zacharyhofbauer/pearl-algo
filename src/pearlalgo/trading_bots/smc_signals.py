@@ -31,8 +31,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from zoneinfo import ZoneInfo
-
 from pearlalgo.utils.logger import logger
 
 # ---------------------------------------------------------------------------
@@ -70,7 +68,7 @@ def _get_smc():
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 
 # Default Silver Bullet windows (hour_start, hour_end) in ET
 _DEFAULT_SB_WINDOWS: List[List[int]] = [[10, 11], [14, 15], [15, 16]]

@@ -14,9 +14,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from zoneinfo import ZoneInfo
-
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -939,8 +937,8 @@ class PerformanceTracker:
                 if current_record is None:
                     try:
                         current_record = self._trade_db.get_signal_event_by_id(signal_id)
-                    except Exception:
-                        pass  # OK — proceed with partial payload
+                    except Exception as e:
+                        logger.debug("Signal lookup failed for %s, proceeding with partial payload: %s", signal_id, e)
 
                 # Copy to avoid mutating the original signal dict passed from callers.
                 event_payload = dict(current_record) if isinstance(current_record, dict) else {}

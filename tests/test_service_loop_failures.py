@@ -81,6 +81,7 @@ class TestServiceLoopFailures:
         service.scheduled_tasks.check_follower_heartbeat = AsyncMock()
         service.scheduled_tasks.check_signal_pruning = AsyncMock()
         service.scheduled_tasks.check_audit_retention = AsyncMock()
+        service.scheduled_tasks.check_cycle_diagnostics_retention = AsyncMock()
         service.scheduled_tasks.check_equity_snapshot = AsyncMock()
         service._check_execution_control_flags = AsyncMock()
         service.cadence_scheduler = None
@@ -138,6 +139,7 @@ class TestServiceLoopFailures:
         service.scheduled_tasks.check_follower_heartbeat = AsyncMock()
         service.scheduled_tasks.check_signal_pruning = AsyncMock()
         service.scheduled_tasks.check_audit_retention = AsyncMock()
+        service.scheduled_tasks.check_cycle_diagnostics_retention = AsyncMock()
         service.scheduled_tasks.check_equity_snapshot = AsyncMock()
         service._check_execution_control_flags = AsyncMock()
         service._check_data_quality = AsyncMock()
@@ -208,7 +210,8 @@ class TestServiceLoopFailures:
         service.execution_orchestrator.check_execution_health = AsyncMock()
         service.scheduled_tasks = MagicMock()
         for m in ("check_morning_briefing", "check_market_close_summary", "check_follower_heartbeat",
-                  "check_signal_pruning", "check_audit_retention", "check_equity_snapshot"):
+                  "check_signal_pruning", "check_audit_retention", "check_cycle_diagnostics_retention",
+                  "check_equity_snapshot"):
             setattr(service.scheduled_tasks, m, AsyncMock())
         service._check_execution_control_flags = AsyncMock()
         service._check_data_quality = AsyncMock()
@@ -287,7 +290,8 @@ class TestServiceLoopFailures:
         service.execution_orchestrator.check_execution_health = AsyncMock()
         service.scheduled_tasks = MagicMock()
         for m in ("check_morning_briefing", "check_market_close_summary", "check_follower_heartbeat",
-                  "check_signal_pruning", "check_audit_retention", "check_equity_snapshot"):
+                  "check_signal_pruning", "check_audit_retention", "check_cycle_diagnostics_retention",
+                  "check_equity_snapshot"):
             setattr(service.scheduled_tasks, m, AsyncMock())
         service._check_execution_control_flags = AsyncMock()
         service._check_data_quality = AsyncMock()

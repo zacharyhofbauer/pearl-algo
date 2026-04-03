@@ -12,9 +12,22 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
-from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
+
+
+def get_project_root() -> Path:
+    """
+    Get the project root directory.
+    
+    Works for both development (src/ structure) and installed package contexts.
+    
+    Returns:
+        Path to project root (where pyproject.toml, README.md, etc. live)
+    """
+    # In development: /repo/src/pearlalgo/utils/paths.py -> /repo
+    # In installed: /venv/lib/python3.12/site-packages/pearlalgo/utils/paths.py -> /repo (via site-packages/../../../)
+    return Path(__file__).parent.parent.parent.parent.resolve()
 
 
 def ensure_state_dir(state_dir: Optional[Path] = None) -> Path:
@@ -94,7 +107,7 @@ def get_performance_file(state_dir: Path) -> Path:
     return state_dir / "performance.json"
 
 
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 
 
 def get_et_timestamp() -> str:  # FIXED 2026-03-25: store ET not UTC

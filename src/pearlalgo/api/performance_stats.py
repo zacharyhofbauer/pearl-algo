@@ -6,10 +6,9 @@ import logging
 from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from zoneinfo import ZoneInfo
+from pearlalgo.utils.timezones import ET as _ET
 
 logger = logging.getLogger(__name__)
-_ET = ZoneInfo("America/New_York")
 
 
 def _coerce_utc(dt) -> Any:

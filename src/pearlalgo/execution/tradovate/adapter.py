@@ -14,6 +14,7 @@ Key design decisions:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -24,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from pearlalgo.execution.base import (
     ExecutionAdapter,
     ExecutionConfig,
-    ExecutionDecision,
     ExecutionResult,
     OrderStatus,
     Position,
@@ -81,7 +81,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Live position cache updated from WebSocket events
         self._live_positions: Dict[str, Dict[str, Any]] = {}
         self._live_positions_updated_at: float = 0.0  # time.monotonic()
-        self._POSITION_CACHE_TTL: float = 5.0  # 2 minutes — stale after this
+        self._POSITION_CACHE_TTL: float = 5.0  # seconds — stale after this
 
         # Pending orders counter: incremented when place_bracket is called,
         # decremented when WS confirms a fill or close. Provides a synchronous
@@ -131,14 +131,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 # Also get the contract ID for position matching
                 contract_info = await self._client.find_contract(self._contract_symbol)
                 self._contract_id = contract_info.get("id")
-            except Exception as e:
+            except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
                 logger.warning(f"Contract resolution failed (will retry on first order): {e}")
 
             # Start WebSocket for real-time updates
             try:
                 await self._client.start_websocket()
                 self._client.add_event_handler(self._handle_ws_event)
-            except Exception as e:
+            except (ConnectionError, asyncio.TimeoutError, OSError, TradovateAPIError) as e:
                 logger.warning(f"WebSocket start failed (REST-only mode): {e}")
 
             self._connected = True
@@ -171,7 +171,6 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         FIXED 2026-03-25: After agent restart, detect positions with no exchange stop order
         and place a hard stop immediately. Prevents naked positions after soft-restart.
         """
-        import asyncio
         await asyncio.sleep(5)  # Wait for WS and account data to settle
         try:
             summary = await self.get_account_summary()
@@ -242,10 +241,12 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         stop_price=stop_price,
                     )
                     logger.info(f"Emergency stop placed for orphaned position: result={result}")
-                except Exception as e:
+                except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
                     logger.error(f"Failed to place emergency stop for orphaned position: {e}")
 
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise
+        except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
             logger.warning(f"Orphaned stop check failed (non-fatal): {e}")
 
     async def _reattach_orphaned_stop_on_connect_with_retry(self, max_attempts: int = 10, base_delay: float = 30.0) -> bool:
@@ -275,7 +276,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     continue
                 logger.error(f"Orphaned stop reattach failed (non-503 error): {e}")
                 return False
-            except Exception as e:
+            except asyncio.CancelledError:
+                raise
+            except (asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
                 logger.warning(f"Orphaned stop reattach attempt {attempt + 1} failed: {e}")
                 return False
         logger.error("❌ Failed to reattach orphaned stop after max attempts — ALERT NEEDED")
@@ -297,7 +300,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 f"after placement! signal={signal_id}"
             )
             return False
-        except Exception as e:
+        except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
             logger.warning(f"Bracket verification error: {e}")
             return False
 
@@ -353,10 +356,14 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         # Check actual broker positions before placing any order.
         direction = signal.get("direction", "long")
         try:
-            # Use cached live positions from WS events, or fall back to REST
-            # Discard stale cache when WS is disconnected for too long
+            # Use cached live positions from WS events, or fall back to REST.
+            # Prefer fresh WebSocket data over REST when WS updated recently,
+            # to avoid a race where clearing stale cache discards a just-arrived
+            # WS update that would be overridden by slower REST data.
             cache_age = time.monotonic() - self._live_positions_updated_at
-            if cache_age > self._POSITION_CACHE_TTL:
+            ws_data_fresh = cache_age <= 2.0  # WS updated within last 2 seconds
+
+            if not ws_data_fresh and cache_age > self._POSITION_CACHE_TTL:
                 if self._live_positions:
                     logger.info(
                         f"Position cache stale ({cache_age:.0f}s old), clearing "
@@ -365,7 +372,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     self._live_positions.clear()
 
             broker_positions = list(self._live_positions.values())
-            if not broker_positions and self.is_connected():
+            if not broker_positions and not ws_data_fresh and self.is_connected():
                 try:
                     broker_positions_raw = await self._client.get_positions()
                     broker_positions = [
@@ -456,7 +463,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     signal_id=signal_id,
                     error_message=f"max_position_size ({total_abs_pos}/{max_net_positions}) reached",
                 )
-        except Exception as e:
+        except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
             logger.warning(f"Broker position guard check failed (non-fatal): {e}")
 
         # Dry-run mode
@@ -496,7 +503,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         signal_id=signal_id,
                         error_message=f"Contract resolution returned empty for {symbol}",
                     )
-            except Exception as e:
+            except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
                 return ExecutionResult(
                     success=False,
                     status=OrderStatus.ERROR,
@@ -632,10 +639,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             )
 
             # ADDED 2026-03-25: log raw response for debugging bracket issues
-            import json as _json
             logger.info(
                 f"place_oso raw response: "
-                f"{_json.dumps(result) if isinstance(result, dict) else str(result)[:500]}"
+                f"{json.dumps(result) if isinstance(result, dict) else str(result)[:500]}"
             )  # ADDED 2026-03-25: debug bracket response
 
             # FIXED 2026-03-25: handle list response from place_oso (Tradovate bracket returns list)
@@ -741,6 +747,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 signal_id=signal_id,
                 error_message=str(e),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"Tradovate order error: {e}", exc_info=True)
             return ExecutionResult(
@@ -1155,9 +1163,8 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                             "price": entity.get("price", 0.0),
                             "net_pos": entity.get("netPos"),
                         }
-                        import json as _json
                         with open(_ff, "a") as f:
-                            _json.dump(fill_record, f)
+                            json.dump(fill_record, f)
                             f.write("\n")
                 except Exception as e:
                     logger.debug(f"Non-critical: could not persist fill: {e}")
@@ -1297,7 +1304,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             else:
                 logger.error(f"REST order poll failed: {e}", exc_info=True)
             return
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise
+        except (asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
             logger.error(f"REST order poll failed: {e}", exc_info=True)
             return
 
@@ -1333,6 +1342,27 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     f"to {ord_status} (detected via REST poll)"
                 )
                 self._open_orders.pop(order_id, None)
+
+        # Time-based cleanup: remove tracked orders older than 10 minutes
+        # that were never resolved by WS events or REST reconciliation above.
+        # Prevents unbounded growth if WS misses fill events.
+        _STALE_ORDER_THRESHOLD = 600  # 10 minutes
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for order_id in list(self._open_orders.keys()):
+            placed_at = self._open_orders[order_id].get("placed_at", "")
+            if not placed_at:
+                continue
+            try:
+                placed_dt = datetime.fromisoformat(placed_at.replace("Z", "+00:00"))
+                age_seconds = (datetime.now(timezone.utc) - placed_dt).total_seconds()
+                if age_seconds > _STALE_ORDER_THRESHOLD:
+                    logger.warning(
+                        f"Removing stale tracked order {order_id} "
+                        f"(placed {age_seconds:.0f}s ago, never resolved)"
+                    )
+                    self._open_orders.pop(order_id, None)
+            except (ValueError, TypeError):
+                pass
 
     async def _reconciliation_loop(self) -> None:
         """

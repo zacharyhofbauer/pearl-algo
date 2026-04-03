@@ -430,8 +430,8 @@ class _SignalStore:
                     try:
                         is_duplicate = self._is_duplicate_signal(signal, recent_signals)
                     except Exception as e:
-                        logger.warning(f"State operation failed: {e}")
-                        is_duplicate = False
+                        logger.error(f"Dedup check failed, assuming duplicate for safety: {e}")
+                        is_duplicate = True
                     if is_duplicate:
                         logger.debug(
                             f"Tagging duplicate signal (persisting anyway): {signal_id} "
@@ -458,6 +458,8 @@ class _SignalStore:
 
                     with open(self._signals_file, "a") as f:
                         f.write(payload + "\n")
+                        f.flush()
+                        os.fsync(f.fileno())
 
                     if self._signal_count is not None:
                         self._signal_count += 1
@@ -482,6 +484,8 @@ class _SignalStore:
                     payload = json.dumps(create_minimal_signal_record(signal_id, signal))
                 with open(self._signals_file, "a") as f:
                     f.write(payload + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
 
                 if self._signal_count is not None:
                     self._signal_count += 1

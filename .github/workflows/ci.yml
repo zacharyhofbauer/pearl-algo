@@ -64,11 +64,18 @@ jobs:
         run: |
           ruff check src/pearlalgo --statistics
 
-      - name: Type checking (mypy)
+      - name: Type checking (mypy) — informational
         continue-on-error: true
         run: |
           mypy src/pearlalgo --no-error-summary 2>&1 | head -100 || true
           echo "::notice::Type checking completed (informational mode)"
+
+      - name: Type checking — critical modules (enforced)
+        run: |
+          mypy src/pearlalgo/execution/tradovate/config.py \
+               src/pearlalgo/execution/tradovate/utils.py \
+               src/pearlalgo/market_agent/order_manager.py \
+               --no-error-summary
 
       - name: Architecture boundaries (enforced)
         run: |

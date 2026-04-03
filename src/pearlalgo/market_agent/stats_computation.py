@@ -17,12 +17,10 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
-
 from pearlalgo.utils.state_io import load_json_file, load_jsonl_file
 from pearlalgo.utils.paths import parse_trade_timestamp_to_utc
 
-_ET = ZoneInfo("America/New_York")
+from pearlalgo.utils.timezones import ET as _ET
 
 # ---------------------------------------------------------------------------
 # Simple caching mechanism
