@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { useAgentStore, useChartStore } from '@/stores'
+import { useAgentStore, useChartStore, useUIStore, selectWsStatus } from '@/stores'
 import { deriveHeadline } from '@/types/pearl'
 import { formatMarketCountdown } from '@/lib/formatters'
 
@@ -20,6 +20,7 @@ export default function NavBar() {
   const pathname = usePathname()
   const agentState = useAgentStore((s) => s.agentState)
   const marketStatus = useChartStore((s) => s.marketStatus)
+  const wsStatus = useUIStore(selectWsStatus)
 
   const isHome = pathname === '/' || pathname === ''
   const isDashboard = pathname?.startsWith('/dashboard')
@@ -89,6 +90,22 @@ export default function NavBar() {
                 role="status"
                 aria-label={dashboardContext.previewText}
               />
+              <span
+                className={`nav-context-ws nav-context-ws-${wsStatus}`}
+                role="status"
+                title={
+                  wsStatus === 'connected'
+                    ? 'WebSocket connected — live state streaming'
+                    : wsStatus === 'connecting'
+                      ? 'WebSocket reconnecting…'
+                      : wsStatus === 'error'
+                        ? 'WebSocket error — falling back to HTTP polling'
+                        : 'WebSocket disconnected — falling back to HTTP polling'
+                }
+                aria-label={`WebSocket ${wsStatus}`}
+              >
+                WS
+              </span>
               <span className="nav-context-preview">{dashboardContext.previewText}</span>
             </div>
           )}

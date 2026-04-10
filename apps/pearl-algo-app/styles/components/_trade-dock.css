@@ -1351,3 +1351,82 @@
     padding: var(--space-3);
   }
 }
+
+/* ============================================================================
+ * Strategy + R-Multiple chips on history rows
+ * ============================================================================ */
+
+.trade-strategy-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: var(--space-1) var(--space-3);
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  margin-left: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.trade-strategy-badge.strategy-cyan {
+  border-color: rgba(var(--accent-cyan-rgb), 0.45);
+  background: rgba(var(--accent-cyan-rgb), 0.12);
+  color: var(--accent-cyan);
+}
+.trade-strategy-badge.strategy-yellow {
+  border-color: rgba(var(--accent-yellow-rgb), 0.45);
+  background: rgba(var(--accent-yellow-rgb), 0.12);
+  color: var(--accent-yellow);
+}
+.trade-strategy-badge.strategy-green {
+  border-color: rgba(var(--accent-green-rgb), 0.45);
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--accent-green);
+}
+.trade-strategy-badge.strategy-purple {
+  border-color: rgba(var(--accent-purple-rgb), 0.45);
+  background: rgba(var(--accent-purple-rgb), 0.12);
+  color: var(--accent-purple);
+}
+.trade-strategy-badge.strategy-neutral {
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.trade-r-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  margin-right: var(--space-2);
+  flex: 0 0 auto;
+  cursor: help;
+}
+
+.trade-r-chip.positive {
+  border-color: rgba(var(--accent-green-rgb), 0.45);
+  background: rgba(var(--accent-green-rgb), 0.12);
+  color: var(--color-profit);
+}
+.trade-r-chip.negative {
+  border-color: rgba(var(--accent-red-rgb), 0.45);
+  background: rgba(var(--accent-red-rgb), 0.12);
+  color: var(--color-loss);
+}
+
+.trade-r-chip.planned {
+  border-color: rgba(var(--accent-cyan-rgb), 0.45);
+  background: rgba(var(--accent-cyan-rgb), 0.12);
+  color: var(--accent-cyan);
+}

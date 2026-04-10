@@ -132,6 +132,36 @@ type Tab = 'positions' | 'history' | 'stats' | 'analytics' | 'signals'
  * This is a *display* of historical data, not a *gate* — per CLAUDE.md the user
  * prefers strategy decisions without hour/regime/direction vetoes.
  */
+/**
+ * Map a backend signal_type / entry_reason to a short badge label and a CSS
+ * variant class. Handles common shapes (smc/fvg/vwap/orb/orb-extreme/etc) and
+ * falls back to the raw token uppercased.
+ */
+function strategyBadge(signalType?: string | null): { label: string; variant: string } | null {
+  if (!signalType) return null
+  const lower = String(signalType).toLowerCase()
+  if (lower.includes('smc') || lower.includes('fvg')) return { label: 'SMC', variant: 'cyan' }
+  if (lower.includes('vwap')) return { label: 'VWAP', variant: 'yellow' }
+  if (lower.includes('orb')) return { label: 'ORB', variant: 'green' }
+  if (lower.includes('breakout')) return { label: 'BO', variant: 'cyan' }
+  if (lower.includes('pullback')) return { label: 'PB', variant: 'purple' }
+  if (lower.includes('reversal')) return { label: 'REV', variant: 'purple' }
+  if (lower.includes('ema')) return { label: 'EMA', variant: 'cyan' }
+  // Fallback: first 3 letters uppercase
+  const token = lower.split(/[\s_-]/)[0] || lower
+  return { label: token.slice(0, 4).toUpperCase(), variant: 'neutral' }
+}
+
+/**
+ * Format an R-multiple value as "+2.3R" / "-0.8R" / "0R".
+ */
+function formatRMultiple(r?: number | null): string {
+  if (r == null || !Number.isFinite(r)) return '—'
+  if (r === 0) return '0R'
+  const sign = r > 0 ? '+' : ''
+  return `${sign}${r.toFixed(1)}R`
+}
+
 function AnalyticsTabContent({ analytics }: { analytics?: AnalyticsData | null }) {
   if (!analytics) {
     return <div className="trade-dock-empty">No analytics data yet — waiting for first session.</div>
@@ -288,34 +318,77 @@ function TradeDockPanel({
   const openLimit = maxOpenRows ?? 6
   const recentLimit = maxRecentRows ?? 8
 
+  // Index recent signal events by signal_id so we can enrich both open and
+  // closed trade rows with stop_loss / signal_type / take_profit that aren't
+  // on the underlying row itself.
+  const signalsById = useMemo(() => {
+    const map = new Map<string, RecentSignalEvent>()
+    for (const s of recentSignals || []) {
+      if (s?.signal_id) map.set(s.signal_id, s)
+    }
+    return map
+  }, [recentSignals])
+
   const openRows = useMemo(() => {
     const fallbackSymbol = symbol || '—'
     return (positions || [])
-      .map((p) => ({
-        ...p,
-        symbol: p.symbol || fallbackSymbol,
-      }))
+      .map((p) => {
+        const sig = p.signal_id ? signalsById.get(p.signal_id) : undefined
+        return {
+          ...p,
+          symbol: p.symbol || fallbackSymbol,
+          // Enrichment from matching signal lifecycle event
+          signal_type: sig?.signal_type ?? null,
+        }
+      })
       .sort((a, b) => {
         const at = a.entry_time ? (new Date(a.entry_time).getTime() || 0) : 0
         const bt = b.entry_time ? (new Date(b.entry_time).getTime() || 0) : 0
         return bt - at
       })
-  }, [positions, symbol])
+  }, [positions, symbol, signalsById])
 
   const recentRows = useMemo(() => {
     const fallbackSymbol = symbol || '—'
     return (recentTrades || [])
-      .map((t) => ({
-        ...t,
-        symbol: t.symbol || fallbackSymbol,
-        position_size: t.position_size ?? null,
-      }))
+      .map((t) => {
+        const sig = t.signal_id ? signalsById.get(t.signal_id) : undefined
+        // R-multiple: realized P&L (USD) divided by per-contract risk (USD).
+        // Per-contract risk = |entry − stop| × $/pt × contracts (then we
+        // collapse contracts in the denominator so 1 contract @ 2R == 5
+        // contracts @ 2R for the multiple).
+        let rMultiple: number | null = null
+        const entry = t.entry_price ?? sig?.entry_price ?? null
+        const stop = sig?.stop_loss ?? null
+        const usdPerPt = getUsdPerPoint(t.symbol || sig?.symbol || symbol)
+        const size = Number(t.position_size ?? 0)
+        if (
+          typeof t.pnl === 'number' &&
+          entry != null &&
+          stop != null &&
+          usdPerPt != null &&
+          size > 0
+        ) {
+          const riskPerContract = Math.abs(entry - stop) * usdPerPt
+          const totalRisk = riskPerContract * size
+          if (totalRisk > 0) rMultiple = t.pnl / totalRisk
+        }
+        return {
+          ...t,
+          symbol: t.symbol || fallbackSymbol,
+          position_size: t.position_size ?? null,
+          // Enrichment
+          stop_loss: stop,
+          signal_type: sig?.signal_type ?? null,
+          r_multiple: rMultiple,
+        }
+      })
       .sort((a, b) => {
         const at = a.exit_time ? (new Date(a.exit_time).getTime() || 0) : 0
         const bt = b.exit_time ? (new Date(b.exit_time).getTime() || 0) : 0
         return bt - at
       })
-  }, [recentTrades, symbol])
+  }, [recentTrades, symbol, signalsById])
 
   const openCount = openRows.length
   const recentCount = recentRows.length
@@ -863,6 +936,40 @@ function TradeDockPanel({
                       const id = p.signal_id
                       const isExpanded = expandedId === id
                       const uUsd = computeUnrealizedUsd(p)
+                      const strat = strategyBadge(p.signal_type)
+                      const ageSec = computeDurationSeconds(p.entry_time ?? null, new Date().toISOString())
+                      const usdPerPt = getUsdPerPoint(p.symbol || symbol)
+                      // Distance to stop / target in $ (per total position)
+                      let stopDistUsd: number | null = null
+                      let tpDistUsd: number | null = null
+                      let plannedR: number | null = null
+                      if (
+                        usdPerPt != null &&
+                        p.position_size != null &&
+                        p.position_size > 0
+                      ) {
+                        if (p.stop_loss != null) {
+                          stopDistUsd =
+                            Math.abs(p.entry_price - p.stop_loss) * usdPerPt * p.position_size
+                        }
+                        if (p.take_profit != null) {
+                          tpDistUsd =
+                            Math.abs(p.take_profit - p.entry_price) * usdPerPt * p.position_size
+                        }
+                        if (stopDistUsd != null && stopDistUsd > 0 && tpDistUsd != null) {
+                          plannedR = tpDistUsd / stopDistUsd
+                        }
+                      }
+
+                      const tooltip = [
+                        p.signal_type ? `Strategy: ${p.signal_type}` : null,
+                        ageSec != null && ageSec > 0 ? `In trade: ${formatDuration(ageSec)}` : null,
+                        plannedR != null ? `Planned R:R: 1:${plannedR.toFixed(1)}` : null,
+                        stopDistUsd != null ? `Risk to stop: $${stopDistUsd.toFixed(0)}` : null,
+                        tpDistUsd != null ? `Reward to target: $${tpDistUsd.toFixed(0)}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join('\n')
 
                       return (
                         <div key={id} className="recent-trade-wrapper">
@@ -873,15 +980,25 @@ function TradeDockPanel({
                             role="button"
                             tabIndex={0}
                             aria-expanded={isExpanded}
-                            aria-label={`${p.direction.toUpperCase()} ${p.symbol || symbol || ''} opened at ${formatPrice(p.entry_price)}, unrealized ${uUsd === null ? 'unknown' : `$${Math.abs(uUsd).toFixed(2)}`}`}
+                            aria-label={`${p.direction.toUpperCase()} ${p.symbol || symbol || ''} opened at ${formatPrice(p.entry_price)}, unrealized ${uUsd === null ? 'unknown' : `$${Math.abs(uUsd).toFixed(2)}`}${ageSec ? `, in trade ${formatDuration(ageSec)}` : ''}`}
+                            title={tooltip || undefined}
                           >
                             <div className="trade-left">
                               <span className={`trade-direction-badge ${p.direction}`}>
                                 {p.direction.toUpperCase()}
                               </span>
+                              {strat && (
+                                <span
+                                  className={`trade-strategy-badge strategy-${strat.variant}`}
+                                  title={p.signal_type ?? ''}
+                                >
+                                  {strat.label}
+                                </span>
+                              )}
                               <div className="trade-info">
                                 <span className="trade-time">
                                   {(p.symbol || symbol || '—')} • Opened {formatTime(p.entry_time || null)}
+                                  {ageSec != null && ageSec > 0 ? ` • ${formatDuration(ageSec)}` : ''}
                                 </span>
                                 <span className="trade-prices">
                                   {formatPrice(p.entry_price)} → {formatPrice(currentPrice ?? null)}
@@ -889,6 +1006,14 @@ function TradeDockPanel({
                               </div>
                             </div>
                             <div className="trade-right">
+                              {plannedR != null && (
+                                <span
+                                  className="trade-r-chip planned"
+                                  title="Planned reward-to-risk ratio (target / stop distance)"
+                                >
+                                  1:{plannedR.toFixed(1)}
+                                </span>
+                              )}
                               <span className={`trade-pnl ${uUsd === null ? '' : uUsd >= 0 ? 'positive' : 'negative'}`}>
                                 {uUsd === null ? '—' : `${uUsd >= 0 ? '+' : ''}$${Math.abs(uUsd).toFixed(2)}`}
                               </span>
@@ -1054,6 +1179,9 @@ function TradeDockPanel({
                     const reasonRaw = (t.exit_reason || '').toString()
                     const reason = reasonRaw ? formatExitReason(reasonRaw) : null
                     const dur = computeDurationSeconds(t.entry_time ?? null, t.exit_time ?? null)
+                    const strat = strategyBadge(t.signal_type)
+                    const rText = formatRMultiple(t.r_multiple)
+                    const rPositive = (t.r_multiple ?? 0) >= 0
 
                     return (
                       <div key={id} className="recent-trade-wrapper">
@@ -1064,13 +1192,22 @@ function TradeDockPanel({
                           role="button"
                           tabIndex={0}
                           aria-expanded={isExpanded}
-                          aria-label={`${dir.toUpperCase()} ${t.symbol || symbol || ''} exited at ${formatTime(t.exit_time ?? null)}, P&L ${formatPnL(t.pnl)}`}
+                          aria-label={`${dir.toUpperCase()} ${t.symbol || symbol || ''} exited at ${formatTime(t.exit_time ?? null)}, P&L ${formatPnL(t.pnl)}${t.r_multiple != null ? `, ${rText}` : ''}`}
                         >
                           <div className="trade-left">
                             <span className={`trade-direction-badge ${dir}`}>{dir.toUpperCase()}</span>
+                            {strat && (
+                              <span
+                                className={`trade-strategy-badge strategy-${strat.variant}`}
+                                title={t.signal_type ?? ''}
+                              >
+                                {strat.label}
+                              </span>
+                            )}
                             <div className="trade-info">
                               <span className="trade-time">
                                 {(t.symbol || symbol || '—')} • {formatTime(t.exit_time ?? null)}
+                                {dur != null && dur > 0 ? ` • ${formatDuration(dur)}` : ''}
                               </span>
                               {(t.entry_price != null && t.exit_price != null) && (
                                 <span className="trade-prices">
@@ -1080,6 +1217,14 @@ function TradeDockPanel({
                             </div>
                           </div>
                           <div className="trade-right">
+                            {t.r_multiple != null && (
+                              <span
+                                className={`trade-r-chip ${rPositive ? 'positive' : 'negative'}`}
+                                title="Realized P&L divided by initial risk (|entry−stop| × $/pt × contracts)"
+                              >
+                                {rText}
+                              </span>
+                            )}
                             <span className={`trade-pnl ${t.pnl === null || t.pnl === undefined ? '' : t.pnl >= 0 ? 'positive' : 'negative'}`}>
                               {formatPnL(t.pnl)}
                             </span>
@@ -1098,6 +1243,12 @@ function TradeDockPanel({
                               <span className="trade-detail-label">Symbol</span>
                               <span className="trade-detail-value">{t.symbol || symbol || '—'}</span>
                             </div>
+                            {t.signal_type && (
+                              <div className="trade-detail-row">
+                                <span className="trade-detail-label">Strategy</span>
+                                <span className="trade-detail-value">{t.signal_type}</span>
+                              </div>
+                            )}
                             <div className="trade-detail-row">
                               <span className="trade-detail-label">Qty</span>
                               <span className="trade-detail-value">{t.position_size ?? '—'}</span>
@@ -1114,6 +1265,12 @@ function TradeDockPanel({
                                 {formatPrice(t.exit_price ?? null)} @ {formatTime(t.exit_time ?? null)}
                               </span>
                             </div>
+                            {t.stop_loss != null && (
+                              <div className="trade-detail-row">
+                                <span className="trade-detail-label">Stop</span>
+                                <span className="trade-detail-value">{formatPrice(t.stop_loss)}</span>
+                              </div>
+                            )}
                             <div className="trade-detail-row">
                               <span className="trade-detail-label">Duration</span>
                               <span className="trade-detail-value">{formatDuration(dur)}</span>
@@ -1124,6 +1281,14 @@ function TradeDockPanel({
                                 {formatPnL(t.pnl)}
                               </span>
                             </div>
+                            {t.r_multiple != null && (
+                              <div className="trade-detail-row">
+                                <span className="trade-detail-label">R-Multiple</span>
+                                <span className={`trade-detail-value ${rPositive ? 'positive' : 'negative'}`}>
+                                  {rText}
+                                </span>
+                              </div>
+                            )}
                             {reasonRaw && (
                               <div className="trade-detail-row">
                                 <span className="trade-detail-label">Reason</span>

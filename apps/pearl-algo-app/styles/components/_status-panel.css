@@ -1913,6 +1913,14 @@
   opacity: 0.8;
 }
 
+.cb-trip-reason {
+  font-size: var(--font-size-xs);
+  color: var(--accent-yellow);
+  margin-left: var(--space-2);
+  font-style: italic;
+  cursor: help;
+}
+
 .session-countdown {
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 import { InfoTooltip } from './ui'
 import type {
@@ -37,6 +37,40 @@ export default function SystemStatusPanel({
   const [confirmKill, setConfirmKill] = useState(false)
   const [killBusy, setKillBusy] = useState(false)
   const [killResult, setKillResult] = useState<{ type: 'idle' | 'ok' | 'error'; message: string } | null>(null)
+
+  // Live cooldown countdown: anchor a deadline on each backend update, then
+  // tick locally so the displayed remaining time updates every second instead
+  // of only when the WS pushes a new state snapshot.
+  const cooldownDeadlineRef = useRef<number | null>(null)
+  const [liveCooldownSeconds, setLiveCooldownSeconds] = useState<number | null>(null)
+  useEffect(() => {
+    if (
+      circuitBreaker?.in_cooldown &&
+      typeof circuitBreaker.cooldown_remaining_seconds === 'number' &&
+      circuitBreaker.cooldown_remaining_seconds > 0
+    ) {
+      cooldownDeadlineRef.current =
+        Date.now() + circuitBreaker.cooldown_remaining_seconds * 1000
+      setLiveCooldownSeconds(circuitBreaker.cooldown_remaining_seconds)
+    } else {
+      cooldownDeadlineRef.current = null
+      setLiveCooldownSeconds(null)
+    }
+  }, [circuitBreaker?.in_cooldown, circuitBreaker?.cooldown_remaining_seconds])
+
+  useEffect(() => {
+    if (!circuitBreaker?.in_cooldown) return
+    const tick = () => {
+      const deadline = cooldownDeadlineRef.current
+      if (deadline == null) return
+      const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000))
+      setLiveCooldownSeconds(remaining)
+      if (remaining <= 0) cooldownDeadlineRef.current = null
+    }
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [circuitBreaker?.in_cooldown])
 
   // Determine overall system readiness
   const getSystemReadiness = () => {
@@ -177,18 +211,30 @@ export default function SystemStatusPanel({
               {circuitBreaker ? (
                 <>
                   {circuitBreaker.in_cooldown ? (
-                    <span className="status-chip cooldown">
+                    <span
+                      className="status-chip cooldown"
+                      title={
+                        circuitBreaker.trip_reason
+                          ? `Cooldown active: ${circuitBreaker.trip_reason}`
+                          : 'Cooldown active'
+                      }
+                    >
                       ⏱ Cooldown
-                      {circuitBreaker.cooldown_remaining_seconds && (
-                        <span className="chip-sub">
-                          {formatTimeRemaining(circuitBreaker.cooldown_remaining_seconds)}
-                        </span>
+                      {liveCooldownSeconds != null && liveCooldownSeconds > 0 && (
+                        <span className="chip-sub">{formatTimeRemaining(liveCooldownSeconds)}</span>
                       )}
                     </span>
                   ) : circuitBreaker.active ? (
                     <span className="status-chip active">✓ Active</span>
                   ) : (
                     <span className="status-chip inactive">Off</span>
+                  )}
+                  {circuitBreaker.in_cooldown && circuitBreaker.trip_reason && (
+                    <span className="cb-trip-reason" title={circuitBreaker.trip_reason}>
+                      {circuitBreaker.trip_reason.length > 28
+                        ? `${circuitBreaker.trip_reason.slice(0, 28)}…`
+                        : circuitBreaker.trip_reason}
+                    </span>
                   )}
                   {circuitBreaker.trips_today > 0 && (
                     <span className="trip-count">{circuitBreaker.trips_today} trips</span>
