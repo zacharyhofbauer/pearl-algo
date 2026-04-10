@@ -1,8 +1,0 @@
-# Package markers and compatibility wrappers intentionally retained.
-pearlalgo.data_providers
-pearlalgo.data_providers.ibkr
-pearlalgo.execution
-pearlalgo.execution.tradovate
-pearlalgo.market_agent
-pearlalgo.storage
-pearlalgo.utils

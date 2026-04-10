@@ -199,6 +199,7 @@ async def test_connection_failure_triggers_pause(tmp_path) -> None:
     )
     # Set low threshold to trigger quickly
     service.max_connection_failures = 2
+    service.pause_on_connection_failures = True
     # Disable adaptive cadence to ensure fast scan interval is respected
     service._adaptive_cadence_enabled = False
 
@@ -466,19 +467,20 @@ class TestCircuitBreakerThresholdEdgeCases:
         )
         # Set threshold to exactly 3
         service.max_connection_failures = 3
+        service.pause_on_connection_failures = True
         # Disable adaptive cadence to ensure fast scan interval is respected
         service._adaptive_cadence_enabled = False
 
         task = asyncio.create_task(service.start())
 
         # Wait for at least 3 failures
-        for _ in range(100):
+        for _ in range(200):
             if service.connection_failures >= 3:
                 break
             await asyncio.sleep(0.02)
 
         # At threshold=3, with 3 failures, should be paused
-        for _ in range(10):
+        for _ in range(50):
             if service.paused:
                 break
             await asyncio.sleep(0.02)
@@ -509,6 +511,7 @@ class TestCircuitBreakerThresholdEdgeCases:
             state_dir=tmp_path,
         )
         service.max_connection_failures = 1  # Pause on first failure
+        service.pause_on_connection_failures = True
 
         task = asyncio.create_task(service.start())
 

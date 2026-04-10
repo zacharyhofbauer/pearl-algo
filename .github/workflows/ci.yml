@@ -98,6 +98,29 @@ jobs:
         run: |
           python scripts/testing/report_orphan_modules.py --enforce
 
+      - name: Config validation (Issue 22)
+        run: |
+          python -c "
+          import yaml, sys
+          with open('config/live/tradovate_paper.yaml') as f:
+              cfg = yaml.safe_load(f)
+          # Verify critical safety values
+          exec_cfg = cfg.get('execution', {})
+          guardrails = cfg.get('guardrails', {})
+          errors = []
+          mpspo = exec_cfg.get('max_position_size_per_order') or guardrails.get('max_position_size_per_order')
+          if mpspo is not None and mpspo > 1:
+              errors.append(f'max_position_size_per_order={mpspo} exceeds safety limit of 1')
+          mps = exec_cfg.get('max_position_size') or guardrails.get('max_position_size')
+          if mps is not None and mps > 5:
+              errors.append(f'max_position_size={mps} exceeds MFF limit of 5')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}', file=sys.stderr)
+              sys.exit(1)
+          print(f'Config valid: {cfg.get(\"account\", {}).get(\"name\", \"unknown\")}')
+          "
+
       - name: Security scan (Trivy - filesystem/dependencies)
         uses: aquasecurity/trivy-action@master
         with:
@@ -106,7 +129,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
-        continue-on-error: true  # Informational for now
+        # Issue 18: Enforced — CRITICAL/HIGH vulns with available fixes block merge
 
       - name: Unit tests (skip external deps)
         env:

@@ -553,20 +553,46 @@ stop_gateway() {
     echo ""
 }
 
+# Issue 24: Safety prompt during market hours for stop/restart
+_confirm_if_market_open() {
+    # Skip prompt if --force flag was passed
+    if [[ "${FORCE:-}" == "true" ]]; then
+        return 0
+    fi
+    # Quick check: is it a weekday and within US futures hours (18:00-17:00 ET)?
+    local et_hour
+    et_hour=$(TZ="America/New_York" date +%H 2>/dev/null || echo "99")
+    local day_of_week
+    day_of_week=$(date +%u 2>/dev/null || echo "6")  # 1=Mon, 7=Sun
+    # Futures trade Sun 18:00 - Fri 17:00 ET
+    if [[ "$day_of_week" -le 5 ]] && [[ "$et_hour" != "99" ]]; then
+        echo -e "${YELLOW}${BOLD}WARNING: Market may be open (ET hour: ${et_hour}, day: ${day_of_week}).${NC}"
+        echo -e "${YELLOW}Stopping the agent will halt all position monitoring and exits.${NC}"
+        read -r -p "Continue? [y/N] " confirm
+        if [[ "${confirm,,}" != "y" ]]; then
+            echo -e "${RED}Aborted.${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 stop_all() {
+    _confirm_if_market_open || return 1
+
     echo ""
     echo -e "${BOLD}🐚 Stopping PEARL System...${NC}"
     echo -e "${BOLD}═══════════════════════════${NC}"
     echo ""
-    
+
     activate_venv
-    
+
     # Stop in reverse dependency order
     stop_tunnel
     stop_chart
     stop_agent
     stop_gateway
-    
+
     echo -e "${GREEN}${BOLD}✅ PEARL System Stopped${NC}"
     echo ""
 }
@@ -576,6 +602,8 @@ stop_all() {
 # ============================================================================
 
 restart_all() {
+    _confirm_if_market_open || return 1
+
     echo ""
     echo -e "${BOLD}🐚 Restarting PEARL System...${NC}"
     echo -e "${BOLD}════════════════════════════${NC}"
@@ -605,8 +633,15 @@ restart_services_only() {
     fi
     open_pos=$(curl -s "${header[@]}" "http://localhost:8001/api/state" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); pos=d.get('tradovate_account',{}).get('positions',[]); print(len(pos))" 2>/dev/null || echo "0")
     if [ "$open_pos" -gt "0" ]; then
-        echo -e "${RED}SOFT-RESTART BLOCKED: $open_pos open position(s) detected. Close positions before restarting.${NC}"
-        exit 1
+        if [[ "${FORCE:-}" == "true" ]]; then
+            echo -e "${YELLOW}WARNING: $open_pos open position(s) detected — restarting anyway (FORCE=true).${NC}"
+            echo -e "${YELLOW}Broker bracket orders (SL/TP) will continue to manage the position.${NC}"
+            echo -e "${YELLOW}Agent-side state (partial_runner, trailing stop overrides) will be lost.${NC}"
+        else
+            echo -e "${RED}SOFT-RESTART BLOCKED: $open_pos open position(s) detected. Close positions before restarting.${NC}"
+            echo -e "${YELLOW}Override with: FORCE=true ./pearl.sh soft-restart${NC}"
+            exit 1
+        fi
     fi
 
     echo ""

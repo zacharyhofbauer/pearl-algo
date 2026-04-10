@@ -1028,14 +1028,51 @@ def check_key_level_signals(
 
 def check_trading_session(dt: datetime, config: Dict) -> bool:
     """
-    Return whether strategy session gating allows signal generation.
+    Return whether the current time is within the configured trading session.
 
-    PEARL no longer enforces time-of-day or timezone-based strategy windows.
-    Session config remains in the codebase for observability and historical
-    compatibility, but signal generation should run regardless of local time,
-    timezone conversion quirks, or configured session boundaries.
+    Session window is defined by session.start_time / session.end_time in ET.
+    Supports overnight sessions (e.g. 18:00 start, 16:00 end = Sun-Fri futures).
     """
-    return True
+    import zoneinfo
+
+    try:
+        # Respect enforce_session_window flag (False = always allow)
+        strategy = config.get("strategy") or {}
+        if strategy.get("enforce_session_window") is False:
+            return True
+
+        session = config.get("session") or {}
+        start_str = str(session.get("start_time", "18:00") or "18:00")
+        end_str = str(session.get("end_time", "16:00") or "16:00")
+        tz_name = str(session.get("timezone", "America/New_York") or "America/New_York")
+    except Exception:
+        return True  # If config is unparseable, allow trading
+
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = zoneinfo.ZoneInfo("America/New_York")
+
+    try:
+        # Convert dt to session timezone
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+        local = dt.astimezone(tz)
+        now_minutes = local.hour * 60 + local.minute
+
+        sh, sm = (int(x) for x in start_str.split(":"))
+        eh, em = (int(x) for x in end_str.split(":"))
+        start_minutes = sh * 60 + sm
+        end_minutes = eh * 60 + em
+    except Exception:
+        return True  # If parsing fails, allow trading
+
+    if start_minutes < end_minutes:
+        # Same-day session (e.g. 09:30 - 16:00)
+        return start_minutes <= now_minutes < end_minutes
+    else:
+        # Overnight session (e.g. 18:00 - 16:00)
+        return now_minutes >= start_minutes or now_minutes < end_minutes
 
 
 # ============================================================================
@@ -2347,6 +2384,7 @@ def generate_signals(
     config: Optional[Dict] = None,
     current_time: Optional[datetime] = None,
     df_5m: Optional[pd.DataFrame] = None,
+    diagnostics: Optional[Dict] = None,
 ) -> List[Dict]:
     """
     Main signal generation function - combines all Pine Script strategies.
@@ -2410,7 +2448,10 @@ def generate_signals(
     # Stage 1b: Override regime with 5m-based detection when available.
     # 5m regime is more stable and catches trend changes faster than
     # 50-bar lookback on 1m (which is only ~50 min of noisy data).
-    if df_5m is not None and not df_5m.empty and len(df_5m) >= 30:
+    _mtf_override_enabled = bool(
+        (config or {}).get("composite_regime", {}).get("mtf_override_enabled", True)
+    )
+    if _mtf_override_enabled and df_5m is not None and not df_5m.empty and len(df_5m) >= 30:
         regime_5m = detect_market_regime(df_5m, lookback=min(50, len(df_5m)))
         old_regime = ind.regime
         ind.regime = regime_5m
@@ -2419,6 +2460,8 @@ def generate_signals(
                 f"MTF regime override: 1m={old_regime.regime}({old_regime.confidence:.2f}) "
                 f"→ 5m={regime_5m.regime}({regime_5m.confidence:.2f})"
             )
+    elif not _mtf_override_enabled:
+        logger.debug("MTF regime override: disabled by config")
 
     # ------------------------------------------------------------------
     # Extract core indicators from ind (already computed by
@@ -2967,6 +3010,10 @@ def generate_signals(
 
     if len(signal_candidates) < pre_filter_count:
         filtered_count = pre_filter_count - len(signal_candidates)
+        if diagnostics is not None:
+            diagnostics["rejected_confidence"] = (
+                int(diagnostics.get("rejected_confidence", 0) or 0) + filtered_count
+            )
         logger.debug(
             f"Post-regime confidence filter removed {filtered_count} signal(s) "
             f"that fell below confidence threshold after regime adjustment"
@@ -2997,9 +3044,20 @@ def generate_signals(
     signal_candidates = validated
 
     if len(signal_candidates) < pre_sanity_count:
+        rejected_price_count = pre_sanity_count - len(signal_candidates)
+        if diagnostics is not None:
+            diagnostics["rejected_invalid_prices"] = (
+                int(diagnostics.get("rejected_invalid_prices", 0) or 0)
+                + rejected_price_count
+            )
         logger.warning(
             "Price sanity filter removed %d signal(s) with NaN/Inf/non-positive prices",
-            pre_sanity_count - len(signal_candidates),
+            rejected_price_count,
+        )
+
+    if diagnostics is not None:
+        diagnostics["raw_signals"] = (
+            int(diagnostics.get("raw_signals", 0) or 0) + len(signal_candidates)
         )
 
     return signal_candidates

@@ -341,7 +341,6 @@ export interface AccountConfig {
   display_name: string
   badge: string
   badge_color: string
-  telegram_prefix: string
   description: string
 }
 

@@ -470,26 +470,44 @@ class _SignalStore:
                     self._signal_write_count += 1
                     if self._signal_write_count % 100 == 0:
                         self._rotate_signals_file()
-            except Exception as e:
-                logger.warning(f"File locking failed, falling back to unlocked write: {e}")
-                signal_record = {
-                    "signal_id": signal_id,
-                    "timestamp": get_utc_timestamp(),
-                    "status": "generated",
-                    "signal": _to_json_safe(signal),
-                }
+            except OSError as e:
+                # Retry once after a short delay (Issue 4: retry + fail loud)
+                import time as _time
+                logger.warning("File lock failed on signals write, retrying in 100ms: %s", e)
+                _time.sleep(0.1)
                 try:
-                    payload = json.dumps(signal_record)
-                except TypeError:
-                    payload = json.dumps(create_minimal_signal_record(signal_id, signal))
-                with open(self._signals_file, "a") as f:
-                    f.write(payload + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
+                    with file_lock(lock_path):
+                        signal_record = {
+                            "signal_id": signal_id,
+                            "timestamp": get_utc_timestamp(),
+                            "status": "generated",
+                            "signal": _to_json_safe(signal),
+                        }
+                        try:
+                            payload = json.dumps(signal_record)
+                        except TypeError:
+                            payload = json.dumps(create_minimal_signal_record(signal_id, signal))
+                        with open(self._signals_file, "a") as f:
+                            f.write(payload + "\n")
+                            f.flush()
+                            os.fsync(f.fileno())
 
-                if self._signal_count is not None:
-                    self._signal_count += 1
-                    self._write_signal_count_sidecar(self._signal_count)
+                        if self._signal_count is not None:
+                            self._signal_count += 1
+                            self._write_signal_count_sidecar(self._signal_count)
+
+                        self._signals_cache = None
+                except Exception as retry_err:
+                    # Fail loud: skip the write to prevent corruption, log CRITICAL
+                    logger.critical(
+                        "Signal write SKIPPED after lock retry failure — "
+                        "signal_id=%s will not be persisted to signals.jsonl. "
+                        "Lock error: %s",
+                        signal_id, retry_err,
+                    )
+            except Exception as e:
+                # Non-lock errors (JSON serialization, disk full, etc.)
+                logger.error("Signal persistence failed: %s", e, exc_info=True)
 
             # Dual-write to SQLite
             try:
@@ -727,6 +745,12 @@ class MarketAgentStateManager:
     def set_sqlite_queue(self, queue: Any) -> None:
         """Set the async SQLite queue for non-blocking dual-write operations."""
         self._signal_store.set_sqlite_queue(queue)
+
+    def set_sqlite(self, enabled: bool, trade_db: Any) -> None:
+        """Enable/disable SQLite dual-write for signal persistence."""
+        self._sqlite_enabled = bool(enabled and trade_db is not None)
+        self._trade_db = trade_db if self._sqlite_enabled else None
+        self._signal_store.set_sqlite(self._sqlite_enabled, self._trade_db)
 
     # -- delegation: signals -------------------------------------------
 

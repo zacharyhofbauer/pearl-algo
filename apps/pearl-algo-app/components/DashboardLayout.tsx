@@ -103,11 +103,6 @@ const DashboardLayout = React.memo(function DashboardLayout({
                 <rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/>
               </svg>
             </Link>
-            <Link href="/archive/ibkr" className="tv-sidebar-icon" title="Archive">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <rect x="2" y="4" width="14" height="12" rx="2"/><path d="M2 4l2-2h10l2 2"/><line x1="7" y1="9" x2="11" y2="9"/>
-              </svg>
-            </Link>
             <Link href="/settings" className="tv-sidebar-icon" title="Settings">
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.1 3.1l1.4 1.4M13.5 13.5l1.4 1.4M3.1 14.9l1.4-1.4M13.5 4.5l1.4-1.4"/>

@@ -155,6 +155,11 @@ class PerformanceTracker:
         """
         self._async_sqlite_queue = queue
 
+    def set_sqlite(self, enabled: bool, trade_db) -> None:
+        """Enable/disable SQLite dual-write targets used by performance tracking."""
+        self._sqlite_enabled = bool(enabled and trade_db is not None)
+        self._trade_db = trade_db if self._sqlite_enabled else None
+
     def track_signal_generated(self, signal: Dict) -> str:
         """
         Track a new signal generation.
@@ -518,9 +523,25 @@ class PerformanceTracker:
         )
         _pnl_source = "fill_matched" if _fill_match else "estimated"
 
+        # Resolve signal_type with last-resort fallback to signal_record fields.
+        # If still missing, log a WARNING so the data-loss path is visible
+        # (audit 2026-04-10: legacy stub trades had signal_type='unknown').
+        _resolved_type = (
+            signal.get("type")
+            or signal.get("signal_type")
+            or signal_record.get("signal_type")
+            or signal_record.get("type")
+        )
+        if not _resolved_type:
+            logger.warning(
+                "track_exit: signal_type missing for %s (exit_reason=%s, direction=%s) — "
+                "stored as 'unknown'. Investigate signal lifecycle.",
+                signal_id, exit_reason, direction,
+            )
+
         performance = {
             "signal_id": signal_id,
-            "signal_type": signal.get("type"),
+            "signal_type": _resolved_type,
             "direction": direction,
             "entry_price": entry_price,
             "exit_price": exit_price,

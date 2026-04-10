@@ -3,7 +3,6 @@ account:
   display_name: Tradovate Paper
   badge: PAPER
   badge_color: purple
-  telegram_prefix: TV-PAPER
 
 symbol: MNQ
 timeframe: 1m
@@ -34,11 +33,16 @@ strategies:
   composite_intraday:
     ema_fast: 9
     ema_slow: 21
-    min_confidence: 0.4
-    min_confidence_long: 0.4
-    min_confidence_short: 0.4
-    stop_loss_atr_mult: 1.5
-    take_profit_atr_mult: 2.5
+    # AUDIT 2026-04-10: bumped from 0.4 → 0.55. The IBKR-era winning system
+    # ran ~0.55 confidence floor; 0.4 was admitting low-quality signals.
+    min_confidence: 0.55
+    min_confidence_long: 0.55
+    min_confidence_short: 0.55
+    # AUDIT 2026-04-10: widened from 1.5 → 2.5 SL mult and 2.5 → 4.0 TP mult.
+    # IBKR-era winners had avg SL 54pt / TP 80pt. Current was 16pt/26pt — ~3x
+    # too tight, jamming the strategy into the 0-15min losing bucket.
+    stop_loss_atr_mult: 2.5
+    take_profit_atr_mult: 4.0
     volatile_sl_mult: 1.3
     volatile_tp_mult: 1.3
     ranging_sl_mult: 0.8
@@ -57,22 +61,19 @@ strategies:
     sd_threshold_pct: 10.0
     sd_resolution: 50
     vwap_std_dev: 1.0
-    allow_orb_entries: true
-    allow_vwap_2sd_entries: true
-    allow_smc_entries: true
+    # AUDIT 2026-04-10: disabled the 3 trigger types added in the 03-30 revamp.
+    # trades.db shows they fire rarely (2 SMC trades in 173) but contribute to
+    # signal scoring noise. Restore the legacy 4-trigger pearlbot core.
+    allow_orb_entries: false
+    allow_vwap_2sd_entries: false
+    allow_smc_entries: false
     adx_period: 14
     adx_trending_threshold: 25.0
     adx_ranging_threshold: 20.0
 session:
   start_time: '18:00'
-  end_time: '17:00'
+  end_time: '16:00'
   timezone: America/New_York
-
-telegram:
-  enabled: false
-  bot_token: ${TELEGRAM_BOT_TOKEN}
-  chat_id: ${TELEGRAM_CHAT_ID}
-  notification_tier: debug
 
 risk:
   max_risk_per_trade: 0.015
@@ -111,11 +112,76 @@ circuit_breaker:
   max_data_fetch_errors: 5
   pause_on_connection_failures: false
 
+trading_circuit_breaker:
+  # Direction Gating — DISABLED 2026-04-10. Per CLAUDE.md user wants strategy
+  # decisions without direction vetoes. Was silently restricting shorts to
+  # trending_down only and longs to "unknown" regime, starving the system.
+  enable_direction_gating: false
+  direction_gating_min_confidence: 0.70
+  # Regime Avoidance — DISABLED 2026-04-10. blocked_regimes contained
+  # `trending_up` (54% of recent market) which blocked the dominant regime.
+  # Per CLAUDE.md user wants strategy decisions without regime vetoes.
+  enable_regime_avoidance: false
+  blocked_regimes:
+    - ranging
+    - volatile
+  regime_avoidance_min_confidence: 0.70
+  max_concurrent_positions: 5
+  # Position Clustering — DISABLED 2026-04-10. Default was 0.5% which on MNQ
+  # at $25k = 125pt = ~8x the new SL distance. Was rejecting EVERY signal that
+  # came in within 125pt of an open position in the same direction, killing
+  # ~63% of post-restart signals (post-audit conversion dropped from 15% to 3%).
+  # The user's max_position_size_per_order=1 + max_position_size=5 setup is
+  # explicitly designed for stacking 1-contract adds; clustering was incompatible.
+  # Position management is handled by max_concurrent_positions and cooldown_seconds.
+  min_price_distance_pct: 0.0
+
 guardrails:
   signal_gate_enabled: false
+  mode: enforce
   max_consecutive_losses: 3
-  max_session_drawdown: 1800.0
-  max_daily_drawdown: 99999.0
+  consecutive_loss_cooldown_minutes: 15
+  max_session_drawdown: 800.0
+  max_daily_drawdown: 800.0
+  max_daily_profit: 3000.0
+  drawdown_cooldown_minutes: 60
+  rolling_window_trades: 30
+  min_rolling_win_rate: 0.30
+  win_rate_cooldown_minutes: 30
+  require_winning_trade_to_resume: true
+  # Equity Curve Filter — halve size when equity drops below 20-trade EMA
+  enable_equity_curve_filter: true
+  equity_curve_lookback: 20
+  equity_curve_half_size_below_ma: true
+  equity_curve_halt_atr_mult: 1.5
+  # Tiered Consecutive Loss Response — scale down before halting
+  enable_tiered_loss_response: true
+  tiered_loss_levels:
+    - losses: 3
+      risk_scale: 0.5
+      action: reduce
+    - losses: 5
+      risk_scale: 0.25
+      action: reduce
+    - losses: 7
+      risk_scale: 0.0
+      action: halt
+      cooldown_minutes: 30
+    - losses: 10
+      risk_scale: 0.0
+      action: halt_session
+  # Time-of-Day Risk Windows — reduce exposure during historically weak hours
+  enable_tod_risk_scaling: true
+  tod_risk_windows:
+    - start_hour_et: 15
+      end_hour_et: 18
+      risk_scale: 0.5
+  # Volatility Risk Scaling — cut size when ATR expands
+  enable_volatility_risk_scaling: true
+  volatility_high_atr_ratio: 1.5
+  volatility_high_risk_scale: 0.5
+  volatility_extreme_atr_ratio: 2.0
+  volatility_extreme_risk_scale: 0.0
 
 data:
   buffer_size: 300
@@ -194,7 +260,7 @@ virtual_pnl:
 auto_flat:
   enabled: true
   daily_enabled: true
-  daily_time: '16:30'
+  daily_time: '16:00'
   friday_enabled: false
   friday_time: '16:55'
   weekend_enabled: false
@@ -207,6 +273,7 @@ audit:
 
 composite_regime:
   enabled: true
+  mtf_override_enabled: false
   chop_zone_low: 4.0
   chop_zone_high: 6.0
   chop_zone_min_confidence: 0.75
@@ -228,9 +295,9 @@ execution:
   allow_reversal_on_opposite_signal: true
   max_position_size_per_order: 1
   max_positions: 5
-  max_orders_per_day: 50
+  max_orders_per_day: 150
   max_daily_loss: 99999.0
-  cooldown_seconds: 30
+  cooldown_seconds: 60
   symbol_whitelist:
   - MNQ
   ibkr_trading_client_id: 50
@@ -281,8 +348,12 @@ advanced_exits:
     min_duration_minutes: 20
     max_mfe_threshold: 20
     min_mae_threshold: 60
+  # AUDIT 2026-04-10: DISABLED. This was killing the 15-60min sweet spot.
+  # At 10 min, if profit > 30pt, took 70% off — booking winners before they
+  # could mature. IBKR-era data shows trades held 15+ min were the only ones
+  # making money; trades exited <15 min lost ~$7k net.
   time_based_exit:
-    enabled: true
+    enabled: false
     min_duration_minutes: 10
     min_profit_threshold: 30
     take_percentage: 0.7
@@ -295,7 +366,11 @@ advanced_exits:
     tight_trail_trigger_atr: 2.5
     tight_trail_distance_atr: 1.0
     breakeven_offset: 0.25
-    remove_fixed_tp: true
+    # AUDIT 2026-04-10: was true, deleting the original TP target so the
+    # runner relied solely on a trailing stop. On choppy MNQ that yanks
+    # winners on minor pullbacks. Set false so winners can reach the wider
+    # take_profit_atr_mult target we just set.
+    remove_fixed_tp: false
   max_hold_exit:
     enabled: true
     max_duration_minutes: 180

@@ -284,7 +284,9 @@ class AsyncSQLiteQueue:
                             self._write_times = self._write_times[-1000:]
                     except Exception as e:
                         self._total_errors += 1
-                        logger.debug(f"Overflow write failed (non-fatal): {ow.operation} | {e}")
+                        logger.warning(
+                            f"Overflow SQLite write failed (non-fatal): {ow.operation} | {e}"
+                        )
                 
                 # --- Then pull from the main queue ---
                 try:
@@ -306,7 +308,9 @@ class AsyncSQLiteQueue:
                     
                 except Exception as e:
                     self._total_errors += 1
-                    logger.debug(f"SQLite write failed (non-fatal): {write.operation} | {e}")
+                    logger.warning(
+                        f"SQLite write failed (non-fatal): {write.operation} | {e}"
+                    )
                 finally:
                     self._queue.task_done()
                 
@@ -325,7 +329,7 @@ class AsyncSQLiteQueue:
                     self._total_writes += 1
                 except Exception as e:
                     self._total_errors += 1
-                    logger.debug(f"Overflow flush write failed: {e}")
+                    logger.warning(f"Overflow flush SQLite write failed: {e}")
             logger.info(f"Flushed {len(overflow_remaining)} overflow writes")
         
         # Flush remaining writes from main queue on shutdown
@@ -344,7 +348,7 @@ class AsyncSQLiteQueue:
                     break
                 except Exception as e:
                     self._total_errors += 1
-                    logger.debug(f"Flush write failed: {e}")
+                    logger.warning(f"Flush SQLite write failed: {e}")
             logger.info(f"Flushed {flushed}/{remaining} writes")
         
         logger.info("AsyncSQLiteQueue worker loop exited")
@@ -387,5 +391,4 @@ class AsyncSQLiteQueue:
             worker_running=self._running and (self._worker_thread is not None) and self._worker_thread.is_alive(),
             backpressure_active=self.is_backpressure_active(),
         )
-
 

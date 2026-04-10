@@ -650,7 +650,6 @@ export default function DashboardPageInner() {
               </div>
               <nav className="mobile-menu-nav">
                 <a href="/dashboard?account=tv_paper" className="mobile-menu-item active">Dashboard</a>
-                <a href="/archive/ibkr" className="mobile-menu-item">Archive</a>
                 <a href="/settings" className="mobile-menu-item">Settings</a>
               </nav>
               <div className="mobile-menu-divider" />

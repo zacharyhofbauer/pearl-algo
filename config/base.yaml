@@ -5,11 +5,6 @@ session:
   start_time: '18:00'
   end_time: '15:45'
   timezone: America/New_York
-telegram:
-  enabled: true
-  bot_token: ${TELEGRAM_BOT_TOKEN}
-  chat_id: ${TELEGRAM_CHAT_ID}
-  notification_tier: critical
 risk:
   max_risk_per_trade: 0.015
   max_drawdown: 0.1

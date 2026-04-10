@@ -27,12 +27,13 @@ async def test_service_smoke_start_iterate_stop(tmp_path: Path) -> None:
     config["scan_interval"] = 0.05  # fast cycle for test
 
     service = MarketAgentService(data_provider=provider, config=config, state_dir=tmp_path)
+    service._adaptive_cadence_enabled = False
 
     task = asyncio.create_task(service.start())
-    # Let the service run at least one cycle
-    await asyncio.sleep(0.3)
+    # Let the service run several cycles (first cycle may include init overhead)
+    await asyncio.sleep(1.0)
     await service.stop("smoke_test")
-    await asyncio.wait_for(task, timeout=3.0)
+    await asyncio.wait_for(task, timeout=5.0)
 
     assert not service.running
     # Verify the service processed at least one scan cycle

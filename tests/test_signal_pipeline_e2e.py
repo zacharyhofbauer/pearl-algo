@@ -89,7 +89,7 @@ def _make_realistic_handler(tmp_path):
 
 def _make_e2e_signal():
     return {
-        "type": "sr_bounce",
+        "type": "pearlbot_pinescript",
         "direction": "long",
         "symbol": "MNQ",
         "entry_price": 20000.0,

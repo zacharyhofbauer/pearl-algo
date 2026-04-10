@@ -35,8 +35,7 @@ from pearlalgo.execution.tradovate.client import (
     TradovateAuthError,
 )
 from pearlalgo.execution.tradovate.config import TradovateConfig
-
-logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 
 class TradovateExecutionAdapter(ExecutionAdapter):
@@ -97,6 +96,10 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         self._reconnect_task: Optional[asyncio.Task] = None
         # Track all background tasks for cleanup on disconnect (Issue 7)
         self._background_tasks: List[asyncio.Task] = []
+
+        # FIXED 2026-04-08: Signal dedup — prevent same signal_id from entering twice
+        self._executed_signal_ids: Dict[str, float] = {}  # signal_id -> monotonic timestamp
+        self._SIGNAL_DEDUP_TTL: float = 300.0  # 5 minutes — covers any reasonable fill window
 
         # Rate limit backoff state
         self._rate_limit_backoff: float = 0.0  # extra delay after 429
@@ -368,6 +371,26 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         """
         signal_id = signal.get("signal_id", str(uuid.uuid4()))
 
+        # FIXED 2026-04-08: Reject duplicate signal_ids — prevents double entries
+        # when the same signal fires twice (race condition or signal storm).
+        now = time.monotonic()
+        # Evict expired entries
+        self._executed_signal_ids = {
+            sid: ts for sid, ts in self._executed_signal_ids.items()
+            if now - ts < self._SIGNAL_DEDUP_TTL
+        }
+        if signal_id in self._executed_signal_ids:
+            logger.warning(
+                "DEDUP GUARD: signal_id=%s already executed %.1fs ago — rejecting duplicate",
+                signal_id, now - self._executed_signal_ids[signal_id],
+            )
+            return ExecutionResult(
+                success=False,
+                status=OrderStatus.REJECTED,
+                signal_id=signal_id,
+                error_message="duplicate_signal_id_rejected",
+            )
+
         # Check preconditions (armed, limits, cooldowns, etc.)
         decision = self.check_preconditions(signal)
         if not decision.execute:
@@ -410,8 +433,16 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                         if isinstance(p, dict)
                     ]
                 except Exception:
-                    logger.warning("Failed to fetch broker positions, defaulting to empty", exc_info=True)
-                    broker_positions = []
+                    logger.error(
+                        "Failed to fetch broker positions — REJECTING signal for safety "
+                        "(cannot verify broker state). signal=%s", signal_id, exc_info=True,
+                    )
+                    return ExecutionResult(
+                        success=False,
+                        status=OrderStatus.REJECTED,
+                        signal_id=signal_id,
+                        error_message="position_check_failed_cannot_verify_broker_state",
+                    )
 
             active_broker_positions = [
                 p for p in broker_positions if p.get("net_pos", 0) != 0
@@ -493,7 +524,13 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     error_message=f"max_position_size ({total_abs_pos}/{max_net_positions}) reached",
                 )
         except (TradovateAPIError, asyncio.TimeoutError, OSError, ValueError, TypeError, KeyError) as e:
-            logger.warning(f"Broker position guard check failed (non-fatal): {e}")
+            logger.error(f"Broker position guard check failed — REJECTING signal for safety: {e}")
+            return ExecutionResult(
+                success=False,
+                status=OrderStatus.REJECTED,
+                signal_id=signal_id,
+                error_message=f"position_guard_error: {e}",
+            )
 
         # Dry-run mode
         if self.config.mode.value == "dry_run":
@@ -653,12 +690,16 @@ class TradovateExecutionAdapter(ExecutionAdapter):
             f"tp_distance={abs(take_profit - entry_price):.2f} sl_distance={abs(stop_loss - entry_price):.2f}"
         )
 
+        # Mark signal as executed BEFORE placing — prevents duplicates even if
+        # the API call is slow and a second invocation arrives.
+        self._executed_signal_ids[signal_id] = time.monotonic()
+
         pending_incremented = False
         try:
             async with self._pending_orders_lock:
                 self._pending_orders_count += 1
                 pending_incremented = True
-            result = await self._client.place_oso(
+            _oso_kwargs = dict(
                 symbol=self._contract_symbol,
                 action=action,
                 order_qty=position_size,
@@ -666,6 +707,24 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 tp_price=take_profit if take_profit > 0 else None,
                 sl_price=stop_loss if stop_loss > 0 else None,
             )
+            try:
+                async with asyncio.timeout(15):
+                    result = await self._client.place_oso(**_oso_kwargs)
+            except TimeoutError:
+                # FIXED 2026-04-08: Do NOT retry — timeout does not mean the order
+                # wasn't placed. Retrying risks duplicate positions at the broker.
+                # Fail closed and let the next signal cycle re-evaluate.
+                logger.critical(
+                    "Tradovate place_oso TIMEOUT (15s) for signal=%s — "
+                    "NOT retrying (risk of duplicate order). Check broker manually.",
+                    signal_id,
+                )
+                return ExecutionResult(
+                    success=False,
+                    status=OrderStatus.ERROR,
+                    signal_id=signal_id,
+                    error_message="execution_timeout_no_retry",
+                )
 
             # ADDED 2026-03-25: log raw response for debugging bracket issues
             logger.info(
@@ -716,14 +775,24 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     if len(result) > 2 and isinstance(result[2], dict):
                         sl_order_id = str(result[2].get("orderId") or result[2].get("id") or "")
                 elif isinstance(result, dict):
-                    # Dict format: {"orderId": X, "bracket1": {"orderId": Y}, "bracket2": {"orderId": Z}}
-                    # bracket1 = TP (limit), bracket2 = SL (stop) per place_oso request body construction
-                    b1 = result.get("bracket1") or {}
-                    b2 = result.get("bracket2") or {}
-                    if isinstance(b1, dict):
-                        tp_order_id = str(b1.get("orderId") or b1.get("id") or "")
-                    if isinstance(b2, dict):
-                        sl_order_id = str(b2.get("orderId") or b2.get("id") or "")
+                    # Tradovate placeOSO returns flat: {"orderId": X, "oso1Id": Y, "oso2Id": Z}
+                    # where oso1Id = bracket1 (TP limit), oso2Id = bracket2 (SL stop)
+                    oso1 = result.get("oso1Id")
+                    oso2 = result.get("oso2Id")
+                    if oso1:
+                        tp_order_id = str(oso1)
+                    if oso2:
+                        sl_order_id = str(oso2)
+
+                    # Legacy fallback: nested dict format
+                    if not tp_order_id:
+                        b1 = result.get("bracket1") or {}
+                        if isinstance(b1, dict):
+                            tp_order_id = str(b1.get("orderId") or b1.get("id") or "")
+                    if not sl_order_id:
+                        b2 = result.get("bracket2") or {}
+                        if isinstance(b2, dict):
+                            sl_order_id = str(b2.get("orderId") or b2.get("id") or "")
 
                 raw_keys = list(result.keys()) if isinstance(result, dict) else f"list[{len(result)}]"
                 logger.info(
@@ -798,20 +867,47 @@ class TradovateExecutionAdapter(ExecutionAdapter):
 
     # FIXED 2026-03-26: bracket detection - helpers to detect and cancel duplicate stops
     async def _has_existing_stop_for_position(self, position_direction: str) -> bool:
-        """Check if Tradovate already has a working stop order for the current position."""
+        """Check if Tradovate already has a working stop order for the current position.
+
+        Tradovate's /order/list returns minimal fields (orderType is often empty).
+        We check: (1) any order with working status + stopPrice set, (2) any order
+        with working status + correct exit action, (3) our tracked SL order IDs.
+        """
         try:
             orders = await self._client.get_orders()
             if not orders:
+                logger.info("_has_existing_stop: get_orders returned empty")
                 return False
             stop_action = "Sell" if position_direction == "long" else "Buy"
             working_states = {"working", "open", "accepted", "pending", "held", "submitted"}
+
             for order in orders:
                 order_type = (order.get("orderType") or "").lower()
                 action = order.get("action", "")
                 status = (order.get("ordStatus") or order.get("status") or "").lower()
-                if order_type == "stop" and action == stop_action and status in working_states:
-                    logger.info(f"Existing stop found: orderId={order.get('id')} price={order.get('stopPrice')}")
+                stop_price = order.get("stopPrice")
+                order_id = order.get("id") or order.get("orderId")
+
+                if status not in working_states:
+                    continue
+
+                # Match by orderType if available
+                if order_type == "stop" and action == stop_action:
+                    logger.info(f"Existing stop found (by type): orderId={order_id} price={stop_price}")
                     return True
+
+                # Match by stopPrice presence (orderType often empty in list endpoint)
+                if stop_price is not None and action == stop_action:
+                    logger.info(f"Existing stop found (by stopPrice): orderId={order_id} price={stop_price}")
+                    return True
+
+                # Fallback: when orderType is empty (Tradovate list endpoint bug),
+                # any working exit-direction order likely indicates a bracket leg
+                if not order_type and action == stop_action:
+                    logger.info(f"Existing protective order found (by action, empty type): orderId={order_id} action={action}")
+                    return True
+
+            logger.info(f"_has_existing_stop: no working {stop_action} orders found in {len(orders)} total orders")
             return False
         except Exception as e:
             logger.warning(f"Could not check existing stops: {e}")

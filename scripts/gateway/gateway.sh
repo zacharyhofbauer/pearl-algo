@@ -1226,6 +1226,10 @@ AcceptNonBrokerageAccountWarning=yes
 AutoRestart=no
 RestartDaily=no
 
+# Session persistence - take over existing sessions instead of prompting, auto-retry if 2FA times out
+ExistingSessionDetectedAction=primary
+ReloginAfterSecondFactorAuthenticationTimeout=yes
+
 # Logging
 LogComponents=yes
 LogToFile=yes
@@ -1287,7 +1291,9 @@ cmd_reduce_login_prompts() {
   _set_ini_or_append "ReadOnlyLogin" "yes"
   _set_ini_or_append "AcceptIncomingConnectionAction" "accept"
   _set_ini_or_append "AcceptNonBrokerageAccountWarning" "yes"
-  echo "   ✅ Set RestartDaily=no, AutoRestart=no, ReadOnlyLogin=yes, AcceptIncomingConnectionAction=accept"
+  _set_ini_or_append "ExistingSessionDetectedAction" "primary"
+  _set_ini_or_append "ReloginAfterSecondFactorAuthenticationTimeout" "yes"
+  echo "   ✅ Set RestartDaily=no, AutoRestart=no, ReadOnlyLogin=yes, ExistingSessionDetectedAction=primary, ReloginAfter2FATimeout=yes"
   echo ""
   echo "1. Ensure credentials are in .env so Gateway can auto-login:"
   echo "   IBKR_USERNAME=your_username"

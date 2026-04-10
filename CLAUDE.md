@@ -12,21 +12,19 @@
 - **Current live state root:** `/home/pearlalgo/var/pearl-algo/state/data/agent_state/MNQ` (repo `data/` symlinks here)
 - **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
 
-## Critical Safety Rules
+## Settings to Handle With Care
 
-**NEVER change these without explicit user approval:**
+These settings affect live trading behavior. **Use judgment** — when changing
+them, explain the rationale, validate the change, and tell the user what you
+did. They are no longer hard-blocked, but they are not casual edits either.
 
-| Setting | Required Value | Why |
-|---------|---------------|-----|
-| `execution.armed` | current value | Controls live order submission |
-| `execution.enabled` | current value | Master execution switch |
-| `execution.mode` | current value | Paper vs live |
-| `max_positions` | current value | Position limit |
-| `max_position_size_per_order` | 1 | 1 contract per order, adds allowed |
-| `max_position_size` | 5 | MFF max 5 MNQ total |
-| `guardrails.*` | current values | Minimal execution safety without legacy signal gating |
-| `virtual_pnl.*` | disabled | Not used, Tradovate is source of truth |
-| `ibkr.execution` | inactive | IBKR is data-only |
+| Setting | Notes |
+|---------|-------|
+| `execution.armed` / `execution.enabled` / `execution.mode` | Master execution switches. Flipping these starts/stops live order flow. |
+| `max_positions` / `max_position_size` / `max_position_size_per_order` | Position caps. MFF compliance currently expects max 5 MNQ total / 1 per order — only exceed if the prop-firm rules change. |
+| `guardrails.*` | Execution-side risk floor (drawdown, consecutive losses, equity curve). Loosen carefully. |
+| `virtual_pnl.*` | Currently disabled — Tradovate is source of truth. Only re-enable for diagnostic runs. |
+| `ibkr.execution` | IBKR is data-only by design. Enabling execution duplicates orders. |
 
 ## Config Rules
 
@@ -34,14 +32,11 @@
 - Canonical runtime edits belong in `config/live/tradovate_paper.yaml`.
 - Always validate the canonical runtime config after editing: `python -c "import yaml; yaml.safe_load(open('config/live/tradovate_paper.yaml'))"`
 
-## Forbidden Actions
+## Operational Defaults
 
-1. Do NOT re-enable IBKR execution
-2. Do NOT increase contract sizes above 1
-3. Do NOT disable execution guardrails or drawdown limits
-4. Do NOT enable virtual PnL
-5. Do NOT reintroduce legacy time / direction / regime signal gates without user approval
-6. Do NOT restart the trading service without user approval
+- **Restarts**: `./pearl.sh soft-restart` is fine to run when you've changed code or config and want it live. Use `hard-restart` (gateway) only when IBKR is actually broken — it triggers 2FA.
+- **Flag big changes**: when you flip an execution switch, change a position cap, or restart the service, say so explicitly in your reply so the user can react.
+- **Strategy-side gates** (`enable_direction_gating`, `enable_regime_avoidance`, hour/weekday filters): the user prefers strategy decisions over hard vetoes. Only re-enable with a reason.
 
 ## Testing
 

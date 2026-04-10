@@ -203,7 +203,7 @@ class TestRESTOperations:
         assert result["orderId"] == 77
         client._post.assert_awaited_once()
         call_url, call_body = client._post.call_args[0]
-        assert "/order/placeoso" in call_url
+        assert "/order/placeOSO" in call_url
         assert call_body["action"] == "Buy"
         assert call_body["orderQty"] == 2
         assert call_body["isAutomated"] is True

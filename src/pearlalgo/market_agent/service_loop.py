@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -43,6 +44,8 @@ class ServiceLoopMixin:
         )
 
         while not self.shutdown_requested:
+            _cycle_start = _time.monotonic()
+
             # Check for execution control flag files (from Telegram commands)
             await self._check_execution_control_flags()
 
@@ -129,13 +132,51 @@ class ServiceLoopMixin:
                     except Exception as e:
                         logger.debug(f"Tradovate account poll (non-critical): {e}")
 
-                # Save state after Tradovate poll even if data fetch will fail.
-                # This ensures the dashboard shows live broker values during IBKR outages.
+                # Sync broker P&L into circuit breaker — source of truth
+                if _tv_polled and self._tradovate_account:
+                    _broker_rpnl = self._tradovate_account.get("realized_pnl")
+                    _broker_opnl = self._tradovate_account.get("open_pnl", 0.0)
+                    if _broker_rpnl is not None and self.trading_circuit_breaker is not None:
+                        self.trading_circuit_breaker.sync_broker_pnl(
+                            float(_broker_rpnl), float(_broker_opnl or 0.0),
+                        )
+                    # Record account snapshot to DB (throttled: once per 60s)
+                    _snap_now = _time.monotonic()
+                    _snap_last = getattr(self, "_last_account_snapshot_at", 0)
+                    _snap_eligible = (
+                        self._trade_db is not None
+                        and _broker_rpnl is not None
+                        and (_snap_now - _snap_last) >= 60
+                    )
+                    if _snap_eligible:
+                        try:
+                            _tv = self._tradovate_account
+                            _net_pos = sum(
+                                abs(p.get("net_pos", 0))
+                                for p in (_tv.get("positions") or [])
+                            )
+                            self._trade_db.add_account_snapshot(
+                                equity=float(_tv.get("equity", 0)),
+                                cash_balance=float(_tv.get("cash_balance", 0)),
+                                realized_pnl=float(_broker_rpnl),
+                                open_pnl=float(_broker_opnl or 0),
+                                week_realized_pnl=float(_tv.get("week_realized_pnl", 0)),
+                                position_count=int(_tv.get("position_count", 0)),
+                                net_position=int(_net_pos),
+                                initial_margin=float(_tv.get("initial_margin", 0)),
+                            )
+                            self._last_account_snapshot_at = _snap_now
+                            logger.info(
+                                "Account snapshot recorded: equity=$%.2f rpnl=$%.2f",
+                                float(_tv.get("equity", 0)), float(_broker_rpnl),
+                            )
+                        except Exception as _snap_err:
+                            logger.warning("Account snapshot write failed: %s", _snap_err)
+
+                # Mark state dirty after Tradovate poll so dashboard shows live
+                # broker values. Actual write deferred to end-of-cycle (Issue 13).
                 if _tv_polled:
-                    try:
-                        self._save_state(force=True)
-                    except Exception as e:
-                        logger.debug(f"Early state save (non-critical): {e}")
+                    self.mark_state_dirty()
 
                 # Fetch latest data with error handling
                 try:
@@ -423,17 +464,21 @@ class ServiceLoopMixin:
                     # Use run_in_executor to avoid blocking the event loop during
                     # CPU-bound indicator computation (EMA, ATR, S&R channels, etc.)
                     df = market_data.get("df")
+                    # Per-cycle diagnostics dict — strategy populates rejection counters here.
+                    _strategy_diag: dict = {}
                     if df is not None and not df.empty:
                         _df_5m = market_data.get("df_5m")
                         _analyze_fn = functools.partial(
                             self.strategy.analyze, df,
                             current_time=datetime.now(timezone.utc),
                             df_5m=_df_5m,
+                            diagnostics=_strategy_diag,
                         )
                         loop = asyncio.get_event_loop()
                         signals = await loop.run_in_executor(None, _analyze_fn)
                     else:
                         signals = []
+                    self._last_strategy_diagnostics = _strategy_diag
                     self._analysis_run_count += 1
                     # Update last analyzed bar timestamp
                     if current_bar_ts is not None:
@@ -589,10 +634,29 @@ class ServiceLoopMixin:
                 # Send periodic dashboard (replaces status + heartbeat)
                 # Determine quiet reason (for observability) and capture diagnostics every cycle (for SQLite rollups).
                 quiet_reason = "Active" if signals else self._get_quiet_reason(market_data, has_data=True, no_signals=True)
-                # Capture cycle diagnostics for SQLite observability
+                # Capture cycle diagnostics for SQLite observability.
+                # Merge strategy-side rejection counts (from generate_signals) with
+                # signal_handler runtime rejection counts (CB / regime / validation).
+                _strat_diag = getattr(self, "_last_strategy_diagnostics", None) or {}
+                _handler_diag = (
+                    self._signal_handler.drain_cycle_rejections()
+                    if self._signal_handler is not None
+                    and hasattr(self._signal_handler, "drain_cycle_rejections")
+                    else {}
+                )
                 signal_diagnostics_raw = {
-                    "raw_signals": len(signals) if signals else 0,
+                    "raw_signals": int(_strat_diag.get("raw_signals", 0) or 0)
+                    or (len(signals) if signals else 0),
                     "actionable_signals": len(signals) if signals else 0,
+                    "rejected_confidence": int(_strat_diag.get("rejected_confidence", 0) or 0)
+                    + int(_handler_diag.get("rejected_confidence", 0) or 0),
+                    "rejected_invalid_prices": int(_strat_diag.get("rejected_invalid_prices", 0) or 0)
+                    + int(_handler_diag.get("rejected_invalid_prices", 0) or 0),
+                    "rejected_regime_filter": int(_handler_diag.get("rejected_regime_filter", 0) or 0),
+                    "rejected_quality_scorer": int(_handler_diag.get("rejected_quality_scorer", 0) or 0),
+                    "rejected_risk_reward": int(_strat_diag.get("rejected_risk_reward", 0) or 0),
+                    "rejected_market_hours": int(_handler_diag.get("rejected_market_hours", 0) or 0),
+                    "rejected_order_book": int(_handler_diag.get("rejected_order_book", 0) or 0),
                 }
                 signal_diagnostics = None
 
@@ -633,6 +697,14 @@ class ServiceLoopMixin:
                 if self.execution_adapter is not None and hasattr(self.execution_adapter, "get_account_summary"):
                     try:
                         self._tradovate_account = await self.execution_adapter.get_account_summary()
+                        # Sync broker P&L into circuit breaker
+                        if self._tradovate_account:
+                            _rpnl = self._tradovate_account.get("realized_pnl")
+                            _opnl = self._tradovate_account.get("open_pnl", 0.0)
+                            if _rpnl is not None and self.trading_circuit_breaker is not None:
+                                self.trading_circuit_breaker.sync_broker_pnl(
+                                    float(_rpnl), float(_opnl or 0.0),
+                                )
                     except Exception as e:
                         logger.debug(f"Non-critical: {e}")  # non-fatal: stale cache is fine
 
@@ -672,6 +744,28 @@ class ServiceLoopMixin:
                     self._save_state(force=True)
 
                 self.cycle_count += 1
+
+                # Cycle time instrumentation (Issue 16)
+                _cycle_duration = _time.monotonic() - _cycle_start
+                _cycle_ms = _cycle_duration * 1000
+                _interval = getattr(self, "_effective_interval", self.config.scan_interval)
+                if _cycle_duration > _interval:
+                    logger.critical(
+                        "Cycle %d OVERRAN interval: %.1fms (limit %.0fs) — "
+                        "signals may be stale",
+                        self.cycle_count, _cycle_ms, _interval,
+                    )
+                elif _cycle_duration > _interval * 0.8:
+                    logger.warning(
+                        "Cycle %d approaching limit: %.1fms / %.0fs (%.0f%%)",
+                        self.cycle_count, _cycle_ms, _interval,
+                        (_cycle_duration / _interval) * 100,
+                    )
+                else:
+                    logger.debug(
+                        "Cycle %d completed in %.1fms",
+                        self.cycle_count, _cycle_ms,
+                    )
 
                 # Wait for next cycle (fixed-cadence or legacy sleep-after-work)
                 await self._sleep_until_next_cycle()

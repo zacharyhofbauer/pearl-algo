@@ -267,14 +267,17 @@ def get_paired_tradovate_trades(
             and int(fill.get("qty", 0) or 0) > 0
         ]
 
-        owned_order_ids = _load_pearl_execution_order_ids(state_dir)
-        if owned_order_ids:
-            active_fills = [
-                fill for fill in active_fills
-                if str(fill.get("order_id") or "") in owned_order_ids
-            ]
-            return _raw_fills_to_trades(active_fills)
-
+        # FIX 2026-04-10 (revised): the previous order_id filter operated
+        # on INDIVIDUAL fills, which broke FIFO pairing — when only an entry
+        # fill was "owned" (e.g. SL/TP order_ids missing from signals.jsonl
+        # after rotation), the orphaned open got matched against an unrelated
+        # later close, manufacturing fictitious winners (25W/0L scenarios).
+        # FIFO pairing requires BOTH legs of a trade to be present.
+        #
+        # Correct approach: pair ALL active fills first, then attribute the
+        # resulting trades to Pearl via signal-candidate heuristics. The
+        # attribution happens at the trade level, not the fill level, so
+        # entry/exit fills always travel together.
         paired = _raw_fills_to_trades(active_fills)
         signal_candidates = _load_signal_trade_candidates(state_dir)
         if signal_candidates:

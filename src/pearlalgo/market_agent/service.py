@@ -242,17 +242,23 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
         # TRADING CIRCUIT BREAKER (risk management for consecutive losses/drawdown)
         # ==========================================================================
         self.trading_circuit_breaker: Optional[TradingCircuitBreaker] = None
-        active_strategy = str(self._strategy_settings.get("active", "") or "")
-        legacy_signal_gate_enabled = bool(guardrails_settings.get("signal_gate_enabled", False))
-        allow_legacy_signal_gate = legacy_signal_gate_enabled or not active_strategy
-        if trading_circuit_breaker_settings.get("enabled", True) and allow_legacy_signal_gate:
-            self.trading_circuit_breaker = create_trading_circuit_breaker(trading_circuit_breaker_settings)
-            # Validate config at startup
+        # FIXED 2026-04-08: CB is ALWAYS created when guardrails section exists.
+        # Previously required signal_gate_enabled=true which was off for the
+        # composite_intraday strategy path — leaving the system unprotected.
+        # The guardrails section feeds core risk params (max_consecutive_losses,
+        # max_session_drawdown, max_daily_drawdown) into the CB.  A dedicated
+        # trading_circuit_breaker section, if present, overrides / extends.
+        merged_cb_settings: Dict[str, Any] = {}
+        merged_cb_settings.update(guardrails_settings)
+        merged_cb_settings.update(trading_circuit_breaker_settings)
+        cb_enabled = merged_cb_settings.pop("enabled", True)
+        # signal_gate_enabled is a guardrails key, not a CB key — remove it
+        merged_cb_settings.pop("signal_gate_enabled", None)
+        if cb_enabled:
+            self.trading_circuit_breaker = create_trading_circuit_breaker(merged_cb_settings)
             config_warnings = self.trading_circuit_breaker.validate_config()
             if config_warnings:
                 logger.warning(f"Trading circuit breaker config warnings: {config_warnings}")
-            # FIXED 2026-03-25: Log effective CB mode at startup so
-            # warn_only/shadow drift is never silently missed.
             cb_mode = self.trading_circuit_breaker.config.mode
             if cb_mode != "enforce":
                 logger.warning(
@@ -265,16 +271,13 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 f"mode={cb_mode}, "
                 f"max_consecutive_losses={self.trading_circuit_breaker.config.max_consecutive_losses}, "
                 f"max_session_drawdown=${self.trading_circuit_breaker.config.max_session_drawdown}, "
+                f"max_daily_drawdown=${self.trading_circuit_breaker.config.max_daily_drawdown}, "
                 f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}"
             )
-            # Hydrate daily P&L from DB so restart does not reset the daily loss counter
             self.trading_circuit_breaker.hydrate_daily_pnl()
         else:
-            logger.info(
-                "Legacy signal gate disabled for active runtime path "
-                "(strategy=%s, signal_gate_enabled=%s)",
-                active_strategy or "legacy",
-                legacy_signal_gate_enabled,
+            logger.warning(
+                "⚠️ Trading circuit breaker DISABLED — no risk protection active!"
             )
 
         # ==========================================================================
@@ -321,6 +324,13 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
                 self._trade_db = None
                 self._async_sqlite_queue = None
         
+        # Inject SQLite context into downstream trackers.
+        try:
+            self.state_manager.set_sqlite(self._sqlite_enabled, self._trade_db)
+            self.performance_tracker.set_sqlite(self._sqlite_enabled, self._trade_db)
+        except Exception as e:
+            logger.warning(f"SQLite context wiring failed: {e}", exc_info=True)
+
         # Inject async queue into state_manager + performance_tracker (if enabled)
         if self._async_sqlite_queue is not None:
             try:

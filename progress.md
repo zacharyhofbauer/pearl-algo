@@ -1,24 +1,28 @@
 # progress.md
 
-## Current Objective
+## Current State (2026-04-07)
 
-Align the repo with the approved 2026-04-03 follow-up plan: singleton runtime truth, no-op notification contract completion, repo-local memory bootstrap, post-Telegram doc cleanup, and shared signal-reader reuse in hot API paths.
+Repo is in a clean, consolidated state after full Claude Code config cleanup and documentation audit.
 
-## Completed Tasks
+## Recent Completed Work
 
-- Fixed the real `NotificationQueue` contract gap by adding `enqueue_data_quality_alert()`.
-- Refactored hot API signal consumers to reuse the shared paginated/tail reader path.
-- Added focused tests for the real default notification queue path and cursor-based signal reads.
-- Began canonical doc cleanup for singleton runtime and post-Telegram guidance.
-- Began repo-local memory bootstrap (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `USER.md`, `HALLUCINATE.md`, daily memory log).
+- Full `~/.claude/` cleanup: removed 5 stale project directories (~85 MB), consolidated to single active project context
+- Removed duplicate `MEMORY.md` and `memory/` from project root (auto-memory at `~/.claude/` is canonical)
+- Removed 5 duplicate `HALLUCINATE.md` files (kept `docs/HALLUCINATE.md` only)
+- Fixed color token mismatch in `DESIGN_SYSTEM.md` to match actual `tokens.css` values
+- Removed stale `PEARLALGO_CONFIG_PATH` from `.env` (pointed to non-existent workspace)
+- Removed orphaned `static/dashboard_v2.html` and `docs/legacy/` (Telegram artifacts)
+- Fixed stale doc references in `env.example`
+- Removed stale `htmlcov/`, `.coverage`
 
-## Last Session Thread Link
+## Known State
 
-Unavailable from repo-local context. Record the thread URL manually when working from a chat surface that exposes one.
+- `config/config.yaml` and `config/base.yaml` both exist and are both used (config loader cascade)
+- `--market` flag in pearl.sh is effectively a no-op (singleton runtime)
+- Telegram runtime is fully removed; some compatibility kwargs remain in service constructors
+- `signals.jsonl` is recovery source of truth; `trades.db` is analytics only
 
 ## Discovered Gotchas
 
-- The worktree can be dirty; do not revert unrelated changes.
-- `--market` still exists in scripts, but the Python runtime is singleton-locked.
-- Telegram runtime modules are gone, but some compatibility kwargs and historical filenames remain.
-- `signals.jsonl` hot paths drift easily if callers bypass `pearlalgo.api.data_layer`.
+- The worktree can be dirty; do not revert unrelated changes
+- `signals.jsonl` hot paths drift easily if callers bypass `pearlalgo.api.data_layer`

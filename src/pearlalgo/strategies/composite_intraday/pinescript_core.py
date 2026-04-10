@@ -33,12 +33,14 @@ def generate_signals(
     config: Optional[dict[str, Any]] = None,
     current_time: Optional[datetime] = None,
     df_5m: Optional[pd.DataFrame] = None,
+    diagnostics: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     return legacy.generate_signals(
         df,
         config=config,
         current_time=current_time,
         df_5m=df_5m,
+        diagnostics=diagnostics,
     )
 
 

@@ -173,8 +173,13 @@ def fetch_from_ibkr(
     timeframe: str = "1m",
     days: int = 30,
     start_from: Optional[datetime] = None,
+    client_id: int = 99,
 ) -> pd.DataFrame:
-    """Fetch historical bars from IBKR provider."""
+    """Fetch historical bars from IBKR provider.
+
+    AUDIT 2026-04-10: defaults to client_id=99 to avoid colliding with the
+    live agent (data=51, execution=50). Override via --client-id CLI flag.
+    """
     try:
         from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
     except ImportError as e:
@@ -187,10 +192,10 @@ def fetch_from_ibkr(
     else:
         start = end - timedelta(days=days)
 
-    print(f"  Fetching {symbol} {timeframe} bars from IBKR: {start.date()} to {end.date()}")
+    print(f"  Fetching {symbol} {timeframe} bars from IBKR: {start.date()} to {end.date()} (client_id={client_id})")
 
     try:
-        provider = IBKRProvider()
+        provider = IBKRProvider(client_id=client_id)
         df = provider.fetch_historical(symbol=symbol, start=start, end=end, timeframe=timeframe)
         if df is not None and not df.empty:
             if "timestamp" not in df.columns and df.index.name == "timestamp":
@@ -216,6 +221,7 @@ def collect_data(
     from_cache: bool = False,
     from_ibkr: bool = True,
     db_path: Path = DB_PATH,
+    client_id: int = 99,
 ) -> dict:
     """Collect historical data and store in SQLite.
 
@@ -260,7 +266,7 @@ def collect_data(
     if from_ibkr:
         print("\nFetching from IBKR...")
         start_from = last_1m if last_1m else None
-        df_1m = fetch_from_ibkr("MNQ", "1m", days=days, start_from=start_from)
+        df_1m = fetch_from_ibkr("MNQ", "1m", days=days, start_from=start_from, client_id=client_id)
         if not df_1m.empty:
             n = insert_bars(conn, "bars_1m", df_1m)
             summary["bars_1m"] += n
@@ -268,7 +274,7 @@ def collect_data(
             print(f"  Inserted {n} new 1m bars")
 
         start_from_5m = last_5m if last_5m else None
-        df_5m = fetch_from_ibkr("MNQ", "5m", days=days, start_from=start_from_5m)
+        df_5m = fetch_from_ibkr("MNQ", "5m", days=days, start_from=start_from_5m, client_id=client_id)
         if not df_5m.empty:
             n = insert_bars(conn, "bars_5m", df_5m)
             summary["bars_5m"] += n
@@ -306,6 +312,8 @@ def main() -> None:
     parser.add_argument("--from-cache", action="store_true", help="Load from local cache files only (no IBKR)")
     parser.add_argument("--no-ibkr", action="store_true", help="Skip IBKR fetch (use cache only)")
     parser.add_argument("--db", type=str, default=str(DB_PATH), help="SQLite database path")
+    parser.add_argument("--client-id", type=int, default=99,
+                        help="IBKR client_id (default: 99 to avoid live agent collision)")
     args = parser.parse_args()
 
     print(f"\nPearlAlgo Data Collector")
@@ -319,6 +327,7 @@ def main() -> None:
         from_cache=args.from_cache or args.no_ibkr,
         from_ibkr=use_ibkr,
         db_path=Path(args.db),
+        client_id=args.client_id,
     )
     print(f"\nCollection complete: {summary}")
 

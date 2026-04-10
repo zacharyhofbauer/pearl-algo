@@ -105,6 +105,7 @@ from pearlalgo.market_agent.stats_computation import (
     get_trading_day_start as _shared_get_trading_day_start,
 )
 from pearlalgo.utils.paths import parse_trade_timestamp as _parse_ts  # FIXED 2026-03-25: ET timestamps
+from pearlalgo.utils.paths import parse_trade_timestamp_to_utc as _parse_ts_utc  # FIXED 2026-04-10: tz-aware UTC for daily-stats comparisons
 from pearlalgo.utils.state_io import (
     load_json_file as _load_json_file,
     load_jsonl_file as _load_jsonl_file,
@@ -965,7 +966,7 @@ def _get_state_reader() -> Optional[StateReader]:
     return _state_reader
 
 
-def _read_state_safe() -> Dict[str, Any]:
+def _read_state_uncached() -> Dict[str, Any]:
     """Read state.json via StateReader (locked) with fallback to direct read."""
     reader = _get_state_reader()
     if reader is not None:
@@ -974,6 +975,17 @@ def _read_state_safe() -> Dict[str, Any]:
     if _state_dir is not None:
         return _load_json_file(_state_dir / "state.json") or {}
     return {}
+
+
+def _read_state_safe() -> Dict[str, Any]:
+    """Cached read of state.json with 1-second TTL (Issue 14).
+
+    The dashboard polls every 2 seconds; a 1s TTL halves disk reads
+    while keeping data fresh enough for operator monitoring.
+    """
+    # Include state_dir in key so cache invalidates when dir changes (e.g. tests)
+    cache_key = f"__state_json__:{_state_dir}"
+    return _cached(cache_key, 1.0, _read_state_uncached)
 
 
 # Cache of StateReader instances per state_dir (for multi-market helpers)
@@ -1555,8 +1567,20 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                 equity = float(tv.get("equity", 0))
                 open_pnl = round(tv.get("open_pnl", 0.0), 2)
                 pos_count = tv.get("position_count", 0)
-                # Trade counts from Tradovate fills — filtered to TODAY's trading day
-                trades, wins, losses, daily_pnl = 0, 0, 0, 0.0
+
+                # AUDIT 2026-04-10: Tradovate broker reports realized_pnl directly
+                # — that's the source of truth. The previous fills-based pairing
+                # + commission heuristic was over-deducting ~$400/day because the
+                # `_estimate_commission_per_trade` function uses the
+                # equity-vs-total-fill-pnl gap which counts every historical fill
+                # not just today's. Trust the broker.
+                broker_realized = tv.get("realized_pnl")
+
+                # Trade counts still come from fills (broker doesn't expose a
+                # daily wins/losses counter directly).
+                trades, wins, losses = 0, 0, 0
+                daily_pnl = 0.0
+                pnl_source = "tradovate_realized"
                 try:
                     tv_fills = state_data.get("tradovate_fills") or tv.get("fills") or []
                     if not tv_fills:
@@ -1565,22 +1589,14 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                         tv_fills = _fills_data if isinstance(_fills_data, list) else []
                     if tv_fills:
                         paired = _get_paired_tradovate_trades(state_dir, tv_fills)
-                        # Derive per-trade commission from equity vs fill P&L gap
-                        total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
-                        start_balance = _get_start_balance(state_dir)
-                        cpt = _estimate_commission_per_trade(
-                            paired,
-                            equity=equity,
-                            start_balance=start_balance,
-                        )
-                        # Filter to today's trading day for accurate daily stats
+                        # Filter to today's trading day for the wins/losses count
                         td_start = _get_trading_day_start()
                         today_trades = []
                         for t in paired:
                             exit_time_str = t.get("exit_time") or ""
                             if exit_time_str:
                                 try:
-                                    exit_dt = _parse_ts(exit_time_str)
+                                    exit_dt = _parse_ts_utc(exit_time_str)
                                     if exit_dt >= td_start:
                                         today_trades.append(t)
                                 except Exception:
@@ -1589,8 +1605,22 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                         trades = len(today_trades)
                         wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
                         losses = trades - wins
-                        raw_daily = sum(t.get("pnl", 0) or 0 for t in today_trades)
-                        daily_pnl = round(raw_daily - (trades * cpt), 2)
+
+                        if broker_realized is not None:
+                            # PREFERRED: broker truth, no commission guess needed
+                            daily_pnl = round(float(broker_realized), 2)
+                        else:
+                            # FALLBACK: fills + commission heuristic (legacy path)
+                            start_balance = _get_start_balance(state_dir)
+                            cpt = _estimate_commission_per_trade(
+                                paired, equity=equity, start_balance=start_balance,
+                            )
+                            raw_daily = sum(t.get("pnl", 0) or 0 for t in today_trades)
+                            daily_pnl = round(raw_daily - (trades * cpt), 2)
+                            pnl_source = "tradovate_fills_estimated"
+                    elif broker_realized is not None:
+                        # No fills loaded but broker has realized_pnl — still trust it
+                        daily_pnl = round(float(broker_realized), 2)
                 except Exception as e:
                     logger.warning(f"Non-critical: {e}")
                 return {
@@ -1601,7 +1631,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     "tradovate_equity": round(equity, 2),
                     "tradovate_open_pnl": open_pnl,
                     "tradovate_positions": pos_count,
-                    "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
+                    "pnl_source": pnl_source,
                 }
     except Exception as e:
         logger.warning(f"Non-critical: {e}")
@@ -1618,7 +1648,8 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     exit_ts = t.get("exit_time") or ""
                     if exit_ts:
                         try:
-                            exit_dt = _parse_ts(exit_ts)
+                            # FIXED 2026-04-10: tz-aware UTC for comparison vs td_start
+                            exit_dt = _parse_ts_utc(exit_ts)
                             if exit_dt >= td_start:
                                 today_trades.append(t)
                         except Exception:

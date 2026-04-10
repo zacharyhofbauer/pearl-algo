@@ -98,7 +98,7 @@ def _make_signal(**overrides) -> dict:
     """Build a minimal valid signal dict with sensible defaults."""
     sig = {
         "signal_id": "test_signal_001",
-        "type": "long_entry",
+        "type": "pearlbot_pinescript",
         "direction": "long",
         "entry_price": 17500.0,
         "stop_loss": 17450.0,

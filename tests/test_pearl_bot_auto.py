@@ -429,46 +429,25 @@ class TestCheckTradingSession:
     """Session checks are observability-only and never block strategy execution."""
 
     def test_during_session(self):
-        """Test time during trading session."""
-        # 10:30 AM ET = 15:30 UTC
+        """Test time during overnight futures session (18:00-16:00 ET)."""
+        # 10:30 AM ET = 15:30 UTC — in session
         trading_time = datetime(2024, 1, 15, 15, 30, 0, tzinfo=timezone.utc)
-
-        config = {
-            "start_hour": 9,
-            "start_minute": 30,
-            "end_hour": 16,
-            "end_minute": 0,
-        }
-
+        config = {"session": {"start_time": "18:00", "end_time": "16:00", "timezone": "America/New_York"}}
         assert check_trading_session(trading_time, config) is True
 
     def test_before_session(self):
-        """Test time before trading session."""
-        # 8:00 AM ET = 13:00 UTC
-        before_time = datetime(2024, 1, 15, 13, 0, 0, tzinfo=timezone.utc)
-
-        config = {
-            "start_hour": 9,
-            "start_minute": 30,
-            "end_hour": 16,
-            "end_minute": 0,
-        }
-
-        assert check_trading_session(before_time, config) is True
+        """Test time in the gap between session end and start (16:00-18:00 ET)."""
+        # 5:00 PM ET = 22:00 UTC — between sessions (gap)
+        gap_time = datetime(2024, 1, 15, 22, 0, 0, tzinfo=timezone.utc)
+        config = {"session": {"start_time": "18:00", "end_time": "16:00", "timezone": "America/New_York"}}
+        assert check_trading_session(gap_time, config) is False
 
     def test_after_session(self):
-        """Test time after trading session."""
-        # 5:00 PM ET = 22:00 UTC
-        after_time = datetime(2024, 1, 15, 22, 0, 0, tzinfo=timezone.utc)
-
-        config = {
-            "start_hour": 9,
-            "start_minute": 30,
-            "end_hour": 16,
-            "end_minute": 0,
-        }
-
-        assert check_trading_session(after_time, config) is True
+        """Test time after session open (evening = in session for overnight)."""
+        # 7:00 PM ET = 00:00 UTC next day — in session (after 18:00 open)
+        evening_time = datetime(2024, 1, 16, 0, 0, 0, tzinfo=timezone.utc)
+        config = {"session": {"start_time": "18:00", "end_time": "16:00", "timezone": "America/New_York"}}
+        assert check_trading_session(evening_time, config) is True
 
 
 class TestKeyLevelsCaching:

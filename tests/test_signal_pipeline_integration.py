@@ -38,7 +38,7 @@ from tests.mock_data_provider import MockDataProvider
 
 
 def _make_signal(
-    signal_type: str = "breakout",
+    signal_type: str = "pearlbot_pinescript",
     direction: str = "long",
     entry_price: float = 17500.0,
     stop_loss: float = 17480.0,
@@ -266,7 +266,7 @@ class TestSignalPersistenceFormat:
         This is the contract consumed by /signals command and Telegram UI.
         """
         perf_tracker.track_signal_generated(
-            _make_signal(signal_type="breakout", direction="long"),
+            _make_signal(signal_type="pearlbot_pinescript", direction="long"),
         )
 
         records = state_manager.get_recent_signals()
@@ -279,7 +279,7 @@ class TestSignalPersistenceFormat:
         assert record["status"] == "generated"
 
         inner = record["signal"]
-        assert inner["type"] == "breakout"
+        assert inner["type"] == "pearlbot_pinescript"
         assert inner["direction"] == "long"
         assert isinstance(inner["entry_price"], (int, float))
 
@@ -447,9 +447,9 @@ class TestMultiCycleAccumulation:
         All must be persisted and retrievable.
         """
         signals = [
-            _make_signal(signal_type="breakout", direction="long", entry_price=17500.0),
-            _make_signal(signal_type="reversal", direction="short", entry_price=17600.0),
-            _make_signal(signal_type="vwap_cross", direction="long", entry_price=17550.0),
+            _make_signal(signal_type="pearlbot_pinescript", direction="long", entry_price=17500.0),
+            _make_signal(signal_type="smc_fvg", direction="short", entry_price=17600.0),
+            _make_signal(signal_type="smc_silver_bullet", direction="long", entry_price=17550.0),
         ]
 
         ids = []
@@ -463,7 +463,7 @@ class TestMultiCycleAccumulation:
         assert len(persisted) == 3
 
         persisted_types = {r["signal"]["type"] for r in persisted}
-        assert persisted_types == {"breakout", "reversal", "vwap_cross"}
+        assert persisted_types == {"pearlbot_pinescript", "smc_fvg", "smc_silver_bullet"}
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +548,7 @@ class TestSignalExecutionPipeline:
         handler, *_ = self._build_handler(execution_adapter=mock_adapter)
 
         signal = _make_signal(
-            signal_type="breakout",
+            signal_type="pearlbot_pinescript",
             direction="long",
             entry_price=17500.0,
             stop_loss=17480.0,
@@ -669,7 +669,7 @@ class TestSignalExecutionPipeline:
         )
 
         signal = _make_signal(
-            signal_type="breakout",
+            signal_type="pearlbot_pinescript",
             direction="long",
             entry_price=17500.0,
             stop_loss=17480.0,

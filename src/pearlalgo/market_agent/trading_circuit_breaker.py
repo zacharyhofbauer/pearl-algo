@@ -107,15 +107,11 @@ class TradingCircuitBreaker:
     ) -> CircuitBreakerDecision:
         """
         Evaluate whether a new signal should be allowed.
-        
-        Args:
-            signal: The trading signal to evaluate
-            performance_stats: Recent performance statistics from PerformanceTracker
-            active_positions: List of currently open positions
-            market_data: Market data including ATR, volatility metrics
-        
-        Returns:
-            CircuitBreakerDecision indicating whether the signal is allowed
+
+        Returns a CircuitBreakerDecision. When ``allowed=True`` the caller
+        should also inspect ``risk_scale`` (0.0-1.0) and multiply position
+        size accordingly.  A risk_scale of 0.0 with allowed=True should be
+        treated as a block (edge case safety).
         """
         # Check cooldown first
         if self._is_in_cooldown():
@@ -123,48 +119,61 @@ class TradingCircuitBreaker:
                 allowed=False,
                 reason=f"in_cooldown:{self._cooldown_reason}",
                 severity="warning",
+                risk_scale=0.0,
                 details={
                     "cooldown_until": self._cooldown_until.isoformat() if self._cooldown_until else None,
                     "cooldown_reason": self._cooldown_reason,
                     "remaining_minutes": self._get_cooldown_remaining_minutes(),
                 }
             )
-        
-        # Strategy selection belongs to the strategy layer, not the breaker.
-        # Legacy hour/session/day gates stay inert here, but market-quality
-        # protections still apply when explicitly enabled in config.
 
-        # Check consecutive losses
-        decision = self._check_consecutive_losses()
-        if not decision.allowed:
-            self._record_block(decision.reason)
-            return decision
-        
-        # Check session drawdown
+        # Accumulate the minimum risk_scale across all scaling checks.
+        # Hard-block checks still return allowed=False immediately.
+        min_risk_scale = 1.0
+        scale_reasons: List[str] = []
+
+        # --- Hard-block checks (return immediately if tripped) ---
+
+        # Tiered consecutive loss response (replaces binary check when enabled)
+        if self.config.enable_tiered_loss_response:
+            decision = self._check_tiered_losses()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+            if decision.risk_scale < min_risk_scale:
+                min_risk_scale = decision.risk_scale
+                scale_reasons.append(f"tiered_loss:{decision.risk_scale:.2f}")
+        else:
+            decision = self._check_consecutive_losses()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+
+        # Session drawdown
         decision = self._check_session_drawdown()
         if not decision.allowed:
             self._record_block(decision.reason)
             return decision
-        
-        # Check daily drawdown
+
+        # Daily drawdown
         decision = self._check_daily_drawdown()
         if not decision.allowed:
             self._record_block(decision.reason)
             return decision
 
-        # Check daily profit cap (stop trading after hitting target)
+        # Daily profit cap
         decision = self._check_daily_profit_cap()
         if not decision.allowed:
             self._record_block(decision.reason)
             return decision
-        
-        # Check rolling win rate
+
+        # Rolling win rate
         decision = self._check_rolling_win_rate()
         if not decision.allowed:
             self._record_block(decision.reason)
             return decision
-        
-        # Check position limits
+
+        # Position limits
         if active_positions is not None:
             decision = self._check_position_limits(signal, active_positions)
             if not decision.allowed:
@@ -198,24 +207,68 @@ class TradingCircuitBreaker:
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
-        
-        # =======================================================================
-        # Tradovate Paper Evaluation Gate (prop firm rule enforcement)
-        # =======================================================================
+
+        # --- Scaling checks (reduce risk_scale but don't hard-block) ---
+
+        # Equity curve filter
+        if self.config.enable_equity_curve_filter:
+            decision = self._check_equity_curve()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+            if decision.risk_scale < min_risk_scale:
+                min_risk_scale = decision.risk_scale
+                scale_reasons.append(f"equity_curve:{decision.risk_scale:.2f}")
+
+        # Time-of-day risk scaling
+        if self.config.enable_tod_risk_scaling:
+            decision = self._check_tod_risk_scaling()
+            if decision.risk_scale < min_risk_scale:
+                min_risk_scale = decision.risk_scale
+                scale_reasons.append(f"tod:{decision.risk_scale:.2f}")
+
+        # Volatility risk scaling
+        if self.config.enable_volatility_risk_scaling and market_data:
+            decision = self._check_volatility_risk_scaling(market_data)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+            if decision.risk_scale < min_risk_scale:
+                min_risk_scale = decision.risk_scale
+                scale_reasons.append(f"volatility:{decision.risk_scale:.2f}")
+
+        # Tradovate Paper Evaluation Gate
         if self.config.enable_tv_paper_eval_gate:
             decision = self._check_tv_paper_eval_gate(signal, active_positions)
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
-        
+
+        # Final: if risk_scale is effectively zero, block
+        if min_risk_scale <= 0.0:
+            self._record_block("risk_scale_zero")
+            return CircuitBreakerDecision(
+                allowed=False, reason="risk_scale_zero", severity="warning",
+                risk_scale=0.0, details={"scale_reasons": scale_reasons},
+            )
+
+        if scale_reasons:
+            logger.info(
+                f"CB risk scaling applied: scale={min_risk_scale:.2f}, "
+                f"reasons={scale_reasons}"
+            )
+
         return CircuitBreakerDecision(
             allowed=True,
             reason="passed_all_checks",
             severity="info",
+            risk_scale=min_risk_scale,
             details={
                 "consecutive_losses": self._consecutive_losses,
                 "session_pnl": self._session_pnl,
                 "daily_pnl": self._daily_pnl,
+                "risk_scale": min_risk_scale,
+                "scale_reasons": scale_reasons,
             }
         )
     
@@ -261,13 +314,35 @@ class TradingCircuitBreaker:
             f"session_pnl=${self._session_pnl:.2f}"
         )
     
+    def sync_broker_pnl(self, broker_realized_pnl: float, broker_open_pnl: float = 0.0) -> None:
+        """Sync P&L from the broker's actual account data (Tradovate).
+
+        This is the **source of truth** — overrides any internally tracked
+        P&L derived from virtual trade exits.  Called every scan cycle
+        after polling the broker's account summary.
+
+        Args:
+            broker_realized_pnl: Tradovate's daily realized P&L (resets at session boundary)
+            broker_open_pnl: Tradovate's current unrealized P&L on open positions
+        """
+        old_daily = self._daily_pnl
+        self._daily_pnl = broker_realized_pnl
+        # Session PnL tracks the same as daily for now (resets at 6pm ET)
+        self._session_pnl = broker_realized_pnl
+
+        if abs(old_daily - broker_realized_pnl) > 1.0:
+            logger.info(
+                "CB broker P&L sync: daily=$%.2f (was $%.2f), open=$%.2f",
+                broker_realized_pnl, old_daily, broker_open_pnl,
+            )
+
     def reset_session(self) -> None:
         """Reset session-level tracking (call at start of new trading session)."""
         self._session_pnl = 0.0
         self._session_start = datetime.now(timezone.utc)
         self._consecutive_losses = 0
         logger.info("Trading circuit breaker session reset")
-    
+
     def reset_daily(self) -> None:
         """Reset daily-level tracking (call at start of new trading day)."""
         self._daily_pnl = 0.0
@@ -593,6 +668,235 @@ class TradingCircuitBreaker:
             )
         return CircuitBreakerDecision(allowed=True, reason="consecutive_losses_ok")
     
+    # ==================================================================
+    # NEW: Tiered consecutive loss response
+    # ==================================================================
+    def _check_tiered_losses(self) -> CircuitBreakerDecision:
+        """Tiered response to consecutive losses — scale down before halting.
+
+        Walks configured tiers from highest to lowest.  Returns the matching
+        tier's risk_scale.  If the tier action is 'halt' or 'halt_session',
+        returns allowed=False.
+        """
+        if self._consecutive_losses == 0:
+            return CircuitBreakerDecision(allowed=True, reason="no_losses", risk_scale=1.0)
+
+        # Sort tiers descending by loss count so we match the *highest* tier first
+        tiers = sorted(
+            self.config.tiered_loss_levels,
+            key=lambda t: t.get("losses", 0),
+            reverse=True,
+        )
+
+        for tier in tiers:
+            threshold = int(tier.get("losses", 999))
+            if self._consecutive_losses >= threshold:
+                action = str(tier.get("action", "reduce"))
+                scale = float(tier.get("risk_scale", 0.5))
+
+                if action in ("halt", "halt_session"):
+                    cooldown_min = int(tier.get("cooldown_minutes", 30))
+                    if action == "halt_session":
+                        # Halt until next session (long cooldown)
+                        cooldown_min = max(cooldown_min, 240)
+                    self._activate_cooldown("tiered_loss_halt", cooldown_min)
+                    logger.warning(
+                        f"🛑 Tiered loss halt: {self._consecutive_losses} consecutive losses "
+                        f"(tier threshold={threshold}, cooldown={cooldown_min}min)"
+                    )
+                    return CircuitBreakerDecision(
+                        allowed=False,
+                        reason="tiered_loss_halt",
+                        severity="critical",
+                        risk_scale=0.0,
+                        details={
+                            "consecutive_losses": self._consecutive_losses,
+                            "tier_threshold": threshold,
+                            "action": action,
+                            "cooldown_minutes": cooldown_min,
+                        },
+                    )
+                else:
+                    # Reduce size
+                    logger.info(
+                        f"📉 Tiered loss scaling: {self._consecutive_losses} consecutive losses "
+                        f"→ risk_scale={scale:.2f} (tier threshold={threshold})"
+                    )
+                    return CircuitBreakerDecision(
+                        allowed=True,
+                        reason="tiered_loss_reduce",
+                        risk_scale=scale,
+                        details={
+                            "consecutive_losses": self._consecutive_losses,
+                            "tier_threshold": threshold,
+                            "risk_scale": scale,
+                        },
+                    )
+
+        # No tier matched
+        return CircuitBreakerDecision(allowed=True, reason="tiered_loss_ok", risk_scale=1.0)
+
+    # ==================================================================
+    # NEW: Equity curve filter
+    # ==================================================================
+    def _check_equity_curve(self) -> CircuitBreakerDecision:
+        """Equity curve filter — trade only when equity is above its EMA.
+
+        Uses the running P&L from recent trades to build a mini equity curve,
+        then compares the current equity to its EMA.
+        """
+        lookback = self.config.equity_curve_lookback
+        if len(self._recent_trades) < lookback:
+            # Not enough data yet — allow full size
+            return CircuitBreakerDecision(
+                allowed=True, reason="equity_curve_insufficient_data", risk_scale=1.0,
+            )
+
+        # Build equity curve from recent trades (cumulative PnL)
+        recent = self._recent_trades[-lookback * 2:]  # extra for EMA warmup
+        equity = []
+        running = 0.0
+        for t in recent:
+            running += t.get("pnl", 0.0)
+            equity.append(running)
+
+        if len(equity) < lookback:
+            return CircuitBreakerDecision(
+                allowed=True, reason="equity_curve_insufficient_data", risk_scale=1.0,
+            )
+
+        # Compute EMA of equity curve
+        multiplier = 2.0 / (lookback + 1)
+        ema = equity[0]
+        for val in equity[1:]:
+            ema = (val - ema) * multiplier + ema
+
+        current_equity = equity[-1]
+        equity_diff = current_equity - ema
+
+        # Compute "ATR" of equity curve (avg absolute change per trade)
+        changes = [abs(equity[i] - equity[i - 1]) for i in range(1, len(equity))]
+        equity_atr = sum(changes) / len(changes) if changes else 1.0
+        equity_atr = max(equity_atr, 1.0)  # avoid division by zero
+
+        if equity_diff < -equity_atr * self.config.equity_curve_halt_atr_mult:
+            # Equity far below MA — halt
+            logger.warning(
+                f"🛑 Equity curve halt: equity={current_equity:.2f}, "
+                f"ema={ema:.2f}, diff={equity_diff:.2f}, "
+                f"threshold={-equity_atr * self.config.equity_curve_halt_atr_mult:.2f}"
+            )
+            self._activate_cooldown("equity_curve_halt", 15)
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="equity_curve_halt",
+                severity="critical",
+                risk_scale=0.0,
+                details={
+                    "equity": current_equity,
+                    "ema": ema,
+                    "diff": equity_diff,
+                    "equity_atr": equity_atr,
+                },
+            )
+        elif equity_diff < 0 and self.config.equity_curve_half_size_below_ma:
+            # Equity below MA — half size
+            logger.info(
+                f"📉 Equity curve below MA: equity={current_equity:.2f}, "
+                f"ema={ema:.2f} → risk_scale=0.5"
+            )
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="equity_curve_below_ma",
+                risk_scale=0.5,
+                details={
+                    "equity": current_equity,
+                    "ema": ema,
+                    "diff": equity_diff,
+                },
+            )
+
+        return CircuitBreakerDecision(
+            allowed=True, reason="equity_curve_ok", risk_scale=1.0,
+        )
+
+    # ==================================================================
+    # NEW: Time-of-day risk scaling
+    # ==================================================================
+    def _check_tod_risk_scaling(self) -> CircuitBreakerDecision:
+        """Scale down risk during historically weak hours."""
+        now_et = datetime.now(ET)
+        current_hour = now_et.hour
+
+        for window in self.config.tod_risk_windows:
+            start = int(window.get("start_hour_et", 0))
+            end = int(window.get("end_hour_et", 0))
+            scale = float(window.get("risk_scale", 1.0))
+
+            # Handle windows that cross midnight (e.g. 22-02)
+            if start <= end:
+                in_window = start <= current_hour < end
+            else:
+                in_window = current_hour >= start or current_hour < end
+
+            if in_window:
+                return CircuitBreakerDecision(
+                    allowed=True,
+                    reason="tod_risk_scaling",
+                    risk_scale=scale,
+                    details={
+                        "hour_et": current_hour,
+                        "window": f"{start:02d}-{end:02d}",
+                        "risk_scale": scale,
+                    },
+                )
+
+        return CircuitBreakerDecision(allowed=True, reason="tod_ok", risk_scale=1.0)
+
+    # ==================================================================
+    # NEW: Volatility-adjusted risk scaling
+    # ==================================================================
+    def _check_volatility_risk_scaling(
+        self, market_data: Dict[str, Any],
+    ) -> CircuitBreakerDecision:
+        """Scale risk based on current ATR vs average ATR."""
+        atr_current = market_data.get("atr_current", 0)
+        atr_average = market_data.get("atr_average", 0)
+        if not atr_average or atr_average <= 0:
+            return CircuitBreakerDecision(allowed=True, reason="vol_no_data", risk_scale=1.0)
+
+        ratio = atr_current / atr_average
+
+        if ratio >= self.config.volatility_extreme_atr_ratio:
+            scale = self.config.volatility_extreme_risk_scale
+            if scale <= 0:
+                logger.warning(
+                    f"🛑 Extreme volatility halt: ATR ratio={ratio:.2f} "
+                    f"(threshold={self.config.volatility_extreme_atr_ratio})"
+                )
+                return CircuitBreakerDecision(
+                    allowed=False,
+                    reason="extreme_volatility",
+                    severity="warning",
+                    risk_scale=0.0,
+                    details={"atr_ratio": ratio, "threshold": self.config.volatility_extreme_atr_ratio},
+                )
+            return CircuitBreakerDecision(
+                allowed=True, reason="extreme_vol_scale", risk_scale=scale,
+                details={"atr_ratio": ratio},
+            )
+        elif ratio >= self.config.volatility_high_atr_ratio:
+            scale = self.config.volatility_high_risk_scale
+            logger.info(
+                f"📉 High volatility scaling: ATR ratio={ratio:.2f} → risk_scale={scale:.2f}"
+            )
+            return CircuitBreakerDecision(
+                allowed=True, reason="high_vol_scale", risk_scale=scale,
+                details={"atr_ratio": ratio, "risk_scale": scale},
+            )
+
+        return CircuitBreakerDecision(allowed=True, reason="vol_ok", risk_scale=1.0)
+
     def _check_session_drawdown(self) -> CircuitBreakerDecision:
         """Check if session drawdown exceeds limit."""
         if self._session_pnl <= -self.config.max_session_drawdown:
@@ -886,6 +1190,28 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         enable_trigger_filters=config.get("enable_trigger_filters", False),
         ema_cross_require_volume=config.get("ema_cross_require_volume", True),
         low_regime_require_volume=config.get("low_regime_require_volume", True),
+        # Equity curve filter
+        enable_equity_curve_filter=config.get("enable_equity_curve_filter", False),
+        equity_curve_lookback=config.get("equity_curve_lookback", 20),
+        equity_curve_half_size_below_ma=config.get("equity_curve_half_size_below_ma", True),
+        equity_curve_halt_atr_mult=config.get("equity_curve_halt_atr_mult", 1.5),
+        # Tiered loss response
+        enable_tiered_loss_response=config.get("enable_tiered_loss_response", False),
+        tiered_loss_levels=config.get("tiered_loss_levels", [
+            {"losses": 3, "risk_scale": 0.5, "action": "reduce"},
+            {"losses": 5, "risk_scale": 0.25, "action": "reduce"},
+            {"losses": 7, "risk_scale": 0.0, "action": "halt", "cooldown_minutes": 30},
+            {"losses": 10, "risk_scale": 0.0, "action": "halt_session"},
+        ]),
+        # TOD risk scaling
+        enable_tod_risk_scaling=config.get("enable_tod_risk_scaling", False),
+        tod_risk_windows=config.get("tod_risk_windows", []),
+        # Volatility risk scaling
+        enable_volatility_risk_scaling=config.get("enable_volatility_risk_scaling", False),
+        volatility_high_atr_ratio=config.get("volatility_high_atr_ratio", 1.5),
+        volatility_high_risk_scale=config.get("volatility_high_risk_scale", 0.5),
+        volatility_extreme_atr_ratio=config.get("volatility_extreme_atr_ratio", 2.0),
+        volatility_extreme_risk_scale=config.get("volatility_extreme_risk_scale", 0.0),
         # Tradovate Paper Evaluation Gate
         enable_tv_paper_eval_gate=config.get("enable_tv_paper_eval_gate", False),
         tv_paper_max_contracts_mini=config.get("tv_paper_max_contracts_mini", 5),
@@ -896,5 +1222,5 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         tv_paper_near_max_loss_buffer=config.get("tv_paper_near_max_loss_buffer", 200.0),
         tv_paper_enable_news_blackout=config.get("tv_paper_enable_news_blackout", True),
     )
-    
+
     return TradingCircuitBreaker(cb_config)

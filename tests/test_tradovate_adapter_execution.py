@@ -247,8 +247,8 @@ class TestPlaceBracketPositionGuard:
         adapter._client.get_positions.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_rest_failure_non_fatal(self):
-        """REST position fetch failure does not block order placement."""
+    async def test_rest_failure_rejects_for_safety(self):
+        """REST position fetch failure rejects order — cannot verify broker state."""
         adapter = make_adapter(
             mode="paper", armed=True, connected=True,
             contract_symbol="MNQM6",
@@ -259,9 +259,9 @@ class TestPlaceBracketPositionGuard:
 
         signal = make_signal()
         result = await adapter.place_bracket(signal)
-        # Order should still go through (REST failure is non-fatal)
-        assert result.success
-        assert result.status == OrderStatus.PLACED
+        # FIXED 2026-04-08: Order is now rejected when broker state can't be verified
+        assert not result.success
+        assert result.status == OrderStatus.REJECTED
 
     @pytest.mark.asyncio
     async def test_max_position_size_blocks_order(self):

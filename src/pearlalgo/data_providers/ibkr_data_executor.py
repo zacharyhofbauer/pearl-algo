@@ -156,7 +156,7 @@ class ConnectTask(Task):
         """Connect to IB Gateway."""
         if ib.isConnected():
             return True
-        ib.connect(host=self.host, port=self.port, clientId=self.client_id, timeout=self.timeout)
+        ib.connect(host=self.host, port=self.port, clientId=self.client_id, timeout=self.timeout, readonly=True)
         return ib.isConnected()
 
 
@@ -872,12 +872,14 @@ class GetHistoricalDataTask(Task):
         # Create contract
         if self.is_futures:
             # For futures, use reqContractDetails to get contracts.
-            # IMPORTANT: includeExpired=True so we can select the correct 2025 contract (e.g. MNQZ5)
-            # when backtesting after expiry/rollover.
+            # IMPORTANT: includeExpired is useful for deep historical backfills,
+            # but harms live-path latency if we probe stale contracts first.
             contract = Future(self.symbol, exchange="CME", currency="USD")
             try:
+                end_utc = end.astimezone(timezone.utc)
+                include_expired = end_utc < (datetime.now(timezone.utc) - timedelta(days=3))
                 # ib_insync / IB supports includeExpired on futures contracts
-                contract.includeExpired = True  # type: ignore[attr-defined]
+                contract.includeExpired = include_expired  # type: ignore[attr-defined]
             except Exception as attr_e:
                 logger.debug(f"Could not set includeExpired on contract: {attr_e}")
             try:
@@ -905,12 +907,25 @@ class GetHistoricalDataTask(Task):
                     eligible = [cd for cd in sorted_contracts if _exp_key(cd) >= requested_end_str]
                     active_today = [cd for cd in sorted_contracts if _exp_key(cd) >= today_str]
 
-                    # Always try the nearest returned contracts first, then any
-                    # contracts that are clearly active for the requested window.
-                    candidates: List[Any] = list(sorted_contracts[:3])
-                    if active_today:
-                        # Ensure we also try clearly-active contracts as fallback.
-                        candidates.extend(active_today[:3])
+                    # Candidate order matters:
+                    # - Live/near-live requests should prefer active contracts first.
+                    # - Historical requests should prefer contracts eligible for the requested date.
+                    candidates: List[Any] = []
+                    is_live_window = requested_end_str >= today_str
+                    if is_live_window:
+                        if active_today:
+                            candidates.extend(active_today[:4])
+                        if eligible:
+                            candidates.extend(eligible[:2])
+                        if not candidates:
+                            candidates.extend(sorted_contracts[:4])
+                    else:
+                        if eligible:
+                            candidates.extend(eligible[:4])
+                        if active_today:
+                            candidates.extend(active_today[:2])
+                        if not candidates:
+                            candidates.extend(sorted_contracts[:4])
 
                     # Deduplicate by conId
                     seen_conids = set()
@@ -1265,7 +1280,8 @@ class IBKRExecutor:
                         host=self.host,
                         port=self.port,
                         clientId=self.client_id,
-                        timeout=10
+                        timeout=10,
+                        readonly=True
                     )
                     self._connected = True
                     self._reconnect_attempts = 0

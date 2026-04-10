@@ -68,10 +68,10 @@ Design tokens are CSS custom properties defined in `app/globals.css` that provid
 
 #### Core Colors
 ```css
---bg-primary: #0a0a0f;
---bg-secondary: #12121a;
---bg-card: #1a1a24;
---bg-elevated: #22222e;
+--bg-primary: #131722;
+--bg-secondary: #1e222d;
+--bg-card: #1e222d;
+--bg-elevated: #2a2e39;
 --text-primary: #f0eeeb;    /* WCAG AA: ~15:1 on bg-primary */
 --text-secondary: #b0b8c8;  /* WCAG AA: ~8.5:1 on bg-primary */
 --text-tertiary: #8a92a0;   /* WCAG AA: ~5:1 on bg-card */

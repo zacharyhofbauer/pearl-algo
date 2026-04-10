@@ -346,7 +346,7 @@ class TestTradovateAccountPoll:
 
     @pytest.mark.asyncio
     async def test_tradovate_poll_success(self):
-        """Successful Tradovate poll should save state."""
+        """Successful Tradovate poll should mark state dirty (deferred save)."""
         svc = _make_service_mock()
         adapter = MagicMock()
         adapter.get_account_summary = AsyncMock(return_value={"balance": 50000})
@@ -358,7 +358,8 @@ class TestTradovateAccountPoll:
         await _run_one_cycle(svc)
 
         assert svc._tradovate_account == {"balance": 50000}
-        svc._save_state.assert_called()
+        # Issue 13: state save deferred to end-of-cycle via mark_state_dirty
+        svc.mark_state_dirty.assert_called()
 
     @pytest.mark.asyncio
     async def test_tradovate_poll_failure_handled(self):

@@ -92,6 +92,25 @@ class SignalHandler:
         self.last_signal_sent_at: Optional[str] = None
         self.last_signal_send_error: Optional[str] = None
         self.last_signal_id_prefix: Optional[str] = None
+        # Per-cycle rejection counters — drained by service_loop each cycle
+        # for cycle_diagnostics observability. Categories mirror the schema
+        # columns in trades.db.cycle_diagnostics.
+        self._cycle_rejections: Dict[str, int] = {}
+
+    def _record_rejection(self, category: str, count: int = 1) -> None:
+        """Increment a per-cycle rejection counter."""
+        try:
+            self._cycle_rejections[category] = (
+                int(self._cycle_rejections.get(category, 0)) + int(count)
+            )
+        except Exception:
+            pass
+
+    def drain_cycle_rejections(self) -> Dict[str, int]:
+        """Return current rejection counts and reset them for the next cycle."""
+        snapshot = dict(self._cycle_rejections)
+        self._cycle_rejections.clear()
+        return snapshot
 
     def _is_signal_type_allowed(self, signal: Dict) -> bool:
         """
@@ -118,12 +137,14 @@ class SignalHandler:
 
         signal_type = str(signal.get("type", "")).strip()
         if not signal_type:
+            self._record_rejection("rejected_quality_scorer")
             logger.warning(
                 "Signal rejected: missing 'type' field (whitelist active: %s)", whitelist
             )
             return False
 
         if signal_type not in whitelist:
+            self._record_rejection("rejected_quality_scorer")
             logger.warning(
                 "Signal rejected: type '%s' not in enabled_signal_types %s",
                 signal_type, whitelist,
@@ -156,13 +177,24 @@ class SignalHandler:
             # ==========================================================================
             # TRADING CIRCUIT BREAKER: Check if signal should be allowed
             # ==========================================================================
-            if not self._check_circuit_breaker(signal, buffer_data):
+            cb_risk_scale = self._check_circuit_breaker_with_scale(signal, buffer_data)
+            if cb_risk_scale <= 0.0:
                 return  # Signal blocked by circuit breaker
 
             # ==========================================================================
-            # POSITION SIZING: Compute position size if not already set
+            # POSITION SIZING: Compute position size, then apply CB risk scaling
             # ==========================================================================
             self._ensure_position_size(signal)
+            if cb_risk_scale < 1.0:
+                original_size = signal.get("position_size", 1)
+                scaled_size = max(1, int(original_size * cb_risk_scale))
+                if scaled_size < original_size:
+                    logger.info(
+                        f"CB risk scaling: position_size {original_size} → {scaled_size} "
+                        f"(scale={cb_risk_scale:.2f})"
+                    )
+                    signal["position_size"] = scaled_size
+                    signal["_cb_risk_scale"] = cb_risk_scale
 
             # Track signal generation
             signal_id = self.performance_tracker.track_signal_generated(signal)
@@ -239,12 +271,23 @@ class SignalHandler:
         Args:
             signal: Signal dictionary from strategy or forwarded source
         """
-        async with self._execution_semaphore:
+        try:
+            async with asyncio.timeout(30):
+                await self._execution_semaphore.acquire()
+        except TimeoutError:
+            logger.critical(
+                "Execution semaphore timeout (30s) — signal skipped "
+                "(direction=%s, source=%s). Possible hung execution path.",
+                signal.get("direction"), signal.get("signal_source"),
+            )
+            return
+
+        try:
             try:
                 # Circuit breaker check (re-evaluated inside semaphore so each
                 # queued signal sees current position state, not stale snapshot
                 # from before prior signals were recorded).
-                if not self._check_circuit_breaker(signal, None):
+                if self._check_circuit_breaker_with_scale(signal, None) <= 0.0:
                     return
 
                 # Position sizing: compute if not already set
@@ -288,6 +331,8 @@ class SignalHandler:
             except Exception as e:
                 logger.error(f"Error in follower_execute: {e}", exc_info=True)
                 self.error_count += 1
+        finally:
+            self._execution_semaphore.release()
 
     # ------------------------------------------------------------------
     # Shared helpers (eliminate duplication between process_signal & follower_execute)
@@ -389,6 +434,7 @@ class SignalHandler:
         sid = str(signal_id)[:16]
         raw = signal.get("entry_price")
         if raw is None:
+            self._record_rejection("rejected_invalid_prices")
             logger.warning(f"Rejecting signal {sid}: entry_price is None")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_none", {})
@@ -396,11 +442,13 @@ class SignalHandler:
         try:
             val = float(raw)
         except (TypeError, ValueError):
+            self._record_rejection("rejected_invalid_prices")
             logger.warning(f"Rejecting signal {sid}: entry_price={raw!r} is not a valid number")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_invalid", {"value": str(raw)})
             return None
         if math.isnan(val) or math.isinf(val):
+            self._record_rejection("rejected_invalid_prices")
             logger.warning(f"Rejecting signal {sid}: entry_price is NaN/Inf")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_nan", {})
@@ -430,6 +478,25 @@ class SignalHandler:
             )
         except Exception as exc:
             logger.warning(f"Audit log_trade_entered failed: {exc}")
+
+    def _check_circuit_breaker_with_scale(
+        self,
+        signal: Dict,
+        buffer_data: Optional[pd.DataFrame],
+    ) -> float:
+        """Check circuit breaker and return risk_scale (0.0-1.0).
+
+        Returns 0.0 if blocked, 1.0 for full size, or a fraction for scaling.
+        Delegates to ``_check_circuit_breaker`` which sets
+        ``signal["_cb_decision_risk_scale"]`` on success.
+        """
+        allowed = self._check_circuit_breaker(signal, buffer_data)
+        if not allowed:
+            return 0.0
+        try:
+            return float(signal.pop("_cb_decision_risk_scale", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
 
     def _check_circuit_breaker(
         self,
@@ -547,8 +614,20 @@ class SignalHandler:
                         f"circuit_breaker:{cb_decision.reason}",
                         cb_decision.details or {},
                     )
+                # Per-cycle diagnostics: bucket CB rejections by reason for cycle_diagnostics observability.
+                _reason = str(cb_decision.reason or "")
+                if _reason in ("regime_avoidance", "direction_gating") or "regime" in _reason:
+                    self._record_rejection("rejected_regime_filter")
+                elif "market_hours" in _reason or "session" in _reason:
+                    self._record_rejection("rejected_market_hours")
+                elif "order_book" in _reason or "spread" in _reason:
+                    self._record_rejection("rejected_order_book")
+                else:
+                    self._record_rejection("rejected_quality_scorer")
                 return False  # Block in enforce mode
 
+        # Store risk_scale on the signal for _check_circuit_breaker_with_scale
+        signal["_cb_decision_risk_scale"] = cb_decision.risk_scale
         return True
 
     def _track_virtual_entry(self, signal: Dict, signal_id: str, preserve_full_signal: bool = False) -> float:
@@ -557,6 +636,24 @@ class SignalHandler:
         try:
             entry_price = float(signal.get("entry_price") or 0.0)
             signal_direction = signal.get("direction", "unknown")
+            # AUDIT 2026-04-10: hard guard against synthetic stub trades.
+            # MNQ has never traded below ~1000; the recurring entry=100/exit=100.5
+            # ghosts come from a path that pumps fake signals with entry=100,
+            # sl=90, tp=110. Reject + log the full payload + stack so the source
+            # is identified on next occurrence.
+            if 0 < entry_price < 1000:
+                import traceback
+                logger.error(
+                    "STUB SIGNAL REJECTED: signal_id=%s entry_price=%s (below MNQ minimum 1000) "
+                    "direction=%s sl=%s tp=%s type=%s confidence=%s symbol=%s. "
+                    "Full signal=%r. Stack trace:\n%s",
+                    signal_id, entry_price, signal_direction,
+                    signal.get("stop_loss"), signal.get("take_profit"),
+                    signal.get("type"), signal.get("confidence"),
+                    signal.get("symbol"), signal,
+                    "".join(traceback.format_stack(limit=15)),
+                )
+                return 0.0
             if entry_price > 0:
                 logger.info(
                     f"🔍 VIRTUAL ENTRY: signal_id={signal_id[:16]} | direction={signal_direction.upper()} | "
@@ -670,6 +767,13 @@ class SignalHandler:
                     continue
 
             if not open_positions:
+                # Auto-re-arm if previously disarmed by protection guard
+                if hasattr(adapter, "armed") and not adapter.armed:
+                    if hasattr(adapter, "arm"):
+                        adapter.arm()
+                        logger.info(
+                            "✅ Protection guard: no open positions — auto-re-armed execution"
+                        )
                 return True
 
             working_orders = summary.get("working_orders") or []

@@ -229,7 +229,26 @@ class TradeDatabase:
                 """
             )
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS account_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    equity REAL,
+                    cash_balance REAL,
+                    realized_pnl REAL,
+                    open_pnl REAL,
+                    week_realized_pnl REAL,
+                    position_count INTEGER,
+                    net_position INTEGER,
+                    initial_margin REAL,
+                    source TEXT DEFAULT 'tradovate'
+                )
+                """
+            )
+
             for sql in [
+                "CREATE INDEX IF NOT EXISTS idx_account_snap_timestamp ON account_snapshots(timestamp)",
                 "CREATE INDEX IF NOT EXISTS idx_trades_signal_type ON trades(signal_type)",
                 "CREATE INDEX IF NOT EXISTS idx_trades_direction ON trades(direction)",
                 "CREATE INDEX IF NOT EXISTS idx_trades_regime ON trades(regime)",
@@ -498,6 +517,35 @@ class TradeDatabase:
         with self._get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return {str(row["quiet_reason"]): int(row["count"] or 0) for row in rows}
+
+    def add_account_snapshot(
+        self,
+        equity: float,
+        cash_balance: float,
+        realized_pnl: float,
+        open_pnl: float = 0.0,
+        week_realized_pnl: float = 0.0,
+        position_count: int = 0,
+        net_position: int = 0,
+        initial_margin: float = 0.0,
+        source: str = "tradovate",
+    ) -> None:
+        """Record a point-in-time account snapshot from the broker."""
+        ts = self._now_et()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO account_snapshots
+                    (timestamp, equity, cash_balance, realized_pnl, open_pnl,
+                     week_realized_pnl, position_count, net_position,
+                     initial_margin, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ts, equity, cash_balance, realized_pnl, open_pnl,
+                 week_realized_pnl, position_count, net_position,
+                 initial_margin, source),
+            )
+            conn.commit()
 
     def add_trade(
         self,

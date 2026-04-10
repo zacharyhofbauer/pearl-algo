@@ -66,7 +66,7 @@ def build_strategy_config_from_yaml(base, config_data):
                     "session", "challenge", "performance", "virtual_pnl", "auto_flat",
                     "swing_trading", "guardrails", "strategies", "trading_circuit_breaker",
                     "circuit_breaker", "hud", "indicators", "telegram", "telegram_ui",
-                    "storage", "audit", "accounts"):
+                    "storage", "audit", "accounts", "composite_regime"):
         if section in config_data:
             if isinstance(config_data[section], dict) and isinstance(result.get(section), dict):
                 result[section] = {**result.get(section, {}), **config_data[section]}

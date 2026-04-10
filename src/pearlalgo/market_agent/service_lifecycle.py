@@ -253,11 +253,13 @@ class ServiceLifecycleMixin:
             logger.info(f"Sending shutdown notification: {shutdown_reason}")
             shutdown_task: asyncio.Task[object] | None = None
             try:
-                shutdown_task = asyncio.create_task(
-                    self.telegram_notifier.send_shutdown_notification(summary)
-                )
-                await asyncio.wait_for(shutdown_task, timeout=10.0)
-                logger.info("Shutdown notification sent to Telegram")
+                notify_result = self.telegram_notifier.send_shutdown_notification(summary)
+                if inspect.isawaitable(notify_result):
+                    shutdown_task = asyncio.create_task(notify_result)
+                    await asyncio.wait_for(shutdown_task, timeout=10.0)
+                    logger.info("Shutdown notification sent to Telegram")
+                else:
+                    logger.info("Shutdown notification sink is synchronous/no-op; skipping async wait")
             except asyncio.TimeoutError:
                 await _drain_task(shutdown_task, "shutdown notification")
                 logger.error("Timeout sending shutdown notification - Telegram may be slow or unreachable")

@@ -23,7 +23,6 @@ export default function NavBar() {
 
   const isHome = pathname === '/' || pathname === ''
   const isDashboard = pathname?.startsWith('/dashboard')
-  const isArchive = pathname?.startsWith('/archive')
   const isSettings = pathname?.startsWith('/settings')
 
   const dashboardContext = useMemo(() => {
@@ -74,13 +73,6 @@ export default function NavBar() {
             aria-current={isDashboard ? 'page' : undefined}
           >
             Dashboard
-          </Link>
-          <Link
-            href="/archive/ibkr"
-            className={`nav-bar-link ${isArchive ? 'active' : ''}`}
-            aria-current={isArchive ? 'page' : undefined}
-          >
-            Archive
           </Link>
           <Link
             href="/settings"

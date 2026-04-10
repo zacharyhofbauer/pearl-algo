@@ -437,13 +437,11 @@ class TradovateClient:
                 "isAutomated": True,
             }
 
-        url = f"{self.config.rest_url}/order/placeoso"
-        # FIXED 2026-03-26: log full request body and response for bracket debugging
-        import logging as _logging
-        _log = _logging.getLogger(__name__)
-        _log.info(f"place_oso REQUEST body: {body}")
+        url = f"{self.config.rest_url}/order/placeOSO"
+        from pearlalgo.utils.logger import logger as _plog
+        _plog.info(f"place_oso REQUEST body: {json.dumps(body)}")
         result = await self._post(url, body)
-        _log.info(f"place_oso RESPONSE: {result}")
+        _plog.info(f"place_oso RESPONSE: {json.dumps(result) if isinstance(result, (dict, list)) else str(result)[:1000]}")
         return result
 
     async def modify_order(

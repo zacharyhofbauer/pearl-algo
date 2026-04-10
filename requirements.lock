@@ -112,7 +112,7 @@ pandas-stubs==2.3.3.260113
 pandas-ta==0.4.71b0
 parso==0.8.5
 pathspec==1.0.4
--e git+ssh://git@github.com/zacharyhofbauer/pearl-algo.git@a2c10dddd1a5243d451b837e399112496844b578#egg=pearlalgo
+-e git+ssh://git@github.com/zacharyhofbauer/pearl-algo.git@b1e7a8ca2eba1ada44942bada68aba018a6e88f2#egg=pearlalgo
 # Editable install with no version control (pearlalgo-dev-ai-agents==0.2.4)
 -e /home/pearlalgo/pearlalgo-dev-ai-agents
 pexpect==4.9.0

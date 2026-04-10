@@ -86,4 +86,8 @@ def test_canonical_runtime_disables_legacy_signal_gate(tmp_path):
         )
 
     assert service.strategy.name == "composite_intraday"
-    assert service.trading_circuit_breaker is None
+    # FIXED 2026-04-08: CB is now always created from guardrails config,
+    # regardless of signal_gate_enabled.  The old behavior (CB=None when
+    # signal_gate_enabled=false + active strategy) was a bug that left the
+    # system unprotected.
+    assert service.trading_circuit_breaker is not None

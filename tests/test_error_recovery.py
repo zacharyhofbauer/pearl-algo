@@ -58,6 +58,7 @@ async def test_connection_failure_circuit_breaker_pauses_service(tmp_path) -> No
 
     service = MarketAgentService(data_provider=provider, config=config, state_dir=tmp_path)
     service.max_connection_failures = 1  # trigger immediately
+    service.pause_on_connection_failures = True
 
     task = asyncio.create_task(service.start())
 
