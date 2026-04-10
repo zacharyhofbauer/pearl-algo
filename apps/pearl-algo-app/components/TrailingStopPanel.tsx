@@ -1,9 +1,12 @@
 'use client'
 
-import React, { useMemo } from 'react'
-import { useAgentStore, selectTrailingStop } from '@/stores'
+import React, { useMemo, useState } from 'react'
+import { useAgentStore, selectTrailingStop, useOperatorStore, useUIStore } from '@/stores'
 import type { TrailingStopPosition } from '@/stores'
 import { formatPrice } from '@/lib/formatters'
+import { apiFetch } from '@/lib/api'
+import OperatorUnlockModal from '@/components/OperatorUnlockModal'
+import TrailingStopOverrideModal from '@/components/TrailingStopOverrideModal'
 
 interface TrailingStopRowProps {
   signalId: string
@@ -87,16 +90,94 @@ const TrailingStopRow = React.memo(function TrailingStopRow({ signalId, state }:
  */
 function TrailingStopPanel() {
   const trailing = useAgentStore(selectTrailingStop)
+  const isUnlocked = useOperatorStore((s) => s.isUnlocked)
+  const addNotification = useUIStore((s) => s.addNotification)
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
+  const [showOverrideModal, setShowOverrideModal] = useState(false)
+  const [clearBusy, setClearBusy] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const positions = useMemo(() => {
     if (!trailing?.positions) return []
     return Object.entries(trailing.positions).map(([signalId, state]) => ({ signalId, state }))
   }, [trailing])
 
+  // Open override modal — but if we're not unlocked yet, prompt for the
+  // passphrase first and reopen automatically once the operator store flips.
+  const requestOverride = () => {
+    if (!isUnlocked) {
+      setShowUnlockModal(true)
+      return
+    }
+    setShowOverrideModal(true)
+  }
+
+  // Two-tap clear so a stray click can't wipe an active override.
+  const requestClear = async () => {
+    if (!isUnlocked) {
+      setShowUnlockModal(true)
+      return
+    }
+    if (!confirmClear) {
+      setConfirmClear(true)
+      // Reset the confirmation prompt after a few seconds if the user walks away.
+      setTimeout(() => setConfirmClear(false), 4000)
+      return
+    }
+    setClearBusy(true)
+    try {
+      const res = await apiFetch('/api/trailing-stop/override', { method: 'DELETE' })
+      const text = await res.text()
+      let payload: { ok?: boolean; message?: string; detail?: unknown } = {}
+      try {
+        payload = text ? JSON.parse(text) : {}
+      } catch {
+        // tolerate non-JSON
+      }
+      if (!res.ok) {
+        const detail =
+          (typeof payload.detail === 'string' && payload.detail) ||
+          payload.message ||
+          (text && text.trim()) ||
+          `HTTP ${res.status}`
+        throw new Error(detail)
+      }
+      addNotification({
+        type: 'success',
+        title: 'Trailing override cleared',
+        message: payload.message || 'Reverting to default trail parameters.',
+      })
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Clear request failed'
+      addNotification({ type: 'error', title: 'Clear override failed', message })
+    } finally {
+      setClearBusy(false)
+      setConfirmClear(false)
+    }
+  }
+
+  // ── Modal mounts (always rendered so unlock + override stay isolated) ──
+  const modals = (
+    <>
+      <OperatorUnlockModal
+        isOpen={showUnlockModal}
+        onClose={() => setShowUnlockModal(false)}
+        onUnlocked={() => setShowOverrideModal(true)}
+      />
+      <TrailingStopOverrideModal
+        isOpen={showOverrideModal}
+        onClose={() => setShowOverrideModal(false)}
+        defaultTrailMult={trailing?.active_override?.trail_atr_multiplier}
+        defaultActivationMult={trailing?.active_override?.activation_atr_multiplier}
+      />
+    </>
+  )
+
   if (!trailing) {
     return (
       <div className="trailing-panel">
         <div className="trailing-empty">Trailing stop data not yet available.</div>
+        {modals}
       </div>
     )
   }
@@ -109,6 +190,7 @@ function TrailingStopPanel() {
           <code className="trailing-empty-code"> trailing_stop.enabled: true</code>
           in <code className="trailing-empty-code">config/live/tradovate_paper.yaml</code>.
         </div>
+        {modals}
       </div>
     )
   }
@@ -127,8 +209,18 @@ function TrailingStopPanel() {
             </span>
           )}
         </span>
-        <span className="trailing-header-count">
-          {positions.length} position{positions.length === 1 ? '' : 's'} tracked
+        <span className="trailing-header-actions">
+          <span className="trailing-header-count">
+            {positions.length} position{positions.length === 1 ? '' : 's'}
+          </span>
+          <button
+            type="button"
+            className="trailing-header-btn"
+            onClick={requestOverride}
+            title={isUnlocked ? 'Apply manual override' : 'Click to unlock and apply override'}
+          >
+            {isUnlocked ? 'Override' : '🔒 Override'}
+          </button>
         </span>
       </header>
 
@@ -142,6 +234,27 @@ function TrailingStopPanel() {
                 expires in {ov.expires_in_minutes.toFixed(0)}m
               </span>
             )}
+            <button
+              type="button"
+              className={`trailing-override-clear ${confirmClear ? 'is-confirming' : ''}`}
+              onClick={requestClear}
+              disabled={clearBusy}
+              title={
+                !isUnlocked
+                  ? 'Click to unlock and clear override'
+                  : confirmClear
+                    ? 'Click again to confirm'
+                    : 'Clear override and revert to defaults'
+              }
+            >
+              {clearBusy
+                ? 'Clearing…'
+                : confirmClear
+                  ? 'Confirm Clear'
+                  : isUnlocked
+                    ? 'Clear'
+                    : '🔒 Clear'}
+            </button>
           </div>
           <div className="trailing-override-grid">
             <div className="trailing-cell">
@@ -172,6 +285,7 @@ function TrailingStopPanel() {
           ))}
         </div>
       )}
+      {modals}
     </div>
   )
 }
