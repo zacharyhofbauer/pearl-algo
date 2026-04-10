@@ -144,6 +144,22 @@ export interface ExecutionState {
   disarm_reason?: string
 }
 
+// Session profit lock — live HWM / floor / trip state surfaced from the
+// backend TradingCircuitBreaker.get_status() call.
+export interface SessionProfitLockState {
+  enabled: boolean
+  activation_usd: number
+  retracement_pct: number
+  min_floor_usd: number
+  hwm_usd: number
+  floor_usd: number | null
+  armed: boolean
+  locked: boolean
+  trip_time_utc: string | null
+  trip_hwm_usd: number
+  trip_pnl_usd: number
+}
+
 // Circuit breaker detailed status
 export interface CircuitBreakerStatus {
   active: boolean
@@ -152,6 +168,7 @@ export interface CircuitBreakerStatus {
   rolling_win_rate?: number
   trip_reason?: string
   trips_today: number
+  session_profit_lock?: SessionProfitLockState
 }
 
 // Session context

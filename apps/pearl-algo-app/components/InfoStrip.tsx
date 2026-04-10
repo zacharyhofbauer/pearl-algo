@@ -23,13 +23,13 @@ interface InfoStripProps {
  */
 function InfoStrip({ agentState, positions, wsStatus }: InfoStripProps) {
   const equityCurve = agentState?.equity_curve ?? []
-  const tradovateEquity = agentState?.tradovate_account?.equity ?? null
+  const tradovate = agentState?.tradovate_account ?? null
   const lastExitTime = agentState?.recent_exits?.[0]?.exit_time ?? null
   const symbol = agentState?.config?.symbol
 
   return (
     <div className="info-strip" role="status" aria-label="Live system metrics">
-      <EquityCurveStrip curve={equityCurve} currentEquity={tradovateEquity} />
+      <EquityCurveStrip curve={equityCurve} tradovate={tradovate} />
       <RiskChips
         positions={positions}
         riskMetrics={agentState?.risk_metrics ?? null}

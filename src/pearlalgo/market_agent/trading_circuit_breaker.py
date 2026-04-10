@@ -90,6 +90,19 @@ class TradingCircuitBreaker:
         self._shadow_allowed_wins: int = 0
         self._shadow_allowed_losses: int = 0
         self._shadow_allowed_pnl: float = 0.0
+
+        # Session profit lock state — updated on every sync_broker_pnl() call.
+        # _session_profit_hwm tracks the session's peak net realized P&L.
+        # _session_profit_floor is None until the HWM crosses the activation
+        # threshold; once armed it holds the current give-back floor.
+        # _session_profit_locked flips to True on trip and stays True until
+        # reset_session() clears it at the 18:00 ET session boundary.
+        self._session_profit_hwm: float = 0.0
+        self._session_profit_floor: Optional[float] = None
+        self._session_profit_locked: bool = False
+        self._session_profit_lock_trip_time: Optional[datetime] = None
+        self._session_profit_lock_trip_hwm: float = 0.0
+        self._session_profit_lock_trip_pnl: float = 0.0
         
         logger.info(
             f"TradingCircuitBreaker initialized: "
@@ -336,11 +349,176 @@ class TradingCircuitBreaker:
                 broker_realized_pnl, old_daily, broker_open_pnl,
             )
 
+        # Session profit lock runs on the broker-synced net P&L, not on the
+        # gross accumulator, so the HWM and floor are always in Tradovate units.
+        if self.config.enable_session_profit_lock:
+            self._update_session_profit_lock(broker_realized_pnl)
+
+    def _update_session_profit_lock(self, current_net_pnl: float) -> None:
+        """Track session HWM and trip the profit lock on retracement.
+
+        Called from sync_broker_pnl() on every service loop iteration.  Only
+        does work when ``config.enable_session_profit_lock`` is True.
+
+        State machine:
+          1. HWM update — if current > HWM, raise the HWM.  Also reflow the
+             floor upward as the HWM climbs (ratchet behavior) so a late-day
+             spike doesn't reset the protection.
+          2. Arm floor — once HWM crosses ``session_profit_lock_activation_usd``,
+             compute floor = max(HWM × (1 − retracement_pct), min_floor_usd).
+          3. Trip — if current_net_pnl <= floor and not already locked, fire
+             ``_trip_session_profit_lock``.
+          4. Reset — ``reset_session()`` clears all lock state at 18:00 ET.
+        """
+        # If already locked for this session, short-circuit.  The flag has
+        # been written, cooldown is active, and we wait for the next session
+        # boundary before re-arming.
+        if self._session_profit_locked:
+            return
+
+        cfg = self.config
+
+        # 1. Update high-water mark.  HWM is monotonic within a session —
+        # once it climbs it does not retreat, even if current_net_pnl drops.
+        if current_net_pnl > self._session_profit_hwm:
+            self._session_profit_hwm = current_net_pnl
+
+        # 2. Arm the floor once the HWM has crossed the activation threshold.
+        # Recompute on every tick so the floor ratchets up as HWM climbs.
+        if self._session_profit_hwm >= cfg.session_profit_lock_activation_usd:
+            proposed_floor = self._session_profit_hwm * (1.0 - cfg.session_profit_lock_retracement_pct)
+            floor = max(proposed_floor, cfg.session_profit_lock_min_floor_usd)
+            # Only raise the floor, never lower it.  (If retracement_pct is
+            # tightened mid-session or min_floor bumps up, allow the increase;
+            # otherwise keep the existing value.)
+            if self._session_profit_floor is None or floor > self._session_profit_floor:
+                # First arm is a loud event; subsequent ratchets are debug.
+                first_arm = self._session_profit_floor is None
+                self._session_profit_floor = floor
+                if first_arm:
+                    logger.warning(
+                        "🔒 Session profit lock ARMED: HWM=$%.2f → floor=$%.2f "
+                        "(retracement=%.0f%%, activation=$%.2f)",
+                        self._session_profit_hwm, floor,
+                        cfg.session_profit_lock_retracement_pct * 100,
+                        cfg.session_profit_lock_activation_usd,
+                    )
+                else:
+                    logger.info(
+                        "Session profit lock ratcheted: HWM=$%.2f → floor=$%.2f",
+                        self._session_profit_hwm, floor,
+                    )
+
+        # 3. Trip check — only fires if the floor has been armed and current
+        # P&L has retraced to or below it.
+        if (
+            self._session_profit_floor is not None
+            and current_net_pnl <= self._session_profit_floor
+        ):
+            self._trip_session_profit_lock(
+                current_pnl=current_net_pnl,
+                hwm=self._session_profit_hwm,
+                floor=self._session_profit_floor,
+            )
+
+    def _trip_session_profit_lock(self, current_pnl: float, hwm: float, floor: float) -> None:
+        """Fire the session profit lock: flatten + disarm + cooldown backstop.
+
+        Writes the kill_request.flag to the agent state directory, which the
+        execution_flags.py watcher picks up on the next service loop iteration
+        and uses to:
+          - Disarm the execution adapter (stops new orders)
+          - Cancel all open orders
+          - Flatten all broker positions via market orders
+          - Close all virtual trades
+
+        In parallel we activate a long cooldown on the CB itself so new
+        signals are blocked immediately (no one-cycle window where a signal
+        could slip through between lock trip and flag processing).
+
+        This is the forbidden-direction-safe path: no close-and-reverse, no
+        directional bias — just flat and stand down.
+        """
+        self._session_profit_locked = True
+        self._session_profit_lock_trip_time = datetime.now(timezone.utc)
+        self._session_profit_lock_trip_hwm = hwm
+        self._session_profit_lock_trip_pnl = current_pnl
+
+        give_back = hwm - current_pnl
+        give_back_pct = (give_back / hwm * 100) if hwm > 0 else 0.0
+
+        logger.warning(
+            "🛑 SESSION PROFIT LOCK TRIPPED: "
+            "peak=$%.2f → current=$%.2f (floor=$%.2f, gave back $%.2f / %.0f%%). "
+            "Writing kill_request.flag and activating cooldown.",
+            hwm, current_pnl, floor, give_back, give_back_pct,
+        )
+
+        # Write the kill-request flag so execution_flags.py performs the
+        # full disarm + cancel + flatten sequence on its next iteration.
+        try:
+            from pathlib import Path
+            import json as _json
+
+            here = Path(__file__).resolve()
+            workspace = here.parents[3]
+            # Match the state_dir resolution used by hydrate_daily_pnl and
+            # the execution_flags watcher.
+            state_dir = workspace / "data" / "tradovate" / "paper"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            kill_file = state_dir / "kill_request.flag"
+            kill_file.write_text(
+                _json.dumps({
+                    "reason": "session_profit_lock",
+                    "trip_time_utc": self._session_profit_lock_trip_time.isoformat(),
+                    "hwm_usd": hwm,
+                    "current_pnl_usd": current_pnl,
+                    "floor_usd": floor,
+                    "give_back_usd": give_back,
+                }),
+                encoding="utf-8",
+            )
+            logger.warning(
+                "Session profit lock: wrote kill_request.flag at %s", kill_file,
+            )
+        except Exception as e:
+            # Non-fatal — the cooldown backstop below still blocks new signals
+            # even if the file write failed for some reason.
+            logger.error(
+                "Session profit lock: failed to write kill_request.flag: %s",
+                e, exc_info=True,
+            )
+
+        # Activate the CB cooldown as an immediate backstop.  Duration is long
+        # enough that auto-resume during the current session is effectively
+        # impossible; reset_session() at 18:00 ET is what actually clears it.
+        self._activate_cooldown(
+            "session_profit_lock",
+            self.config.session_profit_lock_cooldown_minutes,
+        )
+
     def reset_session(self) -> None:
         """Reset session-level tracking (call at start of new trading session)."""
         self._session_pnl = 0.0
         self._session_start = datetime.now(timezone.utc)
         self._consecutive_losses = 0
+
+        # Clear session profit lock state so the next session starts fresh.
+        # Log the reset when the lock was actually engaged for audit.
+        if self._session_profit_locked or self._session_profit_hwm != 0.0:
+            logger.info(
+                "Session profit lock reset: was_locked=%s, last_hwm=$%.2f, last_floor=%s",
+                self._session_profit_locked,
+                self._session_profit_hwm,
+                f"${self._session_profit_floor:.2f}" if self._session_profit_floor is not None else "None",
+            )
+        self._session_profit_hwm = 0.0
+        self._session_profit_floor = None
+        self._session_profit_locked = False
+        self._session_profit_lock_trip_time = None
+        self._session_profit_lock_trip_hwm = 0.0
+        self._session_profit_lock_trip_pnl = 0.0
+
         logger.info("Trading circuit breaker session reset")
 
     def reset_daily(self) -> None:
@@ -551,6 +729,25 @@ class TradingCircuitBreaker:
             "et_hour": et_hour,
             # Shadow outcome tracking (what happened to would-block vs allowed signals)
             "shadow_outcomes": self.get_shadow_outcome_stats(),
+            # Session profit lock — dashboard reads these to render the live
+            # HWM / floor / armed / tripped state so the user can see the
+            # lock working in real time.
+            "session_profit_lock": {
+                "enabled": self.config.enable_session_profit_lock,
+                "activation_usd": self.config.session_profit_lock_activation_usd,
+                "retracement_pct": self.config.session_profit_lock_retracement_pct,
+                "min_floor_usd": self.config.session_profit_lock_min_floor_usd,
+                "hwm_usd": self._session_profit_hwm,
+                "floor_usd": self._session_profit_floor,
+                "armed": self._session_profit_floor is not None,
+                "locked": self._session_profit_locked,
+                "trip_time_utc": (
+                    self._session_profit_lock_trip_time.isoformat()
+                    if self._session_profit_lock_trip_time else None
+                ),
+                "trip_hwm_usd": self._session_profit_lock_trip_hwm,
+                "trip_pnl_usd": self._session_profit_lock_trip_pnl,
+            },
         }
     
     # =========================================================================
@@ -569,6 +766,18 @@ class TradingCircuitBreaker:
             "daily_pnl": self._daily_pnl,
             "session_pnl": self._session_pnl,
             "consecutive_losses": self._consecutive_losses,
+            # Session profit lock state — must survive a mid-session restart
+            # so a crash right after arming doesn't wipe the floor and allow
+            # the strategy to re-bleed what was just protected.
+            "session_profit_hwm": self._session_profit_hwm,
+            "session_profit_floor": self._session_profit_floor,
+            "session_profit_locked": self._session_profit_locked,
+            "session_profit_lock_trip_time": (
+                self._session_profit_lock_trip_time.isoformat()
+                if self._session_profit_lock_trip_time else None
+            ),
+            "session_profit_lock_trip_hwm": self._session_profit_lock_trip_hwm,
+            "session_profit_lock_trip_pnl": self._session_profit_lock_trip_pnl,
         }
 
     def restore_persisted_state(self, data: Optional[Dict[str, Any]]) -> None:
@@ -614,6 +823,45 @@ class TradingCircuitBreaker:
         if saved_losses and saved_losses > self._consecutive_losses:
             self._consecutive_losses = int(saved_losses)
             logger.info("Restored CB consecutive_losses=%d from persisted state", self._consecutive_losses)
+
+        # Session profit lock — always restore verbatim so a restart mid-lock
+        # stays locked until the session boundary clears it.
+        if "session_profit_hwm" in data:
+            try:
+                self._session_profit_hwm = float(data.get("session_profit_hwm") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        saved_floor = data.get("session_profit_floor")
+        if saved_floor is not None:
+            try:
+                self._session_profit_floor = float(saved_floor)
+            except (TypeError, ValueError):
+                pass
+        self._session_profit_locked = bool(data.get("session_profit_locked", False))
+        trip_ts = data.get("session_profit_lock_trip_time")
+        if trip_ts:
+            try:
+                self._session_profit_lock_trip_time = datetime.fromisoformat(trip_ts)
+            except (ValueError, TypeError):
+                self._session_profit_lock_trip_time = None
+        try:
+            self._session_profit_lock_trip_hwm = float(data.get("session_profit_lock_trip_hwm") or 0.0)
+            self._session_profit_lock_trip_pnl = float(data.get("session_profit_lock_trip_pnl") or 0.0)
+        except (TypeError, ValueError):
+            pass
+
+        if self._session_profit_locked:
+            logger.warning(
+                "Restored session profit lock state: LOCKED (trip HWM=$%.2f, "
+                "trip P&L=$%.2f). Will clear at next 18:00 ET session reset.",
+                self._session_profit_lock_trip_hwm,
+                self._session_profit_lock_trip_pnl,
+            )
+        elif self._session_profit_floor is not None:
+            logger.info(
+                "Restored session profit lock state: ARMED (HWM=$%.2f, floor=$%.2f).",
+                self._session_profit_hwm, self._session_profit_floor,
+            )
 
     # =========================================================================
     # Private methods
@@ -1212,6 +1460,12 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         volatility_high_risk_scale=config.get("volatility_high_risk_scale", 0.5),
         volatility_extreme_atr_ratio=config.get("volatility_extreme_atr_ratio", 2.0),
         volatility_extreme_risk_scale=config.get("volatility_extreme_risk_scale", 0.0),
+        # Session Profit Lock — protects realized gains from afternoon give-back
+        enable_session_profit_lock=config.get("enable_session_profit_lock", False),
+        session_profit_lock_activation_usd=config.get("session_profit_lock_activation_usd", 300.0),
+        session_profit_lock_retracement_pct=config.get("session_profit_lock_retracement_pct", 0.35),
+        session_profit_lock_min_floor_usd=config.get("session_profit_lock_min_floor_usd", 50.0),
+        session_profit_lock_cooldown_minutes=config.get("session_profit_lock_cooldown_minutes", 600),
         # Tradovate Paper Evaluation Gate
         enable_tv_paper_eval_gate=config.get("enable_tv_paper_eval_gate", False),
         tv_paper_max_contracts_mini=config.get("tv_paper_max_contracts_mini", 5),

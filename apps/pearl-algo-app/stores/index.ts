@@ -30,6 +30,7 @@ export type {
   TrailingStopState,
   TrailingStopPosition,
   TrailingStopOverride,
+  SessionProfitLockState,
 } from './agentStore'
 
 // Export selectors

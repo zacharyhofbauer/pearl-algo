@@ -344,9 +344,34 @@ class TestEstimateCommissionPerTrade:
         assert estimate_commission_per_trade([{"pnl": 25.0}], equity=0.0, start_balance=50000.0) == 0.0
 
     def test_derives_commission_from_equity_gap(self):
+        # Realistic MNQ account with 100 trades, gross = $300, net delta = $150
+        # → $1.50 per round-turn, which matches live Tradovate retail fees.
+        trades = [{"pnl": 3.0} for _ in range(100)]
+        result = estimate_commission_per_trade(
+            trades, equity=50_150.0, start_balance=50_000.0
+        )
+        assert result == 1.5
+
+    def test_clamps_implausible_estimates_to_zero(self):
+        # A broken state_dir / stale start_balance can produce gap-per-trade
+        # values that are wildly wrong (e.g. $30/trade). These used to poison
+        # the daily stats fallback path. We refuse any value above the
+        # plausible MNQ ceiling (~$5/round-turn) and return 0.0 instead.
         trades = [{"pnl": 100.0}, {"pnl": 50.0}]
-        result = estimate_commission_per_trade(trades, equity=50090.0, start_balance=50000.0)
-        assert result == 30.0
+        result = estimate_commission_per_trade(
+            trades, equity=50_090.0, start_balance=50_000.0
+        )
+        assert result == 0.0
+
+    def test_returns_zero_when_gross_under_net(self):
+        # If the gross fill P&L is smaller than the equity delta (i.e. the
+        # "commission" gap is negative) the math is upside-down. Return 0.0
+        # rather than a negative per-trade fee.
+        trades = [{"pnl": 50.0}, {"pnl": 25.0}]
+        result = estimate_commission_per_trade(
+            trades, equity=50_200.0, start_balance=50_000.0
+        )
+        assert result == 0.0
 
 
 class TestSummarizePairedTradesForPeriod:

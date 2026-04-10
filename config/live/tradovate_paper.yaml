@@ -170,6 +170,22 @@ guardrails:
     - losses: 10
       risk_scale: 0.0
       action: halt_session
+  # Session Profit Lock — protect realized gains from afternoon give-back.
+  # When enabled: once today's Tradovate net realized P&L crosses the
+  # activation threshold, arm a floor at HWM × (1 − retracement_pct).  If
+  # realized P&L ever retraces to that floor, fire the kill-switch path
+  # (cancel orders + flatten positions + disarm execution) and block new
+  # signals via cooldown until the next 18:00 ET session boundary.
+  #
+  # Default off — flip to true to activate.  Tunable knobs so you can start
+  # conservative ($300 activation, 35% retracement) and tighten once you've
+  # watched it work for a few days.  Uses the BROKER's net realized P&L via
+  # sync_broker_pnl, NOT the internal gross accumulator.
+  enable_session_profit_lock: false
+  session_profit_lock_activation_usd: 300.0
+  session_profit_lock_retracement_pct: 0.35
+  session_profit_lock_min_floor_usd: 50.0
+  session_profit_lock_cooldown_minutes: 600
   # Time-of-Day Risk Windows — reduce exposure during historically weak hours
   enable_tod_risk_scaling: true
   tod_risk_windows:

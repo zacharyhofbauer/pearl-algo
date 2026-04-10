@@ -294,7 +294,27 @@ def estimate_commission_per_trade(
     equity: float,
     start_balance: float,
 ) -> float:
-    """Estimate round-turn commission from fill P&L vs live equity delta."""
+    """Estimate round-turn commission from fill P&L vs live equity delta.
+
+    Derivation:
+        gross = Σ fill_pnl over the trade list (price-only, no fees)
+        net   = equity − start_balance  (Tradovate ground truth, net of fees)
+        gap   = gross − net             (total fees bled over this window)
+        per_trade = gap / len(trades)
+
+    Both ``trades`` (passed by callers as the full paired-trade list) and
+    ``start_balance`` (read from ``challenge_state.json`` at account open)
+    span the **lifetime of the Tradovate paper account**, so the result
+    converges to a long-run average commission. For the MNQ scalping system
+    this sits around $1.30–$1.80 per round-turn fill.
+
+    Returns 0.0 when inputs are unreliable (no equity, no trades, or a gap
+    that's obviously outside the sane range for MNQ retail futures fees).
+    The sanity clamp at ``MAX_PLAUSIBLE`` prevents the old "$100/trade"
+    failure mode when start_balance or equity is briefly wrong post-restart.
+    """
+    MAX_PLAUSIBLE = 5.0  # USD per round-turn — anything above is broken data
+
     if equity <= 0 or not trades:
         return 0.0
 
@@ -302,7 +322,18 @@ def estimate_commission_per_trade(
     equity_pnl = equity - start_balance
     if total_fill_pnl <= equity_pnl:
         return 0.0
-    return (total_fill_pnl - equity_pnl) / len(trades)
+    est = (total_fill_pnl - equity_pnl) / len(trades)
+    if est <= 0 or est > MAX_PLAUSIBLE:
+        # Outside the plausible band — likely a state-dir or start_balance
+        # corruption window (e.g. right after a soft-restart before the
+        # challenge_state.json reloads). Refuse to return a poisoned value.
+        logger.warning(
+            "estimate_commission_per_trade: implausible estimate $%.2f/trade "
+            "(gross=$%.2f, net=$%.2f, trades=%d) — clamping to 0.0",
+            est, total_fill_pnl, equity_pnl, len(trades),
+        )
+        return 0.0
+    return est
 
 
 def summarize_paired_trades_for_period(

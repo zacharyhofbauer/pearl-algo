@@ -2,88 +2,157 @@
 
 import React, { useMemo } from 'react'
 import Sparkline from '@/components/Sparkline'
-import type { EquityCurvePoint } from '@/stores/agentStore'
+import type { EquityCurvePoint, TradovateAccount } from '@/stores/agentStore'
 import { formatPnL } from '@/lib/formatters'
 
 interface EquityCurveStripProps {
   curve: EquityCurvePoint[]
-  /** Current equity (Tradovate netLiq if available) for the headline number */
-  currentEquity?: number | null
+  /** Tradovate account snapshot — the authoritative net P&L source */
+  tradovate?: TradovateAccount | null
 }
 
 /**
- * Slim equity curve display: sparkline + headline equity + session/peak/drawdown stats.
+ * Bloomberg-style equity strip.
  *
- * Reads agentState.equity_curve directly. Each point is { time, value }.
- * Shows: peak, current drawdown from peak, change since session open.
+ * **Ground truth source hierarchy:**
+ *   1. `tradovate.realized_pnl` — **net** of commissions, from Tradovate's
+ *      /cashBalance endpoint. This is the number on the broker's screen.
+ *      Used as the headline.
+ *   2. `tradovate.open_pnl` — unrealized on the current position.
+ *   3. `tradovate.week_realized_pnl` — week total for context.
+ *   4. `curve` (agentState.equity_curve) — used only for the sparkline shape
+ *      since the broker doesn't ship a historical curve directly. Its absolute
+ *      values are gross (see Phase C — fix planned) but its *shape* is still
+ *      representative of intra-session movement.
+ *
+ * When the broker is unreachable we fall back to the curve's tail value.
  */
-function EquityCurveStrip({ curve, currentEquity }: EquityCurveStripProps) {
-  const stats = useMemo(() => {
+function EquityCurveStrip({ curve, tradovate }: EquityCurveStripProps) {
+  // Compute sparkline stats (shape only — absolute values are gross-biased).
+  const spark = useMemo(() => {
     if (!Array.isArray(curve) || curve.length === 0) {
-      return { values: [], peak: null, drawdown: null, sessionDelta: null, latest: null }
+      return { values: [] as number[], peak: null as number | null, sessionStart: null as number | null }
     }
     const values = curve.map((p) => p.value)
-    const latest = values[values.length - 1]
-    const peak = Math.max(...values)
-    const drawdown = latest - peak // <= 0
-    const sessionStart = values[0]
-    const sessionDelta = latest - sessionStart
-    return { values, peak, drawdown, sessionDelta, latest }
+    return {
+      values,
+      peak: Math.max(...values),
+      sessionStart: values[0],
+    }
   }, [curve])
 
-  const headline = currentEquity ?? stats.latest
-  const empty = stats.values.length < 2
+  // Authoritative broker numbers — these are what the trader is accountable for.
+  const brokerRealizedNet = tradovate?.realized_pnl ?? null
+  const brokerOpen = tradovate?.open_pnl ?? null
+  const brokerWeek = tradovate?.week_realized_pnl ?? null
+
+  // Implied commission drag = gross-walk − broker-net.  If the curve's last
+  // point represents today's running gross (which it does post Phase A fix),
+  // this is the fee bite.  When the curve is empty or missing we show "—".
+  const implied = useMemo(() => {
+    if (spark.values.length === 0 || brokerRealizedNet == null) return null
+    const gross = spark.values[spark.values.length - 1]
+    const fees = gross - brokerRealizedNet
+    // Only show the fee line if it's non-trivial and of the expected sign.
+    if (!Number.isFinite(fees) || Math.abs(fees) < 1) return null
+    return { gross, fees }
+  }, [spark.values, brokerRealizedNet])
+
+  // Headline P&L = broker net realized + broker open (total live day delta)
+  const totalLivePnl = useMemo(() => {
+    if (brokerRealizedNet == null && brokerOpen == null) return null
+    return (brokerRealizedNet ?? 0) + (brokerOpen ?? 0)
+  }, [brokerRealizedNet, brokerOpen])
+
+  const empty = spark.values.length < 2
+  const sparkColorTrend = brokerRealizedNet != null ? brokerRealizedNet >= 0 : true
 
   return (
-    <section className="info-strip-section info-strip-equity" aria-label="Equity curve">
+    <section className="info-strip-section info-strip-equity" aria-label="Session P&L">
       <div className="info-strip-equity-spark">
         {empty ? (
           <div className="info-strip-equity-spark-empty" aria-hidden>
             <span>—</span>
           </div>
         ) : (
-          <Sparkline data={stats.values} width={132} height={32} colorByTrend />
+          <Sparkline
+            data={spark.values}
+            width={132}
+            height={32}
+            colorByTrend={!sparkColorTrend /* invert so a negative day shows red */}
+          />
         )}
       </div>
       <div className="info-strip-equity-stats">
         <div className="info-strip-equity-headline">
-          <span className="info-strip-label">Equity</span>
-          <span className="info-strip-equity-value">
-            {headline != null
-              ? `$${headline.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : '—'}
+          <span className="info-strip-label">Day Net</span>
+          <span
+            className={`info-strip-equity-value ${
+              brokerRealizedNet == null
+                ? ''
+                : brokerRealizedNet >= 0
+                  ? 'positive'
+                  : 'negative'
+            }`}
+            title="Tradovate realized_pnl — commission-deducted, broker source of truth"
+          >
+            {brokerRealizedNet != null ? formatPnL(brokerRealizedNet) : '—'}
           </span>
         </div>
         <div className="info-strip-equity-row">
           <span className="info-strip-mini">
-            <span className="info-strip-mini-label">Session</span>
+            <span className="info-strip-mini-label">Open</span>
             <span
               className={`info-strip-mini-value ${
-                stats.sessionDelta == null ? '' : stats.sessionDelta >= 0 ? 'positive' : 'negative'
+                brokerOpen == null || brokerOpen === 0
+                  ? ''
+                  : brokerOpen > 0
+                    ? 'positive'
+                    : 'negative'
               }`}
+              title="Tradovate open_pnl on current position"
             >
-              {stats.sessionDelta != null ? formatPnL(stats.sessionDelta) : '—'}
+              {brokerOpen != null ? formatPnL(brokerOpen) : '—'}
             </span>
           </span>
           <span className="info-strip-mini">
-            <span className="info-strip-mini-label">Peak</span>
-            <span className="info-strip-mini-value">
-              {stats.peak != null
-                ? `$${stats.peak.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-                : '—'}
+            <span className="info-strip-mini-label">Live</span>
+            <span
+              className={`info-strip-mini-value ${
+                totalLivePnl == null
+                  ? ''
+                  : totalLivePnl >= 0
+                    ? 'positive'
+                    : 'negative'
+              }`}
+              title="Net realized + open P&L"
+            >
+              {totalLivePnl != null ? formatPnL(totalLivePnl) : '—'}
             </span>
           </span>
           <span className="info-strip-mini">
-            <span className="info-strip-mini-label">DD</span>
+            <span className="info-strip-mini-label">Week</span>
             <span
               className={`info-strip-mini-value ${
-                stats.drawdown == null || stats.drawdown === 0 ? '' : 'negative'
+                brokerWeek == null || brokerWeek === 0
+                  ? ''
+                  : brokerWeek > 0
+                    ? 'positive'
+                    : 'negative'
               }`}
-              title="Drawdown from session peak"
+              title="Tradovate week_realized_pnl"
             >
-              {stats.drawdown != null && stats.drawdown < 0 ? formatPnL(stats.drawdown) : '$0.00'}
+              {brokerWeek != null ? formatPnL(brokerWeek) : '—'}
             </span>
           </span>
+          {implied && (
+            <span className="info-strip-mini" title="Implied commission drag: gross walk minus broker net">
+              <span className="info-strip-mini-label">Fees</span>
+              <span className="info-strip-mini-value negative">
+                {formatPnL(-Math.abs(implied.fees))}
+              </span>
+            </span>
+          )}
         </div>
       </div>
     </section>

@@ -137,6 +137,29 @@ class TradingCircuitBreakerConfig:
     volatility_extreme_atr_ratio: float = 2.0  # above this → halt
     volatility_extreme_risk_scale: float = 0.0  # 0.0 = block
 
+    # =========================================================================
+    # Session Profit Lock — protect realized gains from afternoon give-back
+    # =========================================================================
+    # Behaviour: once the session's net realized P&L crosses an activation
+    # high-water mark, arm a floor at HWM × (1 − retracement_pct).  If realized
+    # P&L ever retraces to that floor, trip the lock:
+    #   1. Write the kill_request.flag (battle-tested path in execution_flags.py
+    #      that cancels orders, flattens all positions, and disarms execution).
+    #   2. Activate a long cooldown until the next 18:00 ET session boundary
+    #      as a backstop that blocks new signals even if the flag watcher
+    #      hasn't processed the kill yet.
+    #   3. The lock stays engaged for the rest of the session.  It clears
+    #      automatically on reset_session() at the 18:00 ET boundary.
+    #
+    # The HWM tracks Tradovate's authoritative realized_pnl via sync_broker_pnl,
+    # NOT our internal gross accumulator — so the lock arms and trips on the
+    # broker's net numbers, not our commission-inflated gross.
+    enable_session_profit_lock: bool = False
+    session_profit_lock_activation_usd: float = 300.0  # HWM must cross this to arm
+    session_profit_lock_retracement_pct: float = 0.35  # floor at HWM × (1 − this)
+    session_profit_lock_min_floor_usd: float = 50.0  # floor never drops below this
+    session_profit_lock_cooldown_minutes: int = 600  # backstop cooldown on trip
+
     # Tradovate Paper Evaluation Gate
     enable_tv_paper_eval_gate: bool = False
     tv_paper_max_contracts_mini: int = 5
