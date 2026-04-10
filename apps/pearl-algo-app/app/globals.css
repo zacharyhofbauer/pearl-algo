@@ -23,6 +23,7 @@
 @import '../styles/components/_misc.css';
 @import '../styles/components/_trade-dock.css';
 @import '../styles/components/_info-strip.css';
+@import '../styles/components/_trailing-stop.css';
 @import '../styles/components/_toast.css';
 @import '../styles/components/_right-panel.css';
 @import '../styles/components/_settings.css';

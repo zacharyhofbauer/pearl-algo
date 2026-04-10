@@ -1,0 +1,249 @@
+/* ============================================================================
+ * Trailing Stop Panel — right-sidebar tab showing per-position trailing state
+ * ============================================================================ */
+
+.trailing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.trailing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.trailing-header-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-green);
+}
+
+.trailing-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--text-muted);
+}
+
+.trailing-status-dot.is-on {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(var(--accent-green-rgb), 0.5);
+}
+
+.trailing-header-flag {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--accent-cyan);
+  padding: 1px var(--space-2);
+  border: 1px solid rgba(var(--accent-cyan-rgb), 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-cyan-rgb), 0.1);
+}
+
+.trailing-header-count {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+/* ----------------------------------------------------------------------------
+ * Active override callout
+ * ---------------------------------------------------------------------------- */
+
+.trailing-override {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(var(--accent-yellow-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-yellow-rgb), 0.4);
+  border-radius: var(--radius-md);
+}
+
+.trailing-override-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.trailing-override-tag {
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--accent-yellow);
+  padding: 1px var(--space-3);
+  border: 1px solid var(--accent-yellow);
+  border-radius: var(--radius-sm);
+}
+
+.trailing-override-source {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.trailing-override-expiry {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.trailing-override-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-3);
+}
+
+.trailing-override-reason {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-style: italic;
+  padding-top: var(--space-2);
+  border-top: 1px solid rgba(var(--accent-yellow-rgb), 0.25);
+}
+
+/* ----------------------------------------------------------------------------
+ * Per-position rows
+ * ---------------------------------------------------------------------------- */
+
+.trailing-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.trailing-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.trailing-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.trailing-row-id {
+  flex: 1 1 auto;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  cursor: help;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trailing-phase-chip {
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.trailing-phase-chip.phase-inactive {
+  color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+}
+.trailing-phase-chip.phase-armed {
+  color: var(--accent-yellow);
+  border-color: rgba(var(--accent-yellow-rgb), 0.45);
+  background: rgba(var(--accent-yellow-rgb), 0.12);
+}
+.trailing-phase-chip.phase-trailing {
+  color: var(--accent-green);
+  border-color: rgba(var(--accent-green-rgb), 0.45);
+  background: rgba(var(--accent-green-rgb), 0.12);
+}
+.trailing-phase-chip.phase-unknown {
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.trailing-row-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-3);
+}
+
+.trailing-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.trailing-cell-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.trailing-cell-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.trailing-cell-value.positive { color: var(--color-profit); }
+.trailing-cell-value.negative { color: var(--color-loss); }
+
+/* ----------------------------------------------------------------------------
+ * Empty / disabled states
+ * ---------------------------------------------------------------------------- */
+
+.trailing-empty {
+  padding: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  text-align: center;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.trailing-empty-code {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  color: var(--text-primary);
+}
+
+/* ----------------------------------------------------------------------------
+ * Responsive
+ * ---------------------------------------------------------------------------- */
+
+@media (max-width: 480px) {
+  .trailing-row-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

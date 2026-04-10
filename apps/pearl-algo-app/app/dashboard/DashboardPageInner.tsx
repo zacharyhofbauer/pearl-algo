@@ -13,6 +13,7 @@ import SystemLogsPanel from '@/components/SystemLogsPanel'
 import LiveLogsPanel from '@/components/LiveLogsPanel'
 import SignalsPanel from '@/components/SignalsPanel'
 import ActivityLogPanel from '@/components/ActivityLogPanel'
+import TrailingStopPanel from '@/components/TrailingStopPanel'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -745,6 +746,9 @@ export default function DashboardPageInner() {
                 <button className={`mobile-menu-item ${activeRightPanel === 'signals' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('signals') }}>
                   Signals
                 </button>
+                <button className={`mobile-menu-item ${activeRightPanel === 'trailing' ? 'active' : ''}`} onClick={() => { setShowMobileMenu(false); toggleRightPanel('trailing') }}>
+                  Trailing Stops
+                </button>
               </div>
               <div className="mobile-menu-divider" />
               <div className="mobile-menu-actions">
@@ -894,6 +898,9 @@ export default function DashboardPageInner() {
     }
     if (activeRightPanel === 'signals') {
       return <SignalsPanel />
+    }
+    if (activeRightPanel === 'trailing') {
+      return <TrailingStopPanel />
     }
     return null
   }

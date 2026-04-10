@@ -27,6 +27,9 @@ export type {
   GatewayStatus,
   ConnectionHealth,
   DataQuality,
+  TrailingStopState,
+  TrailingStopPosition,
+  TrailingStopOverride,
 } from './agentStore'
 
 // Export selectors
@@ -51,6 +54,7 @@ export {
   selectSessionContext,
   selectSignalActivity,
   selectTradovateAccount,
+  selectTrailingStop,
   selectAccounts,
 } from './agentStore'
 

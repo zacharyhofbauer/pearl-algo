@@ -22,7 +22,7 @@ interface DashboardLayoutProps {
   chart: React.ReactNode
   panels: React.ReactNode
   activeRightPanel: RightPanelTab
-  onToggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity' | 'signals') => void
+  onToggleRightPanel: (panel: 'watchlist' | 'logs' | 'activity' | 'signals' | 'trailing') => void
   onCloseRightPanel: () => void
   rightPanelContent: React.ReactNode
   mainChartApi?: any
@@ -164,7 +164,12 @@ const DashboardLayout = React.memo(function DashboardLayout({
           >
             <div className="tv-right-panel-header">
               <span className="tv-right-panel-title">
-                {activeRightPanel === 'watchlist' ? 'Watchlist' : activeRightPanel === 'activity' ? 'Activity Log' : activeRightPanel === 'logs' ? 'System Status' : activeRightPanel === 'signals' ? 'Signals' : ''}
+                {activeRightPanel === 'watchlist' ? 'Watchlist'
+                  : activeRightPanel === 'activity' ? 'Activity Log'
+                  : activeRightPanel === 'logs' ? 'System Status'
+                  : activeRightPanel === 'signals' ? 'Signals'
+                  : activeRightPanel === 'trailing' ? 'Trailing Stops'
+                  : ''}
               </span>
               <button className="tv-right-panel-close" onClick={onCloseRightPanel} title="Close panel">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -213,6 +218,16 @@ const DashboardLayout = React.memo(function DashboardLayout({
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M2 9h3l2-5 3 10 2-5h4"/>
+              </svg>
+            </button>
+            <button
+              className={`tv-sidebar-icon ${activeRightPanel === 'trailing' ? 'active' : ''}`}
+              title="Trailing Stops"
+              onClick={() => onToggleRightPanel('trailing')}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 13l4-4 3 3 5-7"/>
+                <polyline points="11 5 14 5 14 8"/>
               </svg>
             </button>
             <button className="tv-sidebar-icon" title="Calendar">

@@ -227,6 +227,33 @@ export interface EquityCurvePoint {
   value: number
 }
 
+// Trailing stop runtime state, mirrored from tsm.get_all_states() server-side
+// (state_builder.py:_get_trailing_stop_state). Keys in `positions` are signal_id.
+export interface TrailingStopPosition {
+  entry_price: number
+  direction: 'long' | 'short' | string
+  current_stop: number
+  best_price: number
+  current_phase: string
+}
+
+export interface TrailingStopOverride {
+  trail_atr_multiplier: number
+  activation_atr_multiplier: number
+  force_phase: string | null
+  source: string
+  reason: string
+  expires_in_minutes: number | null
+}
+
+export interface TrailingStopState {
+  enabled: boolean
+  regime_adaptive?: boolean
+  positions: Record<string, TrailingStopPosition>
+  active_override: TrailingStopOverride | null
+  active_positions_count?: number
+}
+
 // Analytics types
 export interface SessionPerformance {
   id: string
@@ -428,6 +455,8 @@ export interface AgentState {
   openclaw_status?: { status: string; port?: number } | null
   /** Tradovate live account data (balance, positions, orders, P&L) */
   tradovate_account: TradovateAccount | null
+  /** Trailing stop runtime state per tracked position + active override */
+  trailing_stop?: TrailingStopState | null
 }
 
 export interface TradovateWorkingOrder {
@@ -591,4 +620,5 @@ export const selectCircuitBreaker = (state: AgentStore) => state.agentState?.cir
 export const selectSessionContext = (state: AgentStore) => state.agentState?.session_context
 export const selectSignalActivity = (state: AgentStore) => state.agentState?.signal_activity
 export const selectTradovateAccount = (state: AgentStore) => state.agentState?.tradovate_account
+export const selectTrailingStop = (state: AgentStore) => state.agentState?.trailing_stop ?? null
 export const selectAccounts = (state: AgentStore) => state.accounts
