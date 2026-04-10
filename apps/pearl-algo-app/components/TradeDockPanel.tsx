@@ -17,7 +17,7 @@ import {
   formatExitReason,
   computeDurationSeconds,
 } from '@/lib/formatters'
-import type { RiskMetrics, TradovateWorkingOrder, TradovateOrderStats } from '@/stores'
+import type { RiskMetrics, TradovateWorkingOrder, TradovateOrderStats, AnalyticsData } from '@/stores'
 
 export interface RecentTradeRow {
   signal_id?: string
@@ -115,9 +115,135 @@ interface TradeDockPanelProps {
   accountId?: string | null
   /** Tradovate environment (e.g. "demo" or "live") */
   accountEnv?: string | null
+  /** Analytics breakdowns from agentState.analytics (session/hourly/duration) */
+  analytics?: AnalyticsData | null
 }
 
-type Tab = 'positions' | 'history' | 'stats' | 'signals'
+type Tab = 'positions' | 'history' | 'stats' | 'analytics' | 'signals'
+
+/**
+ * Analytics tab — surfaces agentState.analytics data computed by the backend.
+ *
+ * Renders three breakdowns side-by-side:
+ *   1. Session performance (overnight / premarket / morning / midday / afternoon / close)
+ *   2. Hourly heatmap (best & worst hours by P&L)
+ *   3. Hold-duration buckets (quick / medium / long)
+ *
+ * This is a *display* of historical data, not a *gate* — per CLAUDE.md the user
+ * prefers strategy decisions without hour/regime/direction vetoes.
+ */
+function AnalyticsTabContent({ analytics }: { analytics?: AnalyticsData | null }) {
+  if (!analytics) {
+    return <div className="trade-dock-empty">No analytics data yet — waiting for first session.</div>
+  }
+
+  const sessions = analytics.session_performance ?? []
+  const best = analytics.best_hours ?? []
+  const worst = analytics.worst_hours ?? []
+  const durations = analytics.hold_duration ?? []
+
+  const hasAny = sessions.length > 0 || best.length > 0 || worst.length > 0 || durations.length > 0
+  if (!hasAny) {
+    return <div className="trade-dock-empty">Analytics computed but empty — no completed trades in window.</div>
+  }
+
+  // Compute heatmap intensity from the absolute max P&L across best+worst.
+  const allHours = [...best, ...worst]
+  const maxAbsPnl = allHours.reduce((m, h) => Math.max(m, Math.abs(h.pnl ?? 0)), 0) || 1
+
+  return (
+    <div className="analytics-tab">
+      {sessions.length > 0 && (
+        <section className="analytics-section">
+          <div className="analytics-section-title">Session Performance</div>
+          <div className="analytics-session-grid">
+            {sessions.map((s) => {
+              const pnlPositive = (s.pnl ?? 0) >= 0
+              return (
+                <div key={s.id} className="analytics-session-pill">
+                  <div className="analytics-session-name">{s.name}</div>
+                  <div className={`analytics-session-pnl ${pnlPositive ? 'positive' : 'negative'}`}>
+                    {formatPnL(s.pnl)}
+                  </div>
+                  <div className="analytics-session-meta">
+                    {(s.wins ?? 0) + (s.losses ?? 0)} trades · {((s.win_rate ?? 0) * 100).toFixed(0)}%
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {(best.length > 0 || worst.length > 0) && (
+        <section className="analytics-section">
+          <div className="analytics-section-title">Hour of Day</div>
+          <div className="analytics-hour-columns">
+            <div className="analytics-hour-col">
+              <div className="analytics-subhead positive">Best Hours</div>
+              {best.map((h) => {
+                const intensity = Math.min(1, Math.abs(h.pnl ?? 0) / maxAbsPnl)
+                return (
+                  <div
+                    key={`b-${h.hour}`}
+                    className="analytics-hour-row"
+                    style={{ background: `rgba(var(--accent-green-rgb), ${(0.08 + intensity * 0.32).toFixed(2)})` }}
+                  >
+                    <span className="analytics-hour-label">{h.hour_label}</span>
+                    <span className="analytics-hour-pnl positive">{formatPnL(h.pnl)}</span>
+                    <span className="analytics-hour-meta">{h.trades}t · {((h.win_rate ?? 0) * 100).toFixed(0)}%</span>
+                  </div>
+                )
+              })}
+              {best.length === 0 && <div className="analytics-hour-empty">—</div>}
+            </div>
+            <div className="analytics-hour-col">
+              <div className="analytics-subhead negative">Worst Hours</div>
+              {worst.map((h) => {
+                const intensity = Math.min(1, Math.abs(h.pnl ?? 0) / maxAbsPnl)
+                return (
+                  <div
+                    key={`w-${h.hour}`}
+                    className="analytics-hour-row"
+                    style={{ background: `rgba(var(--accent-red-rgb), ${(0.08 + intensity * 0.32).toFixed(2)})` }}
+                  >
+                    <span className="analytics-hour-label">{h.hour_label}</span>
+                    <span className="analytics-hour-pnl negative">{formatPnL(h.pnl)}</span>
+                    <span className="analytics-hour-meta">{h.trades}t · {((h.win_rate ?? 0) * 100).toFixed(0)}%</span>
+                  </div>
+                )
+              })}
+              {worst.length === 0 && <div className="analytics-hour-empty">—</div>}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {durations.length > 0 && (
+        <section className="analytics-section">
+          <div className="analytics-section-title">Hold Duration</div>
+          <div className="analytics-duration-grid">
+            {durations.map((d) => {
+              const pnlPositive = (d.pnl ?? 0) >= 0
+              const total = (d.wins ?? 0) + (d.losses ?? 0)
+              return (
+                <div key={d.id} className="analytics-duration-pill">
+                  <div className="analytics-duration-name">{d.name}</div>
+                  <div className={`analytics-duration-pnl ${pnlPositive ? 'positive' : 'negative'}`}>
+                    {formatPnL(d.pnl)}
+                  </div>
+                  <div className="analytics-duration-meta">
+                    {total} trades · {((d.win_rate ?? 0) * 100).toFixed(0)}%
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
 
 function TradeDockPanel({
   positions,
@@ -145,6 +271,7 @@ function TradeDockPanel({
   accountWinRate,
   accountId,
   accountEnv,
+  analytics,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -390,6 +517,7 @@ function TradeDockPanel({
               { id: 'positions' as Tab, label: 'Positions', count: openCount },
               { id: 'history' as Tab, label: 'History', count: recentCount },
               { id: 'stats' as Tab, label: 'Stats' },
+              { id: 'analytics' as Tab, label: 'Analytics' },
               { id: 'signals' as Tab, label: 'Signals' },
             ]).map(({ id, label, count }) => (
               <button
@@ -561,6 +689,11 @@ function TradeDockPanel({
               <div className="trade-dock-empty">No stats data available</div>
             )}
               </>
+            )}
+
+            {/* ── Analytics Tab ── */}
+            {tab === 'analytics' && (
+              <AnalyticsTabContent analytics={analytics} />
             )}
 
             {/* ── Signals Tab ── */}

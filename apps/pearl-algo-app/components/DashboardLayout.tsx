@@ -16,6 +16,8 @@ interface DashboardLayoutProps {
   isChartReady: boolean
   pull: PullToRefreshProps
   header: React.ReactNode
+  /** Optional info strip rendered between header and chart (Bloomberg-style status row) */
+  infoStrip?: React.ReactNode
   chart: React.ReactNode
   panels: React.ReactNode
   activeRightPanel: RightPanelTab
@@ -29,6 +31,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
   isChartReady,
   pull,
   header,
+  infoStrip,
   chart,
   panels,
   activeRightPanel,
@@ -140,6 +143,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
           </aside>
 
           <div className="tv-main" ref={mainRef}>
+            {infoStrip}
             <div className="tv-chart-area">
               {chart}
             </div>

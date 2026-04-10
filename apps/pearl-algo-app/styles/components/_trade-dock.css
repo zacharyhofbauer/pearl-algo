@@ -1206,3 +1206,148 @@
     display: none;
   }
 }
+
+/* ============================================================================
+ * Analytics Tab — session/hour/duration breakdowns from agentState.analytics
+ * ============================================================================ */
+
+.analytics-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  font-family: var(--font-mono);
+}
+
+.analytics-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.analytics-section-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.analytics-subhead {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-2);
+}
+
+.analytics-subhead.positive { color: var(--color-profit); }
+.analytics-subhead.negative { color: var(--color-loss); }
+
+.analytics-session-grid,
+.analytics-duration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.analytics-session-pill,
+.analytics-duration-pill {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.analytics-session-name,
+.analytics-duration-name {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.analytics-session-pnl,
+.analytics-duration-pnl {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+
+.analytics-session-pnl.positive,
+.analytics-duration-pnl.positive {
+  color: var(--color-profit);
+}
+
+.analytics-session-pnl.negative,
+.analytics-duration-pnl.negative {
+  color: var(--color-loss);
+}
+
+.analytics-session-meta,
+.analytics-duration-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.analytics-hour-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.analytics-hour-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.analytics-hour-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  border: 1px solid transparent;
+}
+
+.analytics-hour-label {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.analytics-hour-pnl {
+  font-weight: var(--font-weight-bold);
+  text-align: right;
+}
+
+.analytics-hour-pnl.positive { color: var(--color-profit); }
+.analytics-hour-pnl.negative { color: var(--color-loss); }
+
+.analytics-hour-meta {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.analytics-hour-empty {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--space-3);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 768px) {
+  .analytics-hour-columns {
+    grid-template-columns: 1fr;
+  }
+  .analytics-tab {
+    padding: var(--space-3);
+  }
+}

@@ -19,6 +19,14 @@ export type {
   TradovateAccount,
   TradovateWorkingOrder,
   TradovateOrderStats,
+  AnalyticsData,
+  SessionPerformance,
+  HourStats,
+  DurationStats,
+  EquityCurvePoint,
+  GatewayStatus,
+  ConnectionHealth,
+  DataQuality,
 } from './agentStore'
 
 // Export selectors

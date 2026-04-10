@@ -6,6 +6,7 @@ import CandlestickChart from '@/components/CandlestickChart'
 import RSIPane from '@/components/RSIPane'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary, type RecentSignalEvent } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
+import InfoStrip from '@/components/InfoStrip'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import WatchlistPanel from '@/components/WatchlistPanel'
 import SystemLogsPanel from '@/components/SystemLogsPanel'
@@ -826,6 +827,15 @@ export default function DashboardPageInner() {
         isChartReady={isChartReady}
         pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
         header={renderHeader()}
+        infoStrip={
+          <ErrorBoundary panelName="InfoStrip">
+            <InfoStrip
+              agentState={agentState}
+              positions={positions}
+              wsStatus={wsStatus}
+            />
+          </ErrorBoundary>
+        }
         chart={renderChart()}
         activeRightPanel={activeRightPanel}
         onToggleRightPanel={toggleRightPanel}
@@ -861,6 +871,7 @@ export default function DashboardPageInner() {
                 accountWinRate={performanceSummary?.all?.win_rate ?? null}
                 accountId={(agentState?.tradovate_account as any)?.account ?? null}
                 accountEnv={(agentState?.tradovate_account as any)?.env ?? null}
+                analytics={agentState?.analytics ?? null}
               />
             </ErrorBoundary>
           </>

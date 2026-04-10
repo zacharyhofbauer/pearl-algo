@@ -1,0 +1,325 @@
+/* ============================================================================
+ * Info Strip — always-visible Bloomberg-style status row between header & chart
+ * ----------------------------------------------------------------------------
+ * Sections (left → right):
+ *   .info-strip-equity    EquityCurveStrip   sparkline + headline equity + DD
+ *   .info-strip-risk      RiskChips          stop risk / streak / CB / exec
+ *   .info-strip-health    HealthDots         WS / GW / DATA / TV / DB dots
+ * ============================================================================ */
+
+.info-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-5);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  min-height: 48px;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.info-strip::-webkit-scrollbar { height: 4px; }
+.info-strip::-webkit-scrollbar-track { background: transparent; }
+.info-strip::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+.info-strip-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 0 0 auto;
+}
+
+.info-strip-section + .info-strip-section {
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.info-strip-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ----------------------------------------------------------------------------
+ * Equity section
+ * ---------------------------------------------------------------------------- */
+
+.info-strip-equity {
+  flex: 0 0 auto;
+}
+
+.info-strip-equity-spark {
+  width: 132px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.info-strip-equity-spark-empty {
+  width: 100%;
+  height: 100%;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.info-strip-equity-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.info-strip-equity-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.info-strip-equity-value {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.info-strip-equity-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.info-strip-mini {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.info-strip-mini-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.info-strip-mini-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.info-strip-mini-value.positive,
+.info-strip-equity-value.positive {
+  color: var(--color-profit);
+}
+
+.info-strip-mini-value.negative,
+.info-strip-equity-value.negative {
+  color: var(--color-loss);
+}
+
+/* ----------------------------------------------------------------------------
+ * Risk section
+ * ---------------------------------------------------------------------------- */
+
+.info-strip-risk {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.info-strip-risk-grid {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.info-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  white-space: nowrap;
+  transition: border-color var(--duration-fast) var(--ease-default),
+              background var(--duration-fast) var(--ease-default);
+}
+
+.info-strip-chip-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.info-strip-chip-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+
+.info-strip-chip-value.positive { color: var(--color-profit); }
+.info-strip-chip-value.negative { color: var(--color-loss); }
+
+/* Severity tints */
+.info-strip-chip.chip-warn {
+  border-color: rgba(var(--accent-yellow-rgb), 0.55);
+  background: rgba(var(--accent-yellow-rgb), 0.08);
+}
+.info-strip-chip.chip-warn .info-strip-chip-value {
+  color: var(--accent-yellow);
+}
+
+.info-strip-chip.chip-error {
+  border-color: rgba(var(--accent-red-rgb), 0.55);
+  background: rgba(var(--accent-red-rgb), 0.08);
+}
+.info-strip-chip.chip-error .info-strip-chip-value {
+  color: var(--accent-red);
+}
+
+.info-strip-chip.chip-ok {
+  border-color: rgba(var(--accent-green-rgb), 0.45);
+  background: rgba(var(--accent-green-rgb), 0.06);
+}
+.info-strip-chip.chip-ok .info-strip-chip-value {
+  color: var(--accent-green);
+}
+
+/* ----------------------------------------------------------------------------
+ * Health dots section
+ * ---------------------------------------------------------------------------- */
+
+.info-strip-health {
+  margin-left: auto;
+  flex: 0 0 auto;
+  gap: var(--space-3);
+}
+
+.info-strip-health-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: help;
+}
+
+.info-strip-health-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--text-muted);
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+}
+
+.info-strip-health-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.info-strip-health-dot.health-ok .info-strip-health-marker {
+  background: var(--color-status-online);
+  box-shadow: 0 0 6px rgba(var(--accent-green-rgb), 0.45);
+}
+.info-strip-health-dot.health-ok .info-strip-health-label {
+  color: var(--text-primary);
+}
+
+.info-strip-health-dot.health-warn .info-strip-health-marker {
+  background: var(--color-status-warning);
+  box-shadow: 0 0 5px rgba(var(--accent-yellow-rgb), 0.5);
+}
+.info-strip-health-dot.health-warn .info-strip-health-label {
+  color: var(--accent-yellow);
+}
+
+.info-strip-health-dot.health-offline .info-strip-health-marker {
+  background: var(--color-status-offline);
+  box-shadow: 0 0 5px rgba(var(--accent-red-rgb), 0.5);
+}
+.info-strip-health-dot.health-offline .info-strip-health-label {
+  color: var(--accent-red);
+}
+
+.info-strip-health-dot.health-unknown .info-strip-health-marker {
+  background: var(--text-muted);
+}
+
+/* ----------------------------------------------------------------------------
+ * Responsive
+ * ---------------------------------------------------------------------------- */
+
+@media (max-width: 1024px) {
+  .info-strip {
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+  .info-strip-section + .info-strip-section {
+    padding-left: var(--space-4);
+  }
+  .info-strip-equity-spark {
+    width: 96px;
+  }
+}
+
+@media (max-width: 768px) {
+  .info-strip {
+    min-height: auto;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-3);
+  }
+  .info-strip-section + .info-strip-section {
+    border-left: none;
+    padding-left: 0;
+  }
+  .info-strip-health {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+@media (max-width: 480px) {
+  .info-strip {
+    padding: var(--space-2) var(--space-3);
+  }
+  .info-strip-equity-spark {
+    width: 80px;
+    height: 28px;
+  }
+  .info-strip-equity-value {
+    font-size: var(--font-size-md);
+  }
+  .info-strip-chip {
+    padding: var(--space-1) var(--space-3);
+  }
+  .info-strip-mini-label,
+  .info-strip-chip-label,
+  .info-strip-health-label {
+    font-size: 9px;
+  }
+}
