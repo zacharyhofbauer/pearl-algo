@@ -759,7 +759,7 @@ function TradeDockPanel({
             )}
 
             {!performanceSummary && !riskMetrics && !hasSummaryData && (
-              <div className="trade-dock-empty">No stats data available</div>
+              <div className="trade-dock-empty">Stats populate after the first closed trade of the session.</div>
             )}
               </>
             )}
@@ -837,7 +837,7 @@ function TradeDockPanel({
                 )}
 
                 {!signalRejections && displayRecentSignals.length === 0 && (
-                  <div className="trade-dock-empty">No signal data available</div>
+                  <div className="trade-dock-empty">No signal activity yet — strategy is scanning each bar close.</div>
                 )}
               </div>
             )}
@@ -845,10 +845,10 @@ function TradeDockPanel({
             {/* ── Positions Tab ── */}
             {tab === 'positions' ? (
               openCount === 0 && displayWorkingOrders.length === 0 ? (
-                <div className="trade-dock-empty">No open positions</div>
+                <div className="trade-dock-empty">No open positions — system armed and watching the tape.</div>
               ) : openCount === 0 ? (
                 <>
-                  <div className="trade-dock-empty">No open positions</div>
+                  <div className="trade-dock-empty">No open positions — system armed and watching the tape.</div>
                   {groupedWorkingOrders.length > 0 && (
                     <div className="trade-dock-working-orders">
                       <div className="trade-dock-section-label">Working Orders ({groupedWorkingOrders.length})</div>
@@ -1167,7 +1167,7 @@ function TradeDockPanel({
 
             {/* ── History Tab ── */}
             {tab === 'history' && (recentCount === 0 ? (
-              <div className="trade-dock-empty">No recent trades</div>
+              <div className="trade-dock-empty">No closed trades yet today — come back after the first exit.</div>
             ) : (
               <>
                 <div className="recent-trades-list trade-dock-list" aria-label="Recent trades">

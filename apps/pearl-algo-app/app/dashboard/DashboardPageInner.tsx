@@ -71,6 +71,7 @@ export default function DashboardPageInner() {
   const activeRightPanel = useUIStore((s) => s.activeRightPanel)
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel)
   const setActiveRightPanel = useUIStore((s) => s.setActiveRightPanel)
+  const addNotification = useUIStore((s) => s.addNotification)
 
   // Local state for chart API reference (not suitable for global store)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
@@ -309,6 +310,82 @@ export default function DashboardPageInner() {
     }
     dashboardData.handleTradeRefresh()
   }, [dashboardData, requestWebSocketRefresh, wsStatus])
+
+  // ── Toast emissions ─────────────────────────────────────────────────────────
+  // Watch agent state for newsworthy events and push toasts via uiStore.
+  // Each effect tracks the previously-seen value in a ref so we only emit on
+  // *transitions*, not on every state update.
+
+  // Trade-exit toasts (TP / SL / manual). Anchored to recent_exits[0].signal_id.
+  const lastSeenExitIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const top = agentState?.recent_exits?.[0]
+    if (!top || !top.signal_id) return
+    // Skip on first paint so we don't toast historical exits.
+    if (lastSeenExitIdRef.current === null) {
+      lastSeenExitIdRef.current = top.signal_id
+      return
+    }
+    if (top.signal_id === lastSeenExitIdRef.current) return
+    lastSeenExitIdRef.current = top.signal_id
+
+    const dir = (top.direction || '').toUpperCase() || 'TRADE'
+    const reason = (top.exit_reason || '').toLowerCase()
+    const isWin = (top.pnl ?? 0) >= 0
+    let title = ''
+    if (reason.includes('target') || reason.includes('tp_') || reason.includes('profit')) {
+      title = `${dir} hit target  ·  ${isWin ? '+' : '-'}$${Math.abs(top.pnl ?? 0).toFixed(2)}`
+    } else if (reason.includes('stop') || reason.includes('sl_')) {
+      title = `${dir} stopped out  ·  ${isWin ? '+' : '-'}$${Math.abs(top.pnl ?? 0).toFixed(2)}`
+    } else if (reason.includes('trail')) {
+      title = `${dir} trail exit  ·  ${isWin ? '+' : '-'}$${Math.abs(top.pnl ?? 0).toFixed(2)}`
+    } else {
+      title = `${dir} closed  ·  ${isWin ? '+' : '-'}$${Math.abs(top.pnl ?? 0).toFixed(2)}`
+    }
+
+    addNotification({
+      type: isWin ? 'success' : 'warning',
+      title,
+      message: top.exit_reason
+        ? top.exit_reason.replace(/_/g, ' ')
+        : undefined,
+    })
+  }, [agentState?.recent_exits, addNotification])
+
+  // Circuit-breaker trip toasts (when trips_today increments).
+  const lastSeenTripsRef = useRef<number | null>(null)
+  useEffect(() => {
+    const trips = agentState?.circuit_breaker?.trips_today
+    if (typeof trips !== 'number') return
+    if (lastSeenTripsRef.current === null) {
+      lastSeenTripsRef.current = trips
+      return
+    }
+    if (trips > lastSeenTripsRef.current) {
+      const reason = agentState?.circuit_breaker?.trip_reason || 'tripped'
+      addNotification({
+        type: 'error',
+        title: 'Circuit breaker tripped',
+        message: reason,
+      })
+    }
+    lastSeenTripsRef.current = trips
+  }, [agentState?.circuit_breaker?.trips_today, agentState?.circuit_breaker?.trip_reason, addNotification])
+
+  // WebSocket health degradation toast (connected → not connected). We only
+  // toast on the disconnect transition; reconnect is silent so we don't spam.
+  const lastSeenWsRef = useRef<typeof wsStatus | null>(null)
+  useEffect(() => {
+    const prev = lastSeenWsRef.current
+    if (prev === 'connected' && wsStatus !== 'connected') {
+      addNotification({
+        type: 'warning',
+        title: 'Live socket dropped',
+        message: 'Falling back to HTTP polling. Will auto-reconnect.',
+      })
+    }
+    lastSeenWsRef.current = wsStatus
+  }, [wsStatus, addNotification])
 
   const formatTime = formatTimeFromDate
   const formatRelativeTimeFromDate = (date: Date | null) => {

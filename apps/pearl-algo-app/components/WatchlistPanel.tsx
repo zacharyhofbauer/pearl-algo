@@ -79,7 +79,7 @@ export default function WatchlistPanel({
       {/* Recent Signals */}
       <div className="watchlist-section-title">Recent Signals</div>
       {signals.length === 0 ? (
-        <div className="logs-empty">No recent signals</div>
+        <div className="logs-empty">No signals yet — strategy is watching the tape.</div>
       ) : (
         signals.map((sig) => {
           const dir = sig.direction?.toLowerCase() || ''
@@ -101,7 +101,7 @@ export default function WatchlistPanel({
       {/* Trade Log */}
       <div className="watchlist-section-title">Trade Log</div>
       {closedTrades.length === 0 ? (
-        <div className="logs-empty">No closed trades</div>
+        <div className="logs-empty">No closed trades yet — first exit will appear here.</div>
       ) : (
         closedTrades.map((trade) => {
           const dir = trade.direction?.toLowerCase() || ''

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import type { RightPanelTab } from '@/stores/uiStore'
 import PaneDivider from '@/components/chart/PaneDivider'
+import ToastContainer from '@/components/ToastContainer'
 
 interface PullToRefreshProps {
   pullDistance: number
@@ -227,6 +228,7 @@ const DashboardLayout = React.memo(function DashboardLayout({
           </aside>
         </div>
       </main>
+      <ToastContainer />
     </>
   )
 })

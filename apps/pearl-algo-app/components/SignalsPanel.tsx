@@ -124,7 +124,7 @@ export default function SignalsPanel() {
       {/* Signals list */}
       <div className="signals-list">
         {signals.length === 0 ? (
-          <div className="signals-panel-empty">No recent signals</div>
+          <div className="signals-panel-empty">No recent signals — strategy is scanning each bar close.</div>
         ) : (
           signals.map((sig) => (
             <div key={sig.signal_id} className="signals-row">
