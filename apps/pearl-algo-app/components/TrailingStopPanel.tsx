@@ -8,6 +8,20 @@ import { apiFetch } from '@/lib/api'
 import OperatorUnlockModal from '@/components/OperatorUnlockModal'
 import TrailingStopOverrideModal from '@/components/TrailingStopOverrideModal'
 
+/**
+ * Feature flag for the manual override + clear buttons.
+ *
+ * Set to `true` to expose the operator-gated mutation controls (POST/DELETE
+ * /api/trailing-stop/override). Default is `false` so the panel is read-only
+ * — no idle-tinkering risk to live trading parameters.
+ *
+ * Flip this when you want manual override available (e.g. a CPI / FOMC hedge
+ * window). The modal + clear flow are fully built and operator-gated; this
+ * flag just controls whether the buttons render. The backend endpoints stay
+ * accessible to OpenClaw / scripts regardless.
+ */
+const SHOW_OVERRIDE_CONTROLS = false
+
 interface TrailingStopRowProps {
   signalId: string
   state: TrailingStopPosition
@@ -213,14 +227,16 @@ function TrailingStopPanel() {
           <span className="trailing-header-count">
             {positions.length} position{positions.length === 1 ? '' : 's'}
           </span>
-          <button
-            type="button"
-            className="trailing-header-btn"
-            onClick={requestOverride}
-            title={isUnlocked ? 'Apply manual override' : 'Click to unlock and apply override'}
-          >
-            {isUnlocked ? 'Override' : '🔒 Override'}
-          </button>
+          {SHOW_OVERRIDE_CONTROLS && (
+            <button
+              type="button"
+              className="trailing-header-btn"
+              onClick={requestOverride}
+              title={isUnlocked ? 'Apply manual override' : 'Click to unlock and apply override'}
+            >
+              {isUnlocked ? 'Override' : '🔒 Override'}
+            </button>
+          )}
         </span>
       </header>
 
@@ -234,27 +250,29 @@ function TrailingStopPanel() {
                 expires in {ov.expires_in_minutes.toFixed(0)}m
               </span>
             )}
-            <button
-              type="button"
-              className={`trailing-override-clear ${confirmClear ? 'is-confirming' : ''}`}
-              onClick={requestClear}
-              disabled={clearBusy}
-              title={
-                !isUnlocked
-                  ? 'Click to unlock and clear override'
+            {SHOW_OVERRIDE_CONTROLS && (
+              <button
+                type="button"
+                className={`trailing-override-clear ${confirmClear ? 'is-confirming' : ''}`}
+                onClick={requestClear}
+                disabled={clearBusy}
+                title={
+                  !isUnlocked
+                    ? 'Click to unlock and clear override'
+                    : confirmClear
+                      ? 'Click again to confirm'
+                      : 'Clear override and revert to defaults'
+                }
+              >
+                {clearBusy
+                  ? 'Clearing…'
                   : confirmClear
-                    ? 'Click again to confirm'
-                    : 'Clear override and revert to defaults'
-              }
-            >
-              {clearBusy
-                ? 'Clearing…'
-                : confirmClear
-                  ? 'Confirm Clear'
-                  : isUnlocked
-                    ? 'Clear'
-                    : '🔒 Clear'}
-            </button>
+                    ? 'Confirm Clear'
+                    : isUnlocked
+                      ? 'Clear'
+                      : '🔒 Clear'}
+              </button>
+            )}
           </div>
           <div className="trailing-override-grid">
             <div className="trailing-cell">
