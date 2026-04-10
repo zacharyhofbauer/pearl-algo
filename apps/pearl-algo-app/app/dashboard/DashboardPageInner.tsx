@@ -559,7 +559,7 @@ export default function DashboardPageInner() {
         <div className="header-row-single">
           {/* Mobile: logo + hamburger — only visible when sidebars hidden */}
           <div className="mobile-logo">
-            <img src="/logo.png" alt="PEARL" width={20} height={20} />
+            <Image src="/logo.png" alt="PEARL" width={20} height={20} />
           </div>
           <button
             className="mobile-menu-btn"
@@ -718,7 +718,7 @@ export default function DashboardPageInner() {
           <div className="mobile-menu-overlay" onClick={() => setShowMobileMenu(false)}>
             <div className="mobile-menu-panel" onClick={(e) => e.stopPropagation()}>
               <div className="mobile-menu-header">
-                <img src="/logo.png" alt="PEARL" width={20} height={20} />
+                <Image src="/logo.png" alt="PEARL" width={20} height={20} />
                 <span>PEARL</span>
                 <button className="mobile-menu-close" onClick={() => setShowMobileMenu(false)}>
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">

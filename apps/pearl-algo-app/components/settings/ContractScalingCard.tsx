@@ -31,8 +31,9 @@ export default function ContractScalingCard() {
       const data = await apiFetchJson<ConfidenceScalingConfig>('/api/confidence-scaling')
       setConfig(data)
       setError(null)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load scaling config')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to load scaling config'
+      setError(message)
     } finally {
       setLoading(false)
     }
@@ -53,185 +54,123 @@ export default function ContractScalingCard() {
       })
       setConfig(updated)
       setError(null)
-    } catch (e: any) {
-      setError(e?.message || 'Toggle failed')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Toggle failed'
+      setError(message)
     } finally {
       setToggling(false)
     }
   }
 
-  const CONTRACT_COLORS: Record<number, string> = {
-    1: '#4ade80',  // green
-    2: '#facc15',  // yellow
-    3: '#f97316',  // orange
+  /**
+   * Map a tier's contract count to a semantic variant class. Color comes from
+   * design tokens (--accent-green / --accent-yellow / --accent-purple), not
+   * hardcoded hex.
+   */
+  const tierVariant = (contracts: number): string => {
+    if (contracts <= 1) return 'tier-one'
+    if (contracts === 2) return 'tier-two'
+    return 'tier-three'
+  }
+
+  // Each tier's confidence range as a fraction of the full 0–28% spread the
+  // backend currently emits, used to size the visual bar. Kept inline (not in
+  // CSS) because it depends on per-tier numeric data.
+  const tierBarWidth = (tier: Tier): number => {
+    const span = (tier.max_confidence - tier.min_confidence) * 100
+    return Math.max(8, Math.min(100, (span / 28) * 100))
   }
 
   if (loading) {
     return (
       <div className="settings-section">
         <h3 className="settings-section-title">Contract Scaling</h3>
-        <div style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>Loading…</div>
+        <div className="contract-scaling-loading">Loading…</div>
       </div>
     )
   }
 
   return (
     <div className="settings-section">
-      <h3 className="settings-section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 className="settings-section-title contract-scaling-title">
         Contract Scaling
-        <span style={{
-          fontSize: '11px',
-          fontWeight: 500,
-          color: config?.enabled ? '#4ade80' : '#94a3b8',
-          background: config?.enabled ? 'rgba(74,222,128,0.12)' : 'rgba(148,163,184,0.12)',
-          border: `1px solid ${config?.enabled ? 'rgba(74,222,128,0.3)' : 'rgba(148,163,184,0.25)'}`,
-          borderRadius: '4px',
-          padding: '2px 8px',
-        }}>
+        <span
+          className={`contract-scaling-status ${
+            config?.enabled ? 'is-active' : 'is-gated'
+          }`}
+        >
           {config?.enabled ? 'ACTIVE' : 'GATED'}
         </span>
       </h3>
 
-      {/* Warning banner */}
-      <div style={{
-        background: 'rgba(251,191,36,0.08)',
-        border: '1px solid rgba(251,191,36,0.3)',
-        borderRadius: '6px',
-        padding: '10px 14px',
-        marginBottom: '16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-      }}>
-        <span style={{ fontSize: '16px' }}>⚠️</span>
-        <span style={{ fontSize: '12px', color: '#fbbf24', fontWeight: 500 }}>
+      <div className="contract-scaling-warning" role="note">
+        <span className="contract-scaling-warning-icon" aria-hidden>⚠️</span>
+        <span className="contract-scaling-warning-text">
           GATED — enable only after 200+ clean baseline trades
         </span>
       </div>
 
-      {error && (
-        <div style={{ color: '#f87171', fontSize: '12px', marginBottom: '12px' }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="contract-scaling-error">{error}</div>}
 
-      {/* Toggle */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 0',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-        marginBottom: '16px',
-      }}>
+      <div className="contract-scaling-toggle-row">
         <div>
-          <div style={{ fontSize: '13px', fontWeight: 500, color: '#e2e8f0' }}>
-            Confidence Scaling
-          </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+          <div className="contract-scaling-toggle-label">Confidence Scaling</div>
+          <div className="contract-scaling-toggle-sub">
             Scale contracts 1→3 based on signal confidence
           </div>
         </div>
         <button
+          type="button"
           onClick={handleToggle}
           disabled={toggling}
-          style={{
-            position: 'relative',
-            width: '44px',
-            height: '24px',
-            borderRadius: '12px',
-            border: 'none',
-            cursor: toggling ? 'not-allowed' : 'pointer',
-            background: config?.enabled ? '#22c55e' : '#334155',
-            transition: 'background 0.2s',
-            outline: 'none',
-            opacity: toggling ? 0.6 : 1,
-          }}
+          className={`contract-scaling-toggle ${config?.enabled ? 'is-on' : 'is-off'} ${
+            toggling ? 'is-busy' : ''
+          }`}
           title={config?.enabled ? 'Disable scaling' : 'Enable scaling'}
+          aria-pressed={config?.enabled}
         >
-          <span style={{
-            position: 'absolute',
-            top: '2px',
-            left: config?.enabled ? '22px' : '2px',
-            width: '20px',
-            height: '20px',
-            borderRadius: '50%',
-            background: '#fff',
-            transition: 'left 0.2s',
-            display: 'block',
-          }} />
+          <span className="contract-scaling-toggle-knob" />
         </button>
       </div>
 
-      {/* Tier display */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Confidence Tiers
-        </div>
-        {(config?.tiers || []).map((tier, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '10px 14px',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderRadius: '6px',
-          }}>
-            {/* Contract count badge */}
-            <div style={{
-              minWidth: '28px',
-              height: '28px',
-              borderRadius: '6px',
-              background: `${CONTRACT_COLORS[tier.contracts] || '#94a3b8'}22`,
-              border: `1px solid ${CONTRACT_COLORS[tier.contracts] || '#94a3b8'}44`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: CONTRACT_COLORS[tier.contracts] || '#94a3b8',
-              fontFamily: 'monospace',
-            }}>
-              {tier.contracts}
-            </div>
-            {/* Confidence range */}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 500 }}>
-                {tier.contracts === 1 ? '1 contract' : `${tier.contracts} contracts`}
+      <div className="contract-scaling-tiers">
+        <div className="contract-scaling-tiers-label">Confidence Tiers</div>
+        {(config?.tiers || []).map((tier, i) => {
+          const variant = tierVariant(tier.contracts)
+          return (
+            <div key={i} className="contract-scaling-tier">
+              <div className={`contract-scaling-tier-badge ${variant}`}>
+                {tier.contracts}
               </div>
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', fontFamily: 'monospace' }}>
-                confidence {(tier.min_confidence * 100).toFixed(0)}% – {(tier.max_confidence * 100).toFixed(0)}%
+              <div className="contract-scaling-tier-info">
+                <div className="contract-scaling-tier-name">
+                  {tier.contracts === 1 ? '1 contract' : `${tier.contracts} contracts`}
+                </div>
+                <div className="contract-scaling-tier-range">
+                  confidence {(tier.min_confidence * 100).toFixed(0)}% – {(tier.max_confidence * 100).toFixed(0)}%
+                </div>
+              </div>
+              <div className="contract-scaling-tier-bar">
+                <div
+                  className={`contract-scaling-tier-bar-fill ${variant}`}
+                  style={{ width: `${tierBarWidth(tier).toFixed(0)}%` }}
+                />
               </div>
             </div>
-            {/* Visual bar */}
-            <div style={{ width: '80px' }}>
-              <div style={{
-                height: '4px',
-                borderRadius: '2px',
-                background: 'rgba(255,255,255,0.06)',
-                overflow: 'hidden',
-              }}>
-                <div style={{
-                  height: '100%',
-                  width: `${(tier.max_confidence - tier.min_confidence) * 100 / 0.28 * 100}%`,
-                  background: CONTRACT_COLORS[tier.contracts] || '#94a3b8',
-                  borderRadius: '2px',
-                  opacity: 0.7,
-                }} />
-              </div>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
-      {/* Footer info */}
-      <div style={{ marginTop: '16px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '11px', color: '#64748b' }}>
-          Max contracts: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{config?.max_contracts ?? 3}</span>
+      <div className="contract-scaling-footer">
+        <div className="contract-scaling-footer-item">
+          Max contracts:{' '}
+          <span className="contract-scaling-footer-value">{config?.max_contracts ?? 3}</span>
         </div>
-        <div style={{ fontSize: '11px', color: '#64748b' }}>
-          Long-only scaling: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{config?.long_only_scaling ? 'yes' : 'no'}</span>
+        <div className="contract-scaling-footer-item">
+          Long-only scaling:{' '}
+          <span className="contract-scaling-footer-value">
+            {config?.long_only_scaling ? 'yes' : 'no'}
+          </span>
         </div>
       </div>
     </div>

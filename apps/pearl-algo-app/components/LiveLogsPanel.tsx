@@ -74,8 +74,20 @@ export default function LiveLogsPanel() {
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data)
-          appendLog({ ts: data.ts, level: data.level, message: data.message })
-        } catch {}
+          // Shape guard: a malformed payload from a network proxy or buggy
+          // backend deploy shouldn't poison the log stream. We accept the
+          // entry only when the three fields we render are all present.
+          if (
+            data &&
+            typeof data.ts === 'string' &&
+            typeof data.level === 'string' &&
+            typeof data.message === 'string'
+          ) {
+            appendLog({ ts: data.ts, level: data.level, message: data.message })
+          }
+        } catch {
+          /* ignore unparseable frames */
+        }
       }
     }
 

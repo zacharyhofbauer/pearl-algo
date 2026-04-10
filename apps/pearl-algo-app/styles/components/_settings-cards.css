@@ -1,0 +1,239 @@
+/* ============================================================================
+ * Settings Cards
+ * ----------------------------------------------------------------------------
+ * Reusable styles for the cards rendered inside SettingsCategory pages.
+ * Replaces the inline-style soup that used to live in ContractScalingCard.
+ * ============================================================================ */
+
+.contract-scaling-loading {
+  padding: var(--space-5);
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+}
+
+.contract-scaling-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.contract-scaling-status {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.contract-scaling-status.is-active {
+  color: var(--accent-green);
+  background: rgba(var(--accent-green-rgb), 0.12);
+  border-color: rgba(var(--accent-green-rgb), 0.3);
+}
+
+.contract-scaling-status.is-gated {
+  color: var(--text-secondary);
+  background: rgba(var(--text-tertiary-rgb), 0.12);
+  border-color: rgba(var(--text-tertiary-rgb), 0.25);
+}
+
+.contract-scaling-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  background: rgba(var(--accent-yellow-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-yellow-rgb), 0.3);
+  border-radius: var(--radius-md);
+}
+
+.contract-scaling-warning-icon {
+  font-size: var(--font-size-xl);
+}
+
+.contract-scaling-warning-text {
+  font-size: var(--font-size-md);
+  color: var(--accent-yellow);
+  font-weight: var(--font-weight-medium);
+}
+
+.contract-scaling-error {
+  color: var(--accent-red);
+  font-size: var(--font-size-md);
+  margin-bottom: var(--space-5);
+}
+
+.contract-scaling-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-6);
+}
+
+.contract-scaling-toggle-label {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.contract-scaling-toggle-sub {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+}
+
+.contract-scaling-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  transition: background var(--duration-normal) var(--ease-default),
+              opacity var(--duration-fast) var(--ease-default);
+  outline: none;
+  flex: 0 0 auto;
+}
+
+.contract-scaling-toggle.is-on {
+  background: var(--accent-green);
+}
+
+.contract-scaling-toggle.is-busy {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.contract-scaling-toggle:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.contract-scaling-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  display: block;
+  transition: left var(--duration-normal) var(--ease-default);
+}
+
+.contract-scaling-toggle.is-on .contract-scaling-toggle-knob {
+  left: 22px;
+}
+
+.contract-scaling-tiers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.contract-scaling-tiers-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.contract-scaling-tier {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.contract-scaling-tier-badge {
+  min-width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-mono);
+  border: 1px solid transparent;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.contract-scaling-tier-badge.tier-one {
+  background: rgba(var(--accent-green-rgb), 0.13);
+  border-color: rgba(var(--accent-green-rgb), 0.27);
+  color: var(--accent-green);
+}
+.contract-scaling-tier-badge.tier-two {
+  background: rgba(var(--accent-yellow-rgb), 0.13);
+  border-color: rgba(var(--accent-yellow-rgb), 0.27);
+  color: var(--accent-yellow);
+}
+.contract-scaling-tier-badge.tier-three {
+  background: rgba(var(--accent-purple-rgb), 0.13);
+  border-color: rgba(var(--accent-purple-rgb), 0.27);
+  color: var(--accent-purple);
+}
+
+.contract-scaling-tier-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.contract-scaling-tier-name {
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.contract-scaling-tier-range {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+}
+
+.contract-scaling-tier-bar {
+  width: 80px;
+  flex: 0 0 auto;
+}
+
+.contract-scaling-tier-bar-fill {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  opacity: 0.85;
+}
+
+.contract-scaling-tier-bar-fill.tier-one { background: var(--accent-green); }
+.contract-scaling-tier-bar-fill.tier-two { background: var(--accent-yellow); }
+.contract-scaling-tier-bar-fill.tier-three { background: var(--accent-purple); }
+
+.contract-scaling-footer {
+  margin-top: var(--space-6);
+  display: flex;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.contract-scaling-footer-item {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+.contract-scaling-footer-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
