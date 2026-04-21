@@ -12,6 +12,27 @@
 - **Current live state root:** `/home/pearlalgo/var/pearl-algo/state/data/agent_state/MNQ` (repo `data/` symlinks here)
 - **Prop firm:** MFF compliance via TraderSyncer (copies demo -> live)
 
+## Deployment Workflow (Mac-as-control-plane)
+
+**As of 2026-04-21**: the Mac (`pearlassistant`) is the sole edit/AI surface. The Beelink (`px-core`, SSH alias `pearlalgo`, Tailscale `100.100.12.86`) is a pure runtime — no Claude / Codex / Cursor / OpenClaw runs there. Never edit code directly on the Beelink.
+
+**Canonical flow:**
+```bash
+# On the Mac, in ~/projects/pearl-algo
+git add <files> && git commit -m "..."
+./scripts/ops/deploy-from-mac.sh              # push + SSH pull, NO restart (safe during market hours)
+./scripts/ops/deploy-from-mac.sh --tv-paper   # apply changes: restart agent only
+./scripts/ops/deploy-from-mac.sh --restart    # full restart (disruptive)
+./scripts/ops/deploy-from-mac.sh --chart      # rebuild + restart webapp
+./scripts/ops/deploy-from-mac.sh --status     # quick health check
+
+./scripts/ops/health-from-mac.sh              # read-only: pearl.sh quick over SSH
+```
+
+The script refuses to run with uncommitted Mac-side changes, forcing a clean commit-and-push. The Beelink is fast-forwarded via `git reset --hard origin/<branch>`, so anything left uncommitted on the Beelink will be destroyed — the Beelink is NOT a working tree.
+
+If the Beelink dies, see `docs/DR_RUNBOOK.md`.
+
 ## Settings to Handle With Care
 
 These settings affect live trading behavior. **Use judgment** — when changing
