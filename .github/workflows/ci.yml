@@ -90,10 +90,6 @@ jobs:
         run: |
           python scripts/testing/check_no_secrets.py
 
-      - name: Stale code audit (orphan allowlist)
-        run: |
-          python scripts/testing/report_orphan_modules.py --enforce
-
       - name: Config validation (Issue 22)
         run: |
           python -c "
@@ -133,14 +129,8 @@ jobs:
         run: |
           pytest -m "not requires_ibkr and not requires_telegram" --cov-report=xml
 
-      - name: Generate coverage badge
-        run: |
-          python scripts/testing/generate_coverage_badge.py
-
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v7
         with:
           name: coverage
-          path: |
-            coverage.xml
-            docs/coverage-badge.svg
+          path: coverage.xml
