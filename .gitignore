@@ -89,3 +89,7 @@ MagicMock/
 *.bak_*
 *.backup_*
 *.orig
+
+# Audit/session backup files (config/*.bak.audit-*, config/*.bak.session-*)
+*.bak.audit-*
+*.bak.session-*
