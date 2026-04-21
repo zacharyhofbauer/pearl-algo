@@ -96,16 +96,19 @@ jobs:
           import yaml, sys
           with open('config/live/tradovate_paper.yaml') as f:
               cfg = yaml.safe_load(f)
-          # Verify critical safety values
+          # Safety gates aligned with CLAUDE.md policy (2026-04-21):
+          # MFF total-position cap stays at 5. Per-order sizing is user-tunable,
+          # so max_position_size_per_order is no longer capped here — still capped
+          # by max_position_size since per-order <= total-position is invariant.
           exec_cfg = cfg.get('execution', {})
           guardrails = cfg.get('guardrails', {})
           errors = []
-          mpspo = exec_cfg.get('max_position_size_per_order') or guardrails.get('max_position_size_per_order')
-          if mpspo is not None and mpspo > 1:
-              errors.append(f'max_position_size_per_order={mpspo} exceeds safety limit of 1')
           mps = exec_cfg.get('max_position_size') or guardrails.get('max_position_size')
           if mps is not None and mps > 5:
               errors.append(f'max_position_size={mps} exceeds MFF limit of 5')
+          mpspo = exec_cfg.get('max_position_size_per_order') or guardrails.get('max_position_size_per_order')
+          if mpspo is not None and mps is not None and mpspo > mps:
+              errors.append(f'max_position_size_per_order={mpspo} exceeds max_position_size={mps}')
           if errors:
               for e in errors:
                   print(f'ERROR: {e}', file=sys.stderr)
