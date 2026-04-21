@@ -224,7 +224,7 @@ class OrderManager:
             - adjusted_size: int (may be reduced)
             - reason: str (if invalid or adjusted)
         """
-        result = {
+        result: Dict[str, Any] = {
             "valid": True,
             "adjusted_size": size,
             "reason": None,
