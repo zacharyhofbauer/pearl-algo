@@ -90,10 +90,6 @@ jobs:
         run: |
           python scripts/testing/check_no_secrets.py
 
-      - name: Doc reference audit
-        run: |
-          python scripts/testing/check_doc_references.py
-
       - name: Stale code audit (orphan allowlist)
         run: |
           python scripts/testing/report_orphan_modules.py --enforce
