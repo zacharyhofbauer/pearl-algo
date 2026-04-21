@@ -21,7 +21,7 @@ did. They are no longer hard-blocked, but they are not casual edits either.
 | Setting | Notes |
 |---------|-------|
 | `execution.armed` / `execution.enabled` / `execution.mode` | Master execution switches. Flipping these starts/stops live order flow. |
-| `max_positions` / `max_position_size` / `max_position_size_per_order` | Position caps. MFF compliance currently expects max 5 MNQ total / 1 per order — only exceed if the prop-firm rules change. |
+| `max_positions` / `max_position_size` / `max_position_size_per_order` | Position caps. MFF compliance expects max 5 MNQ total; per-order sizing is up to the user. |
 | `guardrails.*` | Execution-side risk floor (drawdown, consecutive losses, equity curve). Loosen carefully. |
 | `virtual_pnl.*` | Currently disabled — Tradovate is source of truth. Only re-enable for diagnostic runs. |
 | `ibkr.execution` | IBKR is data-only by design. Enabling execution duplicates orders. |

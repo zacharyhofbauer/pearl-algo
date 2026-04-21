@@ -15,8 +15,8 @@ strategy:
   - composite_intraday
   enable_dynamic_sizing: true
   base_contracts: 1
-  high_conf_contracts: 1
-  max_conf_contracts: 1
+  high_conf_contracts: 2
+  max_conf_contracts: 3
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
@@ -35,9 +35,9 @@ strategies:
     ema_slow: 21
     # AUDIT 2026-04-10: bumped from 0.4 → 0.55. The IBKR-era winning system
     # ran ~0.55 confidence floor; 0.4 was admitting low-quality signals.
-    min_confidence: 0.55
-    min_confidence_long: 0.55
-    min_confidence_short: 0.55
+    min_confidence: 0.60
+    min_confidence_long: 0.60
+    min_confidence_short: 0.72
     # AUDIT 2026-04-10: widened from 1.5 → 2.5 SL mult and 2.5 → 4.0 TP mult.
     # IBKR-era winners had avg SL 54pt / TP 80pt. Current was 16pt/26pt — ~3x
     # too tight, jamming the strategy into the 0-15min losing bucket.
@@ -116,12 +116,12 @@ trading_circuit_breaker:
   # Direction Gating — DISABLED 2026-04-10. Per CLAUDE.md user wants strategy
   # decisions without direction vetoes. Was silently restricting shorts to
   # trending_down only and longs to "unknown" regime, starving the system.
-  enable_direction_gating: false
+  enable_direction_gating: true
   direction_gating_min_confidence: 0.70
   # Regime Avoidance — DISABLED 2026-04-10. blocked_regimes contained
   # `trending_up` (54% of recent market) which blocked the dominant regime.
   # Per CLAUDE.md user wants strategy decisions without regime vetoes.
-  enable_regime_avoidance: false
+  enable_regime_avoidance: true
   blocked_regimes:
     - ranging
     - volatile
@@ -140,7 +140,7 @@ guardrails:
   signal_gate_enabled: false
   mode: enforce
   max_consecutive_losses: 3
-  consecutive_loss_cooldown_minutes: 15
+  consecutive_loss_cooldown_minutes: 30
   max_session_drawdown: 800.0
   max_daily_drawdown: 800.0
   max_daily_profit: 3000.0
@@ -181,16 +181,33 @@ guardrails:
   # conservative ($300 activation, 35% retracement) and tighten once you've
   # watched it work for a few days.  Uses the BROKER's net realized P&L via
   # sync_broker_pnl, NOT the internal gross accumulator.
-  enable_session_profit_lock: false
-  session_profit_lock_activation_usd: 300.0
-  session_profit_lock_retracement_pct: 0.35
+  enable_session_profit_lock: true
+  session_profit_lock_activation_usd: 250.0
+  session_profit_lock_retracement_pct: 0.25
   session_profit_lock_min_floor_usd: 50.0
   session_profit_lock_cooldown_minutes: 600
   # Time-of-Day Risk Windows — reduce exposure during historically weak hours
   enable_tod_risk_scaling: true
   tod_risk_windows:
+    # Session open chop — data shows -$873 here, near 0% WR
+    - start_hour_et: 18
+      end_hour_et: 20
+      risk_scale: 0.0
+    # Late evening bleed — -$460 at 23:00 UTC
+    - start_hour_et: 22
+      end_hour_et: 23
+      risk_scale: 0.25
+    # Pre-London bleed — -$828 at 04:00-05:00 ET
+    - start_hour_et: 4
+      end_hour_et: 6
+      risk_scale: 0.25
+    # NY open chop — -$468 at 08:00-10:00 ET
+    - start_hour_et: 8
+      end_hour_et: 10
+      risk_scale: 0.25
+    # Afternoon give-back
     - start_hour_et: 15
-      end_hour_et: 18
+      end_hour_et: 16
       risk_scale: 0.5
   # Volatility Risk Scaling — cut size when ATR expands
   enable_volatility_risk_scaling: true
@@ -309,11 +326,11 @@ execution:
   adapter: tradovate
   enforce_protection_guard: true
   allow_reversal_on_opposite_signal: true
-  max_position_size_per_order: 1
+  max_position_size_per_order: 3
   max_positions: 5
-  max_orders_per_day: 150
+  max_orders_per_day: 80
   max_daily_loss: 99999.0
-  cooldown_seconds: 60
+  cooldown_seconds: 120
   symbol_whitelist:
   - MNQ
   ibkr_trading_client_id: 50
