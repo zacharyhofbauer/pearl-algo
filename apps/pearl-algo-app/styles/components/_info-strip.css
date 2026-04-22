@@ -314,8 +314,25 @@
   .info-strip-equity-value {
     font-size: var(--font-size-md);
   }
+  /* Risk chips: pack into balanced 3-col grid on phones so the 6 chips
+     (Stop Risk / Peak Risk / Open / Streak / CB / Exec) render as 2 tidy
+     rows instead of 5+1 with a lonely Exec dangling on its own row. */
+  .info-strip-risk-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
   .info-strip-chip {
-    padding: var(--space-1) var(--space-3);
+    padding: var(--space-1) var(--space-2);
+    min-width: 0;
+  }
+  .info-strip-chip-value {
+    font-size: var(--font-size-xs);
+    /* Prevent long values like "DISARM" or timer strings from overflowing
+       the grid cell — truncate with ellipsis if needed. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .info-strip-mini-label,
   .info-strip-chip-label,
