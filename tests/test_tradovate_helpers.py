@@ -399,6 +399,28 @@ class TestSummarizePairedTradesForPeriod:
             "win_rate": 50.0,
         }
 
+    def test_accepts_timezone_aware_period_bounds(self):
+        paired_trades = [
+            {"exit_time": "2026-03-10T10:30:00", "pnl": 75.0},
+            {"exit_time": "2026-03-10T11:00:00", "pnl": -25.0},
+            {"exit_time": "2026-03-10T12:00:00", "pnl": 10.0},
+        ]
+
+        result = summarize_paired_trades_for_period(
+            paired_trades,
+            datetime(2026, 3, 10, 14, 0, tzinfo=timezone.utc),
+            end_utc=datetime(2026, 3, 10, 16, 0, tzinfo=timezone.utc),
+            commission_per_trade=5.0,
+        )
+
+        assert result == {
+            "pnl": 40.0,
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+        }
+
 
 class TestTradovatePerformanceSummary:
     def test_uses_supplied_paired_trades_without_repairing(self, monkeypatch, tmp_path):

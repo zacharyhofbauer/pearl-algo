@@ -336,6 +336,19 @@ def estimate_commission_per_trade(
     return est
 
 
+def _normalize_period_boundary(boundary: Optional[datetime]) -> Optional[datetime]:
+    """Normalize period boundaries to naive ET to match paired trade timestamps."""
+    if boundary is None:
+        return None
+    if boundary.tzinfo is None:
+        return boundary
+
+    from pearlalgo.utils.market_hours import ET
+
+    return boundary.astimezone(ET).replace(tzinfo=None)
+
+
+
 def summarize_paired_trades_for_period(
     trades: List[Dict[str, Any]],
     start_utc: datetime,
@@ -343,6 +356,9 @@ def summarize_paired_trades_for_period(
     commission_per_trade: float = 0.0,
 ) -> Dict[str, Any]:
     """Build period stats from an already-paired Tradovate trade list."""
+    start_utc = _normalize_period_boundary(start_utc)
+    end_utc = _normalize_period_boundary(end_utc)
+
     filtered = []
     for t in trades:
         exit_ts = t.get("exit_time", "")

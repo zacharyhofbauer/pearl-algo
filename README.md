@@ -67,7 +67,7 @@ python3 scripts/ops/audit_runtime_paths.py
 ./pearl.sh start --no-chart
 
 # Tradovate Paper only
-./pearl.sh tv_paper status
+./pearl.sh tv-paper status
 ```
 
 ## Operating model

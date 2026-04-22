@@ -113,14 +113,14 @@ circuit_breaker:
   pause_on_connection_failures: false
 
 trading_circuit_breaker:
-  # Direction Gating — DISABLED 2026-04-10. Per CLAUDE.md user wants strategy
-  # decisions without direction vetoes. Was silently restricting shorts to
-  # trending_down only and longs to "unknown" regime, starving the system.
+  # Direction gating is intentionally ENABLED in the current paper profile.
+  # Given the live analytics, this acts as a conservative long-bias / regime
+  # sanity check instead of letting every low-context short through.
   enable_direction_gating: true
   direction_gating_min_confidence: 0.70
-  # Regime Avoidance — DISABLED 2026-04-10. blocked_regimes contained
-  # `trending_up` (54% of recent market) which blocked the dominant regime.
-  # Per CLAUDE.md user wants strategy decisions without regime vetoes.
+  # Regime avoidance is intentionally ENABLED, but only for the weak regimes
+  # we still want to avoid in paper (`ranging`, `volatile`). The earlier audit
+  # issue was blocking `trending_up`; that is no longer part of blocked_regimes.
   enable_regime_avoidance: true
   blocked_regimes:
     - ranging
