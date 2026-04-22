@@ -41,5 +41,8 @@
     "ts-jest": "^29.4.6",
     "typescript": "^5",
     "webpack": "^5.105.2"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5"
   }
 }
