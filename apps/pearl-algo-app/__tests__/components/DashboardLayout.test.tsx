@@ -11,6 +11,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     const skipLink = screen.getByRole('link', { name: /skip to main content/i })
@@ -25,6 +29,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     expect(screen.getByText('Header')).toBeInTheDocument()
@@ -40,6 +48,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     expect(screen.getByText('Pull to refresh')).toBeInTheDocument()
@@ -53,6 +65,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     expect(screen.getByText('Refreshing...')).toBeInTheDocument()
@@ -66,6 +82,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     const dashboard = container.querySelector('[data-chart-ready]')
@@ -80,6 +100,10 @@ describe('DashboardLayout', () => {
         header={<div>Header</div>}
         chart={<div>Chart</div>}
         panels={<div>Panels</div>}
+        activeRightPanel={null}
+        onToggleRightPanel={() => {}}
+        onCloseRightPanel={() => {}}
+        rightPanelContent={null}
       />
     )
     const dashboard = container.querySelector('[data-chart-ready]')

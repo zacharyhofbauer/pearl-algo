@@ -1,4 +1,4 @@
-import { useChartSettingsStore, type ChartTheme } from '@/stores/chartSettingsStore'
+import { useChartSettingsStore, type ChartTheme, type IndicatorVisibility } from '@/stores/chartSettingsStore'
 
 describe('chartSettingsStore', () => {
   beforeEach(() => {
@@ -25,6 +25,13 @@ describe('chartSettingsStore', () => {
         atrBands: false,
         volumeProfile: false,
         volume: true,
+        vwapBands: false,
+        keyLevels: false,
+        tbtTrendlines: false,
+        srPowerZones: false,
+        rsi: false,
+        sessions: false,
+        sdZones: false,
       },
       showVolumeProfilePanel: false,
       showVolume: true,
@@ -98,7 +105,7 @@ describe('chartSettingsStore', () => {
     })
 
     it('should toggle all indicator types', () => {
-      const indicators = [
+      const indicators: Array<keyof IndicatorVisibility> = [
         'ema9',
         'ema21',
         'vwap',

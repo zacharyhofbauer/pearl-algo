@@ -93,12 +93,12 @@ describe('useDashboardData', () => {
     it('should fetch all disconnected HTTP endpoints in parallel', async () => {
       const mockCandles = [{ time: 1000, open: 1, high: 2, low: 0.5, close: 1.5 }]
       const mockIndicators = { ema9: [] }
-      const mockMarkers = []
+      const mockMarkers: unknown[] = []
       const mockState = { running: true }
       const mockMarketStatus = { is_open: true }
-      const mockPositions = []
-      const mockTrades = []
-      const mockSignals = []
+      const mockPositions: unknown[] = []
+      const mockTrades: unknown[] = []
+      const mockSignals: unknown[] = []
       const mockPerf = { td: { pnl: 100 } }
 
       mockApiFetch
@@ -349,7 +349,7 @@ describe('useDashboardData', () => {
     it('should return positions, recentTrades, and performanceSummary', async () => {
       const mockPositions = [{ signal_id: '1', entry_price: 100 }]
       const mockTrades = [{ signal_id: '2', pnl: 50 }]
-      const mockSignals = []
+      const mockSignals: unknown[] = []
       const mockPerf = { td: { pnl: 100 } }
 
       mockApiFetch

@@ -38,12 +38,12 @@ describe('API utility', () => {
 
   describe('getAuthHeaders', () => {
     it('should return headers with Content-Type', () => {
-      const headers = getAuthHeaders()
+      const headers = getAuthHeaders() as Record<string, string>
       expect(headers['Content-Type']).toBe('application/json')
     })
 
     it('should not include X-API-Key when not configured', () => {
-      const headers = getAuthHeaders()
+      const headers = getAuthHeaders() as Record<string, string>
       expect(headers['X-API-Key']).toBeUndefined()
     })
   })
