@@ -600,6 +600,7 @@
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .trade-dock-header-stats .dock-stat.pnl {

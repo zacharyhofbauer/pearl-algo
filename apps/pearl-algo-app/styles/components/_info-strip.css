@@ -93,6 +93,9 @@
   font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   line-height: 1;
+  /* Tabular digits so live P&L updates don't jitter horizontally when a
+     digit-count changes (e.g. $99 → $100). */
+  font-variant-numeric: tabular-nums;
 }
 
 .info-strip-equity-row {
@@ -119,6 +122,7 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .info-strip-mini-value.positive,
@@ -171,6 +175,7 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .info-strip-chip-value.positive { color: var(--color-profit); }
