@@ -148,11 +148,29 @@ _ibc_command_ready() {
 }
 
 
-_warm_restart_gateway() {
-  if [ ! -x "$IBC_DIR/restart.sh" ]; then
-    return 1
+_ibc_send_command() {
+  local cmd="$1"
+
+  if command -v nc >/dev/null 2>&1; then
+    # Prefer a native netcat send so warm restart does not depend on IBC's
+    # legacy commandsend.sh hardcoding /usr/local/bin/telnet.
+    printf '%s\nEXIT\nquit\n' "$cmd" | nc 127.0.0.1 "${IBC_COMMAND_PORT}" >/dev/null 2>&1
+    return $?
   fi
 
+  if [ -x "$IBC_DIR/commandsend.sh" ]; then
+    (
+      cd "$IBC_DIR"
+      ./commandsend.sh "$cmd"
+    )
+    return $?
+  fi
+
+  return 1
+}
+
+
+_warm_restart_gateway() {
   if ! _gateway_running; then
     return 1
   fi
@@ -162,10 +180,7 @@ _warm_restart_gateway() {
   fi
 
   echo "Attempting warm IBC restart via command server on port ${IBC_COMMAND_PORT}..."
-  (
-    cd "$IBC_DIR"
-    ./restart.sh
-  )
+  _ibc_send_command RESTART
 }
 
 
