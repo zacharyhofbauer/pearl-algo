@@ -600,6 +600,7 @@
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .trade-dock-header-stats .dock-stat.pnl {
@@ -1073,11 +1074,18 @@
   .trade-dock-tabs::-webkit-scrollbar {
     display: none;
   }
+  /* WCAG 2.1 AA: tabs are tappable, bump to 44px min-height so they're
+     reachable with a thumb without mis-taps. Horizontal scroll already
+     handles overflow. */
   .trade-dock-tab {
-    padding: 6px 8px;
+    padding: 11px 10px;
+    min-height: 44px;
     font-size: 11px;
     flex-shrink: 0;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
   .trade-dock-count {
     font-size: 10px;
@@ -1089,8 +1097,9 @@
 }
 
 @media (max-width: 380px) {
+  /* Keep 44px min-height for accessibility; trim horizontal padding only */
   .trade-dock-tab {
-    padding: 5px 6px;
+    padding: 11px 8px;
     font-size: 10px;
   }
   .trade-dock-last {

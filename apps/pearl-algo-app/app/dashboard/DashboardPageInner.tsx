@@ -444,6 +444,58 @@ export default function DashboardPageInner() {
   // Keep ref in sync with state for use in touchend
   useEffect(() => { pullDistanceRef.current = pullDistance }, [pullDistance])
 
+  // Keyboard shortcuts — TradingView-style, single key (no modifier required).
+  // Guards against inputs/textareas/contenteditable to keep normal typing safe.
+  useEffect(() => {
+    const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1D']
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const tag = target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (target.isContentEditable) return
+
+      switch (e.key) {
+        case '[': {
+          const idx = TIMEFRAMES.indexOf(timeframe)
+          if (idx > 0) { setTimeframe(TIMEFRAMES[idx - 1]); e.preventDefault() }
+          break
+        }
+        case ']': {
+          const idx = TIMEFRAMES.indexOf(timeframe)
+          if (idx >= 0 && idx < TIMEFRAMES.length - 1) { setTimeframe(TIMEFRAMES[idx + 1]); e.preventDefault() }
+          break
+        }
+        case 'f':
+        case 'F': {
+          // Fit chart — same logic as DataFreshnessIndicator's fit-all button
+          if (mainChartApi && candles.length > 0) {
+            const visibleBars = Math.min(100, candles.length)
+            if (candles.length > visibleBars) {
+              const fromTime = candles[candles.length - visibleBars].time as unknown as import('lightweight-charts').Time
+              const toTime = candles[candles.length - 1].time as unknown as import('lightweight-charts').Time
+              mainChartApi.timeScale().setVisibleRange({ from: fromTime, to: toTime })
+            } else {
+              mainChartApi.timeScale().fitContent()
+            }
+            mainChartApi.timeScale().scrollToRealTime()
+            e.preventDefault()
+          }
+          break
+        }
+        case 'g':
+        case 'G': {
+          mainChartApi?.timeScale().scrollToRealTime()
+          e.preventDefault()
+          break
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [timeframe, setTimeframe, mainChartApi, candles])
+
   useEffect(() => {
     let refreshingRef = false
 
@@ -825,7 +877,7 @@ export default function DashboardPageInner() {
             <div className="no-data-title">No Live Data</div>
             <div className="no-data-message">{chartError}</div>
             <div className="no-data-hint">
-              Start the Market Agent to see real-time data
+              The trading agent may be restarting. Data resumes automatically when it reconnects.
             </div>
           </div>
         )}

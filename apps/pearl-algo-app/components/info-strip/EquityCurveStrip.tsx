@@ -58,12 +58,6 @@ function EquityCurveStrip({ curve, tradovate }: EquityCurveStripProps) {
     return { gross, fees }
   }, [spark.values, brokerRealizedNet])
 
-  // Headline P&L = broker net realized + broker open (total live day delta)
-  const totalLivePnl = useMemo(() => {
-    if (brokerRealizedNet == null && brokerOpen == null) return null
-    return (brokerRealizedNet ?? 0) + (brokerOpen ?? 0)
-  }, [brokerRealizedNet, brokerOpen])
-
   const empty = spark.values.length < 2
   const sparkColorTrend = brokerRealizedNet != null ? brokerRealizedNet >= 0 : true
 
@@ -113,21 +107,6 @@ function EquityCurveStrip({ curve, tradovate }: EquityCurveStripProps) {
               title="Tradovate open_pnl on current position"
             >
               {brokerOpen != null ? formatPnL(brokerOpen) : '—'}
-            </span>
-          </span>
-          <span className="info-strip-mini">
-            <span className="info-strip-mini-label">Live</span>
-            <span
-              className={`info-strip-mini-value ${
-                totalLivePnl == null
-                  ? ''
-                  : totalLivePnl >= 0
-                    ? 'positive'
-                    : 'negative'
-              }`}
-              title="Net realized + open P&L"
-            >
-              {totalLivePnl != null ? formatPnL(totalLivePnl) : '—'}
             </span>
           </span>
           <span className="info-strip-mini">

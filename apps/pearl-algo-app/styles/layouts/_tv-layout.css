@@ -157,14 +157,15 @@ body:has(.tv-layout) .nav-bar {
   /* Show hamburger menu button */
   .mobile-menu-btn { display: flex !important; }
 
-  /* Compact header height */
+  /* Mobile header — accommodate 44x44 touch targets (WCAG 2.1 AA) */
   .header-combined {
     padding: 3px 6px !important;
-    min-height: 34px !important;
+    min-height: 50px !important;
   }
 
   .header-row-single {
     gap: 6px !important;
+    align-items: center;
   }
 }
 

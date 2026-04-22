@@ -228,6 +228,13 @@ body {
   padding: 0;
   gap: 0;
   overflow: hidden;
+  /* iOS home-indicator + landscape notch insets. These are 0 on most
+     devices — env() resolves to 0 where not applicable — so desktop and
+     older phones are unaffected. Top is handled per-mode (browser vs
+     standalone PWA) below since browser already reserves top space. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Standalone PWA mode - extra top padding for status bar */
