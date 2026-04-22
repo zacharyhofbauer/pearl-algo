@@ -1080,8 +1080,14 @@ class TestStaticHelpers:
         sides = {"999": "long"}
         assert TradovateExecutionAdapter._is_protective_order(order, sides) is False
 
-    def test_is_protective_order_sparse_oco_accepted(self):
-        """Sparse OCO-linked order with correct action is accepted as protective."""
+    def test_is_protective_order_sparse_oco_rejected(self):
+        """Sparse OCO-linked order (no qty/price/type) is NOT protective by itself.
+
+        Post-c23ca82 (kill-switch hardening): stale OCO child orders from prior
+        brackets could otherwise mask naked positions. The signal handler falls
+        back to a live stop-specific broker check when no explicit protective
+        orders are present.
+        """
         order = {
             "contract_id": "999", "action": "Sell",
             "order_type": "", "qty": 0,
@@ -1090,7 +1096,7 @@ class TestStaticHelpers:
             "status": "working",
         }
         sides = {"999": "long"}
-        assert TradovateExecutionAdapter._is_protective_order(order, sides) is True
+        assert TradovateExecutionAdapter._is_protective_order(order, sides) is False
 
     def test_normalize_working_order_terminal_returns_none(self):
         """Terminal status order returns None."""
@@ -1166,16 +1172,22 @@ class TestBuildWorkingOrders:
         assert stats["cancelled"] == 1  # Expired counts as cancelled
 
     def test_sparse_oco_with_position_qty_backfill(self):
-        """Sparse OCO order with qty=0 gets backfilled from position qty."""
+        """Sparse OCO order with qty=0 gets qty backfilled from position qty.
+
+        Post-c23ca82 the backfilled order is NOT classified as protective
+        (sparse OCO is rejected by itself), so it won't appear in `working`.
+        Verify the backfill via the debug classification instead.
+        """
         orders = [{
             "id": 10, "ordStatus": "Working", "contractId": 999,
             "action": "Sell", "ocoId": 555,
         }]
         positions = [{"contract_id": "999", "net_pos": 2}]
         working, stats, debug = TradovateExecutionAdapter.build_working_orders(orders, positions)
-        assert len(working) == 1
-        # qty should have been backfilled from position
-        assert working[0]["qty"] == 2
+        assert len(working) == 0
+        assert stats["working"] == 1
+        assert len(debug) == 1
+        assert debug[0]["normalized"]["qty"] == 2
 
 
 # ---------------------------------------------------------------------------
