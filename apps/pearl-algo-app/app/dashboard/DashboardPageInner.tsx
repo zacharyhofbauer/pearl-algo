@@ -711,9 +711,10 @@ export default function DashboardPageInner() {
 
           </div>
 
-          {/* Right: Status badges */}
+          {/* Right: Status badges — only the two pieces of state the info
+              strip's HealthDots doesn't already surface. GW and Data were
+              duplicates of info-strip GW and DATA dots, respectively. */}
           <div className="header-badges">
-            {/* System status badges - tap for explanation */}
             {agentState && (
               <span
                 className={`badge agent-badge ${agentState.running ? (agentState.paused ? 'paused' : 'running') : 'stopped'}`}
@@ -727,17 +728,6 @@ export default function DashboardPageInner() {
                   : (isCompactHeader ? 'STOP' : 'STOPPED')}
               </span>
             )}
-            {agentState && (
-              <span
-                className={`badge gw-badge ${agentState.gateway_status?.status === 'online' ? 'ok' : 'error'}`}
-                role="button" tabIndex={0}
-                title="Gateway — IBKR connection status"
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'gw' ? null : 'gw') }}
-              >
-                <span className="badge-dot"></span>
-                GW
-              </span>
-            )}
             {marketStatus && (
               <span
                 className={`badge market-badge ${marketStatus.is_open ? 'open' : 'closed'}`}
@@ -748,17 +738,6 @@ export default function DashboardPageInner() {
                 {isCompactHeader ? (marketStatus.is_open ? 'OPN' : 'CLS') : (marketStatus.is_open ? 'OPEN' : 'CLOSED')}
               </span>
             )}
-            {agentState && (
-              <span
-                className={`badge data-badge ${agentState.data_fresh ? 'ok' : 'stale'}`}
-                role="button" tabIndex={0}
-                title="Data — Market data feed freshness"
-                onClick={(e) => { e.stopPropagation(); setBadgeTip(badgeTip === 'data' ? null : 'data') }}
-              >
-                <span className="badge-dot"></span>
-                {isCompactHeader ? 'DATA' : 'Data'}
-              </span>
-            )}
           </div>
           {/* Badge explanation tooltip */}
           {badgeTip && (
@@ -766,14 +745,8 @@ export default function DashboardPageInner() {
               {badgeTip === 'agent' && (
                 <p><strong>Agent</strong> — Trading scanner process. {agentState?.running ? 'Running and scanning for signals every cycle.' : 'Stopped. No signals are being generated.'}{agentState?.paused ? ' Currently paused due to circuit breaker or manual pause.' : ''}</p>
               )}
-              {badgeTip === 'gw' && (
-                <p><strong>Gateway</strong> — IBKR Gateway connection. {agentState?.gateway_status?.status === 'online' ? `Online on port ${agentState.gateway_status.port}. Market data and execution available.` : 'Offline. No market data or execution. Check Gateway process.'}</p>
-              )}
               {badgeTip === 'market' && (
                 <p><strong>Market</strong> — CME Futures session. {marketStatus?.is_open ? 'Market is open. Real-time data flowing.' : `Market closed${marketStatus?.close_reason ? ` (${marketStatus.close_reason})` : ''}. Historical data only.`}</p>
-              )}
-              {badgeTip === 'data' && (
-                <p><strong>Data Feed</strong> — {agentState?.data_fresh ? 'Fresh. Latest bar is recent and buffer has enough bars for indicators.' : 'Stale. Data may be delayed or unavailable. Check IBKR connection.'}</p>
               )}
             </div>
           )}
