@@ -789,16 +789,24 @@ class TestGetHistoricalDataTask:
     @pytest.mark.unit
     @patch("pearlalgo.data_providers.ibkr_data_executor.load_service_config", return_value={})
     def test_futures_historical_exception_fallback(self, mock_config):
-        """If first contract raises, should try next one."""
+        """If first contract raises, should try next one.
+
+        Expiries are relative to `now` so the candidate filter in
+        GetHistoricalDataTask (which drops contracts that expire before the
+        requested end date) keeps both contracts eligible regardless of when
+        the test is run.
+        """
         ib = MagicMock()
-        cd1 = _make_contract_details(exp="20260320", con_id=100)
-        cd2 = _make_contract_details(exp="20260620", con_id=200)
+        now = datetime.now(timezone.utc)
+        exp1 = (now + timedelta(days=60)).strftime("%Y%m%d")
+        exp2 = (now + timedelta(days=150)).strftime("%Y%m%d")
+        cd1 = _make_contract_details(exp=exp1, con_id=100)
+        cd2 = _make_contract_details(exp=exp2, con_id=200)
         ib.reqContractDetails.return_value = [cd1, cd2]
 
         bars = [_make_bar(20900, 21000, 20800, 20950, 3000)]
         ib.reqHistoricalData.side_effect = [RuntimeError("timeout"), bars]
 
-        now = datetime.now(timezone.utc)
         task = GetHistoricalDataTask(
             task_id="h9", symbol="MNQ",
             start=now - timedelta(days=1), end=now,
