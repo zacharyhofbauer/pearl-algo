@@ -942,15 +942,15 @@
     flex-shrink: 0;
   }
 
-  /* Action buttons — compact */
+  /* Action buttons — WCAG 2.1 AA touch target (>=44x44) */
   .header-actions {
-    gap: 1px;
+    gap: 4px;
     flex-shrink: 0;
   }
 
   .header-action-btn {
-    width: 30px;
-    height: 30px;
+    width: 44px;
+    height: 44px;
   }
 
   /* Badges — horizontal scroll */
@@ -1003,14 +1003,15 @@
     padding: 1px 4px !important;
   }
 
+  /* ≤400px: stay at 44x44 for accessibility, but icon stays compact */
   .header-action-btn {
-    width: 26px;
-    height: 26px;
+    width: 44px;
+    height: 44px;
   }
 
   .header-action-btn svg {
-    width: 13px;
-    height: 13px;
+    width: 14px;
+    height: 14px;
   }
 }
 
@@ -1023,14 +1024,15 @@
 .mobile-tf-select { display: none; }
 .mobile-menu-btn { display: none; }
 
-/* Mobile timeframe dropdown */
+/* Mobile timeframe dropdown — WCAG 2.1 AA (>=44px height) */
 .mobile-tf-select {
   background: #1e222d;
   color: var(--text-primary, #d1d4dc);
   border: 1px solid #2a2e39;
   border-radius: 4px;
-  padding: 4px 6px;
-  font-size: 11px;
+  padding: 0 22px 0 10px;
+  height: 44px;
+  font-size: 13px;
   font-family: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -1038,9 +1040,8 @@
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%23787b86' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 6px center;
-  padding-right: 20px;
-  min-width: 48px;
+  background-position: right 8px center;
+  min-width: 64px;
 }
 
 .mobile-tf-select:focus {
@@ -1048,12 +1049,12 @@
   border-color: var(--accent-cyan, #2962ff);
 }
 
-/* Mobile hamburger menu button */
+/* Mobile hamburger menu button — WCAG 2.1 AA (44x44) */
 .mobile-menu-btn {
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   border: none;
   background: none;
   color: var(--text-secondary, #787b86);
