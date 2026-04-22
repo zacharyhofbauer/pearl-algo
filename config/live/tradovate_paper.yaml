@@ -113,10 +113,10 @@ circuit_breaker:
   pause_on_connection_failures: false
 
 trading_circuit_breaker:
-  # Direction gating is intentionally ENABLED in the current paper profile.
-  # Given the live analytics, this acts as a conservative long-bias / regime
-  # sanity check instead of letting every low-context short through.
-  enable_direction_gating: true
+  # Direction gating is DISABLED in the paper profile so the strategy can
+  # express both long and short signals across regimes without the circuit
+  # breaker forcing a one-way directional bias.
+  enable_direction_gating: false
   direction_gating_min_confidence: 0.70
   # Regime avoidance is intentionally ENABLED, but only for the weak regimes
   # we still want to avoid in paper (`ranging`, `volatile`). The earlier audit
