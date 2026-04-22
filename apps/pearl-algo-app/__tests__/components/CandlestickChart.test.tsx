@@ -16,6 +16,8 @@ const mockCreatePriceLine = jest.fn(() => ({}))
 
 const mockSetData = jest.fn()
 const mockSetMarkers = jest.fn()
+const mockAttachPrimitive = jest.fn()
+const mockDetachPrimitive = jest.fn()
 const mockSeriesInstance = {
   setData: mockSetData,
   setMarkers: mockSetMarkers,
@@ -24,6 +26,8 @@ const mockSeriesInstance = {
   removePriceLine: mockRemovePriceLine,
   createPriceLine: mockCreatePriceLine,
   applyOptions: jest.fn(),
+  attachPrimitive: mockAttachPrimitive,
+  detachPrimitive: mockDetachPrimitive,
 }
 
 const mockTimeScale = jest.fn(() => ({
@@ -45,15 +49,21 @@ const mockChartInstance = {
   remove: mockChartRemove,
 }
 
-jest.mock('lightweight-charts', () => ({
-  createChart: jest.fn(() => mockChartInstance),
-  createSeriesMarkers: jest.fn(() => ({ setMarkers: jest.fn(), markers: jest.fn(() => []) })),
-  ColorType: { Solid: 'Solid' },
-  CrosshairMode: { Normal: 0 },
-  LineSeries: {},
-  CandlestickSeries: {},
-  HistogramSeries: {},
-}))
+// lightweight-charts v5 is ESM-only with no `require` export condition; use
+// virtual:true so jest doesn't try to resolve the real package.
+jest.mock(
+  'lightweight-charts',
+  () => ({
+    createChart: jest.fn(() => mockChartInstance),
+    createSeriesMarkers: jest.fn(() => ({ setMarkers: jest.fn(), markers: jest.fn(() => []) })),
+    ColorType: { Solid: 'Solid' },
+    CrosshairMode: { Normal: 0 },
+    LineSeries: {},
+    CandlestickSeries: {},
+    HistogramSeries: {},
+  }),
+  { virtual: true },
+)
 
 // Mock next/image – render a simple img
 jest.mock('next/image', () => ({

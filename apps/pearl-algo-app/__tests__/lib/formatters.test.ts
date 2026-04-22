@@ -62,7 +62,8 @@ describe('formatPrice', () => {
 describe('formatTime', () => {
   it('should format valid ISO timestamps', () => {
     const result = formatTime('2024-01-01T12:34:56Z')
-    expect(result).toMatch(/^\d{2}:\d{2}$/)
+    // Formatter targets America/New_York and uses 12-hour clock (e.g. "7:34 AM")
+    expect(result).toMatch(/^\d{1,2}:\d{2} (AM|PM)$/)
   })
 
   it('should handle null/undefined/invalid', () => {
@@ -76,7 +77,8 @@ describe('formatTimeFromDate', () => {
   it('should format valid Date objects', () => {
     const date = new Date('2024-01-01T12:34:56Z')
     const result = formatTimeFromDate(date)
-    expect(result).toMatch(/^\d{2}:\d{2}:\d{2}$/)
+    // Formatter targets America/New_York and uses 12-hour clock (e.g. "7:34:56 AM")
+    expect(result).toMatch(/^\d{1,2}:\d{2}:\d{2} (AM|PM)$/)
   })
 
   it('should handle null', () => {
@@ -128,7 +130,8 @@ describe('formatRelativeTime', () => {
   it('should format time for older dates', () => {
     const older = new Date('2024-01-01T10:00:00Z')
     const result = formatRelativeTime(older)
-    expect(result).toMatch(/^\d{2}:\d{2}$/)
+    // Older-than-an-hour falls back to America/New_York 12-hour clock
+    expect(result).toMatch(/^\d{1,2}:\d{2} (AM|PM)$/)
   })
 
   it('should handle null/undefined', () => {

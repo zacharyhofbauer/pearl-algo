@@ -98,13 +98,15 @@ describe('formatting utilities', () => {
   })
 
   describe('formatTime', () => {
-    it('formats Date object in 24-hour format by default', () => {
+    // Formatter targets America/New_York and uses 12-hour clock regardless of
+    // the `hour12` option. Feb 12, 2025 is EST (UTC-5).
+    it('formats Date object as 12-hour America/New_York time', () => {
       const date = new Date('2025-02-12T14:30:00Z')
-      expect(formatTime(date)).toBe('14:30')
+      expect(formatTime(date)).toBe('9:30 AM')
     })
 
     it('formats ISO string', () => {
-      expect(formatTime('2025-02-12T14:30:00Z')).toBe('14:30')
+      expect(formatTime('2025-02-12T14:30:00Z')).toBe('9:30 AM')
     })
 
     it('handles null and undefined', () => {
@@ -116,16 +118,16 @@ describe('formatting utilities', () => {
       expect(formatTime('invalid')).toBe('—')
     })
 
-    it('supports 12-hour format', () => {
+    it('always returns 12-hour AM/PM format', () => {
       const date = new Date('2025-02-12T14:30:00Z')
       const result = formatTime(date, { hour12: true })
-      // Result depends on timezone, but should contain "PM" or "2:30"
-      expect(result).toMatch(/\d{1,2}:\d{2}/)
+      expect(result).toMatch(/^\d{1,2}:\d{2} (AM|PM)$/)
     })
 
-    it('handles midnight', () => {
-      const date = new Date('2025-02-12T00:00:00Z')
-      expect(formatTime(date)).toBe('00:00')
+    it('handles midnight ET', () => {
+      // 05:00 UTC = 00:00 EST on Feb 12, 2025
+      const date = new Date('2025-02-12T05:00:00Z')
+      expect(formatTime(date)).toBe('12:00 AM')
     })
   })
 
@@ -157,7 +159,8 @@ describe('formatting utilities', () => {
     it('falls back to absolute time for hours ago', () => {
       const hoursAgo = new Date('2025-02-12T10:00:00Z').toISOString()
       const result = formatRelativeTime(hoursAgo)
-      expect(result).toMatch(/\d{2}:\d{2}/) // Should be absolute time format
+      // Falls back to America/New_York 12-hour clock, e.g. "5:00 AM"
+      expect(result).toMatch(/^\d{1,2}:\d{2} (AM|PM)$/)
     })
 
     it('handles null and undefined', () => {

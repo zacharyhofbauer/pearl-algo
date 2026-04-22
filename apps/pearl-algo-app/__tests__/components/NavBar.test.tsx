@@ -31,10 +31,18 @@ describe('NavBar', () => {
     expect(dashboard).toHaveAttribute('href', '/dashboard?account=tv_paper')
   })
 
-  it('renders Archive link to ibkr', () => {
+  it('renders Settings link', () => {
     render(<NavBar />)
-    const archive = screen.getByRole('link', { name: /Archive/i })
-    expect(archive).toHaveAttribute('href', '/archive/ibkr')
+    const settings = screen.getByRole('link', { name: /Settings/i })
+    expect(settings).toHaveAttribute('href', '/settings')
+  })
+
+  it('highlights Settings when on /settings', () => {
+    mockUsePathname.mockReturnValue('/settings')
+    render(<NavBar />)
+    const settings = screen.getByRole('link', { name: /Settings/i })
+    expect(settings).toHaveClass('active')
+    expect(settings).toHaveAttribute('aria-current', 'page')
   })
 
   it('highlights brand as active when on landing', () => {
@@ -51,14 +59,6 @@ describe('NavBar', () => {
     const dashboard = screen.getByRole('link', { name: /Dashboard/i })
     expect(dashboard).toHaveClass('active')
     expect(dashboard).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('highlights Archive when on /archive', () => {
-    mockUsePathname.mockReturnValue('/archive/ibkr')
-    render(<NavBar />)
-    const archive = screen.getByRole('link', { name: /Archive/i })
-    expect(archive).toHaveClass('active')
-    expect(archive).toHaveAttribute('aria-current', 'page')
   })
 
   it('has navigation role and aria-label', () => {

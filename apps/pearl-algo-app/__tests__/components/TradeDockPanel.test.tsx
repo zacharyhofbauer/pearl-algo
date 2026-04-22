@@ -69,18 +69,18 @@ describe('TradeDockPanel', () => {
       expect(container).toBeTruthy()
     })
 
-    it('shows "No open positions" when there are no open trades', () => {
+    it('shows no-open-positions empty state when there are no open trades', () => {
       render(<TradeDockPanel positions={[]} recentTrades={[]} />)
-      expect(screen.getByText('No open positions')).toBeInTheDocument()
+      expect(screen.getByText(/No open positions/i)).toBeInTheDocument()
     })
 
-    it('shows "No recent trades" when switching to Recent tab with empty data', () => {
+    it('shows no-closed-trades empty state when switching to History tab with empty data', () => {
       render(<TradeDockPanel positions={[]} recentTrades={[]} />)
 
       const recentTab = screen.getByRole('tab', { name: /history/i })
       fireEvent.click(recentTab)
 
-      expect(screen.getByText('No recent trades')).toBeInTheDocument()
+      expect(screen.getByText(/No closed trades yet today/i)).toBeInTheDocument()
     })
   })
 
@@ -283,7 +283,7 @@ describe('TradeDockPanel', () => {
       )
 
       expect(container).toBeTruthy()
-      expect(screen.getByText('No open positions')).toBeInTheDocument()
+      expect(screen.getByText(/No open positions/i)).toBeInTheDocument()
     })
 
     it('renders positions without currentPrice gracefully', () => {
