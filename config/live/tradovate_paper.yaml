@@ -321,7 +321,7 @@ runner_mode:
 
 execution:
   enabled: true
-  armed: true
+  armed: false
   mode: paper
   adapter: tradovate
   enforce_protection_guard: true

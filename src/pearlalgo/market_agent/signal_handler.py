@@ -767,13 +767,13 @@ class SignalHandler:
                     continue
 
             if not open_positions:
-                # Auto-re-arm if previously disarmed by protection guard
+                # Safety: the protection guard must never arm execution on its own.
+                # Once disarmed (whether by kill-switch, operator action, or a prior
+                # safety event), execution stays disarmed until an explicit arm action.
                 if hasattr(adapter, "armed") and not adapter.armed:
-                    if hasattr(adapter, "arm"):
-                        adapter.arm()
-                        logger.info(
-                            "✅ Protection guard: no open positions — auto-re-armed execution"
-                        )
+                    logger.info(
+                        "🔒 Protection guard: no open positions — leaving execution disarmed until explicit arm"
+                    )
                 return True
 
             working_orders = summary.get("working_orders") or []

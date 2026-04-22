@@ -753,6 +753,17 @@ class TestSignalHandlerProtectionGuard:
         assert result is True
 
     @pytest.mark.asyncio
+    async def test_no_open_positions_does_not_auto_rearm(self):
+        adapter = AsyncMock()
+        adapter.get_account_summary.return_value = {"positions": []}
+        adapter.armed = False
+        adapter.arm = MagicMock(return_value=True)
+        handler = self._make_handler(adapter=adapter)
+        result = await handler._enforce_tradovate_protection_guard({"direction": "long"})
+        assert result is True
+        adapter.arm.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_valid_working_orders_returns_true(self):
         adapter = AsyncMock()
         adapter.get_account_summary.return_value = {
