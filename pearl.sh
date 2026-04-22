@@ -273,18 +273,52 @@ show_status() {
 # Quick one-liner status
 show_quick_status() {
     activate_venv
-    
+    load_env_files
+
     local gw_status=$(./scripts/gateway/gateway.sh api-ready &>/dev/null && echo "✅" || echo "❌")
     local tv_paper_status="❌"
+    local agent_running=false
     if systemctl is-active --quiet pearlalgo-agent 2>/dev/null; then
-        tv_paper_status="✅"
+        agent_running=true
     else
         local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_${MARKET}.pid"
         if [ ! -f "$tv_paper_pid_file" ]; then
             tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
         fi
-        tv_paper_status=$([ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
+        if [ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null; then
+            agent_running=true
+        fi
     fi
+
+    if [ "$agent_running" = true ]; then
+        local header=()
+        if [ -n "${PEARL_API_KEY:-}" ]; then
+            header=(-H "X-API-Key: $PEARL_API_KEY")
+        fi
+        local state_json
+        state_json=$(curl -fsS "${header[@]}" "http://localhost:8001/api/state" 2>/dev/null || true)
+        if [ -n "$state_json" ]; then
+            local execution_health
+            execution_health=$(printf '%s' "$state_json" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    e = d.get("execution") or {}
+    ok = bool(e.get("connected")) and bool(e.get("authenticated")) and bool(e.get("ws_connected"))
+    print("ok" if ok else "bad")
+except Exception:
+    print("unknown")
+' 2>/dev/null || echo "unknown")
+            if [ "$execution_health" = "ok" ]; then
+                tv_paper_status="✅"
+            else
+                tv_paper_status="❌"
+            fi
+        else
+            tv_paper_status="✅"
+        fi
+    fi
+
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
     local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
 

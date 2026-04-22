@@ -176,7 +176,11 @@ class TradovateClient:
 
     # ── Authentication ────────────────────────────────────────────────
 
-    async def _authenticate(self) -> None:
+    async def _authenticate(
+        self,
+        p_ticket: Optional[str] = None,
+        allow_p_ticket_retry: bool = True,
+    ) -> None:
         """Request an access token using client credentials."""
         url = f"{self.config.rest_url}/auth/accesstokenrequest"
         body = {
@@ -188,6 +192,8 @@ class TradovateClient:
             "sec": self.config.sec,
             "deviceId": self.config.device_id,
         }
+        if p_ticket:
+            body["p-ticket"] = p_ticket
 
         try:
             data = await self._post(url, body, auth=False)
@@ -195,14 +201,32 @@ class TradovateClient:
             raise TradovateAuthError(f"Authentication request failed: {e}") from e
 
         error_text = data.get("errorText")
-        if error_text:
-            # Handle time penalty (rate limited)
-            p_ticket = data.get("p-ticket")
-            p_time = data.get("p-time")
-            if p_ticket and p_time:
-                raise TradovateAuthError(
-                    f"Auth rate limited: wait {p_time}s then retry with p-ticket={p_ticket}"
+        penalty_ticket = data.get("p-ticket")
+        penalty_time = data.get("p-time")
+        penalty_message = data.get("p-message") or error_text
+        penalty_requires_captcha = bool(data.get("p-captcha"))
+
+        if penalty_ticket and penalty_time is not None:
+            if allow_p_ticket_retry and not p_ticket and not penalty_requires_captcha:
+                logger.warning(
+                    "Tradovate auth penalty: %s. Waiting %ss and retrying with p-ticket",
+                    penalty_message or "rate limited",
+                    penalty_time,
                 )
+                await asyncio.sleep(float(penalty_time))
+                return await self._authenticate(
+                    p_ticket=str(penalty_ticket),
+                    allow_p_ticket_retry=False,
+                )
+
+            detail = penalty_message or "Auth rate limited"
+            if penalty_requires_captcha:
+                detail = f"{detail} (p-captcha=true)"
+            raise TradovateAuthError(
+                f"{detail}: wait {penalty_time}s and retry with p-ticket"
+            )
+
+        if error_text:
             raise TradovateAuthError(f"Auth error: {error_text}")
 
         self._access_token = data.get("accessToken")

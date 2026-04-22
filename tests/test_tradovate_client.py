@@ -108,10 +108,53 @@ class TestAuthentication:
             "errorText": "Rate limited",
             "p-ticket": "ticket_abc",
             "p-time": 30,
+            "p-captcha": True,
         })
 
-        with pytest.raises(TradovateAuthError, match="rate limited"):
+        with pytest.raises(TradovateAuthError, match="[Rr]ate limited"):
             await client._authenticate()
+
+    @pytest.mark.asyncio
+    async def test_authenticate_penalty_without_error_text_raises_auth_error(self):
+        """Penalty responses can omit errorText; p-message + p-ticket must still fail loudly."""
+        client = _make_client()
+        client._session = MagicMock()
+        client._post = AsyncMock(return_value={
+            "p-message": "Rate limit exceeded: more than 5 requests per hour",
+            "p-ticket": "ticket_abc",
+            "p-time": 30,
+            "p-captcha": True,
+        })
+
+        with pytest.raises(TradovateAuthError, match="Rate limit exceeded"):
+            await client._authenticate()
+
+    @pytest.mark.asyncio
+    async def test_authenticate_penalty_retries_once_with_ticket_when_no_captcha(self):
+        """Non-captcha penalties should sleep briefly and retry once with the returned ticket."""
+        client = _make_client()
+        client._session = MagicMock()
+        client._post = AsyncMock(side_effect=[
+            {
+                "p-message": "Rate limited",
+                "p-ticket": "ticket_abc",
+                "p-time": 0,
+                "p-captcha": False,
+            },
+            {
+                "accessToken": "tok_abc123",
+                "mdAccessToken": "md_tok_xyz",
+                "userId": 42,
+                "expirationTime": "2026-03-01T12:00:00Z",
+            },
+        ])
+
+        await client._authenticate()
+
+        assert client._post.await_count == 2
+        retry_body = client._post.await_args_list[1].args[1]
+        assert retry_body["p-ticket"] == "ticket_abc"
+        assert client._access_token == "tok_abc123"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
