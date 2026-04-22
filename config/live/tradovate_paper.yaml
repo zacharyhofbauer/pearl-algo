@@ -36,8 +36,10 @@ strategies:
     # AUDIT 2026-04-10: bumped from 0.4 → 0.55. The IBKR-era winning system
     # ran ~0.55 confidence floor; 0.4 was admitting low-quality signals.
     min_confidence: 0.60
+    # Keep paper thresholds direction-neutral so long/short opportunity counts
+    # reflect strategy behavior instead of a config-level confidence handicap.
     min_confidence_long: 0.60
-    min_confidence_short: 0.72
+    min_confidence_short: 0.60
     # AUDIT 2026-04-10: widened from 1.5 → 2.5 SL mult and 2.5 → 4.0 TP mult.
     # IBKR-era winners had avg SL 54pt / TP 80pt. Current was 16pt/26pt — ~3x
     # too tight, jamming the strategy into the 0-15min losing bucket.

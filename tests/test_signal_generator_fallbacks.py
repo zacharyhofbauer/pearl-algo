@@ -100,3 +100,90 @@ def test_check_vwap_2sd_signal_band_error_returns_none(monkeypatch) -> None:
     )
 
     assert result is None
+
+
+def test_generate_signals_short_falls_back_to_generic_min_confidence(monkeypatch) -> None:
+    """Shorts should use the generic threshold when no short-specific override exists."""
+    df = _sample_df(rows=40)
+    regime = sg.MarketRegime(
+        regime="trending_down",
+        confidence=1.0,
+        trend_strength=1.0,
+        volatility_ratio=1.0,
+        recommendation="full_size",
+        adx_value=30.0,
+    )
+    ind = sg.IndicatorResult(
+        close=99.0,
+        prev_close=100.0,
+        atr=1.0,
+        atr_series=pd.Series([1.0] * len(df)),
+        ema_fast=pd.Series([99.0] * len(df)),
+        ema_slow=pd.Series([100.0] * len(df)),
+        vwap_series=pd.Series([100.0] * len(df)),
+        vwap_val=100.0,
+        ema_cross_up=False,
+        ema_cross_down=True,
+        volume_confirmed=False,
+        sr_signal=None,
+        sr_confidence=0.0,
+        tbt_signal=None,
+        tbt_confidence=0.0,
+        sd_signal=None,
+        sd_confidence=0.0,
+        key_levels={},
+        key_level_signal=None,
+        key_level_confidence=0.0,
+        key_level_info={},
+        vwap_band_signal=None,
+        regime=regime,
+        adx_value=30.0,
+        vwap_cross_signal=None,
+        vwap_retest_signal=None,
+        trend_breakout_signal=None,
+        trend_momentum_signal=None,
+    )
+
+    monkeypatch.setattr(sg, "check_trading_session", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        sg,
+        "update_opening_range",
+        lambda *args, **kwargs: {
+            "or_defined": True,
+            "bar_count": 16,
+            "session_open_price": 100.0,
+            "or_high": 101.0,
+            "or_low": 99.0,
+        },
+    )
+    monkeypatch.setattr(sg, "_calculate_indicators", lambda *args, **kwargs: ind)
+
+    def _force_mid_confidence(state, ctx, params):
+        state.confidence = 0.65
+
+    monkeypatch.setattr(sg, "_apply_directional_confidence_adjustments", _force_mid_confidence)
+
+    signals = sg.generate_signals(
+        df,
+        config={
+            "symbol": "MNQ",
+            "timeframe": "1m",
+            "min_risk_reward": 1.3,
+            "strategy": {"active": "composite_intraday"},
+            "strategies": {
+                "composite_intraday": {
+                    "min_confidence": 0.60,
+                    "min_risk_reward": 1.3,
+                    "stop_loss_atr_mult": 1.0,
+                    "take_profit_atr_mult": 2.0,
+                    "max_stop_points": 45.0,
+                }
+            },
+            "composite_regime": {"enabled": False, "mtf_override_enabled": False},
+        },
+        current_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert len(signals) == 1
+    assert signals[0]["direction"] == "short"
+    assert signals[0]["confidence"] == 0.65

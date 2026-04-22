@@ -2873,7 +2873,7 @@ def generate_signals(
             logger.debug(f"SHORT blocked by composite regime chop zone (score={regime_score:.1f}, conf={confidence:.2f})")
             _chop_blocked_short = True
 
-        _min_conf_short = config.get("min_confidence_short", 0.78)
+        _min_conf_short = config.get("min_confidence_short", config.get("min_confidence", 0.55))
         if confidence >= _min_conf_short and not _chop_blocked_short:
             entry_price = close
             # Use dynamic regime-adaptive parameters
