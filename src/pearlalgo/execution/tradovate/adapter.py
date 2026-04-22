@@ -869,9 +869,9 @@ class TradovateExecutionAdapter(ExecutionAdapter):
     async def _has_existing_stop_for_position(self, position_direction: str) -> bool:
         """Check if Tradovate already has a working stop order for the current position.
 
-        Tradovate's /order/list returns minimal fields (orderType is often empty).
-        We check: (1) any order with working status + stopPrice set, (2) any order
-        with working status + correct exit action, (3) our tracked SL order IDs.
+        Tradovate's /order/list can return sparse rows, but generic opposite-side
+        OCO legs are not safe evidence of real protection because stale child orders
+        from prior brackets can linger. Only explicit stop semantics count here.
         """
         try:
             orders = await self._client.get_orders()
@@ -901,13 +901,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                     logger.info(f"Existing stop found (by stopPrice): orderId={order_id} price={stop_price}")
                     return True
 
-                # Fallback: when orderType is empty (Tradovate list endpoint bug),
-                # any working exit-direction order likely indicates a bracket leg
-                if not order_type and action == stop_action:
-                    logger.info(f"Existing protective order found (by action, empty type): orderId={order_id} action={action}")
-                    return True
-
-            logger.info(f"_has_existing_stop: no working {stop_action} orders found in {len(orders)} total orders")
+            logger.info(f"_has_existing_stop: no working {stop_action} stop orders found in {len(orders)} total orders")
             return False
         except Exception as e:
             logger.warning(f"Could not check existing stops: {e}")
@@ -1047,8 +1041,27 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         if self.config.mode.value == "dry_run":
             return [ExecutionResult(success=True, status=OrderStatus.CANCELLED, signal_id="kill_cancel")]
 
+        working_states = {
+            "working", "open", "accepted", "pending", "held",
+            "submitted", "partiallyfilled", "partially_filled", "partial",
+        }
+        candidate_order_ids = list(self._open_orders.keys())
+
+        try:
+            raw_orders = await self._client.get_orders()
+            for order in raw_orders or []:
+                status = self._normalize_order_status(order)
+                if status not in working_states:
+                    continue
+                order_id = order.get("id") or order.get("orderId")
+                if order_id is not None:
+                    candidate_order_ids.append(str(order_id))
+        except Exception as e:
+            logger.warning(f"Kill switch: failed to fetch live working orders for cancel_all: {e}")
+
+        deduped_order_ids = list(dict.fromkeys(candidate_order_ids))
         results = []
-        for order_id in list(self._open_orders.keys()):
+        for order_id in deduped_order_ids:
             result = await self.cancel_order(order_id)
             results.append(result)
 
@@ -1707,14 +1720,11 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         if qty > 0 and has_price and type_is_protective:
             return True
 
-        # Fallback for sparse Tradovate /order/list rows:
-        # treat working OCO-linked opposite-side orders as protective.
-        has_oco_link = working_order.get("oco_id") is not None or working_order.get("parent_id") is not None
-        status = str(working_order.get("status") or "").strip().lower()
-        return has_oco_link and status in {
-            "working", "open", "accepted", "pending", "held",
-            "submitted", "partiallyfilled", "partially_filled", "partial",
-        }
+        # Do not treat sparse opposite-side OCO rows as protective by themselves.
+        # Stale child orders from prior brackets can otherwise mask naked positions.
+        # The signal handler falls back to a live stop-specific broker check when
+        # no explicit protective orders are present.
+        return False
 
     @staticmethod
     def _protective_rejection_reason(
@@ -1737,7 +1747,7 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         if qty <= 0:
             has_oco_link = working_order.get("oco_id") is not None or working_order.get("parent_id") is not None
             if has_oco_link:
-                return "accepted_sparse_oco_order"
+                return "sparse_oco_requires_live_stop_check"
             return "non_positive_qty"
 
         has_price = working_order.get("price") is not None or working_order.get("stop_price") is not None
