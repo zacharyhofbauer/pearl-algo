@@ -194,10 +194,16 @@ const DataFreshnessIndicator = React.memo(function DataFreshnessIndicator({
           <span className={`freshness-dot ${isLoading ? 'loading' : ''}`} role="status" aria-label={`Data ${isStale ? 'stale' : isWarning ? 'warning' : 'fresh'}, updated ${formatTimeAgo(secondsAgo)} ago`} key={pulseKey}></span>
           <span className={`freshness-source-badge ${sourceDisplay.className}`}>{sourceDisplay.label}</span>
           <span className="freshness-time-inline">{formatTimeAgo(secondsAgo)}</span>
-          <span className={`freshness-ws-badge ${wsDisplay.className}`}>
-            {wsDisplay.icon}
-            {wsDisplay.label}
-          </span>
+          {/* WS badge intentionally shown only in degraded states. The status
+              bar's HealthDots already surfaces WS-connected as a green dot;
+              duplicating "WS" text here was visual noise. Keep POLL/ERR
+              visible because those are anomalies worth flagging inline. */}
+          {wsStatus !== 'connected' && (
+            <span className={`freshness-ws-badge ${wsDisplay.className}`}>
+              {wsDisplay.icon}
+              {wsDisplay.label}
+            </span>
+          )}
           {onRefresh && (
             <button
               className={`freshness-refresh-btn ${isLoading ? 'spinning' : ''}`}
