@@ -84,6 +84,8 @@ export default function DashboardPageInner() {
   const [showIndicatorsDropdown, setShowIndicatorsDropdown] = useState(false)
   // Mobile menu state
   const [showMobileMenu, setShowMobileMenu] = useState(false)
+  // Keyboard shortcuts help overlay (toggled by `?`, closed by `Esc`)
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const indicatorSettings = useChartSettingsStore((s) => s.indicators)
   const toggleIndicator = useChartSettingsStore((s) => s.toggleIndicator)
 
@@ -446,6 +448,8 @@ export default function DashboardPageInner() {
 
   // Keyboard shortcuts — TradingView-style, single key (no modifier required).
   // Guards against inputs/textareas/contenteditable to keep normal typing safe.
+  // `?` / `Esc` toggle the shortcut help overlay (rendered at the bottom of
+  // this component).
   useEffect(() => {
     const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1D']
     const onKey = (e: KeyboardEvent) => {
@@ -488,6 +492,15 @@ export default function DashboardPageInner() {
         case 'G': {
           mainChartApi?.timeScale().scrollToRealTime()
           e.preventDefault()
+          break
+        }
+        case '?': {
+          setShowShortcutsHelp((v) => !v)
+          e.preventDefault()
+          break
+        }
+        case 'Escape': {
+          setShowShortcutsHelp(false)
           break
         }
       }
@@ -959,6 +972,7 @@ export default function DashboardPageInner() {
 
   // Standard layout (all viewports)
   return (
+    <>
     <DashboardLayout
         isChartReady={isChartReady}
         pull={{ pullDistance, pullRefreshing, pullThreshold: PULL_THRESHOLD }}
@@ -1013,5 +1027,46 @@ export default function DashboardPageInner() {
           </>
         }
       />
+    {showShortcutsHelp && (
+      <div
+        className="shortcuts-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-title"
+        onClick={() => setShowShortcutsHelp(false)}
+      >
+        <div className="shortcuts-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="shortcuts-header">
+            <h2 id="shortcuts-title" className="shortcuts-title">Keyboard Shortcuts</h2>
+            <button
+              className="shortcuts-close"
+              onClick={() => setShowShortcutsHelp(false)}
+              aria-label="Close shortcuts help"
+            >×</button>
+          </div>
+          <div className="shortcuts-body">
+            <div className="shortcuts-section">
+              <div className="shortcuts-section-label">Timeframe</div>
+              <div className="shortcuts-row"><kbd>[</kbd><span className="shortcuts-desc">Previous timeframe</span></div>
+              <div className="shortcuts-row"><kbd>]</kbd><span className="shortcuts-desc">Next timeframe</span></div>
+            </div>
+            <div className="shortcuts-section">
+              <div className="shortcuts-section-label">Chart</div>
+              <div className="shortcuts-row"><kbd>F</kbd><span className="shortcuts-desc">Fit to last ~100 bars</span></div>
+              <div className="shortcuts-row"><kbd>G</kbd><span className="shortcuts-desc">Go live (scroll to now)</span></div>
+            </div>
+            <div className="shortcuts-section">
+              <div className="shortcuts-section-label">Help</div>
+              <div className="shortcuts-row"><kbd>?</kbd><span className="shortcuts-desc">Toggle this panel</span></div>
+              <div className="shortcuts-row"><kbd>Esc</kbd><span className="shortcuts-desc">Close</span></div>
+            </div>
+          </div>
+          <div className="shortcuts-footer">
+            Shortcuts are disabled while typing in form fields.
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
