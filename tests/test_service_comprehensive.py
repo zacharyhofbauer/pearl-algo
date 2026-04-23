@@ -641,18 +641,25 @@ class TestBuildPearlReviewMessage:
         assert "Stopped" in result
 
     def test_includes_trade_count(self, service):
-        now = datetime.now(timezone.utc)
+        # service_status.summarize_pearl_review_trades matches today via
+        # substring on the ET date. Pin an ET-naive instant so the test
+        # is stable around UTC-vs-ET date boundaries.
+        now_et = datetime(2026, 3, 25, 15, 0)
         state = {
             "agent_running": True,
             "session_open": True,
             "futures_open": True,
         }
         trades = [
-            {"exit_time": now.isoformat(), "pnl": 50.0, "is_win": True, "signal_id": "s1"},
-            {"exit_time": now.isoformat(), "pnl": -20.0, "is_win": False, "signal_id": "s2"},
+            {"exit_time": now_et.isoformat(), "pnl": 50.0, "is_win": True, "signal_id": "s1"},
+            {"exit_time": now_et.isoformat(), "pnl": -20.0, "is_win": False, "signal_id": "s2"},
         ]
         service.performance_tracker.load_performance_data = MagicMock(return_value=trades)
-        result = service._build_pearl_review_message(state)
+        with patch(
+            "pearlalgo.market_agent.service_status._now_et_naive",
+            return_value=now_et,
+        ):
+            result = service._build_pearl_review_message(state)
         assert result is not None
         assert "2 trades" in result
 
