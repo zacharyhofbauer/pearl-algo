@@ -411,16 +411,22 @@ function TradeDockPanel({
     return n >= 0 ? `+$${formatted}` : `-$${formatted}`
   }
 
-  // `Day P&L` is intentionally omitted here — it duplicates `Day Net` in
-  // the status bar (api/server.py sets daily_pnl = tradovate.realized_pnl
-  // whenever the broker is connected). The dock shows what the status bar
-  // doesn't: Equity + W/L.
+  // Day shown here for quick scan adjacent to W/L. EquityCurveStrip still holds
+  // the authoritative Day Net with sparkline + implied fees. `dailyPnL` is
+  // sourced from `agentState.daily_pnl`, which api/server.py sets to
+  // `tradovate.realized_pnl` whenever the broker is connected.
   const headerStats = (
     <div className="trade-dock-header-stats" aria-label="Account summary">
       {accountEquity != null && (
         <div className="dock-stat equity">
           <span className="dock-stat-k">Equity</span>
           <span className="dock-stat-v">{fmtMoney(accountEquity)}</span>
+        </div>
+      )}
+      {typeof dailyPnL === 'number' && (
+        <div className={`dock-stat pnl ${dailyPnL >= 0 ? 'positive' : 'negative'}`}>
+          <span className="dock-stat-k">Day</span>
+          <span className="dock-stat-v">{fmtSignedMoney(dailyPnL)}</span>
         </div>
       )}
       {(typeof dailyWins === 'number' || typeof dailyLosses === 'number') && (
