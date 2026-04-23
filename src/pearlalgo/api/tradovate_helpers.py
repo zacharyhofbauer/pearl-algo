@@ -150,12 +150,30 @@ def _load_pearl_execution_order_ids(state_dir: Path) -> Set[str]:
 
 
 def _load_signal_trade_candidates(state_dir: Path) -> List[Dict[str, Any]]:
-    """Load signal rows suitable for heuristic PEARL trade attribution."""
+    """Load signal candidates suitable for PEARL trade attribution.
+
+    FIX 2026-04-23 (follow-up #1 after audit): previously this loader
+    only read ``generated`` rows whose ``entry_price`` is the *estimated*
+    close-bar price at signal time. Real fills often differ by 5-10pt
+    (today's short: signal 26986 -> fill 26980.75, 5.25pt). By joining
+    with the corresponding ``entered`` row — which carries the actual
+    dispatched price — candidates land within a tick of the fill and
+    attribution tightens back up.
+
+    Two-pass scan:
+      1. Build ``signal_id -> metadata`` from ``generated`` rows
+         (direction / position_size / signal_type / SL / TP / estimate).
+      2. For each ``entered`` row, emit a candidate using the entered
+         row's ``entry_price`` + ``timestamp`` and the generated row's
+         metadata. Falls back to the generated entry_price if the
+         entered row doesn't carry one.
+    """
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
         return []
 
-    candidates: List[Dict[str, Any]] = []
+    gen_meta: Dict[str, Dict[str, Any]] = {}
+    entered_rows: List[Dict[str, Any]] = []
     try:
         with signals_file.open("r", encoding="utf-8") as f:
             for line in f:
@@ -163,34 +181,66 @@ def _load_signal_trade_candidates(state_dir: Path) -> List[Dict[str, Any]]:
                     row = json.loads(line.strip())
                 except (json.JSONDecodeError, ValueError):
                     continue
-
-                signal = row.get("signal")
-                if not isinstance(signal, dict):
+                sid = str(row.get("signal_id") or "")
+                if not sid:
                     continue
-
-                direction = str(signal.get("direction") or "").lower()
-                if direction not in ("long", "short"):
-                    continue
-
-                try:
-                    entry_price = float(signal.get("entry_price"))
-                    position_size = int(signal.get("position_size") or 1)
-                except (TypeError, ValueError):
-                    continue
-
-                signal_time = _parse_signal_timestamp(row, signal)
-                if signal_time is None:
-                    continue
-
-                candidates.append({
-                    "signal_id": str(row.get("signal_id") or ""),
-                    "direction": direction,
-                    "entry_price": entry_price,
-                    "position_size": position_size,
-                    "timestamp": signal_time,
-                })
+                status = row.get("status")
+                if status == "generated":
+                    signal = row.get("signal")
+                    if not isinstance(signal, dict):
+                        continue
+                    direction = str(signal.get("direction") or "").lower()
+                    if direction not in ("long", "short"):
+                        continue
+                    try:
+                        entry_price = float(signal.get("entry_price"))
+                        position_size = int(signal.get("position_size") or 1)
+                    except (TypeError, ValueError):
+                        continue
+                    # Last-generated-wins: signals may re-fire before entering.
+                    gen_meta[sid] = {
+                        "direction": direction,
+                        "position_size": position_size,
+                        "entry_price": entry_price,
+                        "signal_type": signal.get("type") or signal.get("signal_source"),
+                        "stop_loss": signal.get("stop_loss"),
+                        "take_profit": signal.get("take_profit"),
+                    }
+                elif status == "entered":
+                    entered_rows.append(row)
     except Exception as e:
         logger.debug(f"Non-critical: {e}")
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    for row in entered_rows:
+        sid = str(row.get("signal_id") or "")
+        meta = gen_meta.get(sid)
+        if not meta:
+            continue
+        raw_ep = row.get("entry_price")
+        if raw_ep is None:
+            entry_price = meta["entry_price"]
+        else:
+            try:
+                entry_price = float(raw_ep)
+            except (TypeError, ValueError):
+                entry_price = meta["entry_price"]
+
+        signal_time = _parse_signal_timestamp(row, meta)
+        if signal_time is None:
+            continue
+
+        candidates.append({
+            "signal_id": sid,
+            "direction": meta["direction"],
+            "entry_price": entry_price,
+            "position_size": meta["position_size"],
+            "timestamp": signal_time,
+            "signal_type": meta.get("signal_type"),
+            "stop_loss": meta.get("stop_loss"),
+            "take_profit": meta.get("take_profit"),
+        })
 
     return candidates
 
@@ -340,7 +390,14 @@ def estimate_commission_per_trade(
     The sanity clamp at ``MAX_PLAUSIBLE`` prevents the old "$100/trade"
     failure mode when start_balance or equity is briefly wrong post-restart.
     """
-    MAX_PLAUSIBLE = 5.0  # USD per round-turn — anything above is broken data
+    # FIX 2026-04-23 (follow-up #4): raised ceiling from $5 to $20/RT.
+    # $5 was Tradovate's pure-commission estimate, but the production
+    # MNQ paper account also eats slippage and MFF evaluation fees that
+    # are legitimately part of the per-trade cost. With ~$8k of total
+    # drag over 261 trades (~$30/RT) the old clamp returned 0, making
+    # Stats tab show gross P&L as if fees were zero. $20 still rejects
+    # the ~$100/trade "state-dir corruption" catastrophe failure mode.
+    MAX_PLAUSIBLE = 20.0  # USD per round-turn
 
     if equity <= 0 or not trades:
         return 0.0
@@ -351,9 +408,6 @@ def estimate_commission_per_trade(
         return 0.0
     est = (total_fill_pnl - equity_pnl) / len(trades)
     if est <= 0 or est > MAX_PLAUSIBLE:
-        # Outside the plausible band — likely a state-dir or start_balance
-        # corruption window (e.g. right after a soft-restart before the
-        # challenge_state.json reloads). Refuse to return a poisoned value.
         logger.warning(
             "estimate_commission_per_trade: implausible estimate $%.2f/trade "
             "(gross=$%.2f, net=$%.2f, trades=%d) — clamping to 0.0",

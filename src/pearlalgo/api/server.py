@@ -2303,7 +2303,13 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         return dict(DEFAULT_RISK_METRICS)
 
     # -- Compute via shared pure function -----------------------------------
-    result = compute_risk_metrics(pnls, trades)
+    # FIX 2026-04-23 (follow-up #3): thread start_balance so DD% is
+    # measured against account equity, not raw cumulative-P&L peak.
+    try:
+        start_balance = _get_start_balance(state_dir)
+    except Exception:
+        start_balance = None
+    result = compute_risk_metrics(pnls, trades, start_balance=start_balance)
 
     # -- Exposure metrics (require signals.jsonl entry/exit timestamps) -----
     signals_file = state_dir / "signals.jsonl"
@@ -3351,11 +3357,33 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         else:
             all_fill_stats["tradovate_equity"] = round(start_balance + total_fill_pnl, 2)
 
+        # FIX 2026-04-23 (follow-up #4): for TODAY and WEEK, prefer the
+        # broker's authoritative realized_pnl (already commission-net)
+        # over the fills-estimated gross-minus-cpt. Tradovate exposes
+        # realized_pnl for the current session and week_realized_pnl
+        # for the running week; use those directly so the dock header
+        # (Day +$6.70) matches the Stats tab TODAY (+$6.70 not +$52).
+        td_fill_stats = _tradovate_performance_for_period(
+            fills, td_start, commission_per_trade=cpt, paired_trades=paired_trades,
+        )
+        broker_today_pnl = tv.get("realized_pnl") if tv else None
+        if broker_today_pnl is not None:
+            td_fill_stats["pnl"] = round(float(broker_today_pnl), 2)
+            td_fill_stats["pnl_source"] = "tradovate_realized"
+
+        wtd_fill_stats = _tradovate_performance_for_period(
+            fills, wtd_start, commission_per_trade=cpt, paired_trades=paired_trades,
+        )
+        broker_week_pnl = tv.get("week_realized_pnl") if tv else None
+        if broker_week_pnl is not None:
+            wtd_fill_stats["pnl"] = round(float(broker_week_pnl), 2)
+            wtd_fill_stats["pnl_source"] = "tradovate_week_realized"
+
         return {
             "as_of": now.isoformat(),
-            "td": _tradovate_performance_for_period(fills, td_start, commission_per_trade=cpt, paired_trades=paired_trades),
+            "td": td_fill_stats,
             "yday": _tradovate_performance_for_period(fills, yday_start, yday_end, commission_per_trade=cpt, paired_trades=paired_trades),
-            "wtd": _tradovate_performance_for_period(fills, wtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
+            "wtd": wtd_fill_stats,
             "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
             "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt, paired_trades=paired_trades),
             "all": all_fill_stats,
@@ -3365,7 +3393,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
                 "virtual_ibkr": 0,
                 "other": 0,
             },
-            "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
+            "pnl_source": "tradovate_fills",
         }
 
     # IBKR Virtual: existing performance.json logic (cached read)
@@ -3460,25 +3488,44 @@ async def get_trades(
 async def get_signals(
     limit: int = Query(default=50, ge=1, le=300, description="Max signal events to return"),
     dedupe: bool = Query(default=False, description="Collapse multiple events per signal_id to the latest"),
+    collapse_content: bool = Query(
+        default=True,
+        description=(
+            "FIX 2026-04-23 follow-up #2: collapse by SIGNAL CONTENT "
+            "(direction + entry_price + SL + TP + signal_type) instead of just signal_id. "
+            "The live pinescript generator creates a fresh signal_id every bar close "
+            "(~15s) for the same logical setup, so the Signals tab was showing the same "
+            "LONG RSI_OVERSOLD 10+ times in a row. Setting this false restores the "
+            "legacy per-signal_id view."
+        ),
+    ),
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get recent signal lifecycle events from signals.jsonl.
 
     Returns the raw lifecycle stream by default so consumers like the
     Activity Log can preserve entries/exits/skips as separate events.
-    Set ``dedupe=true`` to collapse multiple events for the same signal
-    to its latest status.
+    Set ``dedupe=true`` to collapse multiple events for the same
+    signal_id to its latest status. Set ``collapse_content=true`` (the
+    default for the dashboard's Signals tab) to additionally group
+    consecutive re-fires of the SAME logical setup into a single row
+    annotated with ``raw_event_count`` and ``duplicate_count``.
     """
     _require_state_dir()
     # Pull extra events so dedupe still has ``limit`` unique signals after
     # collapse. 4x covers the typical duplicate density without being wasteful.
-    raw_limit = limit if not dedupe else min(limit * 4, 1200)
+    # Content-collapse needs even more since re-fires can be 10x.
+    if collapse_content:
+        raw_limit = min(max(limit * 10, 200), 3000)
+    elif dedupe:
+        raw_limit = min(limit * 4, 1200)
+    else:
+        raw_limit = limit
     events = _get_recent_signals(_state_dir, limit=raw_limit)
-    if not dedupe:
+    if not dedupe and not collapse_content:
         return events
 
-    # Collapse: keep the most recent event per signal_id. Iterate oldest-first
-    # so later events overwrite earlier ones in the dict.
+    # Phase A: collapse multiple events per signal_id to the latest.
     by_id: Dict[str, Dict[str, Any]] = {}
     ordered_events = sorted(events, key=lambda r: str(r.get("timestamp") or ""))
     for ev in ordered_events:
@@ -3489,7 +3536,6 @@ async def get_signals(
             by_id[sid] = dict(ev)
         else:
             prev = by_id[sid]
-            # Promote to the more-terminal status if this event has one.
             prev["status"] = ev.get("status") or prev.get("status")
             if ev.get("pnl") is not None:
                 prev["pnl"] = ev["pnl"]
@@ -3499,9 +3545,56 @@ async def get_signals(
                 prev["exit_price"] = ev["exit_price"]
             if ev.get("timestamp"):
                 prev["timestamp"] = ev["timestamp"]
-    # Sort ascending by timestamp to match the previous contract, then take tail.
-    ordered = sorted(by_id.values(), key=lambda r: r.get("timestamp") or "")
-    return ordered[-limit:]
+    per_signal = sorted(by_id.values(), key=lambda r: r.get("timestamp") or "")
+
+    if not collapse_content:
+        return per_signal[-limit:]
+
+    # Phase B: content-level collapse. Group by (direction, entry_price,
+    # SL, TP, signal_type). Within each group keep the most recent event
+    # as the representative and record raw_event_count / duplicate_count.
+    def _content_key(r: Dict[str, Any]) -> tuple:
+        return (
+            str(r.get("direction") or "").lower(),
+            _round_or_none(r.get("entry_price"), 4),
+            _round_or_none(r.get("stop_loss"), 4),
+            _round_or_none(r.get("take_profit"), 4),
+            str(r.get("signal_type") or "").lower(),
+        )
+
+    groups: Dict[tuple, Dict[str, Any]] = {}
+    for r in per_signal:
+        k = _content_key(r)
+        if k not in groups:
+            rep = dict(r)
+            rep["raw_event_count"] = 1
+            rep["duplicate_count"] = 0
+            groups[k] = rep
+        else:
+            rep = groups[k]
+            rep["raw_event_count"] += 1
+            rep["duplicate_count"] += 1
+            # Promote to the most recent event in the group.
+            if (r.get("timestamp") or "") > (rep.get("timestamp") or ""):
+                for fld in ("timestamp", "status", "pnl", "exit_reason",
+                            "exit_price", "confidence", "reason"):
+                    if r.get(fld) is not None:
+                        rep[fld] = r[fld]
+
+    collapsed = sorted(groups.values(), key=lambda r: r.get("timestamp") or "")
+    return collapsed[-limit:]
+
+
+def _round_or_none(v: Any, ndigits: int) -> Optional[float]:
+    """Round a value to ``ndigits`` decimal places or return None on error.
+
+    Used for content-keying signal rows so tiny float drift across
+    re-fires (e.g. SL 26902.47 vs 26902.471) still groups together.
+    """
+    try:
+        return round(float(v), ndigits)
+    except (TypeError, ValueError):
+        return None
 
 
 @app.get("/api/signals-panel")
