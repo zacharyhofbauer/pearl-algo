@@ -23,8 +23,16 @@ Usage:
 
 Concurrency: one shared connection protected by a threading.Lock. SQLite
 is in WAL mode so readers never block writers. Writes are batched inside
-a single transaction per ``append_bars`` call. For our write rate (≤1
-bar per 15s per TF) contention is nil.
+a single transaction per ``append_bars`` call.
+
+Write rate (Issue 16-A, updated 2026-04-23): live runtime uses 1m as
+primary TF plus 5m and 15m MTF overlays, so per-market the effective
+write cadence can briefly peak at ~3 append_bars() calls per minute
+during open-of-session bar bursts (still well below the lock's
+throughput). Readers never block because of WAL. If a future expansion
+pushes multiple symbols through the single archive, revisit the
+single-connection design. ``archive.write_count()`` exposes the running
+count for observability.
 """
 
 from __future__ import annotations
@@ -101,7 +109,20 @@ class CandleArchive:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn: Optional[sqlite3.Connection] = None
+        # Issue 16-A: surface a running count of successful append_bars
+        # calls so operators can see actual archive write rate (docstring
+        # assumption was "≤1 bar / 15s / TF"; live is ~3 TFs in parallel).
+        self._write_count = 0
+        self._rows_written = 0
         self._ensure_schema()
+
+    def write_count(self) -> int:
+        """Running number of successful ``append_bars`` calls since boot."""
+        return self._write_count
+
+    def rows_written(self) -> int:
+        """Running number of rows actually inserted or replaced since boot."""
+        return self._rows_written
 
     # ------------------------------------------------------------------
     # Internals
@@ -189,6 +210,9 @@ class CandleArchive:
             except sqlite3.Error:
                 conn.execute("ROLLBACK")
                 raise
+            # Issue 16-A: count only after a successful commit.
+            self._write_count += 1
+            self._rows_written += len(rows)
         return len(rows)
 
     # ------------------------------------------------------------------
