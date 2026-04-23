@@ -132,22 +132,24 @@ def _save_checkpoint(path: Path, completed_through: datetime) -> None:
 def _dataframe_to_bars(df: Any, tf: str) -> List[Dict[str, Any]]:
     """Convert the IBKR provider's DataFrame to the archive's bar dict.
 
-    The provider returns columns ``timestamp, open, high, low, close,
-    volume`` with timestamp as tz-aware datetime. We emit bar-open
-    unix seconds (UTC) which is what ``candle_archive.append_bars``
-    expects.
+    The provider (IBKRProvider.fetch_historical) returns a DataFrame
+    indexed by ``timestamp`` (tz-aware UTC) with columns ``open,
+    high, low, close, volume``. We emit bar-open unix seconds (UTC)
+    which is what ``candle_archive.append_bars`` expects.
     """
     if df is None or len(df) == 0:
         return []
     bars: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
-        ts = row["timestamp"]
+    # df.iterrows() yields (index, row). The index IS the timestamp —
+    # the provider set it via df = df.set_index("timestamp").
+    for idx, row in df.iterrows():
+        ts = idx
         if hasattr(ts, "to_pydatetime"):
             ts = ts.to_pydatetime()
         if getattr(ts, "tzinfo", None) is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        unix_s = int(ts.timestamp())
         try:
+            unix_s = int(ts.timestamp())
             bars.append({
                 "time": unix_s,
                 "open": float(row["open"]),
@@ -156,7 +158,7 @@ def _dataframe_to_bars(df: Any, tf: str) -> List[Dict[str, Any]]:
                 "close": float(row["close"]),
                 "volume": float(row.get("volume", 0.0) or 0.0),
             })
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError, KeyError, AttributeError):
             continue
     return bars
 
@@ -212,7 +214,8 @@ def main() -> int:
 
     settings = get_settings()
     provider = create_data_provider(
-        kind=os.environ.get("IBKR_PROVIDER_KIND", "ibkr"),
+        os.environ.get("IBKR_PROVIDER_KIND", "ibkr"),
+        settings=settings,
         host=os.environ.get("IB_HOST") or settings.ib_host,
         port=int(os.environ.get("IB_PORT") or settings.ib_port),
         client_id=int(

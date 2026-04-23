@@ -199,14 +199,31 @@ def _attribute_trades_to_pearl_signals(
     trades: List[Dict[str, Any]],
     signal_candidates: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Match paired trades back to PEARL signals when explicit order IDs are absent."""
-    if not trades or not signal_candidates:
+    """Enrich paired trades with matching PEARL signal metadata.
+
+    FIX 2026-04-23 (post-audit): previously this function DROPPED any
+    trade that couldn't be matched to a Pearl signal within ±2pt entry
+    and ±180s. Today's short trade had 5.25pt slippage (signal 26986 ->
+    fill 26980.75) and was silently excluded — causing /api/state to
+    show W/L 1/0 instead of 1/1 and Stats to report TODAY +$52 (one
+    leg) rather than the broker's real +$6.70. Widened tolerance to
+    10pt (MNQ regularly fills 5-10pt off signal close under volatility)
+    and — crucially — now return every paired trade. Pearl-signal
+    attribution is for enrichment only (signal_type, SL, TP); the
+    broker's fill P&L is authoritative regardless.
+    """
+    if not trades:
         return []
+    if not signal_candidates:
+        return list(trades)
 
     from pearlalgo.utils.paths import parse_trade_timestamp
 
-    attributed: List[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = []
     remaining = list(signal_candidates)
+
+    PRICE_DELTA_TOL = 10.0
+    TIME_DELTA_TOL_S = 180
 
     for trade in trades:
         try:
@@ -214,6 +231,7 @@ def _attribute_trades_to_pearl_signals(
             trade_price = float(trade.get("entry_price") or 0.0)
             trade_size = int(trade.get("position_size") or 0)
         except (TypeError, ValueError):
+            out.append(trade)
             continue
 
         direction = str(trade.get("direction") or "").lower()
@@ -224,21 +242,30 @@ def _attribute_trades_to_pearl_signals(
             if candidate["position_size"] != trade_size:
                 continue
             price_delta = abs(candidate["entry_price"] - trade_price)
-            if price_delta > 2.0:
+            if price_delta > PRICE_DELTA_TOL:
                 continue
             time_delta = abs((candidate["timestamp"] - trade_time).total_seconds())
-            if time_delta > 180:
+            if time_delta > TIME_DELTA_TOL_S:
                 continue
             eligible.append((time_delta, price_delta, idx))
 
-        if not eligible:
-            continue
+        if eligible:
+            _, _, best_idx = min(eligible)
+            cand = remaining.pop(best_idx)
+            enriched = dict(trade)
+            if cand.get("signal_id"):
+                enriched["signal_id"] = cand["signal_id"]
+            if cand.get("signal_type") and not enriched.get("signal_type"):
+                enriched["signal_type"] = cand["signal_type"]
+            if cand.get("stop_loss") and not enriched.get("stop_loss"):
+                enriched["stop_loss"] = cand["stop_loss"]
+            if cand.get("take_profit") and not enriched.get("take_profit"):
+                enriched["take_profit"] = cand["take_profit"]
+            out.append(enriched)
+        else:
+            out.append(trade)
 
-        _, _, best_idx = min(eligible)
-        attributed.append(trade)
-        remaining.pop(best_idx)
-
-    return attributed
+    return out
 
 
 def get_paired_tradovate_trades(

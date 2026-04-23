@@ -962,7 +962,9 @@ function TradeDockPanel({
                 <div className="trade-dock-empty">
                   {execArmed === false
                     ? 'No open positions — execution disarmed, signals will not place orders.'
-                    : 'No open positions — system armed and watching the tape.'}
+                    : execArmed === true
+                      ? 'No open positions — system armed and watching the tape.'
+                      : 'No open positions.'}
                 </div>
               ) : openCount === 0 ? (
                 <>
