@@ -209,6 +209,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
 
         self.health_monitor = deps.health_monitor
         self.audit_logger: Optional[AuditLogger] = deps.audit_logger
+        self.signal_audit_logger = deps.signal_audit_logger
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         trading_circuit_breaker_settings = service_config.get("trading_circuit_breaker", {}) or {}
@@ -664,6 +665,7 @@ class MarketAgentService(ServiceLoopMixin, ServiceLifecycleMixin):
             execution_adapter=self.execution_adapter,
             telegram_notifier=self.telegram_notifier,
             audit_logger=self.audit_logger,
+            signal_audit_logger=self.signal_audit_logger,
         )
         # Propagate persisted counters so handler continues from saved state
         self._signal_handler.signal_count = self.signal_count

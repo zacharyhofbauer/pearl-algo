@@ -49,6 +49,7 @@ class SignalHandler:
         execution_adapter: Optional[Any] = None,
         telegram_notifier: Optional[Any] = None,
         audit_logger: Optional[Any] = None,
+        signal_audit_logger: Optional[Any] = None,
     ):
         """
         Initialize the signal handler.
@@ -62,6 +63,8 @@ class SignalHandler:
             execution_adapter: Optional execution adapter for order placement
             telegram_notifier: Optional Telegram notifier
             audit_logger: Optional AuditLogger for persistent audit events
+            signal_audit_logger: Optional SignalAuditLogger for per-gate
+                decision events (Phase 1 observability)
         """
         self.state_manager = state_manager
         self.performance_tracker = performance_tracker
@@ -77,6 +80,7 @@ class SignalHandler:
 
         # Audit
         self._audit_logger = audit_logger
+        self._signal_audit_logger = signal_audit_logger
 
         # Execution serialization semaphore — prevents signal storms.
         # follower_execute acquires this before executing; queued signals
@@ -693,6 +697,22 @@ class SignalHandler:
 
                 # Check preconditions
                 decision = self.execution_adapter.check_preconditions(signal)
+
+                # Phase 1 observability: record the gate decision.
+                # Never block or raise into the signal path.
+                if self._signal_audit_logger is not None:
+                    try:
+                        from pearlalgo.market_agent.gate_translators import (
+                            execution_decision_to_gate,
+                        )
+                        self._signal_audit_logger.record(
+                            signal, execution_decision_to_gate(decision)
+                        )
+                    except Exception:
+                        logger.debug(
+                            "signal_audit_logger.record failed — non-fatal",
+                            exc_info=True,
+                        )
 
                 if decision.execute:
                     # Place bracket order
