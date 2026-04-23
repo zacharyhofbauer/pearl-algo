@@ -42,6 +42,11 @@ from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+# Issue 2-A (deferred sub-task): retained no-op shim from the Telegram
+# removal. Each notification_queue.enqueue_* call-site in this file
+# should be inlined with the equivalent audit_logger call in a follow-
+# up PR, then this import and the notification_queue module can be
+# deleted. See docs/architecture/service_composition.md.
 from pearlalgo.market_agent.notification_queue import NotificationQueue, NotificationTier, Priority
 from pearlalgo.market_agent.trading_circuit_breaker import (
     TradingCircuitBreaker,
