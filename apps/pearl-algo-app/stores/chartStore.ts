@@ -129,6 +129,7 @@ interface ChartStore {
 
   // Actions
   setCandles: (candles: CandleData[]) => void
+  prependCandles: (older: CandleData[]) => void
   setIndicators: (indicators: Indicators) => void
   setMarkers: (markers: MarkerData[]) => void
   setMarketStatus: (status: MarketStatus | null) => void
@@ -162,6 +163,26 @@ export const useChartStore = create<ChartStore>((set) => ({
 
   // Actions
   setCandles: (candles) => set({ candles, isLoading: false }),
+
+  prependCandles: (older) =>
+    set((state) => {
+      if (!older.length) return state
+      // Dedupe by `time` — older first, then existing, then re-sort.
+      const seen = new Set<number>()
+      const merged: CandleData[] = []
+      for (const b of older) {
+        if (seen.has(b.time)) continue
+        seen.add(b.time)
+        merged.push(b)
+      }
+      for (const b of state.candles) {
+        if (seen.has(b.time)) continue
+        seen.add(b.time)
+        merged.push(b)
+      }
+      merged.sort((a, b) => a.time - b.time)
+      return { candles: merged }
+    }),
 
   setIndicators: (indicators) => set({ indicators }),
 

@@ -17,6 +17,7 @@ import ActivityLogPanel from '@/components/ActivityLogPanel'
 import TrailingStopPanel from '@/components/TrailingStopPanel'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { useDashboardData } from '@/hooks/useDashboardData'
+import { useLazyLoadCandles } from '@/hooks/useLazyLoadCandles'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { formatTimeFromDate, formatRelativeTime, formatMarketCountdown } from '@/lib/formatters'
 import type { IChartApi } from 'lightweight-charts'
@@ -50,6 +51,7 @@ export default function DashboardPageInner() {
   const chartLoading = useChartStore((s) => s.isLoading)
   const chartError = useChartStore((s) => s.error)
   const setCandles = useChartStore((s) => s.setCandles)
+  const prependCandles = useChartStore((s) => s.prependCandles)
   const setIndicators = useChartStore((s) => s.setIndicators)
   const setMarkers = useChartStore((s) => s.setMarkers)
   const setMarketStatus = useChartStore((s) => s.setMarketStatus)
@@ -77,6 +79,16 @@ export default function DashboardPageInner() {
 
   // Local state for chart API reference (not suitable for global store)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
+
+  // Lazy-load older bars from the archive when user pans toward the
+  // leftmost bar. The hook's no-op when the archive runs out of data.
+  useLazyLoadCandles({
+    chart: mainChartApi,
+    data: candles,
+    symbol: agentState?.config?.symbol || 'MNQ',
+    timeframe,
+    onOlderBars: prependCandles,
+  })
 
   // Badge tooltip state (which badge explanation is showing)
   const [badgeTip, setBadgeTip] = useState<string | null>(null)
