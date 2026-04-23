@@ -159,7 +159,7 @@ describe('useDashboardData', () => {
       expect(calledUrls).toContain('/api/markers?hours=72')
       expect(calledUrls).toContain('/api/market-status')
       expect(calledUrls).toContain('/api/analytics')
-      expect(calledUrls).toContain('/api/signals?limit=80')
+      expect(calledUrls).toContain('/api/signals?limit=80&collapse_content=true')
       expect(calledUrls).not.toContain('/api/state')
       expect(calledUrls).not.toContain('/api/positions')
       expect(calledUrls).not.toContain('/api/trades?limit=50')

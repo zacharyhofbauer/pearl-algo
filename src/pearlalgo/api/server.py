@@ -3489,14 +3489,14 @@ async def get_signals(
     limit: int = Query(default=50, ge=1, le=300, description="Max signal events to return"),
     dedupe: bool = Query(default=False, description="Collapse multiple events per signal_id to the latest"),
     collapse_content: bool = Query(
-        default=True,
+        default=False,
         description=(
-            "FIX 2026-04-23 follow-up #2: collapse by SIGNAL CONTENT "
+            "FIX 2026-04-23 follow-up #2: optionally collapse by SIGNAL CONTENT "
             "(direction + entry_price + SL + TP + signal_type) instead of just signal_id. "
-            "The live pinescript generator creates a fresh signal_id every bar close "
-            "(~15s) for the same logical setup, so the Signals tab was showing the same "
-            "LONG RSI_OVERSOLD 10+ times in a row. Setting this false restores the "
-            "legacy per-signal_id view."
+            "The dashboard Signals tab should request this explicitly because the live "
+            "pinescript generator creates a fresh signal_id every bar close (~15s) for "
+            "the same logical setup. Leaving the API default false preserves the raw "
+            "lifecycle stream for Activity Log and tests."
         ),
     ),
     api_key: Optional[str] = Depends(verify_api_key),

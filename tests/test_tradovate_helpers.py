@@ -129,20 +129,32 @@ class TestGetPairedTradovateTrades:
             },
         ]
         (tmp_path / "signals.jsonl").write_text(
-            json.dumps(
-                {
-                    "signal_id": "sig-1",
-                    "status": "generated",
-                    "timestamp": "2026-04-02T10:40:45+00:00",
-                    "signal": {
-                        "direction": "long",
-                        "entry_price": 23792.25,
-                        "position_size": 1,
-                        "_execution_order_id": "100",
-                        "_execution_stop_order_id": "101",
-                        "_execution_take_profit_order_id": "102",
-                    },
-                }
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "signal_id": "sig-1",
+                            "status": "generated",
+                            "timestamp": "2026-04-02T10:40:45+00:00",
+                            "signal": {
+                                "direction": "long",
+                                "entry_price": 23792.25,
+                                "position_size": 1,
+                                "_execution_order_id": "100",
+                                "_execution_stop_order_id": "101",
+                                "_execution_take_profit_order_id": "102",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "signal_id": "sig-1",
+                            "status": "entered",
+                            "timestamp": "2026-04-02T10:40:50+00:00",
+                            "entry_price": 23792.25,
+                        }
+                    ),
+                ]
             )
             + "\n",
             encoding="utf-8",
@@ -150,10 +162,12 @@ class TestGetPairedTradovateTrades:
 
         trades = get_paired_tradovate_trades(tmp_path, fills)
 
-        assert len(trades) == 1
+        assert len(trades) == 2
+        assert trades[0]["signal_id"] == "sig-1"
         assert trades[0]["position_size"] == 1
         assert trades[0]["entry_price"] == 23792.25
         assert trades[0]["exit_price"] == 23809.0
+        assert trades[1]["signal_id"].startswith("tv_")
 
     def test_matches_trades_to_signal_candidates_without_order_ids(self, monkeypatch, tmp_path):
         monkeypatch.setattr(helpers_mod, "cached", lambda _key, _ttl, fn: fn())
@@ -197,17 +211,29 @@ class TestGetPairedTradovateTrades:
             },
         ]
         (tmp_path / "signals.jsonl").write_text(
-            json.dumps(
-                {
-                    "signal_id": "sig-1",
-                    "status": "generated",
-                    "timestamp": "2026-04-02T10:40:45+00:00",
-                    "signal": {
-                        "direction": "long",
-                        "entry_price": 23792.25,
-                        "position_size": 1,
-                    },
-                }
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "signal_id": "sig-1",
+                            "status": "generated",
+                            "timestamp": "2026-04-02T10:40:45+00:00",
+                            "signal": {
+                                "direction": "long",
+                                "entry_price": 23792.25,
+                                "position_size": 1,
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "signal_id": "sig-1",
+                            "status": "entered",
+                            "timestamp": "2026-04-02T10:40:50+00:00",
+                            "entry_price": 23792.25,
+                        }
+                    ),
+                ]
             )
             + "\n",
             encoding="utf-8",
@@ -215,10 +241,12 @@ class TestGetPairedTradovateTrades:
 
         trades = get_paired_tradovate_trades(tmp_path, fills)
 
-        assert len(trades) == 1
+        assert len(trades) == 2
+        assert trades[0]["signal_id"] == "sig-1"
         assert trades[0]["position_size"] == 1
         assert trades[0]["entry_price"] == 23792.25
         assert trades[0]["exit_price"] == 23809.0
+        assert trades[1]["signal_id"].startswith("tv_")
 
 
 # ---------------------------------------------------------------------------

@@ -181,7 +181,7 @@ export function useDashboardData({
         shouldFetchAnalytics ? apiFetch(`/api/analytics`, fetchOptions).catch(() => null) : Promise.resolve(null),
         includeSocketOwnedData ? apiFetch(`/api/positions`, fetchOptions).catch(() => null) : Promise.resolve(null),
         includeSocketOwnedData ? apiFetch(`/api/trades?limit=50`, fetchOptions).catch(() => null) : Promise.resolve(null),
-        apiFetch(`/api/signals?limit=80`, fetchOptions).catch(() => null),
+        apiFetch(`/api/signals?limit=80&collapse_content=true`, fetchOptions).catch(() => null),
         includeSocketOwnedData
           ? apiFetch(`/api/performance-summary`, fetchOptions).catch(() => null)
           : Promise.resolve(null),
