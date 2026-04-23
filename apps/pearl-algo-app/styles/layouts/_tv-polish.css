@@ -179,8 +179,10 @@
 
 @media (max-width: 480px) {
   .tv-layout .nav-bar { padding: 0 8px !important; height: 34px; }
-  .tv-layout .header-combined { padding: 0 8px !important; }
-  .tv-layout .header-row-single { padding: 3px 0 !important; }
+  /* Header: zero vertical padding so the row's height is just the
+     control height (36px tf-select / menu-btn). */
+  .tv-layout .header-combined { padding: 0 8px !important; min-height: 0 !important; }
+  .tv-layout .header-row-single { padding: 0 !important; }
   .tv-layout .chart-info-bar { padding: 4px 8px !important; }
   .tv-layout .account-strip { padding: 4px 8px !important; gap: 6px; }
   .tv-panel-area .data-panel-header { padding: 4px 8px !important; }
