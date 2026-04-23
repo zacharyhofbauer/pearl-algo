@@ -1,0 +1,27 @@
+# Per-file line-coverage floors for pearl-algo's five money-path modules.
+#
+# Enforced by CI (`scripts/testing/check_money_path_coverage.py --enforce`)
+# after the coverage step in `.github/workflows/ci.yml`. Floors only move
+# up — a regression below any floor blocks merges, even if the global
+# project-wide coverage threshold still passes.
+#
+# How to ratchet up after a coverage-raising PR:
+#   make coverage
+#   python scripts/testing/check_money_path_coverage.py --write-floor
+#   # review the diff, then commit .github/coverage_floors.yaml
+#
+# How to acknowledge a deliberate drop (rare — justify in the PR):
+#   Edit the floor down manually with a comment explaining why.
+#
+# Baselines captured 2026-04-23 via `make coverage` on origin/main.
+# Floors set just below measured current to absorb normal run-to-run
+# rounding jitter (tolerance is 0.5 pp).
+#
+# See Issue 9-A in ~/.claude/plans/this-session-work-cosmic-horizon.md.
+
+files:
+  execution/tradovate/adapter.py: 72.5
+  market_agent/order_manager.py: 90.5
+  market_agent/signal_handler.py: 70.0
+  market_agent/trading_circuit_breaker.py: 58.0
+  trading_bots/signal_generator.py: 77.5
