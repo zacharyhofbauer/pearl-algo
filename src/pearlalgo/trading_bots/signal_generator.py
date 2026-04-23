@@ -1360,10 +1360,22 @@ class StrategyParams(_BaseModel):
     regime_avoid_multiplier: float = _Field(default=0.5, description="Avoid sizing multiplier")
 
     # -- Signal thresholds -----------------------------------------------
-    min_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
-    min_confidence_long: float = _Field(default=0.72, ge=0.0, le=1.0)
+    # Issue 5-A: defaults aligned to live YAML (config/live/tradovate_paper.yaml
+    # `strategies.composite_intraday.min_confidence*` — all three at 0.60).
+    # Previously 0.55 / 0.72 / 0.60, where 0.72 for longs silently baked
+    # a long bias whenever StrategyParams() was constructed without YAML
+    # overrides.
+    min_confidence: float = _Field(default=0.60, ge=0.0, le=1.0)
+    min_confidence_long: float = _Field(default=0.60, ge=0.0, le=1.0)
     min_confidence_short: float = _Field(default=0.60, ge=0.0, le=1.0)
     min_risk_reward: float = _Field(default=1.3, ge=0.5)
+
+    # -- Per-trigger base confidence (Issue 5-A) -------------------------
+    # Previously hard-coded to 0.55 inside _direction_trigger_state; now
+    # tunable via YAML so re-priming can move these per trigger without
+    # touching code.
+    mean_reversion_base_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
+    vwap_reclaim_base_confidence: float = _Field(default=0.55, ge=0.0, le=1.0)
 
     # -- Key levels (SpacemanBTC) ----------------------------------------
     key_level_proximity_pct: float = _Field(default=0.15, description="Within 0.15% = near a level")
@@ -1580,8 +1592,11 @@ def _initialize_directional_score(
             active_indicators=["EMA_TREND", "TREND_BREAKOUT", price_label],
         )
     if triggers.mean_reversion:
+        # Issue 5-A: was hard-coded 0.55; now honors the tunable
+        # ``mean_reversion_base_confidence`` field so YAML re-priming
+        # actually moves this trigger's floor.
         return DirectionalScoreState(
-            confidence=0.55,
+            confidence=params.mean_reversion_base_confidence,
             entry_trigger="mean_reversion",
             active_indicators=[mean_reversion_label, "VWAP_STRETCHED"],
         )
@@ -1592,8 +1607,10 @@ def _initialize_directional_score(
             active_indicators=["EMA_TREND", "EMA_PULLBACK", price_label],
         )
     if triggers.vwap_reclaim:
+        # Issue 5-A: was hard-coded 0.55; now honors
+        # ``vwap_reclaim_base_confidence``.
         return DirectionalScoreState(
-            confidence=0.55,
+            confidence=params.vwap_reclaim_base_confidence,
             entry_trigger="vwap_reclaim",
             active_indicators=["VWAP_RECLAIM", "VOL_CONFIRM"],
         )
