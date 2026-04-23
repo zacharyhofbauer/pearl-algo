@@ -341,3 +341,76 @@ class TestCircuitBreakerGateNamesComplete:
             "risk_scale_zero",
         }
         assert _CIRCUIT_BREAKER_GATE_NAMES == expected
+
+
+# ===========================================================================
+# SignalHandler._audit_reject helper
+# ===========================================================================
+
+
+class TestSignalHandlerAuditReject:
+    """Integration-style tests: SignalHandler records rejections to the
+    SignalAuditLogger for its gate sites (whitelist + entry price)."""
+
+    def _make_handler_with_logger(self, tmp_path):
+        from unittest.mock import MagicMock
+        from pearlalgo.market_agent.signal_audit_logger import SignalAuditLogger
+        from pearlalgo.market_agent.signal_handler import SignalHandler
+
+        logger = SignalAuditLogger(tmp_path, enabled=True)
+        handler = SignalHandler(
+            state_manager=MagicMock(),
+            performance_tracker=MagicMock(),
+            notification_queue=MagicMock(),
+            order_manager=MagicMock(),
+            signal_audit_logger=logger,
+        )
+        return handler, logger
+
+    def _drain_and_read(self, logger, tmp_path):
+        import time
+        import json
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if logger._queue.empty():
+                time.sleep(0.05)
+                break
+            time.sleep(0.02)
+        logger.shutdown()
+        path = tmp_path / "signal_audit.jsonl"
+        if not path.exists():
+            return []
+        with open(path) as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_audit_reject_emits_record(self, tmp_path):
+        handler, logger = self._make_handler_with_logger(tmp_path)
+        handler._audit_reject(
+            {"signal_id": "s1", "direction": "long", "confidence": 0.5, "type": "foo"},
+            "signal_type_whitelist",
+            actual={"signal_type": "foo"},
+            message="not in whitelist",
+        )
+        records = self._drain_and_read(logger, tmp_path)
+        assert len(records) == 1
+        r = records[0]
+        assert r["outcome"] == "rejected"
+        assert r["layer"] == "signal_handler"
+        assert r["gate"] == "signal_type_whitelist"
+        assert r["actual"]["signal_type"] == "foo"
+        assert r["signal_id"] == "s1"
+
+    def test_audit_reject_with_no_logger_is_noop(self):
+        # No logger attached — must not raise
+        from unittest.mock import MagicMock
+        from pearlalgo.market_agent.signal_handler import SignalHandler
+
+        handler = SignalHandler(
+            state_manager=MagicMock(),
+            performance_tracker=MagicMock(),
+            notification_queue=MagicMock(),
+            order_manager=MagicMock(),
+            # no signal_audit_logger
+        )
+        handler._audit_reject({"signal_id": "x"}, "any_gate")
+        # if we got here without exception we're good
