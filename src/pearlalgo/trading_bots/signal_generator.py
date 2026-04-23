@@ -1759,6 +1759,15 @@ def _apply_directional_confidence_adjustments(
         state.confidence += or_adj
         state.active_indicators.extend(or_notes)
 
+    # Issue 7-A: enforce the advertised [0.0, 1.0] invariant. Every
+    # additive boost above (volume_boost, sr_boost, tbt_boost, sd_boost,
+    # key_level_confidence + 0.05, pdl/pwl boosts, penalties, OR adj,
+    # etc.) can push the running sum out of range. StrategyParams fields
+    # declare ge=0.0, le=1.0 for *input* confidence; downstream consumers
+    # (/api/confidence-scaling, the dashboard, future probability-weighted
+    # sizing) depend on that invariant holding for the *computed* value.
+    state.confidence = max(0.0, min(1.0, state.confidence))
+
 
 def _calculate_indicators(
     df: "pd.DataFrame",

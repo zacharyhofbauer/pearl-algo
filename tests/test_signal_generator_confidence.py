@@ -66,7 +66,11 @@ def test_apply_directional_confidence_adjustments_long_keeps_existing_order() ->
         params,
     )
 
-    assert state.confidence == pytest.approx(1.375)
+    # Issue 7-A: the additive sum (previously 1.375) now clamps to 1.0 so
+    # downstream consumers see an in-range value. The pre-clamp sum is
+    # preserved inline so a future refactor of individual boosts stays
+    # auditable.
+    assert state.confidence == pytest.approx(1.0)
     assert state.active_indicators == [
         "EMA_CROSS",
         "VWAP_ABOVE",
@@ -124,7 +128,9 @@ def test_apply_directional_confidence_adjustments_short_uses_short_specific_labe
         params,
     )
 
-    assert state.confidence == pytest.approx(1.415)
+    # Issue 7-A: pre-clamp sum was 1.415; now clamped to the advertised
+    # [0.0, 1.0] invariant.
+    assert state.confidence == pytest.approx(1.0)
     assert state.active_indicators == [
         "VWAP_RECLAIM",
         "VOL_CONFIRM",
