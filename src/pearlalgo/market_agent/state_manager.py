@@ -23,6 +23,8 @@ import json
 import os
 import fcntl
 import threading
+import time
+from collections import deque
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -242,6 +244,13 @@ class _SignalStore:
         self._signals_cache_limit: int = 0
         self._signals_cache_lock = threading.Lock()
 
+        # Issue 13-A: rolling circular buffer of save_signal wall-clock
+        # durations (seconds). Used by state_builder to surface p95
+        # latency on /api/state so operators see when velocity-mode
+        # cadence is being starved by fsync stalls.
+        self._signal_write_latencies_s: deque[float] = deque(maxlen=512)
+        self._signal_write_latencies_lock = threading.Lock()
+
     # -- public helpers ------------------------------------------------
 
     def set_sqlite_queue(self, queue: Any) -> None:
@@ -410,7 +419,16 @@ class _SignalStore:
     # -- save / read ---------------------------------------------------
 
     def save_signal(self, signal: Dict) -> None:  # noqa: C901
-        """Persist a signal record to ``signals.jsonl`` (and optionally SQLite)."""
+        """Persist a signal record to ``signals.jsonl`` (and optionally SQLite).
+
+        Issue 13-A: wall-clock duration of each save_signal call is
+        recorded in the ``_signal_write_latencies_s`` rolling buffer so
+        ``signal_write_latency_snapshot()`` can report p95 to /api/state.
+        The measurement includes the file-lock acquisition, JSON
+        serialization, fsync, and any SQLite enqueue. Test signals and
+        duplicates are excluded.
+        """
+        _t_start = time.monotonic()
         try:
             if signal.get("_is_test", False):
                 logger.debug(f"Skipping test signal persistence: {signal.get('type', 'unknown')}")
@@ -535,6 +553,45 @@ class _SignalStore:
 
         except Exception as e:
             logger.error(f"Critical signal save error: {e}", exc_info=True)
+        finally:
+            # Issue 13-A: record wall-clock duration in the rolling buffer.
+            _elapsed = time.monotonic() - _t_start
+            with self._signal_write_latencies_lock:
+                self._signal_write_latencies_s.append(_elapsed)
+
+    def signal_write_latency_snapshot(self) -> Dict[str, Any]:
+        """Issue 13-A: return p50/p95/p99 signal-write latency plus count.
+
+        Used by StateBuilder to surface velocity-mode starvation on
+        /api/state. Never raises; returns zeros when the buffer is empty.
+        """
+        with self._signal_write_latencies_lock:
+            samples = list(self._signal_write_latencies_s)
+        if not samples:
+            return {
+                "count": 0,
+                "p50_ms": 0.0,
+                "p95_ms": 0.0,
+                "p99_ms": 0.0,
+                "max_ms": 0.0,
+            }
+        sorted_s = sorted(samples)
+        n = len(sorted_s)
+
+        def _pct(p: float) -> float:
+            # Inclusive-nearest-rank percentile. For 100 samples the p95
+            # is the 95th sorted value (index 94). Matches what operators
+            # see in Grafana et al.
+            idx = min(n - 1, max(0, int(round((p / 100.0) * n)) - 1))
+            return sorted_s[idx] * 1000.0
+
+        return {
+            "count": n,
+            "p50_ms": round(_pct(50), 2),
+            "p95_ms": round(_pct(95), 2),
+            "p99_ms": round(_pct(99), 2),
+            "max_ms": round(sorted_s[-1] * 1000.0, 2),
+        }
 
     def get_recent_signals(self, limit: int = 100) -> List[Dict]:
         import time
@@ -762,6 +819,12 @@ class MarketAgentStateManager:
 
     def save_signal(self, signal: Dict) -> None:
         self._signal_store.save_signal(signal)
+
+    def signal_write_latency_snapshot(self) -> Dict[str, Any]:
+        """Issue 13-A: expose the signal-write latency snapshot at the
+        facade level so StateBuilder can read it via the single
+        state_manager handle the service already owns."""
+        return self._signal_store.signal_write_latency_snapshot()
 
     def get_recent_signals(self, limit: int = 100) -> List[Dict]:
         return self._signal_store.get_recent_signals(limit)
