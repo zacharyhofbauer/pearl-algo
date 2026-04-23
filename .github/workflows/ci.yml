@@ -136,6 +136,10 @@ jobs:
         run: |
           pytest -m "not requires_ibkr and not requires_telegram" --cov-report=xml
 
+      - name: Money-path coverage floors (Issue 9-A)
+        run: |
+          python scripts/testing/check_money_path_coverage.py
+
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v7
         with:
