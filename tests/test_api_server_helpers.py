@@ -734,6 +734,42 @@ class TestComputeDailyStats:
         assert result["daily_trades"] == 3
         mock_shared.assert_called_once_with(tmp_path)
 
+    @patch.object(srv, "_get_start_balance", return_value=50000.0)
+    @patch.object(srv, "_get_trading_day_start", return_value=datetime(2026, 4, 23, 0, 0, 0, tzinfo=timezone.utc))
+    @patch.object(srv, "_get_paired_tradovate_trades", return_value=[
+        {"exit_time": "2026-04-23T05:51:55Z", "pnl": 51.5},
+        {"exit_time": "2026-04-23T06:17:42Z", "pnl": -41.0},
+        {"exit_time": "2026-04-23T06:30:00Z", "pnl": 0.0},
+    ])
+    @patch.object(srv, "_shared_compute_daily_stats", return_value={
+        "daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0,
+    })
+    @patch.object(srv, "_is_tv_paper_account_new", return_value=True)
+    @patch.object(srv, "_read_state_for_dir", return_value={
+        "tradovate_account": {
+            "equity": 50006.70,
+            "open_pnl": 0.0,
+            "position_count": 0,
+            "realized_pnl": 6.70,
+        },
+        "tradovate_fills": [{"id": 1}],
+    })
+    def test_tv_paper_counts_only_negative_pnl_trades_as_losses(
+        self,
+        _mock_read_state,
+        _mock_is_tv_paper,
+        _mock_shared,
+        _mock_pair,
+        _mock_day_start,
+        _mock_start_balance,
+        tmp_path: Path,
+    ):
+        result = srv._compute_daily_stats(tmp_path)
+        assert result["daily_trades"] == 3
+        assert result["daily_wins"] == 1
+        assert result["daily_losses"] == 1
+        assert result["daily_pnl"] == 6.70
+
 
 # ---------------------------------------------------------------------------
 # 17. _compute_performance_stats (IBKR Virtual path with performance.json)

@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import TradeDockPanel from '@/components/TradeDockPanel'
 import type { Position } from '@/stores'
-import type { RecentTradeRow, PerformanceSummary } from '@/components/TradeDockPanel'
+import type { RecentTradeRow, PerformanceSummary, RecentSignalEvent } from '@/components/TradeDockPanel'
 
 // Mock DataPanelsContainer – render children with title for assertions
 jest.mock('@/components/DataPanelsContainer', () => ({
@@ -56,6 +56,19 @@ const makeRecentTrade = (overrides: Partial<RecentTradeRow> = {}): RecentTradeRo
   ...overrides,
 })
 
+const makeRecentSignal = (overrides: Partial<RecentSignalEvent> = {}): RecentSignalEvent => ({
+  signal_id: 'sig-100',
+  status: 'generated',
+  timestamp: '2025-06-01T14:30:00Z',
+  direction: 'long',
+  symbol: 'MNQ',
+  entry_price: 18000,
+  stop_loss: 17980,
+  take_profit: 18050,
+  reason: 'base signal',
+  ...overrides,
+})
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -72,6 +85,11 @@ describe('TradeDockPanel', () => {
     it('shows no-open-positions empty state when there are no open trades', () => {
       render(<TradeDockPanel positions={[]} recentTrades={[]} />)
       expect(screen.getByText(/No open positions/i)).toBeInTheDocument()
+    })
+
+    it('shows disarmed copy when execution is disabled', () => {
+      render(<TradeDockPanel positions={[]} recentTrades={[]} execArmed={false} />)
+      expect(screen.getByText(/execution disarmed, signals will not place orders/i)).toBeInTheDocument()
     })
 
     it('shows no-closed-trades empty state when switching to History tab with empty data', () => {
@@ -373,6 +391,74 @@ describe('TradeDockPanel', () => {
       expect(screen.getByText('Month')).toBeInTheDocument()
       expect(screen.getByText('Year')).toBeInTheDocument()
       expect(screen.getByText('All Time')).toBeInTheDocument()
+    })
+
+    it('shows a provenance warning when performance mixes fill-matched and virtual history', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          performanceSummary={{
+            ...SAMPLE_PERFORMANCE,
+            pnl_source: 'mixed',
+            trade_source_counts: {
+              fill_matched: 12,
+              estimated: 0,
+              virtual_ibkr: 3,
+              other: 0,
+            },
+          }}
+        />
+      )
+
+      fireEvent.click(screen.getByRole('tab', { name: /stats/i }))
+
+      expect(screen.getByText(/mixed history: 12 fill-matched trades and 3 virtual ibkr trades/i)).toBeInTheDocument()
+    })
+  })
+
+  describe('signals tab', () => {
+    it('collapses duplicate signal events and shows the repeat count', () => {
+      render(
+        <TradeDockPanel
+          positions={[]}
+          recentTrades={[]}
+          recentSignals={[
+            makeRecentSignal({
+              signal_id: 'sig-repeat',
+              status: 'generated',
+              timestamp: '2025-06-01T14:30:00Z',
+              reason: 'first fire',
+            }),
+            makeRecentSignal({
+              signal_id: 'sig-repeat',
+              status: 'generated',
+              timestamp: '2025-06-01T14:31:00Z',
+              reason: 'retry',
+            }),
+            makeRecentSignal({
+              signal_id: 'sig-repeat',
+              status: 'skipped',
+              timestamp: '2025-06-01T14:32:00Z',
+              reason: 'not armed',
+            }),
+            makeRecentSignal({
+              signal_id: 'sig-unique',
+              status: 'generated',
+              timestamp: '2025-06-01T14:33:00Z',
+              reason: 'unique signal',
+            }),
+          ]}
+        />
+      )
+
+      fireEvent.click(screen.getByRole('tab', { name: /signals/i }))
+
+      expect(screen.getByText(/collapsed 2 duplicate events; latest status shown per signal/i)).toBeInTheDocument()
+      expect(screen.getByText(/fired 3 times; showing latest status/i)).toBeInTheDocument()
+      expect(screen.getByText(/not armed/i)).toBeInTheDocument()
+      expect(screen.getByText(/unique signal/i)).toBeInTheDocument()
+      expect(screen.getAllByText(/MNQ/i).length).toBeGreaterThan(0)
     })
   })
 

@@ -1218,6 +1218,13 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                     "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
                     "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt, paired_trades=paired_trades),
                     "all": all_fill_stats,
+                    "trade_source_counts": {
+                        "fill_matched": total_trades,
+                        "estimated": 0,
+                        "virtual_ibkr": 0,
+                        "other": 0,
+                    },
+                    "pnl_source": "tradovate_fills",
                 }
 
             # IBKR Virtual
@@ -1229,6 +1236,13 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                     "as_of": _now_et_iso(),
                     "td": empty, "yday": empty, "wtd": empty,
                     "mtd": empty, "ytd": empty, "all": empty,
+                    "trade_source_counts": {
+                        "fill_matched": 0,
+                        "estimated": 0,
+                        "virtual_ibkr": 0,
+                        "other": 0,
+                    },
+                    "pnl_source": "none",
                 }
 
             now = _now_et_naive()
@@ -1238,6 +1252,7 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
             mtd_start = _get_month_to_date_start(now)
             ytd_start = _get_year_to_date_start(now)
             all_time_start = datetime(2020, 1, 1)
+            source_summary = _summarize_performance_trade_sources(trades)
 
             return {
                 "as_of": now.isoformat(),
@@ -1247,6 +1262,7 @@ def _get_performance_summary_for_broadcast(state_dir: Path) -> Optional[Dict[str
                 "mtd": _aggregate_performance_since(trades, mtd_start),
                 "ytd": _aggregate_performance_since(trades, ytd_start),
                 "all": _aggregate_performance_since(trades, all_time_start),
+                **source_summary,
             }
         except Exception as e:
             logger.debug(f"Broadcast performance-summary error: {e}")
@@ -2065,6 +2081,40 @@ def _get_recent_signals(state_dir: Path, limit: int = 50) -> List[Dict[str, Any]
 
     events.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
     return events[:limit]
+
+
+def _summarize_performance_trade_sources(trades: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Summarize how much of performance history is fill-backed vs synthetic."""
+    counts = {
+        "fill_matched": 0,
+        "estimated": 0,
+        "virtual_ibkr": 0,
+        "other": 0,
+    }
+
+    for trade in trades or []:
+        source = str(trade.get("pnl_source") or "").strip().lower()
+        if source in ("fill_matched", "estimated", "virtual_ibkr"):
+            counts[source] += 1
+        else:
+            counts["other"] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        pnl_source = "none"
+    elif counts["fill_matched"] == total:
+        pnl_source = "fill_matched"
+    elif counts["estimated"] == total:
+        pnl_source = "estimated"
+    elif counts["virtual_ibkr"] == total:
+        pnl_source = "virtual_ibkr"
+    else:
+        pnl_source = "mixed"
+
+    return {
+        "pnl_source": pnl_source,
+        "trade_source_counts": counts,
+    }
 
 
 def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
@@ -3309,6 +3359,12 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
             "mtd": _tradovate_performance_for_period(fills, mtd_start, commission_per_trade=cpt, paired_trades=paired_trades),
             "ytd": _tradovate_performance_for_period(fills, ytd_start, commission_per_trade=cpt, paired_trades=paired_trades),
             "all": all_fill_stats,
+            "trade_source_counts": {
+                "fill_matched": len(paired_trades),
+                "estimated": 0,
+                "virtual_ibkr": 0,
+                "other": 0,
+            },
             "pnl_source": "tradovate_fills",  # FIXED 2026-03-25: fills-based P&L tracking
         }
 
@@ -3321,6 +3377,13 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
             "as_of": _now_et_iso(),
             "td": empty, "yday": empty, "wtd": empty,
             "mtd": empty, "ytd": empty, "all": empty,
+            "trade_source_counts": {
+                "fill_matched": 0,
+                "estimated": 0,
+                "virtual_ibkr": 0,
+                "other": 0,
+            },
+            "pnl_source": "none",
         }
 
     now = _now_et_naive()
@@ -3330,6 +3393,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
     mtd_start = _get_month_to_date_start(now)
     ytd_start = _get_year_to_date_start(now)
     all_time_start = datetime(2020, 1, 1)
+    source_summary = _summarize_performance_trade_sources(trades)
 
     return {
         "as_of": now.isoformat(),
@@ -3339,6 +3403,7 @@ async def performance_summary(api_key: Optional[str] = Depends(verify_api_key)):
         "mtd": _aggregate_performance_since(trades, mtd_start),
         "ytd": _aggregate_performance_since(trades, ytd_start),
         "all": _aggregate_performance_since(trades, all_time_start),
+        **source_summary,
     }
 
 @app.get("/api/trades")
@@ -3394,16 +3459,15 @@ async def get_trades(
 @app.get("/api/signals")
 async def get_signals(
     limit: int = Query(default=50, ge=1, le=300, description="Max signal events to return"),
-    dedupe: bool = Query(default=True, description="Collapse multiple events per signal_id to the latest"),
+    dedupe: bool = Query(default=False, description="Collapse multiple events per signal_id to the latest"),
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get recent signal lifecycle events from signals.jsonl.
 
-    FIX F5 (audit 2026-04-23): by default, collapse events so each
-    signal_id appears at most once (latest status wins). The live agent
-    re-fires the same signal every bar close (~15s) while gated, so the
-    raw tail of signals.jsonl is ~83% duplicates. Set dedupe=false to
-    get the raw lifecycle stream.
+    Returns the raw lifecycle stream by default so consumers like the
+    Activity Log can preserve entries/exits/skips as separate events.
+    Set ``dedupe=true`` to collapse multiple events for the same signal
+    to its latest status.
     """
     _require_state_dir()
     # Pull extra events so dedupe still has ``limit`` unique signals after
@@ -3416,7 +3480,8 @@ async def get_signals(
     # Collapse: keep the most recent event per signal_id. Iterate oldest-first
     # so later events overwrite earlier ones in the dict.
     by_id: Dict[str, Dict[str, Any]] = {}
-    for ev in events:
+    ordered_events = sorted(events, key=lambda r: str(r.get("timestamp") or ""))
+    for ev in ordered_events:
         sid = ev.get("signal_id") or ""
         if not sid:
             continue

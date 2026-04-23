@@ -41,6 +41,13 @@ export interface PerformancePeriodSummary {
   tradovate_equity?: number
 }
 
+export interface PerformanceTradeSourceCounts {
+  fill_matched: number
+  estimated: number
+  virtual_ibkr: number
+  other: number
+}
+
 export interface PerformanceSummary {
   as_of: string
   td: PerformancePeriodSummary
@@ -49,6 +56,8 @@ export interface PerformanceSummary {
   mtd: PerformancePeriodSummary
   ytd: PerformancePeriodSummary
   all: PerformancePeriodSummary
+  pnl_source?: string
+  trade_source_counts?: PerformanceTradeSourceCounts
 }
 
 export interface RecentSignalEvent {
@@ -66,6 +75,11 @@ export interface RecentSignalEvent {
   pnl?: number | null
   signal_type?: string | null
   duplicate?: boolean
+}
+
+type CollapsedRecentSignalEvent = RecentSignalEvent & {
+  raw_event_count: number
+  duplicate_count: number
 }
 
 interface TradeDockPanelProps {
@@ -491,7 +505,75 @@ function TradeDockPanel({
       }
     })
   }, [displayWorkingOrders])
-  const displayRecentSignals = (recentSignals || []).slice(0, 20)
+  const collapsedRecentSignals = useMemo<CollapsedRecentSignalEvent[]>(() => {
+    const byId = new Map<string, CollapsedRecentSignalEvent>()
+    const orderedEvents = [...(recentSignals || [])].sort((a, b) => {
+      const at = a.timestamp ? (new Date(a.timestamp).getTime() || 0) : 0
+      const bt = b.timestamp ? (new Date(b.timestamp).getTime() || 0) : 0
+      return at - bt
+    })
+
+    // Iterate oldest-first so the latest event for a signal wins.
+    for (const event of orderedEvents) {
+      const signalId = event?.signal_id
+      if (!signalId) continue
+
+      const existing = byId.get(signalId)
+      if (!existing) {
+        byId.set(signalId, {
+          ...event,
+          raw_event_count: 1,
+          duplicate_count: 0,
+        })
+        continue
+      }
+
+      byId.set(signalId, {
+        ...existing,
+        ...event,
+        raw_event_count: existing.raw_event_count + 1,
+        duplicate_count: existing.duplicate_count + 1,
+      })
+    }
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const at = a.timestamp ? (new Date(a.timestamp).getTime() || 0) : 0
+      const bt = b.timestamp ? (new Date(b.timestamp).getTime() || 0) : 0
+      return bt - at
+    })
+  }, [recentSignals])
+
+  const displayRecentSignals = collapsedRecentSignals.slice(0, 20)
+  const suppressedSignalEvents = useMemo(
+    () => displayRecentSignals.reduce((sum, event) => sum + event.duplicate_count, 0),
+    [displayRecentSignals]
+  )
+
+  const performanceSourceNote = useMemo(() => {
+    const counts = performanceSummary?.trade_source_counts
+    if (!counts) return null
+
+    const pluralize = (count: number, singular: string, plural: string) =>
+      `${count} ${count === 1 ? singular : plural}`
+
+    if ((counts.estimated ?? 0) > 0) {
+      return `Historical stats still include ${pluralize(counts.estimated, 'estimated trade', 'estimated trades')}. Run the fill backfill before trusting totals.`
+    }
+
+    if ((counts.virtual_ibkr ?? 0) > 0 && (counts.fill_matched ?? 0) > 0) {
+      return `Mixed history: ${pluralize(counts.fill_matched, 'fill-matched trade', 'fill-matched trades')} and ${pluralize(counts.virtual_ibkr, 'virtual IBKR trade', 'virtual IBKR trades')}.`
+    }
+
+    if ((counts.virtual_ibkr ?? 0) > 0) {
+      return `Stats are based on ${pluralize(counts.virtual_ibkr, 'virtual IBKR trade', 'virtual IBKR trades')}.`
+    }
+
+    if ((counts.other ?? 0) > 0) {
+      return `Stats include ${pluralize(counts.other, 'trade with unknown provenance', 'trades with unknown provenance')}.`
+    }
+
+    return null
+  }, [performanceSummary])
 
   const hasSummaryData = !!directionBreakdown || !!statusBreakdown
 
@@ -619,6 +701,14 @@ function TradeDockPanel({
             {/* ── Stats Tab ── */}
             {tab === 'stats' && (
               <>
+            {performanceSourceNote && (
+                  <div className="trade-stats-summary" role="note">
+                    <div className="trade-stats-row">
+                      <span className="trade-stats-label">Stats Source:</span>
+                      <span className="trade-stats-value">{performanceSourceNote}</span>
+                    </div>
+                  </div>
+            )}
             {performanceSummary && (
                   <div className="trade-perf-strip">
                     {([
@@ -784,6 +874,16 @@ function TradeDockPanel({
                 {displayRecentSignals.length > 0 && (
                   <div className="signals-section">
                     <div className="signals-section-title">Recent Signal Activity</div>
+                    {suppressedSignalEvents > 0 && (
+                      <div className="trade-stats-summary" role="note">
+                        <div className="trade-stats-row">
+                          <span className="trade-stats-label">Display:</span>
+                          <span className="trade-stats-value">
+                            Collapsed {suppressedSignalEvents} duplicate event{suppressedSignalEvents === 1 ? '' : 's'}; latest status shown per signal.
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     <div className="recent-trades-list trade-dock-list" aria-label="Recent signal activity">
                       {displayRecentSignals.map((s, idx) => {
                         const id = s.signal_id || `signal-${idx}`
@@ -808,6 +908,11 @@ function TradeDockPanel({
                                 {reason ? (
                                   <span className="trade-time">
                                     {reason.length > 120 ? `${reason.slice(0, 120)}...` : reason}
+                                  </span>
+                                ) : null}
+                                {s.raw_event_count > 1 ? (
+                                  <span className="trade-time">
+                                    Fired {s.raw_event_count} times; showing latest status.
                                   </span>
                                 ) : null}
                               </div>
@@ -862,10 +967,10 @@ function TradeDockPanel({
               ) : openCount === 0 ? (
                 <>
                   <div className="trade-dock-empty">
-                  {execArmed === false
-                    ? 'No open positions — execution disarmed, signals will not place orders.'
-                    : 'No open positions — system armed and watching the tape.'}
-                </div>
+                    {execArmed === false
+                      ? 'No open positions — execution disarmed, signals will not place orders.'
+                      : 'No open positions — system armed and watching the tape.'}
+                  </div>
                   {groupedWorkingOrders.length > 0 && (
                     <div className="trade-dock-working-orders">
                       <div className="trade-dock-section-label">Working Orders ({groupedWorkingOrders.length})</div>

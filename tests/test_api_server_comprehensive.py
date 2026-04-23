@@ -2202,6 +2202,31 @@ class TestGetPerformanceSummaryBroadcast:
             if result is not None:
                 assert "td" in result
 
+    def test_ibkr_virtual_includes_trade_source_metadata(self, tmp_path):
+        d = tmp_path / "bc_state_sources"
+        d.mkdir()
+        (d / "state.json").write_text("{}")
+        (d / "performance.json").write_text(json.dumps([
+            {"exit_time": "2026-04-23T05:00:00Z", "pnl": 10.0, "pnl_source": "fill_matched"},
+            {"exit_time": "2026-04-23T06:00:00Z", "pnl": -5.0, "pnl_source": "virtual_ibkr"},
+        ]))
+        server_mod._state_reader_cache.clear()
+        core_mod._state_reader_cache.clear()
+        data_layer_mod._state_reader_cache.clear()
+        data_layer_mod._ttl_cache.clear()
+        server_mod._ttl_cache.clear()
+        with patch.object(server_mod, "_is_tv_paper_account", return_value=False):
+            result = server_mod._get_performance_summary_for_broadcast(d)
+
+        assert result is not None
+        assert result["pnl_source"] == "mixed"
+        assert result["trade_source_counts"] == {
+            "fill_matched": 1,
+            "estimated": 0,
+            "virtual_ibkr": 1,
+            "other": 0,
+        }
+
 
 # ===========================================================================
 # 87. _get_accounts_config / _init_accounts_config

@@ -559,6 +559,65 @@ class TestPositionsEndpoint:
         assert resp.json() == []
 
 
+class TestSignalsEndpoint:
+    """/api/signals endpoint."""
+
+    def test_signals_returns_raw_lifecycle_events_by_default(self, client, _patch_globals, state_dir):
+        _write_jsonl(state_dir / "signals.jsonl", [
+            {
+                "signal_id": "sig_dup",
+                "status": "generated",
+                "timestamp": "2026-04-23T05:00:00Z",
+                "signal": {"direction": "long", "symbol": "MNQ", "entry_price": 20000.0},
+            },
+            {
+                "signal_id": "sig_dup",
+                "status": "skipped",
+                "timestamp": "2026-04-23T05:01:00Z",
+                "exit_reason": "not_armed",
+            },
+        ])
+
+        resp = client.get("/api/signals?limit=10")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 2
+        assert [row["status"] for row in body] == ["skipped", "generated"]
+
+    def test_signals_can_dedupe_to_latest_status(self, client, _patch_globals, state_dir):
+        _write_jsonl(state_dir / "signals.jsonl", [
+            {
+                "signal_id": "sig_dup",
+                "status": "generated",
+                "timestamp": "2026-04-23T05:00:00Z",
+                "signal": {"direction": "long", "symbol": "MNQ", "entry_price": 20000.0},
+            },
+            {
+                "signal_id": "sig_dup",
+                "status": "skipped",
+                "timestamp": "2026-04-23T05:01:00Z",
+                "exit_reason": "not_armed",
+            },
+            {
+                "signal_id": "sig_other",
+                "status": "generated",
+                "timestamp": "2026-04-23T05:02:00Z",
+                "signal": {"direction": "short", "symbol": "MNQ", "entry_price": 19990.0},
+            },
+        ])
+
+        resp = client.get("/api/signals?limit=10&dedupe=true")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 2
+        assert {row["signal_id"] for row in body} == {"sig_dup", "sig_other"}
+        deduped = next(row for row in body if row["signal_id"] == "sig_dup")
+        assert deduped["status"] == "skipped"
+        assert deduped["exit_reason"] == "not_armed"
+
+
 class TestPerformanceSummaryEndpoint:
     """/api/performance-summary endpoint."""
 
@@ -580,6 +639,40 @@ class TestPerformanceSummaryEndpoint:
         body = resp.json()
         for period in ("td", "yday", "wtd", "mtd", "ytd", "all"):
             assert period in body, "Missing period bucket: " + period
+
+    def test_performance_summary_reports_trade_source_mix(
+        self, client, _patch_globals, state_dir,
+    ):
+        perf = [
+            {
+                "exit_time": datetime.now(timezone.utc).isoformat(),
+                "pnl": 50.0,
+                "pnl_source": "fill_matched",
+            },
+            {
+                "exit_time": datetime.now(timezone.utc).isoformat(),
+                "pnl": -10.0,
+                "pnl_source": "virtual_ibkr",
+            },
+            {
+                "exit_time": datetime.now(timezone.utc).isoformat(),
+                "pnl": 5.0,
+                "pnl_source": "estimated",
+            },
+        ]
+        (state_dir / "performance.json").write_text(json.dumps(perf))
+
+        resp = client.get("/api/performance-summary")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pnl_source"] == "mixed"
+        assert body["trade_source_counts"] == {
+            "fill_matched": 1,
+            "estimated": 1,
+            "virtual_ibkr": 1,
+            "other": 0,
+        }
 
     def test_performance_summary_empty_when_no_file(self, client, _patch_globals_empty):
         """Returns zero-filled buckets when performance.json is absent."""
