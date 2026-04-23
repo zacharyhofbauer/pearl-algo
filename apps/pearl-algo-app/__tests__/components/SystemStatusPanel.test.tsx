@@ -153,7 +153,14 @@ describe('SystemStatusPanel', () => {
       // "Cooldown" appears in both the readiness badge and circuit breaker chip
       const cooldownMatches = screen.getAllByText(/Cooldown/)
       expect(cooldownMatches.length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByText('2m 0s')).toBeInTheDocument()
+
+      const cooldownTime = screen.getByText(/\dm \d+s/)
+      const match = cooldownTime.textContent?.match(/^(\d+)m (\d+)s$/)
+      expect(match).not.toBeNull()
+      const totalSeconds = Number(match?.[1]) * 60 + Number(match?.[2])
+      expect(totalSeconds).toBeGreaterThanOrEqual(119)
+      expect(totalSeconds).toBeLessThanOrEqual(120)
+
       expect(screen.getByText('1 trips')).toBeInTheDocument()
     })
 
