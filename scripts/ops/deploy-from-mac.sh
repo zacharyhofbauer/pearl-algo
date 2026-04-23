@@ -116,7 +116,9 @@ else
             fi
             echo "${CYAN}==> Running predeploy smoke on $REMOTE_HOST (mode=$SMOKE_MODE)${NC}"
             set +e
-            ssh "$REMOTE_HOST" "cd $REMOTE_PATH && python3 scripts/ops/predeploy_smoke.py $SMOKE_ARGS"
+            # Use the Beelink's venv python so `import pearlalgo` resolves.
+            # Falls back to python3 only if the venv is missing (broken Beelink).
+            ssh "$REMOTE_HOST" "cd $REMOTE_PATH && if [ -x .venv/bin/python ]; then ./.venv/bin/python scripts/ops/predeploy_smoke.py $SMOKE_ARGS; else python3 scripts/ops/predeploy_smoke.py $SMOKE_ARGS; fi"
             SMOKE_STATUS=$?
             set -e
             if [[ $SMOKE_STATUS -ne 0 ]]; then
