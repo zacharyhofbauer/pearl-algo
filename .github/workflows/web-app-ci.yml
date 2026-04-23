@@ -40,6 +40,15 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # Issue 20-A: enforce high-severity CVEs in production deps only.
+      # --omit=dev scopes the audit to runtime deps so a vuln in a
+      # dev-only bundler doesn't block merges. When intentionally
+      # accepting a transitive with no upstream fix, add an override
+      # entry to apps/pearl-algo-app/package.json (the same mechanism
+      # already used for serialize-javascript).
+      - name: npm audit (production deps, fail on high+)
+        run: npm audit --omit=dev --audit-level=high
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
