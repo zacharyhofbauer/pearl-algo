@@ -586,6 +586,23 @@ class SignalHandler:
             market_data=market_data,
         )
 
+        # Phase 1 observability: record the circuit-breaker decision.
+        # Never block or raise into the signal path.
+        _sa_logger_cb = getattr(self, "_signal_audit_logger", None)
+        if _sa_logger_cb is not None:
+            try:
+                from pearlalgo.market_agent.gate_translators import (
+                    circuit_breaker_decision_to_gate,
+                )
+                _sa_logger_cb.record(
+                    signal, circuit_breaker_decision_to_gate(cb_decision)
+                )
+            except Exception:
+                logger.debug(
+                    "signal_audit_logger.record (CB) failed — non-fatal",
+                    exc_info=True,
+                )
+
         if not cb_decision.allowed:
             signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
 

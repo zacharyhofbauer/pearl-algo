@@ -1,15 +1,22 @@
-"""Tests for gate_translators.execution_decision_to_gate."""
+"""Tests for the gate_translators module.
+
+Covers:
+- ``execution_decision_to_gate``  — ExecutionDecision → GateDecision
+- ``circuit_breaker_decision_to_gate`` — CircuitBreakerDecision → GateDecision
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 import pytest
 
 from pearlalgo.market_agent.gate_decision import GateLayer, GateOutcome
 from pearlalgo.market_agent.gate_translators import (
+    _CIRCUIT_BREAKER_GATE_NAMES,
     _EXECUTION_GATE_NAMES,
+    circuit_breaker_decision_to_gate,
     execution_decision_to_gate,
 )
 
@@ -164,3 +171,173 @@ class TestDuckTyping:
         d = execution_decision_to_gate(Empty())
         assert d.outcome == GateOutcome.REJECTED  # .execute defaults False
         assert d.gate == "unknown"
+
+
+# ===========================================================================
+# CircuitBreakerDecision translator
+# ===========================================================================
+
+
+@dataclass
+class FakeCbDecision:
+    allowed: bool
+    reason: str = ""
+    risk_scale: float = 1.0
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+class TestCircuitBreakerAccepted:
+    def test_fully_allowed_maps_to_accepted(self) -> None:
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(allowed=True, reason="passed_all_checks", risk_scale=1.0)
+        )
+        assert d.outcome == GateOutcome.ACCEPTED
+        assert d.layer == GateLayer.CIRCUIT_BREAKER
+        assert d.gate is None
+
+    def test_allowed_with_risk_scale_1_is_accepted(self) -> None:
+        # Edge case: allowed + 1.0 — no scaling applied
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(allowed=True, reason="consecutive_losses_ok", risk_scale=1.0)
+        )
+        assert d.outcome == GateOutcome.ACCEPTED
+
+    def test_allowed_empty_reason_defaults_message(self) -> None:
+        d = circuit_breaker_decision_to_gate(FakeCbDecision(allowed=True, reason=""))
+        assert d.outcome == GateOutcome.ACCEPTED
+        assert "checks passed" in d.message.lower()
+
+
+class TestCircuitBreakerRejected:
+    @pytest.mark.parametrize(
+        "reason,expected_gate,expected_detail",
+        [
+            ("in_cooldown:session_profit_lock", "in_cooldown", "session_profit_lock"),
+            ("consecutive_losses", "consecutive_losses", None),
+            ("tiered_loss:5:halt", "tiered_loss", "5:halt"),
+            ("session_drawdown", "session_drawdown", None),
+            ("daily_drawdown", "daily_drawdown", None),
+            ("daily_profit_cap", "daily_profit_cap", None),
+            ("rolling_win_rate", "rolling_win_rate", None),
+            ("position_limits_clustering", "position_limits_clustering", None),
+            ("direction_gating", "direction_gating", None),
+            ("regime_avoidance", "regime_avoidance", None),
+            ("trigger_filters", "trigger_filters", None),
+            ("volatility_filter", "volatility_filter", None),
+            ("tv_paper_eval_gate", "tv_paper_eval_gate", None),
+            ("risk_scale_zero", "risk_scale_zero", None),
+        ],
+    )
+    def test_rejection_maps_to_canonical_gate(
+        self, reason: str, expected_gate: str, expected_detail: Optional[str]
+    ) -> None:
+        d = circuit_breaker_decision_to_gate(FakeCbDecision(allowed=False, reason=reason))
+        assert d.outcome == GateOutcome.REJECTED
+        assert d.layer == GateLayer.CIRCUIT_BREAKER
+        assert d.gate == expected_gate
+        if expected_detail is None:
+            assert "raw_detail" not in d.actual
+        else:
+            assert d.actual["raw_detail"] == expected_detail
+        assert "unknown_gate" not in d.actual
+
+    def test_unknown_reason_is_tagged(self) -> None:
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(allowed=False, reason="moon_phase_blocked:full")
+        )
+        assert d.gate == "moon_phase_blocked"
+        assert d.actual["unknown_gate"] is True
+
+
+class TestCircuitBreakerRiskScaled:
+    def test_risk_scaled_extracts_dominant_gate_from_details(self) -> None:
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(
+                allowed=True,
+                reason="passed_all_checks",
+                risk_scale=0.5,
+                details={"scale_reasons": ["tod:0.50", "equity_curve:0.75"]},
+            )
+        )
+        assert d.outcome == GateOutcome.RISK_SCALED
+        assert d.layer == GateLayer.CIRCUIT_BREAKER
+        assert d.gate == "tod"
+        assert d.risk_scale_applied == 0.5
+        assert d.actual["scale_reasons"] == ["tod:0.50", "equity_curve:0.75"]
+
+    def test_risk_scaled_with_no_scale_reasons_uses_fallback(self) -> None:
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(
+                allowed=True,
+                reason="passed_all_checks",
+                risk_scale=0.75,
+                details={},
+            )
+        )
+        assert d.outcome == GateOutcome.RISK_SCALED
+        assert d.gate == "unknown_scaler"
+
+    def test_risk_scale_zero_with_allowed_false_is_rejected(self) -> None:
+        # CB returns allowed=False + risk_scale=0 when cumulative scaling zeroes out
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(
+                allowed=False,
+                reason="risk_scale_zero",
+                risk_scale=0.0,
+                details={"scale_reasons": ["tod:0.0"]},
+            )
+        )
+        assert d.outcome == GateOutcome.REJECTED
+        assert d.gate == "risk_scale_zero"
+
+
+class TestCircuitBreakerDuckTyping:
+    def test_missing_attrs_default_safely(self) -> None:
+        class Empty:
+            pass
+        d = circuit_breaker_decision_to_gate(Empty())
+        # allowed defaults False
+        assert d.outcome == GateOutcome.REJECTED
+        assert d.gate == "unknown"
+
+    def test_nondict_details_ignored(self) -> None:
+        d = circuit_breaker_decision_to_gate(
+            FakeCbDecision(allowed=True, risk_scale=0.5, details="oops not a dict")  # type: ignore[arg-type]
+        )
+        assert d.outcome == GateOutcome.RISK_SCALED
+        assert d.gate == "unknown_scaler"
+
+    def test_non_numeric_risk_scale_defaults_to_1(self) -> None:
+        class BadScale:
+            allowed = True
+            reason = "passed_all_checks"
+            risk_scale = "nonsense"
+            details: Dict[str, Any] = {}
+        d = circuit_breaker_decision_to_gate(BadScale())
+        assert d.outcome == GateOutcome.ACCEPTED
+
+
+class TestCircuitBreakerGateNamesComplete:
+    def test_all_known_gates_present(self) -> None:
+        expected = {
+            "in_cooldown",
+            "consecutive_losses",
+            "tiered_loss",
+            "session_drawdown",
+            "daily_drawdown",
+            "daily_profit_cap",
+            "rolling_win_rate",
+            "position_limits_clustering",
+            "direction_gating",
+            "regime_avoidance",
+            "trigger_filters",
+            "volatility_filter",
+            "tv_paper_eval_gate",
+            "equity_curve",
+            "tod",
+            "tod_risk_scaling",
+            "volatility",
+            "volatility_risk_scaling",
+            "risk_scale_zero",
+        }
+        assert _CIRCUIT_BREAKER_GATE_NAMES == expected
