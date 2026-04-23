@@ -259,17 +259,22 @@
   letter-spacing: 0.04em;
 }
 
-/* Phone: hide labels — just colored dots, like a status LED row */
+/* Phone: keep abbreviated labels, just tighter spacing so all 5 fit
+   next to the RUN/OPN badges. */
 @media (max-width: 640px) {
   .header-health .info-strip-health {
-    gap: 5px;
+    gap: 4px;
   }
-  .header-health .info-strip-health-label {
-    display: none;
+  .header-health .info-strip-health-dot {
+    gap: 2px;
   }
   .header-health .info-strip-health-marker {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
+  }
+  .header-health .info-strip-health-label {
+    font-size: 8px;
+    letter-spacing: 0;
   }
 }
 
