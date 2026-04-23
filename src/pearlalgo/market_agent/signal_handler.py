@@ -116,6 +116,40 @@ class SignalHandler:
         self._cycle_rejections.clear()
         return snapshot
 
+    def _audit_reject(
+        self,
+        signal: Dict,
+        gate: str,
+        *,
+        actual: Optional[Dict[str, Any]] = None,
+        message: str = "",
+    ) -> None:
+        """Emit a signal_handler-layer rejection audit record.
+
+        Never raises. Safe to call from any gate site — if the audit
+        logger isn't wired, this is a no-op. Used by the whitelist and
+        entry-price-validation gates (Phase 1 observability).
+        """
+        _sa = getattr(self, "_signal_audit_logger", None)
+        if _sa is None:
+            return
+        try:
+            from pearlalgo.market_agent.gate_decision import (
+                GateLayer,
+                rejected as _rejected,
+            )
+            _sa.record(
+                signal,
+                _rejected(
+                    GateLayer.SIGNAL_HANDLER,
+                    gate,
+                    actual=actual or {},
+                    message=message,
+                ),
+            )
+        except Exception:
+            logger.debug("signal_audit emit failed — non-fatal", exc_info=True)
+
     def _is_signal_type_allowed(self, signal: Dict) -> bool:
         """
         Check if the signal type is in the enabled whitelist.
@@ -176,6 +210,12 @@ class SignalHandler:
             # SIGNAL TYPE GATE: Reject signals not in the enabled whitelist
             # ==========================================================================
             if not self._is_signal_type_allowed(signal):
+                self._audit_reject(
+                    signal,
+                    "signal_type_whitelist",
+                    actual={"signal_type": str(signal.get("type", ""))},
+                    message="signal type not in enabled_signal_types whitelist",
+                )
                 return  # Signal type not whitelisted
 
             # ==========================================================================
@@ -442,6 +482,10 @@ class SignalHandler:
             logger.warning(f"Rejecting signal {sid}: entry_price is None")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_none", {})
+            self._audit_reject(
+                signal, "entry_price_none",
+                message="entry_price field is None",
+            )
             return None
         try:
             val = float(raw)
@@ -450,17 +494,31 @@ class SignalHandler:
             logger.warning(f"Rejecting signal {sid}: entry_price={raw!r} is not a valid number")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_invalid", {"value": str(raw)})
+            self._audit_reject(
+                signal, "entry_price_invalid",
+                actual={"value": str(raw)},
+                message="entry_price is not a valid number",
+            )
             return None
         if math.isnan(val) or math.isinf(val):
             self._record_rejection("rejected_invalid_prices")
             logger.warning(f"Rejecting signal {sid}: entry_price is NaN/Inf")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_nan", {})
+            self._audit_reject(
+                signal, "entry_price_nan",
+                message="entry_price is NaN or Inf",
+            )
             return None
         if val <= 0:
             logger.warning(f"Rejecting signal {sid}: entry_price={val} is <= 0")
             if self._audit_logger is not None:
                 self._audit_logger.log_signal_rejected(str(signal_id), "entry_price_non_positive", {"value": str(val)})
+            self._audit_reject(
+                signal, "entry_price_non_positive",
+                actual={"value": val},
+                message="entry_price must be > 0",
+            )
             return None
         return val
 
@@ -585,6 +643,23 @@ class SignalHandler:
             active_positions=active_positions,
             market_data=market_data,
         )
+
+        # Phase 1 observability: record the circuit-breaker decision.
+        # Never block or raise into the signal path.
+        _sa_logger_cb = getattr(self, "_signal_audit_logger", None)
+        if _sa_logger_cb is not None:
+            try:
+                from pearlalgo.market_agent.gate_translators import (
+                    circuit_breaker_decision_to_gate,
+                )
+                _sa_logger_cb.record(
+                    signal, circuit_breaker_decision_to_gate(cb_decision)
+                )
+            except Exception:
+                logger.debug(
+                    "signal_audit_logger.record (CB) failed — non-fatal",
+                    exc_info=True,
+                )
 
         if not cb_decision.allowed:
             signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
