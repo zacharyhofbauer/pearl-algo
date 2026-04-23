@@ -81,6 +81,10 @@ jobs:
         run: |
           python scripts/testing/check_architecture_boundaries.py --enforce
 
+      - name: Test-side trading_bots import guard (Issue 11-A)
+        run: |
+          python scripts/testing/check_test_imports.py
+
       - name: Gate coverage (enforced)
         run: |
           python scripts/testing/check_gate_coverage.py --enforce
