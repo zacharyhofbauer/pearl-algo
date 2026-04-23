@@ -42,6 +42,7 @@ from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.notification_queue import NotificationQueue
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
+from pearlalgo.market_agent.signal_audit_logger import SignalAuditLogger
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.strategies.registry import get_strategy_defaults
 from pearlalgo.utils.logger import logger
@@ -91,6 +92,9 @@ class ServiceDependencies:
     # ---- audit ----
     audit_logger: Optional[AuditLogger] = None
 
+    # ---- observability (Phase 1) ----
+    signal_audit_logger: Optional[SignalAuditLogger] = None
+
     def resolve_defaults(self) -> "ServiceDependencies":
         """Fill in ``None`` fields with sensible production defaults.
 
@@ -134,6 +138,15 @@ class ServiceDependencies:
                 account=_get_audit_account_type(self.service_config),
                 retention_days=int(audit_cfg.get("retention_days", 90)),
                 snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
+            )
+
+        if self.signal_audit_logger is None and self.state_manager is not None:
+            obs_cfg = self.service_config.get("observability", {}) or {}
+            self.signal_audit_logger = SignalAuditLogger(
+                state_dir=self.state_manager.state_dir,
+                enabled=bool(obs_cfg.get("enabled", True)),
+                rotation_bytes=int(obs_cfg.get("rotation_bytes", 20 * 1024 * 1024)),
+                retention_days=int(obs_cfg.get("retention_days", 14)),
             )
 
         return self
@@ -187,6 +200,14 @@ def build_service_dependencies(
         snapshot_retention_days=int(audit_cfg.get("snapshot_retention_days", 365)),
     )
 
+    obs_cfg = service_config.get("observability", {}) or {}
+    signal_audit_logger = SignalAuditLogger(
+        state_dir=state_manager.state_dir if state_manager.state_dir else Path("."),
+        enabled=bool(obs_cfg.get("enabled", True)),
+        rotation_bytes=int(obs_cfg.get("rotation_bytes", 20 * 1024 * 1024)),
+        retention_days=int(obs_cfg.get("retention_days", 14)),
+    )
+
     logger.debug("ServiceDependencies built via factory")
 
     return ServiceDependencies(
@@ -200,4 +221,5 @@ def build_service_dependencies(
         notification_queue=notification_queue,
         health_monitor=health_monitor,
         audit_logger=audit_logger,
+        signal_audit_logger=signal_audit_logger,
     )
