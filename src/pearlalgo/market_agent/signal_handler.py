@@ -699,13 +699,16 @@ class SignalHandler:
                 decision = self.execution_adapter.check_preconditions(signal)
 
                 # Phase 1 observability: record the gate decision.
-                # Never block or raise into the signal path.
-                if self._signal_audit_logger is not None:
+                # Never block or raise into the signal path. getattr guards
+                # against MagicMock(spec=SignalHandler) in tests that don't
+                # initialize instance attributes.
+                _sa_logger = getattr(self, "_signal_audit_logger", None)
+                if _sa_logger is not None:
                     try:
                         from pearlalgo.market_agent.gate_translators import (
                             execution_decision_to_gate,
                         )
-                        self._signal_audit_logger.record(
+                        _sa_logger.record(
                             signal, execution_decision_to_gate(decision)
                         )
                     except Exception:
