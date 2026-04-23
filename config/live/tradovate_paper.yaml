@@ -183,34 +183,18 @@ guardrails:
   # conservative ($300 activation, 35% retracement) and tighten once you've
   # watched it work for a few days.  Uses the BROKER's net realized P&L via
   # sync_broker_pnl, NOT the internal gross accumulator.
-  enable_session_profit_lock: true
+  # Session profit lock DISABLED 2026-04-23: we're in demo-only strategy
+  # iteration mode and don't want auto-kills interrupting full-session data.
+  enable_session_profit_lock: false
   session_profit_lock_activation_usd: 250.0
   session_profit_lock_retracement_pct: 0.25
   session_profit_lock_min_floor_usd: 50.0
   session_profit_lock_cooldown_minutes: 600
-  # Time-of-Day Risk Windows — reduce exposure during historically weak hours
-  enable_tod_risk_scaling: true
-  tod_risk_windows:
-    # Session open chop — data shows -$873 here, near 0% WR
-    - start_hour_et: 18
-      end_hour_et: 20
-      risk_scale: 0.0
-    # Late evening bleed — -$460 at 23:00 UTC
-    - start_hour_et: 22
-      end_hour_et: 23
-      risk_scale: 0.25
-    # Pre-London bleed — -$828 at 04:00-05:00 ET
-    - start_hour_et: 4
-      end_hour_et: 6
-      risk_scale: 0.25
-    # NY open chop — -$468 at 08:00-10:00 ET
-    - start_hour_et: 8
-      end_hour_et: 10
-      risk_scale: 0.25
-    # Afternoon give-back
-    - start_hour_et: 15
-      end_hour_et: 16
-      risk_scale: 0.5
+  # Time-of-Day Risk Windows DISABLED 2026-04-23: demo-only iteration; we want
+  # full-size trades across all hours so we can evaluate strategy behavior on
+  # the historically losing windows, not just the winning ones.
+  enable_tod_risk_scaling: false
+  tod_risk_windows: []
   # Volatility Risk Scaling — cut size when ATR expands
   enable_volatility_risk_scaling: true
   volatility_high_atr_ratio: 1.5
@@ -293,10 +277,13 @@ virtual_pnl:
   notify_exit: true
 
 auto_flat:
+  # Daily auto-flat DISABLED 2026-04-23: demo-only iteration; we want to allow
+  # overnight holds so strategies can be evaluated across the full 24h cycle.
+  # Friday-flat stays on to avoid weekend gap risk if we ever re-enable live.
   enabled: true
-  daily_enabled: true
+  daily_enabled: false
   daily_time: '16:00'
-  friday_enabled: false
+  friday_enabled: true
   friday_time: '16:55'
   weekend_enabled: false
   timezone: America/New_York
