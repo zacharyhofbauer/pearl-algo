@@ -1,0 +1,78 @@
+# Pearl-Algo — W13-revert strategy overlay
+#
+# Drop-in candidate for `pearl.sh backtest-config`. Produces the
+# `strategies.composite_intraday` block that was live during Week 13
+# (2026-03-30 through 2026-04-01) — the only profitable week in the
+# 717-trade history as of 2026-04-23. Full analysis:
+# docs/audits/2026-04-23-ibkr-era-baseline-reconstruction.md.
+#
+# Usage:
+#   1. Confirm PR #43 is merged and the candle archive is backfilled.
+#   2. Replay this candidate vs current live:
+#        ./pearl.sh backtest-config config/candidates/w13_revert_strategy_overlay.yaml \
+#           --days 30 --json > docs/audits/w13_revert_replay.json
+#        ./pearl.sh backtest-config config/live/tradovate_paper.yaml \
+#           --days 30 --json > docs/audits/current_replay.json
+#   3. Compare scorecards. Do NOT re-arm a config that only wins in one
+#      regime — demand >=60 replay trades spanning multiple regime
+#      transitions.
+#
+# NOT a full standalone config. The overlay keeps account / session /
+# execution / guardrails / risk / data blocks AT CURRENT LIVE VALUES
+# because those are the safety scaffold the Phase-1 demo re-arm depends
+# on. Only `strategies.composite_intraday` reverts to the W13 shape.
+
+strategies:
+  composite_intraday:
+    # W13 winners: 92 trades, +1,203.7 pt, 47.8% WR, +13.08 pt/trade
+    # expectancy. See audit doc section "Week 13 (winner) vs Week 15-16
+    # (loser) — head-to-head".
+    ema_fast: 9
+    ema_slow: 21
+    # CRITICAL: confidence floor 0.40 (not 0.55 / 0.60). The April-10
+    # audit bumped this to 0.55 citing "IBKR-era 0.55 floor" — no such
+    # data exists in this repo's trades.db.
+    min_confidence: 0.40
+    min_confidence_long: 0.40
+    min_confidence_short: 0.40
+    # CRITICAL: SL / TP ATR multipliers 1.5 / 2.5 (not 2.5 / 4.0). The
+    # April-10 audit widened these citing "IBKR-era avg SL 54pt / TP
+    # 80pt" — not supported by this repo's data. W13 ran tighter stops
+    # and won.
+    stop_loss_atr_mult: 1.5
+    take_profit_atr_mult: 2.5
+    volatile_sl_mult: 1.3
+    volatile_tp_mult: 1.3
+    ranging_sl_mult: 0.8
+    ranging_tp_mult: 0.7
+    allow_vwap_cross_entries: true
+    allow_vwap_retest_entries: true
+    allow_trend_momentum_entries: true
+    trend_momentum_atr_mult: 0.5
+    allow_trend_breakout_entries: true
+    trend_breakout_lookback_bars: 5
+    volume_ma_length: 20
+    sr_length: 130
+    sr_atr_mult: 0.5
+    tbt_period: 10
+    tbt_trend_type: wicks
+    sd_threshold_pct: 10.0
+    sd_resolution: 50
+    vwap_std_dev: 1.0
+    # CRITICAL: all three triggers ENABLED. The April-10 audit disabled
+    # these citing "they fire rarely (2 SMC trades in 173)" — but in
+    # W13, SMC delivered +220.4 pt on just 2 trades (avg +110 pt) and
+    # the absence of ORB / VWAP-2SD signals coincided with the
+    # expectancy collapse.
+    allow_orb_entries: true
+    allow_vwap_2sd_entries: true
+    allow_smc_entries: true
+    adx_period: 14
+    adx_trending_threshold: 25.0
+    adx_ranging_threshold: 20.0
+
+# Note: this overlay only touches `strategies.composite_intraday`.
+# `signals.enabled_signal_types`, `session`, `execution`, `guardrails`,
+# and `risk` stay whatever the live YAML specifies, so the Phase-1
+# demo safety scaffold (max_daily_loss=$120, 1 contract, RTH-only,
+# max_consecutive_losses=2) remains enforced when this overlay is used.
