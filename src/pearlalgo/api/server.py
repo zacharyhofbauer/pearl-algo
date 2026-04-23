@@ -1583,6 +1583,84 @@ async def get_candles(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/candles/range")
+async def get_candles_range(
+    symbol: str = Query(default="MNQ", description="Symbol"),
+    timeframe: str = Query(default="5m", description="Timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)"),
+    from_ts: Optional[int] = Query(
+        default=None,
+        description="Inclusive lower bound on bar-open unix seconds (UTC). Omit for open-ended.",
+    ),
+    to_ts: Optional[int] = Query(
+        default=None,
+        description="Inclusive upper bound on bar-open unix seconds (UTC). Omit for open-ended.",
+    ),
+    limit: int = Query(default=1000, ge=1, le=5000, description="Max rows to return"),
+    _key: Optional[str] = Depends(verify_api_key),
+):
+    """Read OHLCV bars from the cumulative archive (``candles.db``).
+
+    Unlike ``/api/candles`` which returns the last N bars from the live
+    data provider (rolling window), this endpoint serves historical
+    ranges from the SQLite archive. Designed for the chart's lazy-load
+    on pan-left (Phase 3) and for backtesting tools.
+
+    Response shape matches ``/api/candles``:
+      [{"time": 1706500000, "open": 26200, "high": 26210,
+        "low": 26195, "close": 26205, "volume": 123}, ...]
+    Ordered ascending by ``time``. Empty list if the range has no bars.
+    """
+    try:
+        from pearlalgo.persistence.candle_archive import (
+            ACCEPTED_TFS,
+            get_archive,
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"archive module unavailable: {e}")
+
+    tf_norm = timeframe.lower()
+    if tf_norm not in ACCEPTED_TFS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported timeframe {timeframe!r}; use one of {sorted(ACCEPTED_TFS)}",
+        )
+
+    try:
+        rows = get_archive().query_range(
+            symbol=symbol, tf=tf_norm,
+            ts_from=from_ts, ts_to=to_ts, limit=limit,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"archive query failed: {e}")
+
+    return JSONResponse(
+        content=rows,
+        headers={"X-Data-Source": "archive"},
+    )
+
+
+@app.get("/api/candles/coverage")
+async def get_candles_coverage(
+    _key: Optional[str] = Depends(verify_api_key),
+):
+    """Per-(symbol, tf) coverage summary for the archive.
+
+    Returns a list of rows describing how much history each pair has,
+    so the chart can make informed decisions about how far back it can
+    request before falling off the corpus (and the IBKR historical
+    backfill path — Phase 4 — knows what still needs filling).
+
+    Response shape:
+      [{"symbol": "MNQ", "tf": "5m", "n": 1301,
+        "min_ts": 1773806100, "max_ts": 1776915900}, ...]
+    """
+    try:
+        from pearlalgo.persistence.candle_archive import get_archive
+        return JSONResponse(content=get_archive().coverage())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"archive coverage failed: {e}")
+
+
 def _get_trading_day_start() -> datetime:
     """Delegate to shared stats_computation module (single source of truth)."""
     return _shared_get_trading_day_start()

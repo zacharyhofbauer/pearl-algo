@@ -306,6 +306,53 @@ class TestCandlesEndpoint:
         assert "detail" in body
 
 
+class TestCandlesArchiveEndpoints:
+    """Tests for the archive-backed /api/candles/range and /api/candles/coverage."""
+
+    @pytest.mark.usefixtures("_patch_server")
+    def test_range_returns_archive_bars(self, client, tmp_path, monkeypatch):
+        from pearlalgo.persistence import candle_archive as ca
+        monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "candles.db"))
+        ca.reset_for_tests()
+        arc = ca.get_archive()
+        arc.append_bars(symbol="MNQ", tf="5m", bars=[
+            {"time": 1000 + i * 300, "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.5, "volume": 10}
+            for i in range(5)
+        ])
+
+        resp = client.get("/api/candles/range?symbol=MNQ&timeframe=5m&from_ts=1000&to_ts=2200")
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Data-Source") == "archive"
+        body = resp.json()
+        assert len(body) == 5
+        assert body[0]["time"] == 1000
+        assert body[-1]["time"] == 2200
+        ca.reset_for_tests()
+
+    @pytest.mark.usefixtures("_patch_server")
+    def test_range_rejects_bad_tf(self, client):
+        resp = client.get("/api/candles/range?symbol=MNQ&timeframe=42s")
+        assert resp.status_code == 400
+        assert "timeframe" in resp.json()["detail"].lower()
+
+    @pytest.mark.usefixtures("_patch_server")
+    def test_coverage_lists_symbol_tf(self, client, tmp_path, monkeypatch):
+        from pearlalgo.persistence import candle_archive as ca
+        monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "candles.db"))
+        ca.reset_for_tests()
+        arc = ca.get_archive()
+        arc.append_bars(symbol="MNQ", tf="1m", bars=[
+            {"time": 100, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 0},
+            {"time": 200, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 0},
+        ])
+        resp = client.get("/api/candles/coverage")
+        assert resp.status_code == 200
+        cov = resp.json()
+        assert any(r["symbol"] == "MNQ" and r["tf"] == "1m" and r["n"] == 2 for r in cov)
+        ca.reset_for_tests()
+
+
 # ---------------------------------------------------------------------------
 # 8. Error response format — invalid auth returns proper JSON error
 # ---------------------------------------------------------------------------
