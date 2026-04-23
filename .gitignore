@@ -66,6 +66,9 @@ live-chart/.next/
 live-chart/node_modules/
 *.tsbuildinfo
 
+# Jest coverage output (webapp)
+apps/pearl-algo-app/coverage/
+
 # Editors/OS
 .DS_Store
 .idea/
