@@ -210,3 +210,38 @@ Note: W13's 91/92 long bias means the revert may underperform in a trending-down
 **Medium** on W13 being a reproducible baseline — 92 trades with 91/92 directional bias means the regime was favorable. A 30-day backtest-config replay is the right way to validate the revert against modern data.
 
 **Low** on the April-10 audit's "IBKR-era" attribution being meaningful — the numbers in the inline comments don't match this repo's history, so they were either pulled from a different codebase or approximated. Either way, they are not the target.
+
+---
+
+## Addendum — 2026-04-23 preview replay (experimental, low fidelity)
+
+Before merge, ran an experimental replay on the Beelink using the PR #43 script (temp-copied, since PR not merged) against the existing 5m candle archive seeded from legacy JSON caches via `scripts/ops/ingest_existing_caches.py` (5,931 candles, ~6 months with gaps). Scripts + candidate overlay were cleaned up after; no lasting changes to the Beelink.
+
+| Metric | Current live | W13-revert overlay | Delta |
+|---|---|---|---|
+| Signals generated | 348 | 865 | +148 % |
+| Trades opened | 342 | 842 | +146 % |
+| Win rate | 52.3 % | 48.3 % | −4 pp |
+| **Total points** | **+198.98** | **−403.07** | **−602 pt worse** |
+| Expectancy | +0.58 pt / trade | −0.48 pt / trade | sign flipped |
+| Max drawdown | 108 pt | 686 pt | 6× worse |
+
+**The W13 revert lost money in this replay** even though it won in W13's live market. The audit's caveat held: regime dependency is real.
+
+**Do not** act on this addendum's numbers as-is. The replay has four named fidelity gaps:
+
+1. **No slippage model.** Both results are flattered vs reality. Add this in a follow-up before any re-arm decision.
+2. **Hold-time distribution mismatches live.** 784 of 842 W13-revert trades "timed out" (hit nothing before the window edge), vs live `trades.db` showing 28-min avg hold. The first-touch SL/TP model is not faithfully matching production signal resolution.
+3. **Per-trigger attribution came back as mostly `unknown`.** The replay's `entry_trigger` field is not surfacing from `generate_signals` output, so the per-trigger breakdown (where W13's profit was concentrated) cannot be validated.
+4. **Archive coverage is from JSON-cache ingest, not a proper IBKR backfill.** Coverage likely has gaps. A full `scripts/ops/backfill_ibkr_historical.py --days 90` run is the first operator task after PR #43 merges.
+
+**Revised re-prime flow** (supersedes the earlier section's step 5):
+
+5. **Do not re-arm on either config based on the current replay.** Instead:
+   - a. After PR #43 + #52 merge, backfill the Beelink archive properly (≥60 days of 1m + 5m).
+   - b. Add a simple slippage model to `backtest_config.py` (e.g., enter at close + 0.25 pt penalty, exit at SL + 0.25 pt, exit at TP − 0.25 pt).
+   - c. Fix trigger attribution on the replay output so the per-trigger breakdown matches the live `trades.db` format.
+   - d. Re-run both configs AND try intermediate candidates (e.g., current config with `allow_orb_entries=true` re-enabled; current thresholds with SL/TP narrowed to 2.0/3.5; etc.).
+   - e. Only consider re-arm if *some* candidate produces a replay scorecard with all of: win rate ≥ 45 %, expectancy ≥ 2 pt/trade post-slippage, max-DD ≤ 200 pt, ≥ 60 trades across multiple regime transitions.
+
+The preview replay has done its job — it prevented a confident revert to what would have been a losing config. The path forward is tooling improvement before config tuning.
