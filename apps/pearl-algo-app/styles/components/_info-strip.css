@@ -309,17 +309,14 @@
 }
 
 @media (max-width: 480px) {
-  /* Phone: keep the existing flex-wrap layout. Don't restructure —
-     just scale values up so the text earns the width and the dead
-     space on the right disappears naturally. Bold values + tiny
-     labels is the Bloomberg pattern. */
+  /* Phone: match the text sizing of the chart's OHLC bar (~10-11px
+     values, 9px labels). Sections take full row width so chips and
+     dots fill the viewport end-to-end. */
   .info-strip {
     padding: 2px 8px;
-    gap: 6px;
+    gap: 4px;
     row-gap: 2px;
   }
-  /* Each section owns a full-width row so the chip grid and health
-     dots fill the viewport instead of clustering to the left. */
   .info-strip-equity,
   .info-strip-risk,
   .info-strip-health {
@@ -332,57 +329,52 @@
     justify-content: space-between;
   }
   .info-strip-equity-spark {
-    width: 80px;
-    height: 26px;
+    width: 56px;
+    height: 18px;
   }
-  /* Put the headline and mini stats on one line so the equity row
-     actually fills the width instead of stacking into a narrow column
-     with dead space on the right. */
   .info-strip-equity-stats {
     flex-direction: row;
     align-items: baseline;
     flex-wrap: wrap;
-    gap: 2px 10px;
+    gap: 1px 10px;
   }
   .info-strip-equity-headline {
     gap: var(--space-1);
   }
   .info-strip-equity-value {
-    font-size: 18px;
+    font-size: 12px;
     line-height: 1.1;
   }
   .info-strip-mini-value {
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.1;
   }
   .info-strip-risk-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
+    gap: 3px;
     width: 100%;
   }
   .info-strip-chip {
-    padding: 3px 6px;
+    padding: 1px 5px;
     min-width: 0;
     gap: 4px;
   }
   .info-strip-chip-value {
-    font-size: 14px;
+    font-size: 11px;
     line-height: 1.1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .info-strip-health-dot {
-    padding: 1px 2px;
+    padding: 0;
     gap: 4px;
   }
-  .info-strip-health-label {
-    font-size: 11px;
-  }
   .info-strip-mini-label,
-  .info-strip-chip-label {
-    font-size: 10px;
+  .info-strip-chip-label,
+  .info-strip-health-label {
+    font-size: 9px;
     line-height: 1.1;
   }
 }
