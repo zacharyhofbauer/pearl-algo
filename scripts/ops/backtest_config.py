@@ -185,8 +185,23 @@ def simulate_exit(
     trade: SimTrade,
     future_candles: List[Dict[str, Any]],
     max_hold_minutes: int,
+    *,
+    slippage_points: float = 0.25,
 ) -> None:
-    """Close ``trade`` using a first-touch SL/TP model, or time out."""
+    """Close ``trade`` using a first-touch SL/TP model, or time out.
+
+    Issue #53 fidelity upgrade: applies ``slippage_points`` to every
+    SL / TP fill so the replay scorecard reflects real broker behavior
+    rather than the optimistic at-the-exact-trigger fill. MNQ tick is
+    0.25, so the default of 0.25 pt is one adverse tick — conservative
+    but not catastrophic.
+
+    Slippage direction:
+      - SL hit: exit_price moves AWAY from entry (worse for trader).
+      - TP hit: exit_price moves AWAY from entry (worse — you don't get
+        quite the target you asked for).
+      - Timeout: apply no slippage (market close, no adverse move).
+    """
     entry_ts = trade.entry_time
     deadline = entry_ts + max_hold_minutes * 60
 
@@ -198,23 +213,23 @@ def simulate_exit(
         lo = float(bar["low"])
         if trade.direction == "long":
             if lo <= trade.stop_loss:
-                trade.exit_price = trade.stop_loss
+                trade.exit_price = trade.stop_loss - slippage_points
                 trade.exit_reason = "sl"
                 trade.exit_time = bar_ts
                 return
             if hi >= trade.take_profit:
-                trade.exit_price = trade.take_profit
+                trade.exit_price = trade.take_profit - slippage_points
                 trade.exit_reason = "tp"
                 trade.exit_time = bar_ts
                 return
         else:  # short
             if hi >= trade.stop_loss:
-                trade.exit_price = trade.stop_loss
+                trade.exit_price = trade.stop_loss + slippage_points
                 trade.exit_reason = "sl"
                 trade.exit_time = bar_ts
                 return
             if lo <= trade.take_profit:
-                trade.exit_price = trade.take_profit
+                trade.exit_price = trade.take_profit + slippage_points
                 trade.exit_reason = "tp"
                 trade.exit_time = bar_ts
                 return
@@ -243,6 +258,22 @@ def _tf_minutes(tf: str) -> int:
     raise ValueError(f"unsupported timeframe: {tf!r}")
 
 
+def _extract_trigger(sig: Dict[str, Any]) -> str:
+    """Issue #53: robust trigger-attribution for the replay scorecard.
+
+    ``generate_signals`` emits ``entry_trigger`` for directional signals
+    and also sets ``signal_type`` / ``type`` / ``signal_source`` on every
+    signal. Prefer the most-specific label available; fall back through
+    the chain before giving up on "unknown" so per-trigger breakdowns
+    are actually actionable.
+    """
+    for key in ("entry_trigger", "signal_type", "type", "signal_source"):
+        value = sig.get(key)
+        if value and str(value).strip() and str(value).strip() != "unknown":
+            return str(value).strip()
+    return "unknown"
+
+
 def run_backtest(
     config_path: Path,
     *,
@@ -252,12 +283,19 @@ def run_backtest(
     warmup_bars: int = 120,
     max_hold_minutes: int = 180,
     max_concurrent: int = 1,
+    slippage_points: float = 0.25,
 ) -> Dict[str, Any]:
     """Replay the archive through ``config_path`` and return the scorecard dict."""
     import pandas as pd
-    from pearlalgo.config.config_loader import load_service_config
+    from pearlalgo.config.config_loader import (
+        build_strategy_config_from_yaml,
+        load_service_config,
+    )
     from pearlalgo.persistence.candle_archive import get_archive
-    from pearlalgo.trading_bots.signal_generator import generate_signals
+    from pearlalgo.trading_bots.signal_generator import (
+        CONFIG as _DEFAULT_STRATEGY_CONFIG,
+        generate_signals,
+    )
 
     tf_min = _tf_minutes(tf)
     now_ts = int(time.time())
@@ -276,8 +314,13 @@ def run_backtest(
             "warmup_bars": warmup_bars,
         }
 
-    merged = load_service_config(config_path=str(config_path), validate=False)
-    merged = dict(merged)
+    # Issue #53: flatten active-strategy params to root so generate_signals
+    # gets the call shape it expects (matches what the live service does
+    # via config_loader.build_strategy_config). Previously a raw
+    # load_service_config caused KeyError('min_risk_reward') because the
+    # value lives under ``signals.min_risk_reward`` not the root.
+    raw = load_service_config(config_path=str(config_path), validate=False)
+    merged = build_strategy_config_from_yaml(dict(_DEFAULT_STRATEGY_CONFIG), raw)
     merged.setdefault("symbol", symbol)
     merged.setdefault("timeframe", tf)
 
@@ -304,7 +347,11 @@ def run_backtest(
         # Close any open trades that resolved between the previous bar and this one.
         still_open = []
         for trade in open_trades:
-            simulate_exit(trade, [bar], max_hold_minutes=max_hold_minutes)
+            simulate_exit(
+                trade, [bar],
+                max_hold_minutes=max_hold_minutes,
+                slippage_points=slippage_points,
+            )
             if trade.is_closed:
                 scorecard.record(trade, tf_min)
                 closed_trades.append(trade)
@@ -317,14 +364,22 @@ def run_backtest(
             if len(open_trades) >= max_concurrent:
                 break
             entry_price = float(sig.get("entry_price") or bar["close"])
+            # Issue #53: apply entry slippage too. For a long, the real
+            # fill at market is ~1 tick above the last print; for a
+            # short, ~1 tick below. Mirror the live-broker bias.
+            direction = str(sig.get("direction") or "long")
+            if direction == "long":
+                entry_price += slippage_points
+            else:
+                entry_price -= slippage_points
             stop = sig.get("stop_loss")
             take = sig.get("take_profit")
             if stop is None or take is None:
                 continue
             trade = SimTrade(
                 signal_id=str(sig.get("signal_id") or f"sim-{i}-{len(closed_trades)}"),
-                trigger=str(sig.get("entry_trigger") or sig.get("signal_type") or "unknown"),
-                direction=str(sig.get("direction") or "long"),
+                trigger=_extract_trigger(sig),
+                direction=direction,
                 entry_time=int(bar["time"]),
                 entry_price=entry_price,
                 stop_loss=float(stop),
@@ -337,7 +392,11 @@ def run_backtest(
     if rows:
         tail = [rows[-1]]
         for trade in open_trades:
-            simulate_exit(trade, tail, max_hold_minutes=max_hold_minutes)
+            simulate_exit(
+                trade, tail,
+                max_hold_minutes=max_hold_minutes,
+                slippage_points=slippage_points,
+            )
             if trade.is_closed:
                 scorecard.record(trade, tf_min)
                 closed_trades.append(trade)
@@ -351,6 +410,7 @@ def run_backtest(
         "warmup_bars": warmup_bars,
         "max_hold_minutes": max_hold_minutes,
         "max_concurrent": max_concurrent,
+        "slippage_points": slippage_points,
         "candles_processed": len(rows),
         "signals_generated": total_signals,
         "trades_opened": len(closed_trades),
@@ -371,6 +431,10 @@ def _format_scorecard_text(sc: Dict[str, Any]) -> str:
     lines.append(
         f"Signals generated: {m.get('signals_generated')} | Trades opened: {m.get('trades_opened')}"
     )
+    slippage = m.get("slippage_points")
+    if slippage is not None:
+        flag = "(NO-SLIPPAGE — results flattered)" if slippage == 0 else ""
+        lines.append(f"Slippage applied: {slippage} pts / side {flag}")
     lines.append("")
     lines.append(f"Entries:         {sc['entries']}")
     lines.append(f"Wins / Losses:   {sc['wins']} / {sc['losses']}  (timeouts: {sc['timeouts']})")
@@ -409,6 +473,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--warmup-bars", type=int, default=120)
     parser.add_argument("--max-hold-minutes", type=int, default=180)
     parser.add_argument("--max-concurrent", type=int, default=1)
+    parser.add_argument(
+        "--slippage-points",
+        type=float,
+        default=0.25,
+        help=(
+            "Adverse fill slippage applied to SL / TP / entry (default 0.25 "
+            "= one MNQ tick). Set to 0.0 to reproduce the pre-#53 "
+            "no-slippage behavior (not recommended — flatters scorecards)."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON scorecard on stdout")
     args = parser.parse_args(argv)
 
@@ -420,6 +494,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         warmup_bars=args.warmup_bars,
         max_hold_minutes=args.max_hold_minutes,
         max_concurrent=args.max_concurrent,
+        slippage_points=args.slippage_points,
     )
 
     if args.json:

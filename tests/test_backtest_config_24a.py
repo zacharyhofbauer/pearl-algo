@@ -96,7 +96,7 @@ def test_simulate_exit_long_hits_take_profit(mod):
         _bar(160, 100.5, 101.0, 100.0, 100.2),
         _bar(220, 100.2, 110.5, 100.0, 110.3),  # TP hit (high >= tp)
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "tp"
     assert trade.exit_price == trade.take_profit
     assert trade.exit_time == 220
@@ -108,7 +108,7 @@ def test_simulate_exit_long_hits_stop_loss_before_tp(mod):
         _bar(160, 100.5, 101.0, 94.5, 94.8),  # SL hit first (low <= sl)
         _bar(220, 94.8, 112.0, 94.0, 111.0),  # would be TP but already exited
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "sl"
     assert trade.exit_price == trade.stop_loss
 
@@ -119,7 +119,7 @@ def test_simulate_exit_short_hits_take_profit(mod):
         _bar(160, 100.5, 101.0, 95.0, 96.0),
         _bar(220, 96.0, 96.5, 89.0, 89.5),  # low <= tp
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "tp"
     assert trade.exit_price == trade.take_profit
 
@@ -129,7 +129,7 @@ def test_simulate_exit_short_hits_stop_loss(mod):
     bars = [
         _bar(160, 100.5, 105.5, 100.0, 105.2),  # high >= sl
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "sl"
     assert trade.exit_price == trade.stop_loss
 
@@ -142,7 +142,7 @@ def test_simulate_exit_times_out(mod):
         _bar(1800, 100.2, 100.7, 99.8, 100.5),
         _bar(3700, 100.5, 100.7, 99.8, 100.3),  # past deadline
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=60)
+    mod.simulate_exit(trade, bars, max_hold_minutes=60, slippage_points=0.0)
     assert trade.exit_reason == "timeout"
     assert trade.exit_time == 3700
 
@@ -153,7 +153,7 @@ def test_simulate_exit_falls_off_end_without_touch(mod):
         _bar(60, 100.5, 100.6, 99.9, 100.2),
         _bar(120, 100.2, 100.5, 99.8, 100.1),
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "timeout"
     assert trade.exit_price == 100.1  # last close
 
@@ -164,9 +164,103 @@ def test_simulate_exit_ignores_bars_before_entry(mod):
         _bar(100, 100.0, 120.0, 90.0, 110.0),  # before entry — must be ignored
         _bar(260, 110.0, 111.0, 110.0, 110.5),  # after entry, TP hit at high >= 110
     ]
-    mod.simulate_exit(trade, bars, max_hold_minutes=180)
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
     assert trade.exit_reason == "tp"
     assert trade.exit_time == 260
+
+
+# ---------------------------------------------------------------------------
+# Issue #53: slippage model
+# ---------------------------------------------------------------------------
+
+
+def test_slippage_shaves_long_tp_fill(mod):
+    trade = _long_trade(mod)  # entry 100, TP 110
+    bars = [_bar(220, 100.2, 110.5, 100.0, 110.3)]
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.25)
+    # TP is 110.0, long fill is TP - slippage
+    assert trade.exit_reason == "tp"
+    assert trade.exit_price == pytest.approx(109.75)
+
+
+def test_slippage_deepens_long_sl_fill(mod):
+    trade = _long_trade(mod)  # entry 100, SL 95
+    bars = [_bar(160, 100.5, 101.0, 94.5, 94.8)]
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.25)
+    # SL is 95.0, long fill is SL - slippage (worse for trader)
+    assert trade.exit_reason == "sl"
+    assert trade.exit_price == pytest.approx(94.75)
+
+
+def test_slippage_shaves_short_tp_fill(mod):
+    trade = _short_trade(mod)  # entry 100, TP 90
+    bars = [_bar(220, 96.0, 96.5, 89.0, 89.5)]
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.25)
+    assert trade.exit_reason == "tp"
+    assert trade.exit_price == pytest.approx(90.25)  # TP + slippage for short
+
+
+def test_slippage_deepens_short_sl_fill(mod):
+    trade = _short_trade(mod)  # entry 100, SL 105
+    bars = [_bar(160, 100.5, 105.5, 100.0, 105.2)]
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.25)
+    assert trade.exit_reason == "sl"
+    assert trade.exit_price == pytest.approx(105.25)  # SL + slippage for short
+
+
+def test_slippage_zero_reproduces_pre_53_behavior(mod):
+    trade = _long_trade(mod)
+    bars = [_bar(220, 100.2, 110.5, 100.0, 110.3)]
+    mod.simulate_exit(trade, bars, max_hold_minutes=180, slippage_points=0.0)
+    assert trade.exit_price == trade.take_profit
+
+
+def test_slippage_not_applied_on_timeout(mod):
+    trade = _long_trade(mod, entry_ts=0)
+    bars = [
+        _bar(60, 100.5, 100.6, 99.9, 100.2),
+        _bar(3700, 100.5, 100.7, 99.8, 100.3),  # past deadline
+    ]
+    mod.simulate_exit(trade, bars, max_hold_minutes=60, slippage_points=0.25)
+    assert trade.exit_reason == "timeout"
+    # Timeout fills at the bar close; no slippage applied (market close, no adverse move).
+    assert trade.exit_price == 100.3
+
+
+# ---------------------------------------------------------------------------
+# Issue #53: trigger attribution
+# ---------------------------------------------------------------------------
+
+
+def test_extract_trigger_prefers_entry_trigger(mod):
+    sig = {"entry_trigger": "ema_cross", "signal_type": "pearlbot_pinescript"}
+    assert mod._extract_trigger(sig) == "ema_cross"
+
+
+def test_extract_trigger_falls_back_to_signal_type(mod):
+    sig = {"signal_type": "smc_fvg", "type": "pearlbot_pinescript"}
+    assert mod._extract_trigger(sig) == "smc_fvg"
+
+
+def test_extract_trigger_falls_back_to_type(mod):
+    sig = {"type": "pearlbot_pinescript"}
+    assert mod._extract_trigger(sig) == "pearlbot_pinescript"
+
+
+def test_extract_trigger_falls_back_to_signal_source(mod):
+    sig = {"signal_source": "orb"}
+    assert mod._extract_trigger(sig) == "orb"
+
+
+def test_extract_trigger_returns_unknown_when_all_missing(mod):
+    assert mod._extract_trigger({}) == "unknown"
+
+
+def test_extract_trigger_skips_empty_or_unknown_values(mod):
+    """An explicit empty string or the literal 'unknown' should fall through
+    to the next key rather than block the real label below."""
+    sig = {"entry_trigger": "", "signal_type": "unknown", "type": "pearlbot_pinescript"}
+    assert mod._extract_trigger(sig) == "pearlbot_pinescript"
 
 
 # ---------------------------------------------------------------------------
