@@ -314,6 +314,15 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 logger.warning(f"Orphaned stop reattach attempt {attempt + 1} failed: {e}")
                 return False
         logger.error("❌ Failed to reattach orphaned stop after max attempts — ALERT NEEDED")
+        # Issue 14-A: same reasoning as reconnect-give-up. If we give up
+        # reattaching the orphaned stop, the live position is unprotected.
+        # Write kill_request.flag so the agent flattens as soon as it can
+        # and disarm the adapter so it does not accept new signals.
+        self._request_kill_switch_on_failure(
+            reason="orphaned_stop_retry_exhausted",
+            source="_reattach_orphaned_stop_on_connect_with_retry",
+            context={"max_attempts": max_attempts},
+        )
         return False
 
     async def _verify_bracket_placed(self, order_id: str, signal_id: str) -> bool:
@@ -1099,6 +1108,66 @@ class TradovateExecutionAdapter(ExecutionAdapter):
                 signal_id="kill_flatten", error_message=str(e),
             )]
 
+    def _request_kill_switch_on_failure(
+        self,
+        reason: str,
+        source: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Best-effort kill-switch request when an auto-recovery path gives up.
+
+        Issue 14-A: prior to this method, reconnect-loop give-up and the
+        orphaned-stop retry exhaustion only logged ``CRITICAL`` and waited
+        for the operator. An open position during those windows was
+        unprotected. Now:
+
+        1. The adapter is immediately disarmed so any in-flight signal
+           cannot place new orders.
+        2. ``kill_request.flag`` is written into the canonical state
+           directory (``pearlalgo.utils.paths.get_state_dir()``). The
+           agent's ``execution_flags`` watcher consumes the flag on its
+           next cycle and calls ``flatten_all_positions()``. The flag is
+           durable, so even if Tradovate is still unreachable, the
+           command is queued for when connectivity returns.
+
+        Residual exposure: while Tradovate itself is unreachable, the
+        flag is queued but cannot physically close positions. Logged as
+        CRITICAL so the operator knows. This is the best outcome
+        achievable without a second execution adapter.
+        """
+        try:
+            self.disarm()
+        except Exception as e:  # disarm must never mask the kill-switch write
+            logger.error(f"Kill-switch disarm failed: {e}", exc_info=True)
+
+        try:
+            from pearlalgo.utils.paths import ensure_state_dir
+
+            state_dir = ensure_state_dir()
+            kill_file = state_dir / "kill_request.flag"
+            payload: Dict[str, Any] = {
+                "reason": reason,
+                "source": source,
+                "requested_at_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            if context:
+                payload["context"] = context
+            kill_file.write_text(json.dumps(payload), encoding="utf-8")
+            logger.critical(
+                "🚨 KILL SWITCH: Tradovate adapter wrote %s (reason=%s, source=%s). "
+                "Agent will flatten on next cycle.",
+                kill_file,
+                reason,
+                source,
+            )
+        except Exception as e:
+            # Non-fatal — the disarm above still prevents new orders.
+            logger.error(
+                "Kill-switch flag write failed (adapter disarmed anyway): %s",
+                e,
+                exc_info=True,
+            )
+
     # ── Position queries ──────────────────────────────────────────────
 
     async def get_positions(self, force_rest: bool = False) -> List[Position]:
@@ -1585,6 +1654,16 @@ class TradovateExecutionAdapter(ExecutionAdapter):
         logger.critical(
             f"Tradovate reconnection FAILED after {max_attempts} attempts — "
             f"manual restart required"
+        )
+        # Issue 14-A: disarm + write kill_request.flag so the agent's
+        # execution_flags watcher runs flatten_all_positions() the moment
+        # connectivity returns. Previously this path waited on the
+        # operator; an open position during the 72-minute give-up window
+        # could lose real money with no bracket.
+        self._request_kill_switch_on_failure(
+            reason="tradovate_reconnect_gave_up",
+            source="_reconnect_loop",
+            context={"max_attempts": max_attempts},
         )
 
     # ── Status ────────────────────────────────────────────────────────
