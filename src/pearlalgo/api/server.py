@@ -29,7 +29,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Thread pool for running blocking I/O (data provider calls, file reads)
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -657,7 +657,7 @@ def _per_key_cache_path(key: str) -> Path:
 
 
 def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
-    """Save candles to cache (memory and per-key disk file)."""
+    """Save candles to cache (memory, per-key disk file, SQLite archive)."""
     _candle_cache_set(key, candles)
 
     # Persist to a per-key file for crash-safe restarts
@@ -670,6 +670,44 @@ def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
         })
     except Exception as e:
         logger.debug(f"Cache write failures are not critical: {e}")
+
+    # Persist to the cumulative candle archive (SQLite) so bars older
+    # than the rolling window aren't lost. Idempotent INSERT OR REPLACE
+    # keyed on (symbol, tf, ts). Failure here is non-fatal — the live
+    # JSON cache above still guarantees the agent sees fresh bars.
+    try:
+        symbol, tf, _n = _parse_candle_cache_key(key)
+        if symbol and tf:
+            from pearlalgo.persistence.candle_archive import get_archive
+            get_archive().append_bars(
+                symbol=symbol, tf=tf, bars=candles, source="ibkr_live",
+            )
+    except Exception as e:
+        logger.debug(f"Candle archive append failed (non-critical): {e}")
+
+
+def _parse_candle_cache_key(key: str) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """Split a cache key like ``MNQ_5m_72`` into ``(symbol, tf, bars)``.
+
+    Returns ``(None, None, None)`` on any parse failure — the caller
+    treats that as "skip the archive for this key". Timeframes are
+    validated against the archive's accepted set to avoid polluting the
+    table with typos.
+    """
+    from pearlalgo.persistence.candle_archive import ACCEPTED_TFS
+    parts = key.split("_")
+    if len(parts) < 3:
+        return None, None, None
+    symbol, tf, n_raw = parts[0], parts[1], parts[-1]
+    # Normalize TF casing: existing caches mix 1D and 1d.
+    tf_norm = tf.lower().replace("d", "d")
+    if tf_norm not in ACCEPTED_TFS:
+        return None, None, None
+    try:
+        n = int(n_raw)
+    except ValueError:
+        n = None
+    return symbol, tf_norm, n
 
 
 def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
