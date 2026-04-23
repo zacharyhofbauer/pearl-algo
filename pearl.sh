@@ -906,6 +906,7 @@ show_help() {
     echo "  tv-paper <start|stop|status|restart|api|logs>  Control Tradovate Paper Eval"
     echo "  chart <start|stop|status|build|deploy>  Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
+    echo "  backtest-config [CFG_PATH]           Replay candle archive through a YAML config (Issue 24-A)"
     echo ""
     echo -e "${CYAN}Options:${NC}"
     echo "  --market MNQ         Market to trade (default: MNQ)"
@@ -972,6 +973,14 @@ case "$COMMAND" in
         ;;
     tunnel)
         handle_tunnel "${1:-status}"
+        ;;
+    backtest-config)
+        # Issue 24-A — replay gate for strategy tuning. Delegates to the
+        # Python CLI; preserves stdout/exit-code verbatim.
+        BACKTEST_CFG="${1:-config/live/tradovate_paper.yaml}"
+        shift 2>/dev/null || true
+        python3 "$SCRIPT_DIR/scripts/ops/backtest_config.py" --config "$BACKTEST_CFG" "$@"
+        exit $?
         ;;
     help|--help|-h)
         show_help
