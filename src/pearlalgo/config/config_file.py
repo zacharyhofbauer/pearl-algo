@@ -99,12 +99,72 @@ def _substitute_env_vars(value: Any) -> Any:
         return value
 
 
-def _load_yaml_file(path: Path, *, substitute_env: bool = True) -> Dict[str, Any]:
-    """Load one YAML file with optional env substitution."""
+class DuplicateConfigKeyError(ValueError):
+    """Raised when a YAML mapping contains the same key more than once.
+
+    YAML's default loader silently lets the last duplicate win — which is
+    how load-bearing tuning values vanish without warning. See Issue 3 in
+    ``~/.claude/plans/this-session-work-cosmic-horizon.md``.
+    """
+
+
+class _SafeLoaderNoDup(__import__("yaml").SafeLoader):
+    """SafeLoader subclass that raises :class:`DuplicateConfigKeyError`
+    on duplicate mapping keys.
+
+    Intentionally a subclass (not a patched SafeLoader) so unrelated
+    ``yaml.safe_load`` callers elsewhere keep the stdlib default.
+    """
+
+
+def _no_dup_mapping_constructor(loader, node, deep: bool = False):
     import yaml
 
+    if not isinstance(node, yaml.MappingNode):  # pragma: no cover — defensive
+        raise yaml.constructor.ConstructorError(
+            None,
+            None,
+            f"expected a mapping node, got {node.id}",
+            node.start_mark,
+        )
+    mapping: Dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            line = getattr(key_node.start_mark, "line", -1) + 1
+            col = getattr(key_node.start_mark, "column", -1) + 1
+            raise DuplicateConfigKeyError(
+                f"Duplicate YAML key {key!r} at line {line}, column {col}. "
+                "YAML silently keeps the last value, which is how load-bearing "
+                "tuning values disappear without notice. Rename or remove one "
+                "of the duplicates."
+            )
+        value = loader.construct_object(value_node, deep=deep)
+        mapping[key] = value
+    return mapping
+
+
+_SafeLoaderNoDup.add_constructor(  # type: ignore[arg-type]
+    __import__("yaml").resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _no_dup_mapping_constructor,
+)
+
+
+def _safe_load_no_duplicates(stream) -> Any:
+    """Wrapper around ``yaml.load`` with duplicate-key rejection.
+
+    Falls back to returning the loader's result (``None`` for empty files).
+    Callers should still guard with ``or {}`` when they need an empty dict.
+    """
+    import yaml
+
+    return yaml.load(stream, Loader=_SafeLoaderNoDup)
+
+
+def _load_yaml_file(path: Path, *, substitute_env: bool = True) -> Dict[str, Any]:
+    """Load one YAML file with optional env substitution."""
     with open(path) as f:
-        data = yaml.safe_load(f) or {}
+        data = _safe_load_no_duplicates(f) or {}
     if substitute_env:
         data = _substitute_env_vars(data)
     return data
@@ -308,9 +368,11 @@ def toggle_strategy_in_config(
     if not resolved.exists():
         raise FileNotFoundError(f"Config file not found: {resolved}")
 
-    # Read without env substitution — we write back as-is
+    # Read without env substitution — we write back as-is. Use the
+    # duplicate-key-rejecting loader so a corrupted toggle can't silently
+    # shadow an earlier mapping key.
     with open(resolved, "r") as f:
-        config = yaml.safe_load(f) or {}
+        config = _safe_load_no_duplicates(f) or {}
 
     if "strategy" not in config:
         config["strategy"] = {}

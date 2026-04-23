@@ -10,6 +10,24 @@ from pearlalgo.config.migration import migrate_legacy_runtime_config
 from pearlalgo.strategies.registry import ACTIVE_STRATEGY
 
 
+# Signal-type names the generator actually emits. Extend this set when a
+# new trigger is added so ``signals.enabled_signal_types`` validation
+# stays in sync with reality. See Issue 3-A in
+# ``~/.claude/plans/this-session-work-cosmic-horizon.md``.
+#
+# Source of truth for emissions:
+#   - ``trading_bots/signal_generator.py:2961`` — default fallback
+#     ``"pearlbot_pinescript"``
+#   - ``trading_bots/smc_signals.py:454-460`` — ``"smc_fvg"``,
+#     ``"smc_ob"``, ``"smc_silver_bullet"``
+KNOWN_SIGNAL_TYPES: frozenset[str] = frozenset({
+    "pearlbot_pinescript",
+    "smc_fvg",
+    "smc_ob",
+    "smc_silver_bullet",
+})
+
+
 class AccountConfig(BaseModel):
     """Account identity (from account overlay)."""
     name: str = "default"
@@ -60,11 +78,32 @@ class ChallengeConfig(BaseModel):
 
 class SignalsConfig(BaseModel):
     """Signal generation thresholds."""
+    model_config = {"extra": "allow"}  # forward-compat for new tuning knobs
+
     min_confidence: float = 0.55
     min_risk_reward: float = 1.3
     duplicate_window_seconds: int = 120
     min_volume: int = 10
     max_stop_points: float = 45.0
+    # Validated against KNOWN_SIGNAL_TYPES so misspelled or stale signal
+    # names are rejected at config load instead of being silently ignored
+    # at runtime. Issue 3-A.
+    enabled_signal_types: List[str] = Field(default_factory=list)
+
+    @field_validator("enabled_signal_types")
+    @classmethod
+    def _validate_enabled_signal_types(cls, value: List[str]) -> List[str]:
+        if not value:
+            return value
+        unknown = [name for name in value if name not in KNOWN_SIGNAL_TYPES]
+        if unknown:
+            raise ValueError(
+                f"signals.enabled_signal_types contains unknown name(s) "
+                f"{unknown}. Known: {sorted(KNOWN_SIGNAL_TYPES)}. "
+                "Add the name to KNOWN_SIGNAL_TYPES in schema_v2.py if the "
+                "generator really emits it; otherwise fix the YAML."
+            )
+        return value
 
 
 class StrategyConfig(BaseModel):

@@ -33,11 +33,24 @@ from pearlalgo.utils.logger import logger
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
+#
+# WARNING (Issue 3-A — ``~/.claude/plans/this-session-work-cosmic-horizon.md``):
+# The load-bearing fields below — ``symbol``, ``timeframe``, ``scan_interval``
+# — are LEGACY in-code defaults kept for backward compatibility with
+# tests that do ``config = PEARL_BOT_CONFIG.copy()``. They are NOT the
+# source of truth for live runtime. The live YAML cascade
+# (``config/base.yaml`` → ``config/live/tradovate_paper.yaml``) is
+# authoritative and overrides these.
+#
+# Do not add new load-bearing defaults here. The existing ones stay only
+# until the 8 tests that rely on ``PEARL_BOT_CONFIG.copy()`` are migrated
+# to build their own config directly. See Backlog item in Section 2 of
+# the plan.
 
 CONFIG = ConfigView({
     "symbol": "MNQ",
-    "timeframe": "5m",
-    "scan_interval": 30,
+    "timeframe": "5m",          # LEGACY default — live YAML sets 1m.
+    "scan_interval": 30,        # LEGACY default — live YAML owns this.
     
     # EMA Crossover (from EMA_Crossover.pine)
     "ema_fast": 9,
@@ -101,6 +114,39 @@ CONFIG = ConfigView({
     "end_hour": 16,
     "end_minute": 0,
 })
+
+
+# Issue 3-A: emit the effective timeframe once per process on the first
+# ``generate_signals`` call so drift between the in-code CONFIG default
+# ("5m"/30s) and the live YAML cascade ("1m"/velocity_mode) is visible
+# in the operator's logs. Kept as a single-flag no-op after the first
+# successful log so the hot scan loop is not slowed.
+_LOGGED_EFFECTIVE_TIMEFRAME = False
+
+
+def _log_effective_timeframe_once(config: Any) -> None:
+    global _LOGGED_EFFECTIVE_TIMEFRAME
+    if _LOGGED_EFFECTIVE_TIMEFRAME:
+        return
+    try:
+        tf_resolved = config.get("timeframe") if hasattr(config, "get") else config["timeframe"]
+        si_resolved = config.get("scan_interval") if hasattr(config, "get") else config["scan_interval"]
+    except (KeyError, AttributeError, TypeError):
+        tf_resolved = None
+        si_resolved = None
+    tf_default = CONFIG["timeframe"]
+    si_default = CONFIG["scan_interval"]
+    drift = (tf_resolved != tf_default) or (si_resolved != si_default)
+    logger.info(
+        "signal_generator effective config: timeframe=%s scan_interval=%s "
+        "(in-code default timeframe=%s scan_interval=%s drift=%s)",
+        tf_resolved,
+        si_resolved,
+        tf_default,
+        si_default,
+        drift,
+    )
+    _LOGGED_EFFECTIVE_TIMEFRAME = True
 
 
 # ============================================================================
@@ -2404,6 +2450,10 @@ def generate_signals(
     """
     if config is None:
         config = CONFIG
+
+    # Issue 3-A: log the effective load-bearing defaults once per process
+    # so operators can see drift between in-code CONFIG and live YAML.
+    _log_effective_timeframe_once(config)
 
     # Load strategy parameters from config (6A: single source of truth for magic numbers)
     params = _load_strategy_params(config)
