@@ -191,13 +191,16 @@ class GetLatestBarTask(Task):
                     sorted_contracts = sorted(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
                     
                     # Check if front month is expiring soon (within 3 days)
-                    from datetime import datetime
+                    # Issue 8-A: both sides must agree on tz; expiration is a
+                    # UTC date per IBKR convention. Previously the subtraction
+                    # used naive local time which drifts a full day at DST.
+                    from datetime import datetime, timezone
                     front_month = sorted_contracts[0]
                     expiration_str = front_month.contract.lastTradeDateOrContractMonth
                     try:
-                        # Parse expiration date (format: YYYYMMDD)
-                        expiration_date = datetime.strptime(expiration_str, "%Y%m%d")
-                        days_until_expiration = (expiration_date - datetime.now()).days
+                        # Parse expiration date (format: YYYYMMDD) as UTC midnight.
+                        expiration_date = datetime.strptime(expiration_str, "%Y%m%d").replace(tzinfo=timezone.utc)
+                        days_until_expiration = (expiration_date - datetime.now(timezone.utc)).days
                         
                         if days_until_expiration <= 0:
                             logger.warning(

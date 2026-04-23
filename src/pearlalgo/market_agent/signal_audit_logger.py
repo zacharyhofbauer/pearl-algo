@@ -200,12 +200,21 @@ class SignalAuditLogger:
         self._trim_old_backups()
 
     def _trim_old_backups(self) -> None:
-        """Delete rotated files older than retention_days."""
-        cutoff = datetime.now() - timedelta(days=self._retention_days)
+        """Delete rotated files older than retention_days.
+
+        Issue 8-A: both sides now aware-UTC. Previously ``datetime.now()``
+        returned naive local time while ``datetime.fromtimestamp`` also
+        returned naive local; during DST fall-back that hour could
+        effectively purge a duplicated local-time window of audit
+        records. UTC arithmetic is DST-safe.
+        """
+        from datetime import timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self._retention_days)
         try:
             for p in self._path.parent.glob(f"{self._path.name}.*"):
                 try:
-                    mtime = datetime.fromtimestamp(p.stat().st_mtime)
+                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
                 except OSError:
                     continue
                 if mtime < cutoff:

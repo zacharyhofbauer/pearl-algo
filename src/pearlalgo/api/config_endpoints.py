@@ -566,7 +566,11 @@ async def update_config(body: ConfigUpdateRequest):
             raise HTTPException(status_code=422, detail=f"Unknown config field: '{dotted_path}'")
         validated_changes[dotted_path] = _validate_value(dotted_path, value, field_schema)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Issue 8-A: use aware Eastern Time for backup-file timestamps so
+    # DST rollbacks do not produce two backups with the same filename.
+    from pearlalgo.utils.timezones import ET
+
+    timestamp = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
     backup_path = LIVE_YAML_PATH.parent / f"{LIVE_YAML_PATH.name}.backup.{timestamp}"
     try:
         if LIVE_YAML_PATH.exists():
