@@ -81,6 +81,10 @@ jobs:
         run: |
           python scripts/testing/check_architecture_boundaries.py --enforce
 
+      - name: Gate coverage (enforced)
+        run: |
+          python scripts/testing/check_gate_coverage.py --enforce
+
       - name: Dependency audit (pip-audit)
         run: |
           python -m pip install --upgrade pip-audit

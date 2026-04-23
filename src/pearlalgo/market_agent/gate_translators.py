@@ -123,22 +123,37 @@ _CIRCUIT_BREAKER_GATE_NAMES = frozenset(
         # Hard-block gates
         "consecutive_losses",
         "tiered_loss",
+        "tiered_loss_halt",
+        "tiered_loss_reduce",
         "session_drawdown",
         "daily_drawdown",
         "daily_profit_cap",
         "rolling_win_rate",
         "position_limits_clustering",
+        "position_clustering",
+        "max_positions",
         "direction_gating",
         "regime_avoidance",
         "trigger_filters",
         "volatility_filter",
         "tv_paper_eval_gate",
+        # Volatility-filter sub-gates (block on specific regimes)
+        "extreme_volatility",
+        "low_volatility",
+        "chop_detected",
         # Scale-only gates (surface as risk_scaled outcomes)
         "equity_curve",
+        "equity_curve_halt",
+        "equity_curve_below_ma",
         "tod",
         "tod_risk_scaling",
         "volatility",
         "volatility_risk_scaling",
+        "high_vol_scale",
+        "extreme_vol_scale",
+        # Silent-pass when data is missing (modelled as gates so the
+        # linter tracks them; translator treats allowed=True as accepted)
+        "insufficient_data",
         # Final-fallback hard block when cumulative scaling reaches zero
         "risk_scale_zero",
     }
