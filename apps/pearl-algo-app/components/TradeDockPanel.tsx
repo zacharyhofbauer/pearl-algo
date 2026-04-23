@@ -1188,7 +1188,7 @@ function TradeDockPanel({
                                 </span>
                               )}
                               <span className={`trade-pnl ${uUsd === null ? '' : uUsd >= 0 ? 'positive' : 'negative'}`}>
-                                {uUsd === null ? '—' : `${uUsd >= 0 ? '+' : ''}$${Math.abs(uUsd).toFixed(2)}`}
+                                {uUsd === null ? '—' : `${uUsd >= 0 ? '+' : '-'}$${Math.abs(uUsd).toFixed(2)}`}
                               </span>
                               <span className="trade-reason-badge reason-open">OPEN</span>
                             </div>
@@ -1218,7 +1218,7 @@ function TradeDockPanel({
                               <div className="trade-detail-row">
                                 <span className="trade-detail-label">Unrealized</span>
                                 <span className={`trade-detail-value ${uUsd === null ? '' : uUsd >= 0 ? 'positive' : 'negative'}`}>
-                                  {uUsd === null ? '—' : `${uUsd >= 0 ? '+' : ''}$${Math.abs(uUsd).toFixed(2)}`}
+                                  {uUsd === null ? '—' : `${uUsd >= 0 ? '+' : '-'}$${Math.abs(uUsd).toFixed(2)}`}
                                 </span>
                               </div>
                               <div className="trade-detail-row">

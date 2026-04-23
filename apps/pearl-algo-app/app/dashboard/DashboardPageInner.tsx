@@ -999,7 +999,15 @@ export default function DashboardPageInner() {
                 recentTrades={recentTrades}
                 symbol={agentState?.config?.symbol || 'MNQ'}
                 currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
-                openUnrealizedPnL={agentState?.active_trades_unrealized_pnl ?? null}
+                openUnrealizedPnL={
+                  // FIX 2026-04-23: prefer broker's live open_pnl over
+                  // agentState's derived active_trades_unrealized_pnl.
+                  // Three sources used to disagree on screen (broker −$33
+                  // vs agent −$61 vs client-side −$211). Broker is truth.
+                  (agentState?.tradovate_account as any)?.open_pnl
+                    ?? agentState?.active_trades_unrealized_pnl
+                    ?? null
+                }
                 performanceSummary={performanceSummary}
                 directionBreakdown={agentState?.analytics?.direction_breakdown || null}
                 statusBreakdown={agentState?.analytics?.status_breakdown || null}
