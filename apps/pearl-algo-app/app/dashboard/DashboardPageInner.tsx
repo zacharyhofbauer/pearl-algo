@@ -1021,6 +1021,7 @@ export default function DashboardPageInner() {
                 accountId={(agentState?.tradovate_account as any)?.account ?? null}
                 accountEnv={(agentState?.tradovate_account as any)?.env ?? null}
                 analytics={agentState?.analytics ?? null}
+                execArmed={agentState?.execution_state?.armed}
               />
             </ErrorBoundary>
           </>

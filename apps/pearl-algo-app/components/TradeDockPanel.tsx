@@ -117,6 +117,10 @@ interface TradeDockPanelProps {
   accountEnv?: string | null
   /** Analytics breakdowns from agentState.analytics (session/hourly/duration) */
   analytics?: AnalyticsData | null
+  /** Whether execution is armed (agentState.execution_state.armed). When
+   * undefined we don't make a claim. When false, the positions empty-state
+   * tells the user signals will not execute. */
+  execArmed?: boolean
 }
 
 type Tab = 'positions' | 'history' | 'stats' | 'analytics' | 'signals'
@@ -302,6 +306,7 @@ function TradeDockPanel({
   accountId,
   accountEnv,
   analytics,
+  execArmed,
 }: TradeDockPanelProps) {
   const [tab, setTab] = useState<Tab>('positions')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -849,10 +854,18 @@ function TradeDockPanel({
             {/* ── Positions Tab ── */}
             {tab === 'positions' ? (
               openCount === 0 && displayWorkingOrders.length === 0 ? (
-                <div className="trade-dock-empty">No open positions — system armed and watching the tape.</div>
+                <div className="trade-dock-empty">
+                  {execArmed === false
+                    ? 'No open positions — execution disarmed, signals will not place orders.'
+                    : 'No open positions — system armed and watching the tape.'}
+                </div>
               ) : openCount === 0 ? (
                 <>
-                  <div className="trade-dock-empty">No open positions — system armed and watching the tape.</div>
+                  <div className="trade-dock-empty">
+                  {execArmed === false
+                    ? 'No open positions — execution disarmed, signals will not place orders.'
+                    : 'No open positions — system armed and watching the tape.'}
+                </div>
                   {groupedWorkingOrders.length > 0 && (
                     <div className="trade-dock-working-orders">
                       <div className="trade-dock-section-label">Working Orders ({groupedWorkingOrders.length})</div>

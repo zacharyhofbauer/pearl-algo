@@ -1719,8 +1719,11 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                                     logger.debug("Failed to parse trade exit_time", exc_info=True)
                                     pass
                         trades = len(today_trades)
+                        # FIX F1 (audit 2026-04-23): count losses explicitly so
+                        # zero-P&L trades (scratch exits) don't land in either
+                        # bucket — subtraction was over-counting them as losses.
                         wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
-                        losses = trades - wins
+                        losses = sum(1 for t in today_trades if (t.get("pnl") or 0) < 0)
 
                         if broker_realized is not None:
                             # PREFERRED: broker truth, no commission guess needed
@@ -1771,8 +1774,9 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                         except Exception:
                             pass
                 trades = len(today_trades)
+                # FIX F1 (audit 2026-04-23): count losses explicitly.
                 wins = sum(1 for t in today_trades if (t.get("pnl") or 0) > 0)
-                losses = trades - wins
+                losses = sum(1 for t in today_trades if (t.get("pnl") or 0) < 0)
                 daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in today_trades), 2)
                 start_balance = _get_start_balance(state_dir)
                 total_fill_pnl = sum(t.get("pnl", 0) or 0 for t in paired)
@@ -3390,11 +3394,49 @@ async def get_trades(
 @app.get("/api/signals")
 async def get_signals(
     limit: int = Query(default=50, ge=1, le=300, description="Max signal events to return"),
+    dedupe: bool = Query(default=True, description="Collapse multiple events per signal_id to the latest"),
     api_key: Optional[str] = Depends(verify_api_key),
 ):
-    """Get recent signal lifecycle events from signals.jsonl."""
+    """Get recent signal lifecycle events from signals.jsonl.
+
+    FIX F5 (audit 2026-04-23): by default, collapse events so each
+    signal_id appears at most once (latest status wins). The live agent
+    re-fires the same signal every bar close (~15s) while gated, so the
+    raw tail of signals.jsonl is ~83% duplicates. Set dedupe=false to
+    get the raw lifecycle stream.
+    """
     _require_state_dir()
-    return _get_recent_signals(_state_dir, limit=limit)
+    # Pull extra events so dedupe still has ``limit`` unique signals after
+    # collapse. 4x covers the typical duplicate density without being wasteful.
+    raw_limit = limit if not dedupe else min(limit * 4, 1200)
+    events = _get_recent_signals(_state_dir, limit=raw_limit)
+    if not dedupe:
+        return events
+
+    # Collapse: keep the most recent event per signal_id. Iterate oldest-first
+    # so later events overwrite earlier ones in the dict.
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for ev in events:
+        sid = ev.get("signal_id") or ""
+        if not sid:
+            continue
+        if sid not in by_id:
+            by_id[sid] = dict(ev)
+        else:
+            prev = by_id[sid]
+            # Promote to the more-terminal status if this event has one.
+            prev["status"] = ev.get("status") or prev.get("status")
+            if ev.get("pnl") is not None:
+                prev["pnl"] = ev["pnl"]
+            if ev.get("exit_reason"):
+                prev["exit_reason"] = ev["exit_reason"]
+            if ev.get("exit_price") is not None:
+                prev["exit_price"] = ev["exit_price"]
+            if ev.get("timestamp"):
+                prev["timestamp"] = ev["timestamp"]
+    # Sort ascending by timestamp to match the previous contract, then take tail.
+    ordered = sorted(by_id.values(), key=lambda r: r.get("timestamp") or "")
+    return ordered[-limit:]
 
 
 @app.get("/api/signals-panel")
