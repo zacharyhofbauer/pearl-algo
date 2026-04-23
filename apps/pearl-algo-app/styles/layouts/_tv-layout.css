@@ -94,33 +94,34 @@ body:has(.tv-layout) .nav-bar {
   overflow: hidden;
 }
 
-/* Bottom panel */
+/* Bottom panel — default; inline style from DashboardLayout overrides once React hydrates */
 .tv-panel-area {
-  flex: 0 1 280px;
-  max-height: 280px;
+  flex: 0 1 420px;
+  max-height: 420px;
   min-height: 80px;
   overflow-y: auto;
   overflow-x: hidden;
   border-top: 1px solid #2a2e39;
   background: #131722;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.1) transparent;
+  scrollbar-color: rgba(255,255,255,0.25) transparent;
 }
 
-.tv-panel-area::-webkit-scrollbar { width: 5px; }
+.tv-panel-area::-webkit-scrollbar { width: 8px; }
 .tv-panel-area::-webkit-scrollbar-track { background: transparent; }
-.tv-panel-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-.tv-panel-area::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+.tv-panel-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 4px; }
+.tv-panel-area::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.38); }
 
-/* Height breakpoints */
+/* Height breakpoints — only apply to the CSS fallback; the inline style from
+   DashboardLayout.tsx is per-user and takes precedence once hydrated. */
 @media (min-height: 1000px) {
-  .tv-panel-area { flex: 0 1 320px; max-height: 320px; }
+  .tv-panel-area { flex: 0 1 480px; max-height: 480px; }
 }
 @media (max-height: 699px) {
-  .tv-panel-area { flex: 0 1 200px; max-height: 200px; min-height: 60px; }
+  .tv-panel-area { flex: 0 1 260px; max-height: 260px; min-height: 60px; }
 }
 @media (max-height: 500px) {
-  .tv-panel-area { flex: 0 1 140px; max-height: 140px; min-height: 40px; }
+  .tv-panel-area { flex: 0 1 180px; max-height: 180px; min-height: 40px; }
 }
 
 /* Tablet: narrower right panel */
