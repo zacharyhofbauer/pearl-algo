@@ -7,6 +7,7 @@ import RSIPane from '@/components/RSIPane'
 import TradeDockPanel, { type RecentTradeRow, type PerformanceSummary, type RecentSignalEvent } from '@/components/TradeDockPanel'
 import DashboardLayout from '@/components/DashboardLayout'
 import InfoStrip from '@/components/InfoStrip'
+import HealthDots from '@/components/info-strip/HealthDots'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
 import WatchlistPanel from '@/components/WatchlistPanel'
 import SystemLogsPanel from '@/components/SystemLogsPanel'
@@ -711,9 +712,22 @@ export default function DashboardPageInner() {
 
           </div>
 
-          {/* Right: Status badges — only the two pieces of state the info
-              strip's HealthDots doesn't already surface. GW and Data were
-              duplicates of info-strip GW and DATA dots, respectively. */}
+          {/* Health dots (WS/GW/DATA/TV/DB) live in the header now —
+              tucked left of the agent/market badges. The .header-health
+              wrapper applies header-specific compact styling (no labels
+              on phone, smaller dots) without disturbing the InfoStrip
+              variant on tablet/desktop. */}
+          <div className="header-health">
+            <HealthDots
+              wsStatus={wsStatus}
+              gateway={agentState?.gateway_status ?? null}
+              connectionHealth={agentState?.connection_health ?? null}
+              tradovate={agentState?.tradovate_account ?? null}
+              dataQuality={agentState?.data_quality ?? null}
+              lastExitTime={agentState?.recent_exits?.[0]?.exit_time ?? null}
+            />
+          </div>
+          {/* Right: Status badges */}
           <div className="header-badges">
             {agentState && (
               <span

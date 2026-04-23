@@ -222,6 +222,57 @@
   top: -1px;
 }
 
+/* Health dots inside the header (next to the badges).
+   The HealthDots component renders an .info-strip-health section meant
+   for the InfoStrip — when it's nested in .header-health we override
+   that styling so it sits inline with the badges as a tight cluster. */
+.header-health {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.header-health .info-strip-health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin-left: 0;
+  width: auto;
+  border-top: none;
+  border-left: none;
+  background: transparent;
+}
+
+.header-health .info-strip-health-dot {
+  padding: 0;
+  gap: 3px;
+}
+
+.header-health .info-strip-health-marker {
+  width: 7px;
+  height: 7px;
+}
+
+.header-health .info-strip-health-label {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+/* Phone: hide labels — just colored dots, like a status LED row */
+@media (max-width: 640px) {
+  .header-health .info-strip-health {
+    gap: 5px;
+  }
+  .header-health .info-strip-health-label {
+    display: none;
+  }
+  .header-health .info-strip-health-marker {
+    width: 8px;
+    height: 8px;
+  }
+}
+
 /* Badges */
 .header-badges {
   display: flex;
