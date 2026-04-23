@@ -316,10 +316,13 @@ class TradingCircuitBreaker:
             "exit_time": trade.get("exit_time", datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S')),  # FIXED 2026-03-25: store ET not UTC
         })
         
-        # Trim to rolling window
+        # Trim to rolling window. Issue 16-A: use `del` slice instead of
+        # re-binding `self._recent_trades` to a new list so no allocation
+        # happens on every append at capacity. The underlying readers
+        # still slice `[-N:]` so list semantics stay intact.
         max_history = max(self.config.rolling_window_trades, self.config.chop_detection_window) * 2
         if len(self._recent_trades) > max_history:
-            self._recent_trades = self._recent_trades[-max_history:]
+            del self._recent_trades[:-max_history]
         
         logger.debug(
             f"Trade recorded: win={is_win}, pnl=${pnl:.2f}, "
