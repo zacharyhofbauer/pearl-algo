@@ -506,14 +506,39 @@ function TradeDockPanel({
     })
   }, [displayWorkingOrders])
   const collapsedRecentSignals = useMemo<CollapsedRecentSignalEvent[]>(() => {
+    // FIX 2026-04-23 (follow-up #2 / #5): the live signal generator
+    // creates a fresh signal_id every 15s bar-close for the SAME logical
+    // setup, so per-signal_id dedup isn't enough. /api/signals now
+    // content-collapses (direction + entry_price + SL + TP + signal_type)
+    // and ships raw_event_count + duplicate_count — prefer those when
+    // present. Fall back to per-signal_id collapse for any consumer
+    // bypassing the new endpoint.
+    const rows = recentSignals || []
+    const hasServerCollapse = rows.some((r) => typeof (r as CollapsedRecentSignalEvent).raw_event_count === 'number')
+    if (hasServerCollapse) {
+      return rows
+        .map((r) => {
+          const collapsed = r as CollapsedRecentSignalEvent
+          return {
+            ...collapsed,
+            raw_event_count: collapsed.raw_event_count ?? 1,
+            duplicate_count: collapsed.duplicate_count ?? 0,
+          }
+        })
+        .sort((a, b) => {
+          const at = a.timestamp ? (new Date(a.timestamp).getTime() || 0) : 0
+          const bt = b.timestamp ? (new Date(b.timestamp).getTime() || 0) : 0
+          return bt - at
+        })
+    }
+
     const byId = new Map<string, CollapsedRecentSignalEvent>()
-    const orderedEvents = [...(recentSignals || [])].sort((a, b) => {
+    const orderedEvents = [...rows].sort((a, b) => {
       const at = a.timestamp ? (new Date(a.timestamp).getTime() || 0) : 0
       const bt = b.timestamp ? (new Date(b.timestamp).getTime() || 0) : 0
       return at - bt
     })
 
-    // Iterate oldest-first so the latest event for a signal wins.
     for (const event of orderedEvents) {
       const signalId = event?.signal_id
       if (!signalId) continue
@@ -543,7 +568,12 @@ function TradeDockPanel({
     })
   }, [recentSignals])
 
-  const displayRecentSignals = collapsedRecentSignals.slice(0, 20)
+  const SIGNALS_DEFAULT_LIMIT = 20
+  const [showAllSignals, setShowAllSignals] = useState(false)
+  const displayRecentSignals = showAllSignals
+    ? collapsedRecentSignals
+    : collapsedRecentSignals.slice(0, SIGNALS_DEFAULT_LIMIT)
+  const hasMoreSignals = collapsedRecentSignals.length > SIGNALS_DEFAULT_LIMIT
   const suppressedSignalEvents = useMemo(
     () => displayRecentSignals.reduce((sum, event) => sum + event.duplicate_count, 0),
     [displayRecentSignals]
@@ -918,6 +948,14 @@ function TradeDockPanel({
                               </div>
                             </div>
                             <div className="trade-right">
+                              {s.raw_event_count > 1 ? (
+                                <span
+                                  className="trade-r-chip"
+                                  title={`This setup fired ${s.raw_event_count} times; ${s.duplicate_count} re-fires collapsed.`}
+                                >
+                                  {s.raw_event_count}×
+                                </span>
+                              ) : null}
                               {hasPnl ? (
                                 <span className={`trade-pnl ${(s.pnl as number) >= 0 ? 'positive' : 'negative'}`}>
                                   {formatPnL(s.pnl)}
@@ -930,6 +968,17 @@ function TradeDockPanel({
                         )
                       })}
                     </div>
+                    {hasMoreSignals && (
+                      <button
+                        type="button"
+                        className="trade-dock-showmore"
+                        onClick={() => setShowAllSignals((v) => !v)}
+                      >
+                        {showAllSignals
+                          ? 'Show less'
+                          : `Show all (${collapsedRecentSignals.length})`}
+                      </button>
+                    )}
                   </div>
                 )}
 

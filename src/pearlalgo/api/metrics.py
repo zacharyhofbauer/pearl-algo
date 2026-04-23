@@ -52,6 +52,7 @@ DEFAULT_RISK_METRICS: Dict[str, Any] = {
 def compute_risk_metrics(
     pnls: List[float],
     trades: Optional[List[Dict[str, Any]]] = None,
+    start_balance: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Compute risk metrics from a list of per-trade P&L values.
 
@@ -77,7 +78,14 @@ def compute_risk_metrics(
     losses = [p for p in pnls if p < 0]
 
     # -- Max drawdown + duration -----------------------------------------------
-    max_dd, max_dd_pct, max_dd_duration_s = _compute_drawdown(pnls, trades)
+    # FIX 2026-04-23 (follow-up #3): pass start_balance so DD% is
+    # measured against account equity, not raw cumulative P&L peak.
+    # Previously a $82 cumulative peak followed by -$1,474 gave
+    # 1556/82 = 1886% — technically correct against cumulative but
+    # not what a trader reads. Against $50k equity it's a sane 3.1%.
+    max_dd, max_dd_pct, max_dd_duration_s = _compute_drawdown(
+        pnls, trades, start_balance=start_balance,
+    )
 
     # -- Profit factor ---------------------------------------------------------
     total_wins = sum(wins) if wins else 0.0
@@ -145,10 +153,18 @@ def compute_risk_metrics(
 def _compute_drawdown(
     pnls: List[float],
     trades: Optional[List[Dict[str, Any]]] = None,
+    start_balance: Optional[float] = None,
 ) -> tuple:
     """Return ``(max_dd, max_dd_pct, max_dd_duration_seconds)``.
 
     Duration is only computed when *trades* carry ``exit_time`` metadata.
+
+    FIX 2026-04-23 (follow-up #3): DD% is now measured against peak
+    *equity* (start_balance + cumulative). When *start_balance* is
+    None we fall back to the legacy behavior of dividing by peak
+    cumulative P&L, which can be nonsensical at small peaks. Prefer
+    to thread start_balance through — standard industry DD% expects
+    an equity denominator.
     """
     cumulative = 0.0
     peak = 0.0
@@ -158,9 +174,15 @@ def _compute_drawdown(
     dd_start_idx = 0
     max_dd_start_idx = 0
     max_dd_end_idx = 0
+    # Track peak equity for % calc (not just peak cumulative P&L).
+    base = float(start_balance) if start_balance is not None and start_balance > 0 else 0.0
+    peak_equity = base  # start_balance + 0.0
 
     for i, pnl in enumerate(pnls):
         cumulative += pnl
+        equity = base + cumulative
+        if equity > peak_equity:
+            peak_equity = equity
         if cumulative > peak:
             peak = cumulative
             peak_idx = i
@@ -171,7 +193,12 @@ def _compute_drawdown(
             max_dd_start_idx = dd_start_idx
             max_dd_end_idx = i
 
-    max_dd_pct = (max_dd / peak * 100) if peak > 0 else 0.0
+    if peak_equity > 0:
+        max_dd_pct = (max_dd / peak_equity) * 100
+    elif peak > 0:
+        max_dd_pct = (max_dd / peak) * 100  # legacy fallback
+    else:
+        max_dd_pct = 0.0
 
     # Compute duration in seconds if we have trade timestamps
     max_dd_duration_s: Optional[int] = None
