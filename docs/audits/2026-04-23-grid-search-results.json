@@ -1,0 +1,232 @@
+{
+  "candidates": [
+    {
+      "name": "A_current_live",
+      "scorecard": {
+        "avg_loss_points": -5.99,
+        "avg_win_points": 6.47,
+        "by_trigger": {
+          "pearlbot_pinescript": {
+            "avg_points": 0.37,
+            "entries": 347,
+            "losses": 170,
+            "total_points": 126.73392857142608,
+            "win_rate": 0.487,
+            "wins": 169
+          }
+        },
+        "entries": 347,
+        "expectancy_points_per_trade": 0.37,
+        "hold_duration_buckets": {
+          "<=5m": 345,
+          ">240m": 2
+        },
+        "losses": 170,
+        "max_drawdown_points": 157.65,
+        "max_loss_points": -42.91,
+        "max_win_points": 57.71,
+        "meta": {
+          "candles_processed": 5931,
+          "config_path": "/tmp/_cand_A_current_live.yaml",
+          "days_requested": 30,
+          "max_concurrent": 1,
+          "max_hold_minutes": 180,
+          "signals_generated": 352,
+          "slippage_points": 0.25,
+          "symbol": "MNQ",
+          "timeframe": "5m",
+          "trades_opened": 347,
+          "warmup_bars": 120
+        },
+        "timeouts": 338,
+        "total_points": 126.73,
+        "win_rate": 0.5101,
+        "wins": 177
+      }
+    },
+    {
+      "name": "B_w13_full_revert",
+      "scorecard": {
+        "error": "parse failure"
+      }
+    },
+    {
+      "name": "C_orb_only",
+      "scorecard": {
+        "avg_loss_points": -5.99,
+        "avg_win_points": 6.47,
+        "by_trigger": {
+          "pearlbot_pinescript": {
+            "avg_points": 0.38,
+            "entries": 348,
+            "losses": 170,
+            "total_points": 133.48392857142608,
+            "win_rate": 0.4885,
+            "wins": 170
+          }
+        },
+        "entries": 348,
+        "expectancy_points_per_trade": 0.38,
+        "hold_duration_buckets": {
+          "<=5m": 346,
+          ">240m": 2
+        },
+        "losses": 170,
+        "max_drawdown_points": 157.65,
+        "max_loss_points": -42.91,
+        "max_win_points": 57.71,
+        "meta": {
+          "candles_processed": 5931,
+          "config_path": "/tmp/_cand_C_orb_only.yaml",
+          "days_requested": 30,
+          "max_concurrent": 1,
+          "max_hold_minutes": 180,
+          "signals_generated": 353,
+          "slippage_points": 0.25,
+          "symbol": "MNQ",
+          "timeframe": "5m",
+          "trades_opened": 348,
+          "warmup_bars": 120
+        },
+        "timeouts": 339,
+        "total_points": 133.48,
+        "win_rate": 0.5115,
+        "wins": 178
+      }
+    },
+    {
+      "name": "D_orb_plus_vwap2sd",
+      "scorecard": {
+        "avg_loss_points": -6.41,
+        "avg_win_points": 6.99,
+        "by_trigger": {
+          "pearlbot_pinescript": {
+            "avg_points": 0.38,
+            "entries": 363,
+            "losses": 179,
+            "total_points": 138.94374999999854,
+            "win_rate": 0.4848,
+            "wins": 176
+          }
+        },
+        "entries": 363,
+        "expectancy_points_per_trade": 0.38,
+        "hold_duration_buckets": {
+          "<=5m": 361,
+          ">240m": 2
+        },
+        "losses": 179,
+        "max_drawdown_points": 204.1,
+        "max_loss_points": -42.91,
+        "max_win_points": 57.71,
+        "meta": {
+          "candles_processed": 5931,
+          "config_path": "/tmp/_cand_D_orb_plus_vwap2sd.yaml",
+          "days_requested": 30,
+          "max_concurrent": 1,
+          "max_hold_minutes": 180,
+          "signals_generated": 368,
+          "slippage_points": 0.25,
+          "symbol": "MNQ",
+          "timeframe": "5m",
+          "trades_opened": 363,
+          "warmup_bars": 120
+        },
+        "timeouts": 351,
+        "total_points": 138.94,
+        "win_rate": 0.5069,
+        "wins": 184
+      }
+    },
+    {
+      "name": "E_narrow_sltp",
+      "scorecard": {
+        "avg_loss_points": -7.65,
+        "avg_win_points": 7.96,
+        "by_trigger": {
+          "pearlbot_pinescript": {
+            "avg_points": -0.08,
+            "entries": 513,
+            "losses": 264,
+            "total_points": -39.1071428571413,
+            "win_rate": 0.4698,
+            "wins": 241
+          }
+        },
+        "entries": 513,
+        "expectancy_points_per_trade": -0.08,
+        "hold_duration_buckets": {
+          "60-120m": 1,
+          "<=5m": 510,
+          ">240m": 2
+        },
+        "losses": 264,
+        "max_drawdown_points": 266.6,
+        "max_loss_points": -44.64,
+        "max_win_points": 64.12,
+        "meta": {
+          "candles_processed": 5931,
+          "config_path": "/tmp/_cand_E_narrow_sltp.yaml",
+          "days_requested": 30,
+          "max_concurrent": 1,
+          "max_hold_minutes": 180,
+          "signals_generated": 522,
+          "slippage_points": 0.25,
+          "symbol": "MNQ",
+          "timeframe": "5m",
+          "trades_opened": 513,
+          "warmup_bars": 120
+        },
+        "timeouts": 496,
+        "total_points": -39.11,
+        "win_rate": 0.4854,
+        "wins": 249
+      }
+    },
+    {
+      "name": "F_w13_thresh_current_triggers",
+      "scorecard": {
+        "avg_loss_points": -9.3,
+        "avg_win_points": 8.78,
+        "by_trigger": {
+          "pearlbot_pinescript": {
+            "avg_points": -0.64,
+            "entries": 820,
+            "losses": 427,
+            "total_points": -520.7044642857145,
+            "win_rate": 0.4634,
+            "wins": 380
+          }
+        },
+        "entries": 820,
+        "expectancy_points_per_trade": -0.64,
+        "hold_duration_buckets": {
+          "60-120m": 1,
+          "<=5m": 816,
+          ">240m": 3
+        },
+        "losses": 427,
+        "max_drawdown_points": 754.61,
+        "max_loss_points": -44.84,
+        "max_win_points": 67.89,
+        "meta": {
+          "candles_processed": 5931,
+          "config_path": "/tmp/_cand_F_w13_thresh_current_triggers.yaml",
+          "days_requested": 30,
+          "max_concurrent": 1,
+          "max_hold_minutes": 180,
+          "signals_generated": 839,
+          "slippage_points": 0.25,
+          "symbol": "MNQ",
+          "timeframe": "5m",
+          "trades_opened": 820,
+          "warmup_bars": 120
+        },
+        "timeouts": 768,
+        "total_points": -520.7,
+        "win_rate": 0.4793,
+        "wins": 393
+      }
+    }
+  ]
+}
