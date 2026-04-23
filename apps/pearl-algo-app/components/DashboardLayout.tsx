@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import type { RightPanelTab } from '@/stores/uiStore'
@@ -41,19 +41,38 @@ const DashboardLayout = React.memo(function DashboardLayout({
   rightPanelContent,
   mainChartApi,
 }: DashboardLayoutProps) {
-  const DEFAULT_PANEL_HEIGHT = 280
+  const DEFAULT_PANEL_HEIGHT = 420
+  const PANEL_HEIGHT_STORAGE_KEY = 'pearl-dock-panel-height'
+  const MIN_PANEL_HEIGHT = 60
+  const MAX_PANEL_HEIGHT = 800
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT)
   const mainRef = useRef<HTMLDivElement>(null)
 
+  // Hydrate from localStorage on mount (client-only to avoid SSR hydration mismatch)
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PANEL_HEIGHT_STORAGE_KEY)
+      if (!raw) return
+      const parsed = Number(raw)
+      if (Number.isFinite(parsed) && parsed >= MIN_PANEL_HEIGHT && parsed <= MAX_PANEL_HEIGHT) {
+        setPanelHeight(parsed)
+      }
+    } catch {
+      // localStorage can throw in private mode / disabled storage — treat as absent
+    }
+  }, [])
+
   const handlePaneResize = useCallback((deltaY: number) => {
     setPanelHeight(prev => {
-      const next = prev - deltaY
-      return Math.max(60, Math.min(next, 600))
+      const next = Math.max(MIN_PANEL_HEIGHT, Math.min(prev - deltaY, MAX_PANEL_HEIGHT))
+      try { window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(next)) } catch { /* ignore */ }
+      return next
     })
   }, [])
 
   const handlePaneReset = useCallback(() => {
     setPanelHeight(DEFAULT_PANEL_HEIGHT)
+    try { window.localStorage.removeItem(PANEL_HEIGHT_STORAGE_KEY) } catch { /* ignore */ }
   }, [])
 
   return (
