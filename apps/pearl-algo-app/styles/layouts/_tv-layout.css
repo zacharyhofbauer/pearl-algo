@@ -164,10 +164,8 @@ body:has(.tv-layout) .nav-bar {
   /* Show hamburger menu button */
   .mobile-menu-btn { display: flex !important; }
 
-  /* Mobile header — 44px touch targets (WCAG 2.1 AA) with no extra padding
-     bloat. The tf-select/menu-btn are already 44px, so the row hits WCAG
-     naturally; header adds just 1-2px breathing room, no forced min-height
-     that creates dead space around the controls. */
+  /* Mobile header — tight cluster, no min-height, no justify-content gap
+     between the action cluster and badges. */
   .header-combined {
     padding: 2px 6px !important;
     min-height: 0 !important;
@@ -176,6 +174,31 @@ body:has(.tv-layout) .nav-bar {
   .header-row-single {
     gap: 6px !important;
     align-items: center;
+    /* Desktop uses space-between to push timeframe left / badges right.
+       On mobile that leaves a huge dead zone between the chart-icon and
+       the RUN/OPN badges. Pack left-to-right instead; let header-badges
+       use margin-left:auto so badges still hug the right edge but with
+       no extra mid-row gap. */
+    justify-content: flex-start !important;
+  }
+
+  .header-actions {
+    margin-right: 0 !important;
+  }
+
+  .header-badges {
+    margin-left: auto;
+  }
+
+  /* Shrink mobile controls — WCAG 2.2 AA minimum target is 24px; these
+     were 44px, which was the biggest vertical budget hog in the header. */
+  .mobile-tf-select {
+    height: 36px !important;
+  }
+
+  .mobile-menu-btn {
+    width: 36px !important;
+    height: 36px !important;
   }
 }
 

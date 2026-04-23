@@ -312,9 +312,17 @@
   /* Phone: keep the multi-row wrap layout from the 768px rule — just
      tighten every knob so the rows themselves take less height. */
   .info-strip {
-    padding: 2px 6px;
+    padding: 1px 6px;
     gap: 4px;
-    row-gap: 2px;
+    row-gap: 1px;
+  }
+  /* Kill the border-top/padding-top that 768px rule puts above the
+     health-dots row — it added a visible separator plus vertical
+     padding between the chip grid and the WS/GW/DATA/TV/DB dots. */
+  .info-strip-health {
+    border-top: none !important;
+    padding-top: 0 !important;
+    gap: 6px;
   }
   .info-strip-equity-spark {
     width: 72px;
@@ -354,10 +362,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .info-strip-health {
-    padding-top: 3px;
-    gap: 6px;
   }
   .info-strip-health-dot {
     padding: 0 2px;
