@@ -18,6 +18,13 @@ body:has(.tv-layout) .nav-bar {
   overflow: hidden;
   background: #131722;
   overscroll-behavior-y: contain;
+  /* iOS home-indicator + landscape notch insets so the bottom panel
+     (Positions / History tabs) isn't clipped in standalone PWA or
+     Safari's new always-full-bleed viewport. env() resolves to 0 where
+     not applicable, so desktop is unaffected. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Body: sidebars + main — horizontal */
@@ -157,10 +164,13 @@ body:has(.tv-layout) .nav-bar {
   /* Show hamburger menu button */
   .mobile-menu-btn { display: flex !important; }
 
-  /* Mobile header — accommodate 44x44 touch targets (WCAG 2.1 AA) */
+  /* Mobile header — 44px touch targets (WCAG 2.1 AA) with no extra padding
+     bloat. The tf-select/menu-btn are already 44px, so the row hits WCAG
+     naturally; header adds just 1-2px breathing room, no forced min-height
+     that creates dead space around the controls. */
   .header-combined {
-    padding: 3px 6px !important;
-    min-height: 50px !important;
+    padding: 2px 6px !important;
+    min-height: 0 !important;
   }
 
   .header-row-single {

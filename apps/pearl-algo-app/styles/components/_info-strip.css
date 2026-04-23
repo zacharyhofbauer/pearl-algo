@@ -309,32 +309,70 @@
 }
 
 @media (max-width: 480px) {
+  /* Phone: Bloomberg strip is one scrollable row — no vertical wrap.
+     Packs 11+ data points (equity, 6 risk chips, 5 health dots) into a
+     single horizontally-scrollable row so the chart gets the vertical
+     space back. */
   .info-strip {
-    padding: var(--space-2) var(--space-3);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: var(--space-1) var(--space-2);
+    gap: var(--space-3);
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Reinstate dividers between sections (desktop has them; 768px removed
+     them for wrap-mode). Now that we're on one row again, they help
+     segment the strip visually. */
+  .info-strip-section + .info-strip-section {
+    padding-left: var(--space-3);
+    border-left: 1px solid var(--border-subtle);
+  }
+  .info-strip-health {
+    width: auto;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  /* Equity: collapse into a single inline row so headline + mini values
+     sit on one line with the sparkline, instead of stacked. */
+  .info-strip-equity {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
   }
   .info-strip-equity-spark {
-    width: 80px;
-    height: 28px;
+    width: 56px;
+    height: 24px;
+  }
+  .info-strip-equity-stats {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .info-strip-equity-headline {
+    gap: var(--space-1);
   }
   .info-strip-equity-value {
     font-size: var(--font-size-md);
   }
-  /* Risk chips: pack into balanced 3-col grid on phones so the 6 chips
-     (Stop Risk / Peak Risk / Open / Streak / CB / Exec) render as 2 tidy
-     rows instead of 5+1 with a lonely Exec dangling on its own row. */
+  .info-strip-equity-row {
+    gap: var(--space-3);
+  }
+
+  /* Risk chips: single horizontal row (was 3×2 grid that doubled height). */
   .info-strip-risk-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     gap: var(--space-2);
   }
   .info-strip-chip {
     padding: var(--space-1) var(--space-2);
     min-width: 0;
+    flex: 0 0 auto;
   }
   .info-strip-chip-value {
     font-size: var(--font-size-xs);
-    /* Prevent long values like "DISARM" or timer strings from overflowing
-       the grid cell — truncate with ellipsis if needed. */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -344,4 +382,11 @@
   .info-strip-health-label {
     font-size: 9px;
   }
+}
+
+/* Very small phones — drop the sparkline entirely to claw back ~60px of
+   horizontal space. The DAY NET value + mini stats still carry the P&L
+   signal; the sparkline is shape-only decoration. */
+@media (max-width: 380px) {
+  .info-strip-equity-spark { display: none; }
 }
