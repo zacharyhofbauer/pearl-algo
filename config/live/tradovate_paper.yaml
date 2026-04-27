@@ -10,19 +10,22 @@ scan_interval: 30
 
 strategy:
   active: composite_intraday
-  enforce_session_window: false
+  # Phase-1 demo re-arm: RTH-only experiment so we can grade the setup on the
+  # one session that was recently positive in fill-matched broker data.
+  enforce_session_window: true
   enabled_signals:
   - composite_intraday
-  enable_dynamic_sizing: true
+  # Keep sizing fixed at 1 contract for the first controlled sample.
+  enable_dynamic_sizing: false
   base_contracts: 1
-  high_conf_contracts: 2
-  max_conf_contracts: 3
+  high_conf_contracts: 1
+  max_conf_contracts: 1
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
   - composite_intraday
   session_position_scaling:
-    enabled: true
+    enabled: false
     london_multiplier: 0.8
     tokyo_multiplier: 0.7
     ny_multiplier: 1.5
@@ -73,19 +76,21 @@ strategies:
     adx_trending_threshold: 25.0
     adx_ranging_threshold: 20.0
 session:
-  start_time: '18:00'
-  end_time: '16:00'
+  # Phase-1 demo re-arm: no overnight entries. Trade only during regular-hours
+  # discovery after the open and stop initiating new risk before the close.
+  start_time: '09:45'
+  end_time: '15:45'
   timezone: America/New_York
 
 risk:
   max_risk_per_trade: 0.015
   max_drawdown: 0.1
   min_position_size: 1
-  max_position_size: 5
+  max_position_size: 1
   signal_type_size_multipliers:
     sr_bounce: 0.25
   signal_type_max_contracts:
-    sr_bounce: 2
+    sr_bounce: 1
 
 service:
   status_update_interval: 3600
@@ -128,7 +133,7 @@ trading_circuit_breaker:
     - ranging
     - volatile
   regime_avoidance_min_confidence: 0.70
-  max_concurrent_positions: 5
+  max_concurrent_positions: 1
   # Position Clustering — DISABLED 2026-04-10. Default was 0.5% which on MNQ
   # at $25k = 125pt = ~8x the new SL distance. Was rejecting EVERY signal that
   # came in within 125pt of an open position in the same direction, killing
@@ -141,7 +146,8 @@ trading_circuit_breaker:
 guardrails:
   signal_gate_enabled: false
   mode: enforce
-  max_consecutive_losses: 3
+  # Phase-1 demo re-arm: stop after two straight losers in-session.
+  max_consecutive_losses: 2
   consecutive_loss_cooldown_minutes: 30
   max_session_drawdown: 800.0
   max_daily_drawdown: 800.0
@@ -277,15 +283,14 @@ virtual_pnl:
   notify_exit: true
 
 auto_flat:
-  # Daily auto-flat DISABLED 2026-04-23: demo-only iteration; we want to allow
-  # overnight holds so strategies can be evaluated across the full 24h cycle.
-  # Friday-flat stays on to avoid weekend gap risk if we ever re-enable live.
+  # Phase-1 demo re-arm: no overnight holds. Stop new entries at 15:45 ET and
+  # force-flat any remaining position at 15:55 ET.
   enabled: true
-  daily_enabled: false
-  daily_time: '16:00'
+  daily_enabled: true
+  daily_time: '15:55'
   friday_enabled: true
-  friday_time: '16:55'
-  weekend_enabled: false
+  friday_time: '15:55'
+  weekend_enabled: true
   timezone: America/New_York
   notify: true
 
@@ -315,10 +320,11 @@ execution:
   adapter: tradovate
   enforce_protection_guard: true
   allow_reversal_on_opposite_signal: true
-  max_position_size_per_order: 3
-  max_positions: 5
+  max_position_size_per_order: 1
+  max_positions: 1
   max_orders_per_day: 80
-  max_daily_loss: 99999.0
+  # Demo stop: auto-disarm when realized session loss reaches $120.
+  max_daily_loss: 120.0
   cooldown_seconds: 120
   symbol_whitelist:
   - MNQ
