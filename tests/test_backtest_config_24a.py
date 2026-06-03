@@ -381,13 +381,20 @@ def test_cli_help_renders():
     assert "--json" in result.stdout
 
 
-def test_main_returns_non_zero_when_archive_empty(mod):
-    # days=1 + warmup=5 still needs 5 bars; archive is empty on a fresh test env.
-    rc = mod.main([
-        "--days", "1", "--tf", "5m", "--warmup-bars", "5",
-        "--max-hold-minutes", "60", "--json",
-    ])
-    assert rc == 1
+def test_main_returns_non_zero_when_archive_empty(mod, tmp_path, monkeypatch):
+    # Isolate the archive to a fresh empty temp DB so this doesn't depend on the
+    # developer's local data/candles.db (which is populated for backtesting work).
+    monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "empty_candles.db"))
+    from pearlalgo.persistence import candle_archive
+    candle_archive.reset_for_tests()
+    try:
+        rc = mod.main([
+            "--days", "1", "--tf", "5m", "--warmup-bars", "5",
+            "--max-hold-minutes", "60", "--json",
+        ])
+        assert rc == 1
+    finally:
+        candle_archive.reset_for_tests()
 
 
 def test_text_formatter_handles_error_result(mod):
