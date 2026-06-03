@@ -1,9 +1,10 @@
 //@version=5
-// PearlAlgo MNQ — RTH Long-Bias Pro
+// PearlAlgo PINSTRIPE MNQ — Manual v3
 // Polished TradingView build: trend ribbon, VWAP(+σ bands), signal markers, drawn trade levels,
-// trend bar-coloring, session/mute shading, and an on-chart dashboard. Signal (EMA9/21 cross +
+// bright manual-alert pinstripes, trend bar-coloring, session/mute shading, and an on-chart dashboard.
+// Signal (EMA9/21 cross +
 // VWAP, RTH-only, long-bias) is UNCHANGED and unproven — paper-trade the gate before funded capital.
-strategy("PearlAlgo MNQ — RTH Long-Bias Pro", overlay = true,
+strategy("PearlAlgo PINSTRIPE MNQ — Manual v3", overlay = true,
      default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
      calc_on_every_tick = false, process_orders_on_close = true,
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
@@ -36,7 +37,8 @@ showSignals = input.bool(true,  "Signal markers", group=gV, inline="v2")
 showLevels  = input.bool(true,  "Trade levels",   group=gV, inline="v2")
 colorBars   = input.bool(true,  "Color bars",     group=gV, inline="v2")
 showCallouts = input.bool(true, "Big signal callouts", group=gV, inline="v3")
-showSignalFlash = input.bool(true, "Signal bar flash", group=gV, inline="v3")
+showPinstripe = input.bool(true, "Alert pinstripe", group=gV, inline="v3")
+showSignalFlash = input.bool(true, "Signal flash", group=gV, inline="v4")
 showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v4")
 dashPos     = input.string("Top Right", "Pos",
      options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v4")
@@ -78,6 +80,12 @@ longStop    = close - stopAtr * atr
 longTarget  = close + targetR * stopAtr * atr
 shortStop   = close + stopAtr * atr
 shortTarget = close - targetR * stopAtr * atr
+sigFired    = longOk or shortOk
+dailyStopWillFire = inRTH and not dailyStopFired and ((maxTradesDay > 0 and tradesToday + (sigFired ? 1 : 0) >= maxTradesDay) or (dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd))
+alertVisual = sigFired or dailyStopWillFire
+sEntry      = close
+sStop       = longOk ? longStop : shortStop
+sTgt        = longOk ? longTarget : shortTarget
 riskPts     = stopAtr * atr
 riskUsdPer  = riskPts * syminfo.pointvalue
 riskUsdTot  = riskUsdPer * contracts
@@ -94,12 +102,20 @@ fill(ub, lb, color = showBands ? color.new(colVw, 93) : na, title="VWAP band")
 
 barcolor(colorBars ? color.new(trendUp ? colUp : colDn, 35) : na, title="Trend bars")
 
-plotshape(showSignals and longOk,  "Buy",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.large, text="BUY\nMNQ",  textcolor=color.white)
-plotshape(showSignals and shortOk, "Sell", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.large, text="SELL\nMNQ", textcolor=color.white)
+plotshape(showSignals and longOk,  "BUY MNQ alert marker",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.huge, text="BUY\nMNQ",  textcolor=color.white)
+plotshape(showSignals and shortOk, "SELL MNQ alert marker", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.huge, text="SELL\nMNQ", textcolor=color.white)
+plotshape(showSignals and dailyStopWillFire and not sigFired, "DAILY STOP alert marker", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.huge, text="STOP\nTODAY", textcolor=color.white)
 
 // Grey wash outside RTH; red wash when entries are muted (daily stop / max trades) during RTH.
 bgcolor(not inRTH ? color.new(color.gray, 92) : (not (tradesCapOk and lossLimitOk) ? color.new(colDn, 90) : na), title="Session / mute")
-bgcolor(showSignalFlash and longOk ? color.new(colUp, 78) : (showSignalFlash and shortOk ? color.new(colDn, 78) : na), title="Signal bar flash")
+bgcolor(showSignalFlash and alertVisual ? color.new(sigFired ? (longOk ? colUp : colDn) : color.orange, 58) : na, title="Manual alert flash")
+
+var box alertStripe = na
+if showPinstripe and alertVisual
+    stripeColor = sigFired ? (longOk ? colUp : colDn) : color.orange
+    box.new(bar_index, high + atr * 4.0, bar_index + 1, low - atr * 4.0,
+         border_color=color.new(stripeColor, 0), border_width=2, bgcolor=color.new(stripeColor, 72),
+         text=sigFired ? (longOk ? "BUY MNQ" : "SELL MNQ") : "DAILY STOP", text_color=color.white, text_size=size.large)
 
 // Managed trade-level rays — only the current setup is drawn (prior set deleted on each signal).
 var line  lnE = na
@@ -112,11 +128,6 @@ var string lastDir = "—"
 var float  lastE = na
 var float  lastS = na
 var float  lastT = na
-
-sigFired = longOk or shortOk
-sEntry   = close
-sStop    = longOk ? longStop   : shortStop
-sTgt     = longOk ? longTarget : shortTarget
 
 if sigFired
     lastDir := longOk ? "▲ LONG" : "▼ SHORT"
@@ -182,7 +193,7 @@ if shortOk
 
 hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
 hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
-if inRTH and not dailyStopFired and (hitTrades or hitLoss)
+if dailyStopWillFire
     dailyStopFired := true
     alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
          ',"symbol":"' + syminfo.ticker + '"' +

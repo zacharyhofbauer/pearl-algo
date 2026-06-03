@@ -8,18 +8,19 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | **Pro build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, BUY/SELL markers, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). The **signal is unchanged and unproven** — see the status note below. |
+| `mnq_rth_long_bias.pine` | **Manual v3 / pinstripe build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). The **signal is unchanged and unproven** — see the status note below. |
 
-## On-chart visuals (Pro)
+## On-chart visuals (Manual v3 / pinstripe)
 
 All toggleable in the **Style** input group (colors are pickers):
 
 - **Dashboard** — themed table (position selectable) with trend, session, status (`ARMED` / `MAX TRADES` / `DAILY STOP` / `CLOSED`), last signal, entry/stop/target, R:R, $-risk/contract, trades-today, daily P&L.
 - **EMA ribbon** — fill between fast/slow EMAs, green/red by trend.
 - **VWAP** (+ optional ±1σ bands).
-- **Signal markers** — large BUY MNQ / SELL MNQ triangles at the bar that fires.
+- **Signal markers** — huge BUY MNQ / SELL MNQ triangles at the exact bar that fires.
+- **Alert pinstripe** — default-on bright full-candle stripe on every manual alert event. Entry alerts get green/red BUY/SELL stripes; guardrail alerts get an orange DAILY STOP stripe.
 - **Big signal callouts** — default-on labels that print direction, entry, stop, and target directly on the signal candle.
-- **Signal bar flash** — default-on green/red background wash on the firing bar so the trigger is obvious even on a crowded chart.
+- **Signal flash** — default-on green/red/orange background wash on the firing bar so the trigger is obvious even on a crowded chart.
 - **Trade levels** — entry (solid) + stop/target (dashed) rays drawn forward with price labels; only the current setup is shown.
 - **Trend bar-coloring** — candles tinted by EMA trend.
 - Session shading: grey outside RTH, red wash when entries are muted by a guardrail.
@@ -34,9 +35,9 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
 
 ## If markers are not visible
 
-- Make sure the chart is running the current `mnq_rth_long_bias.pine` script, not an older generic strategy alert. The screenshot alert body using `{{strategy.order.action}}` does not match this script's v2 `alert()` payload.
-- In the strategy settings, keep **Signal markers**, **Big signal callouts**, and **Signal bar flash** enabled in the Style group.
-- Use **Condition = PearlAlgo MNQ — RTH Long-Bias Pro** and trigger **Any alert() function call** so chart signals, strategy entries, and Discord payloads stay tied to the same Pine source.
+- Make sure the chart label starts with **PearlAlgo PINSTRIPE MNQ — Manual v3**. If TradingView still shows **RTH Long-Bias EMA/VWAP** or any non-pinstripe name, the chart is running an older saved script.
+- In the strategy settings, keep **Signal markers**, **Alert pinstripe**, **Big signal callouts**, and **Signal flash** enabled in the Style group.
+- Use **Condition = PearlAlgo PINSTRIPE MNQ — Manual v3** and trigger **Any alert() function call** so chart signals, strategy entries, and Discord payloads stay tied to the same Pine source. Avoid strategy order-fill placeholders like `{{strategy.order.action}}`; those can notify on fills/exits that are not manual entry alerts.
 
 ## How to wire an alert (per strategy)
 
@@ -44,7 +45,7 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
    your trading timeframe).
 2. Check the **Strategy Tester** tab — this is your first, free backtest. If it's not green on a
    meaningful sample, fix the strategy *before* trading it.
-3. Create an alert: **Condition = the strategy**, trigger = **"Any alert() function call"**,
+3. Create an alert: **Condition = PearlAlgo PINSTRIPE MNQ — Manual v3**, trigger = **"Any alert() function call"**,
    **Webhook URL** = your receiver (or Discord webhook directly — see `../alerts/`).
    *(Prefer condition-based alerts? The script also exposes `alertcondition()` triggers
    "PearlAlgo MNQ — Long/Short" with a minimal placeholder payload.)*
