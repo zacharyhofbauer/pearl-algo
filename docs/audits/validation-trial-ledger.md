@@ -33,7 +33,10 @@ the held-out set is touched exactly once. Plan: `~/.claude/plans/im-starting-to-
 | 7 | 2026-06-03 | RICH (live composite) | 120d (dev) | 228 | **−7.29** | 0 | **KILL** (exp ≤ 0) |
 | 8 | 2026-06-03 | pine (EMA9/21+VWAP, long-only, 1.5×/3.0× ATR) | 120d (dev) | 113 | +6.50, 95% CI [−9.5, +22.9] | 0 | PASS\* — INCONCLUSIVE (CI crosses 0); 14d +37.8→120d +6.5 = regime-dependent; 1280-pt max DD. Advance to WFA. |
 | 9 | 2026-06-03 | orb (opening-range breakout, 2-sided) | 120d (dev) | 192 | **−0.47** | 0 | **KILL** (exp ≤ 0) |
-| 10 | 2026-06-03 | vwap_reversion (fade ±2σ → VWAP, 2-sided) | 120d (dev) | (pending) | — | 0 | — |
+| 10 | 2026-06-03 | vwap_reversion (fade ±2σ → VWAP, 2-sided) | 120d trailing† | 228 | **−5.26** | 0 | **KILL** (exp ≤ 0) |
+| 11 | 2026-06-03 | pine | dev-only 2025-10-26→2026-04-19 (held-out excluded) | pending | — | 0 | — |
+
+† **Contamination caveat:** trials 7–10 used a trailing `--days 120` window (~Feb→Jun) which **overlaps the registered held-out slice (2026-04-20+)**. For RICH/ORB/vwap-reversion the KILL is robust (they lose with or without the recent uptrend). For **pine** it matters — its +6.50 was inflated by the held-out uptrend — so pine is re-run dev-only (trial 11). Date-range support (`--start/--end`) added to the engine for this.
 
 \* Tier-0 is a coarse cost filter; pine survives only as a *candidate to disprove*. Per the committed gate (KILL if exp≤0, or 0<exp<1 with CI crossing 0), +6.50 passes — but the wide CI means the edge is NOT established and must be confirmed in walk-forward + the W13 regime guard + trailing-DD survival.
 

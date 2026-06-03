@@ -289,6 +289,8 @@ def run_backtest(
     max_concurrent: int = 1,
     slippage_points: float = 0.25,
     commission_points: float = 1.0,
+    ts_from: Optional[int] = None,
+    ts_to: Optional[int] = None,
     strategy_fn: Optional[Any] = None,
     strategy_name: str = "composite",
 ) -> Dict[str, Any]:
@@ -315,10 +317,14 @@ def run_backtest(
     sig_fn = strategy_fn or generate_signals
     tf_min = _tf_minutes(tf)
     now_ts = int(time.time())
-    ts_from = now_ts - days * 86400
+    # Explicit [ts_from, ts_to] wins; otherwise fall back to the trailing --days
+    # window. Explicit ranges let us run dev-only and hold out the recent slice.
+    win_to = now_ts if ts_to is None else int(ts_to)
+    win_from = (win_to - days * 86400) if ts_from is None else int(ts_from)
     archive = get_archive()
     rows = archive.query_range(
-        symbol=symbol, tf=tf, ts_from=ts_from, ts_to=now_ts, limit=days * 24 * 60 // tf_min + 500
+        symbol=symbol, tf=tf, ts_from=win_from, ts_to=win_to,
+        limit=(win_to - win_from) // (tf_min * 60) + 500,
     )
     if len(rows) <= warmup_bars:
         return {
@@ -422,6 +428,8 @@ def run_backtest(
         "symbol": symbol,
         "timeframe": tf,
         "days_requested": days,
+        "window_from": win_from,
+        "window_to": win_to,
         "warmup_bars": warmup_bars,
         "max_hold_minutes": max_hold_minutes,
         "max_concurrent": max_concurrent,
@@ -490,6 +498,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--symbol", default="MNQ")
     parser.add_argument("--tf", default="5m", help="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d")
     parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--start", default=None, help="Window start date YYYY-MM-DD (ET); overrides --days")
+    parser.add_argument("--end", default=None, help="Window end date YYYY-MM-DD (ET, inclusive); overrides --days")
     parser.add_argument("--warmup-bars", type=int, default=120)
     parser.add_argument("--max-hold-minutes", type=int, default=180)
     parser.add_argument("--max-concurrent", type=int, default=1)
@@ -529,11 +539,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         from pearlalgo.validation.strategies import STRATEGY_FNS
         sfn = STRATEGY_FNS[args.strategy]
 
+    ts_from = ts_to = None
+    if args.start or args.end:
+        from datetime import datetime as _dt, timedelta as _td
+        from zoneinfo import ZoneInfo as _ZI
+        _ET = _ZI("America/New_York")
+        if args.start:
+            ts_from = int(_dt.strptime(args.start, "%Y-%m-%d").replace(tzinfo=_ET).timestamp())
+        if args.end:  # inclusive: end-of-day
+            ts_to = int((_dt.strptime(args.end, "%Y-%m-%d").replace(tzinfo=_ET) + _td(days=1)).timestamp())
+
     result = run_backtest(
         config_path=Path(args.config),
         symbol=args.symbol,
         tf=args.tf,
         days=args.days,
+        ts_from=ts_from,
+        ts_to=ts_to,
         warmup_bars=args.warmup_bars,
         max_hold_minutes=args.max_hold_minutes,
         max_concurrent=args.max_concurrent,
