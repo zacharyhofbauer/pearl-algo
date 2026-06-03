@@ -29,9 +29,13 @@ the held-out set is touched exactly once. Plan: `~/.claude/plans/im-starting-to-
 
 | # | Date | Strategy | Window | Trades | Net exp (pt/trade) | Tier | Verdict |
 |---|------|----------|--------|--------|--------------------|------|---------|
-| (Phase E grid: 6 prior trials on the BROKEN engine — counted for DSR but results void) |
-| 1–6 | pre-2026-06-03 | composite (Phase E E/F grid) | — | — | void (broken engine) | — | seed-only |
-| 7 | 2026-06-03 | RICH (live config) | 120d (dev) | 228 | **−7.29** | 0 | **KILL** (exp ≤ 0) |
+| 1–6 | pre-2026-06-03 | composite (Phase E E/F grid, broken engine) | — | — | void (broken engine) | — | seed-only for DSR multiple-testing count |
+| 7 | 2026-06-03 | RICH (live composite) | 120d (dev) | 228 | **−7.29** | 0 | **KILL** (exp ≤ 0) |
+| 8 | 2026-06-03 | pine (EMA9/21+VWAP, long-only, 1.5×/3.0× ATR) | 120d (dev) | 113 | +6.50, 95% CI [−9.5, +22.9] | 0 | PASS\* — INCONCLUSIVE (CI crosses 0); 14d +37.8→120d +6.5 = regime-dependent; 1280-pt max DD. Advance to WFA. |
+| 9 | 2026-06-03 | orb (opening-range breakout, 2-sided) | 120d (dev) | 192 | **−0.47** | 0 | **KILL** (exp ≤ 0) |
+| 10 | 2026-06-03 | vwap_reversion (fade ±2σ → VWAP, 2-sided) | 120d (dev) | (pending) | — | 0 | — |
+
+\* Tier-0 is a coarse cost filter; pine survives only as a *candidate to disprove*. Per the committed gate (KILL if exp≤0, or 0<exp<1 with CI crossing 0), +6.50 passes — but the wide CI means the edge is NOT established and must be confirmed in walk-forward + the W13 regime guard + trailing-DD survival.
 
 ## Findings
 
