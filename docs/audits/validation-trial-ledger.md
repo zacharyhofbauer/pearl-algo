@@ -108,10 +108,10 @@ NOT a fund signal — it only justifies procuring deep multi-year data to confir
 
 | # | Date | Strategy | Window | Trades | Net exp (pt/trade) | Tier | Verdict |
 |---|------|----------|--------|--------|--------------------|------|---------|
-| 12 | 2026-06-03 | **opening_drive** (PRIMARY: continue sign of first-15min RTH move, hold to close) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
-| 13 | 2026-06-03 | opening_drive_5 (5-min drive window) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
-| 14 | 2026-06-03 | overnight_seasonality (SHORT @18:00 ET, hold overnight) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
-| 15 | 2026-06-03 | tod_rth_long (unconditional LONG @RTH open, hold to close) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
+| 12 | 2026-06-03 | **opening_drive** (PRIMARY: continue sign of first-15min RTH move, hold to close) | dev-only 2025-10-26→2026-04-19 | 122 | **+12.72** | 0 | **PASS\*** — INCONCLUSIVE: CI95 [−25.66,+49.87] crosses 0; split-half = regime artifact (see below) |
+| 13 | 2026-06-03 | opening_drive_5 (5-min drive window) | dev-only 2025-10-26→2026-04-19 | 122 | **+19.18** | 0 | **PASS\*** — INCONCLUSIVE: CI95 [−20.24,+59.04] crosses 0; split-half = regime artifact |
+| 14 | 2026-06-03 | overnight_seasonality (SHORT @18:00 ET, hold overnight) | dev-only 2025-10-26→2026-04-19 | 123 | **−13.57** | 0 | **KILL** (exp ≤ 0) |
+| 15 | 2026-06-03 | tod_rth_long (unconditional LONG @RTH open, hold to close) | dev-only 2025-10-26→2026-04-19 | 122 | **−4.81** | 0 | **KILL** (exp ≤ 0) |
 
 Commands (held-out discipline = explicit `--end 2026-04-19`; `--max-hold` per the hold target):
 ```
@@ -120,3 +120,57 @@ backtest_config.py --strategy opening_drive_5        --tf 5m --max-hold-minutes 
 backtest_config.py --strategy overnight_seasonality  --tf 5m --max-hold-minutes 900 --start 2025-10-26 --end 2026-04-19 --json
 backtest_config.py --strategy tod_rth_long           --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
 ```
+
+### Tier-1 regime-stability check on the two Tier-0 survivors (split-half, dev-only)
+
+opening_drive / opening_drive_5 cleared Tier-0 (cost viability), so the kill-early ladder advances
+them to the first Tier-1 robust lever: per-period / regime stability (the framework's committed W13
+guard — "any single regime > 40% of profit" is a KILL). A split-half of the dev slice shows the
+positive full-slice expectancy is **100% regime-carried, and — the decisive tell — the two variants
+are positive in OPPOSITE halves**: correlated signals (5-min vs 15-min opening drive) that disagree
+on *which* half pays is the signature of noise, not a persistent effect (the split-half magnitudes
+are themselves n≈60 wide-CI noise; the sign-disagreement is the real evidence):
+
+| Strategy | H1 2025-10-26→2026-01-22 | H2 2026-01-23→2026-04-19 |
+|----------|--------------------------|--------------------------|
+| opening_drive (15-min) | n=62, **−10.82** pt | n=59, **+39.58** pt |
+| opening_drive_5 (5-min) | n=62, **+42.49** pt | n=59, **−2.50** pt |
+
+Every sub-period CI also crosses zero. The 15-min "edge" lives entirely in H2; the 5-min "edge"
+entirely in H1. They contradict each other on *which* half is profitable → not a credible lead.
+
+## CONCLUSION — Path B (2026-06-03)
+
+**No Path-B hypothesis demonstrates a stable, tradeable edge on free 5m dev data.**
+
+- **overnight_seasonality (short): KILL** (−13.57 pt/trade). Shorting the overnight session lost
+  money → the overnight session actually had a mild *positive* drift in-sample. This *contradicts*
+  the local prior (the bot's overnight longs lost −$4,477) — that loss was execution/adverse-
+  selection on an automated scalper, not a directional drift. Per anti-fishing discipline, overnight
+  *long* was NOT separately tested; by symmetry it would be ≈ small-positive (gross overnight drift
+  minus double costs) — itself a wide-CI, inconclusive-noise result that would not establish an edge,
+  so it reinforces rather than changes this verdict. A lone direction-flip on noisy data is no green light.
+- **tod_rth_long: KILL** (−4.81 pt/trade). Being unconditionally long the RTH session lost money
+  after costs — so **RTH sessions did not trend up** in-sample (the index's net gains were *overnight*,
+  per the overnight-short loss above). Useful apples-to-apples control: always-long-RTH lost while
+  sign-conditioned-RTH (opening_drive) gained — both are RTH-duration holds — so the opening-sign
+  added in-sample value (a real signal, but one that does not survive Tier 1; see below).
+- **opening_drive / opening_drive_5: PASS Tier-0, FAIL Tier-1.** They clear the coarse Tier-0 cost
+  filter on full-slice expectancy (+12.72 / +19.18) — the first hypotheses in the whole program to do
+  so — then **die at the first Tier-1 lever (regime stability)**: CIs span zero and the split-half
+  shows the profit is one-regime-only with the two variants positive in *opposite* halves. This is the
+  kill-early ladder working exactly as designed (the pine-trial-8 pattern), **not** a moved goalpost.
+
+**Decision-tree branch:** opening_drive cleared Tier-0 but **failed Tier-1 regime stability on free
+data**, so it does NOT graduate to a credible "procure deep data to confirm" candidate — the free
+data already shows the lead is a regime artifact, making confirmation low-EV. Honest recommendation:
+**do NOT fund anything; do NOT spend on tick/L2 + multi-year data on this basis.** opening-drive is
+the only non-dead lead, but it is fragile. Combined with the four dead intraday families (trials
+7–11) and the two Path-B KILLs, the cost-clean evidence increasingly says signal-based intraday MNQ
+has no edge that survives costs on this data → this **leans toward path A (redirect off intraday
+MNQ)**, unless the operator chooses to spend on deep data to test opening-drive at fidelity *despite*
+the weak free-data signal (operator's $ call).
+
+The held-out slice (2026-04-20→2026-06-03) remains **untouched** (all runs verified
+`window_to ≤ 2026-04-20`). DSR `n_trials` is now **15**. Per-strategy JSON saved at
+`docs/audits/2026-06-03-pathb-*.json`.
