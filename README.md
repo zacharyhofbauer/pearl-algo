@@ -1,22 +1,38 @@
-# PearlAlgo Market Trading Agent
+# PearlAlgo — Manual TradingView-Alert Trading Toolkit
 
 ![Coverage](docs/assets/coverage-badge.svg)
 
-Production-ready market trading agent with a modular architecture:
-data providers (IBKR), strategy/signal generation with aggressive entry triggers, state + metrics,
-and execution via Tradovate. Canonical frontend: Next.js dashboard web app.
+> **2026-06-02 pivot.** The active model is now **manual discretionary futures trading** driven by
+> TradingView Pine Script alerts, executed by hand on a **My Funded Futures (MFF)** MNQ account.
+> The fully-automated IBKR+Tradovate bot is **dormant**, preserved at tag
+> `legacy/automated-mnq-2026-06-02` (parked after −2,026 pts / 717 trades). Read
+> [`docs/MANUAL_PIVOT.md`](docs/MANUAL_PIVOT.md) for the why + validation gate.
 
-The current operating model is intentionally narrow:
-- market data from IBKR
-- strategy via `strategies.composite_intraday`
-- execution on a single Tradovate Paper account
-- operator control through `./pearl.sh`
-- dashboard/frontend in `apps/pearl-algo-app/`
+## Active model (manual)
 
-Anything outside that path should be treated as non-canonical until proven
-otherwise. Use `docs/START_HERE.md` for the live path and
-`docs/COMPATIBILITY_SURFACES.md` for retained legacy bridges, wrappers, and
-fallbacks.
+| Step | Where |
+| --- | --- |
+| **Signals** — Pine strategies fire TradingView alerts | [`pine/`](pine/) |
+| **Delivery** — TradingView webhook → Discord (your phone) | [`alerts/`](alerts/) |
+| **Execution** — you place the MNQ order by hand on MFF (TraderSyncer copies demo→live) | manual |
+| **Journal** — log + review every manual trade | [`docs/JOURNAL.md`](docs/JOURNAL.md) |
+| **Backtest** — vet a Pine idea before trading it | `scripts/backtesting/` |
+
+**Before risking the funded account**, clear the pre-committed validation gate in
+[`docs/MANUAL_PIVOT.md`](docs/MANUAL_PIVOT.md): ≥30 trades, positive expectancy net of fees, max
+drawdown inside the MFF trailing-DD limit, and rule-adherence.
+
+**Edges baked into the starter strategy** (from the 922-trade analysis): RTH only (overnight loses),
+long bias (shorts weak), few robust filters over many.
+
+---
+
+## Legacy automated bot (dormant — preserved at `legacy/automated-mnq-2026-06-02`)
+
+Everything below describes the **parked** automated system. It stays on disk and runnable but is
+not part of the active manual model — see [`docs/legacy/README.md`](docs/legacy/README.md) to re-arm it.
+`execution.armed` is `false`. Anything outside this path is non-canonical; use `docs/START_HERE.md`
+for the old live path and `docs/COMPATIBILITY_SURFACES.md` for retained bridges/wrappers.
 
 ## Pearl Algo Web App
 

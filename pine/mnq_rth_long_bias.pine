@@ -1,0 +1,73 @@
+//@version=5
+// PearlAlgo MNQ — RTH Long-Bias EMA/VWAP starter strategy
+//
+// Encodes the edges from the 922-trade analysis:
+//   • RTH only        — overnight (18:00–08:30 ET) historically lost money
+//   • Long bias       — shorts had a poor win rate (off by default)
+//   • EMA cross + VWAP — the existing signal family, kept simple (few robust filters)
+//
+// This is a STARTING TEMPLATE to validate, NOT a proven money-maker. Backtest it in
+// TradingView's Strategy Tester, then paper-trade the alert loop before risking the
+// MFF funded account. See docs/MANUAL_PIVOT.md for the validation gate.
+strategy("PearlAlgo MNQ — RTH Long-Bias EMA/VWAP", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     pyramiding=0, calc_on_every_tick=false, process_orders_on_close=true)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+emaFastLen  = input.int(9,  "EMA fast", minval=1)
+emaSlowLen  = input.int(21, "EMA slow", minval=2)
+useVwap     = input.bool(true,  "Require price on correct side of VWAP")
+atrLen      = input.int(14, "ATR length", minval=1)
+stopAtr     = input.float(1.5, "Stop = ATR ×", minval=0.1, step=0.1)
+targetR     = input.float(2.0, "Target = R ×", minval=0.1, step=0.1)
+allowShorts = input.bool(false, "Allow shorts (off — shorts had poor win rate)")
+rthOnly     = input.bool(true,  "RTH only (overnight historically loses)")
+sessRTH     = input.session("0930-1600", "RTH session (ET)")
+
+// ── Session gate ───────────────────────────────────────────────────────────────
+inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
+
+// ── Indicators ─────────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+vwap    = ta.vwap(hlc3)
+atr     = ta.atr(atrLen)
+
+plot(emaFast, "EMA fast", color.new(color.aqua,   0))
+plot(emaSlow, "EMA slow", color.new(color.orange, 0))
+plot(vwap,    "VWAP",     color.new(color.purple, 0))
+bgcolor(inRTH ? na : color.new(color.gray, 90), title="Outside RTH")
+
+// ── Signals ────────────────────────────────────────────────────────────────────
+bullCross = ta.crossover(emaFast, emaSlow)
+bearCross = ta.crossunder(emaFast, emaSlow)
+longOk  = bullCross and (not useVwap or close > vwap) and inRTH
+shortOk = allowShorts and bearCross and (not useVwap or close < vwap) and inRTH
+
+// ── Levels for the manual order ──────────────────────────────────────────────────
+longStop    = close - stopAtr * atr
+longTarget  = close + targetR * stopAtr * atr
+shortStop   = close + stopAtr * atr
+shortTarget = close - targetR * stopAtr * atr
+
+// ── Structured JSON alert payload (TradingView → alerts/ receiver → Discord) ───────
+f_msg(action, entry, stop, target) =>
+    '{"strat":"mnq-rth-long-bias","action":"' + action + '","symbol":"' + syminfo.ticker +
+     '","tf":"' + timeframe.period + '","entry":' + str.tostring(entry, "#.##") +
+     ',"stop":' + str.tostring(stop, "#.##") + ',"target":' + str.tostring(target, "#.##") +
+     ',"max_contracts":5}'
+
+// ── Entries, brackets, and alerts ────────────────────────────────────────────────
+if longOk
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    alert(f_msg("BUY", close, longStop, longTarget), alert.freq_once_per_bar_close)
+
+if shortOk
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    alert(f_msg("SELL", close, shortStop, shortTarget), alert.freq_once_per_bar_close)
+
+// Never hold overnight: flatten at the RTH close.
+if rthOnly and not inRTH
+    strategy.close_all("RTH end")
