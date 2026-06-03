@@ -1,73 +1,145 @@
 //@version=5
-// PearlAlgo MNQ — RTH Long-Bias EMA/VWAP starter strategy
+// PearlAlgo MNQ — RTH Long-Bias EMA/VWAP  (v2: rich alerts + MFF discipline guardrails)
 //
-// Encodes the edges from the 922-trade analysis:
+// Signal (UNCHANGED from v1, and DELIBERATELY not "improved"):
 //   • RTH only        — overnight (18:00–08:30 ET) historically lost money
 //   • Long bias       — shorts had a poor win rate (off by default)
-//   • EMA cross + VWAP — the existing signal family, kept simple (few robust filters)
+//   • EMA cross + VWAP — the existing signal family, kept simple
 //
-// This is a STARTING TEMPLATE to validate, NOT a proven money-maker. Backtest it in
-// TradingView's Strategy Tester, then paper-trade the alert loop before risking the
-// MFF funded account. See docs/MANUAL_PIVOT.md for the validation gate.
-strategy("PearlAlgo MNQ — RTH Long-Bias EMA/VWAP", overlay=true,
+// ⚠️  HONEST STATUS: this EMA/VWAP signal FAILED cost-viability validation (see
+// docs/audits/validation-trial-ledger.md, 2026-06-03). It is NOT a proven edge. v2 does
+// NOT add more indicator confluence (that is the disproven curve-fitting that cost the
+// auto-bot −2,026 pts). v2 only makes the ALERTS richer and adds DISCIPLINE guardrails
+// (robust levers) so that *if* you trade it on an MFF demo, the funded account is protected
+// by hard daily-stop rules. Paper-trade the validation gate before risking real capital.
+strategy("PearlAlgo MNQ — RTH Long-Bias (alerts+guardrails)", overlay=true,
      default_qty_type=strategy.fixed, default_qty_value=1,
      pyramiding=0, calc_on_every_tick=false, process_orders_on_close=true)
 
-// ── Inputs ───────────────────────────────────────────────────────────────────
-emaFastLen  = input.int(9,  "EMA fast", minval=1)
-emaSlowLen  = input.int(21, "EMA slow", minval=2)
-useVwap     = input.bool(true,  "Require price on correct side of VWAP")
-atrLen      = input.int(14, "ATR length", minval=1)
-stopAtr     = input.float(1.5, "Stop = ATR ×", minval=0.1, step=0.1)
-targetR     = input.float(2.0, "Target = R ×", minval=0.1, step=0.1)
-allowShorts = input.bool(false, "Allow shorts (off — shorts had poor win rate)")
-rthOnly     = input.bool(true,  "RTH only (overnight historically loses)")
-sessRTH     = input.session("0930-1600", "RTH session (ET)")
+// ── Inputs: signal ───────────────────────────────────────────────────────────────
+emaFastLen  = input.int(9,  "EMA fast", minval=1, group="Signal")
+emaSlowLen  = input.int(21, "EMA slow", minval=2, group="Signal")
+useVwap     = input.bool(true,  "Require price on correct side of VWAP", group="Signal")
+atrLen      = input.int(14, "ATR length", minval=1, group="Signal")
+stopAtr     = input.float(1.5, "Stop = ATR ×", minval=0.1, step=0.1, group="Signal")
+targetR     = input.float(2.0, "Target = R ×", minval=0.1, step=0.1, group="Signal")
+allowShorts = input.bool(false, "Allow shorts (off — shorts had poor win rate)", group="Signal")
 
-// ── Session gate ───────────────────────────────────────────────────────────────
+// ── Inputs: session ────────────────────────────────────────────────────────────────
+rthOnly     = input.bool(true,  "RTH only (overnight historically loses)", group="Session")
+sessRTH     = input.session("0930-1600", "RTH session (ET)", group="Session")
+
+// ── Inputs: MFF discipline guardrails (robust levers, not signal) ────────────────────
+contracts    = input.int(1, "Contracts per trade", minval=1, maxval=5, group="MFF guardrails")
+maxContracts = input.int(5, "Max MNQ total (MFF cap)", minval=1, maxval=5, group="MFF guardrails")
+maxTradesDay = input.int(3, "Max trades / day (0 = no cap)", minval=0, group="MFF guardrails")
+dailyLossUsd = input.float(0.0, "Daily loss limit $ (0 = off)", minval=0, step=25, group="MFF guardrails")
+
+// ── Session gate ─────────────────────────────────────────────────────────────────
 inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = inRTH and not inRTH[1]
 
-// ── Indicators ─────────────────────────────────────────────────────────────────
+// ── Indicators ───────────────────────────────────────────────────────────────────
 emaFast = ta.ema(close, emaFastLen)
 emaSlow = ta.ema(close, emaSlowLen)
 vwap    = ta.vwap(hlc3)
 atr     = ta.atr(atrLen)
 
-plot(emaFast, "EMA fast", color.new(color.aqua,   0))
-plot(emaSlow, "EMA slow", color.new(color.orange, 0))
-plot(vwap,    "VWAP",     color.new(color.purple, 0))
-bgcolor(inRTH ? na : color.new(color.gray, 90), title="Outside RTH")
+// ── Daily discipline state (reset at each RTH session open) ──────────────────────────
+var int   tradesToday    = 0
+var float dayStartProfit = 0.0
+var bool  dailyStopFired = false
+if newSession
+    tradesToday    := 0
+    dayStartProfit := strategy.netprofit
+    dailyStopFired := false
+dailyPnlUsd = strategy.netprofit - dayStartProfit   // strategy.netprofit is in account $ (syminfo.pointvalue)
 
-// ── Signals ────────────────────────────────────────────────────────────────────
-bullCross = ta.crossover(emaFast, emaSlow)
-bearCross = ta.crossunder(emaFast, emaSlow)
-longOk  = bullCross and (not useVwap or close > vwap) and inRTH
-shortOk = allowShorts and bearCross and (not useVwap or close < vwap) and inRTH
+tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
+lossLimitOk = dailyLossUsd == 0.0 or dailyPnlUsd > -dailyLossUsd
+canTrade    = inRTH and tradesCapOk and lossLimitOk
 
-// ── Levels for the manual order ──────────────────────────────────────────────────
+// ── Signals ──────────────────────────────────────────────────────────────────────
+bullCross   = ta.crossover(emaFast, emaSlow)
+bearCross   = ta.crossunder(emaFast, emaSlow)
+vwapLongOk  = not useVwap or close > vwap
+vwapShortOk = not useVwap or close < vwap
+longOk  = bullCross and vwapLongOk  and canTrade
+shortOk = allowShorts and bearCross and vwapShortOk and canTrade
+
+// ── Levels + risk context ($ uses TradingView's real point value) ────────────────────
 longStop    = close - stopAtr * atr
 longTarget  = close + targetR * stopAtr * atr
 shortStop   = close + stopAtr * atr
 shortTarget = close - targetR * stopAtr * atr
+riskPts     = stopAtr * atr
+riskUsdPer  = riskPts * syminfo.pointvalue
+riskUsdTot  = riskUsdPer * contracts
 
-// ── Structured JSON alert payload (TradingView → alerts/ receiver → Discord) ───────
-f_msg(action, entry, stop, target) =>
-    '{"strat":"mnq-rth-long-bias","action":"' + action + '","symbol":"' + syminfo.ticker +
-     '","tf":"' + timeframe.period + '","entry":' + str.tostring(entry, "#.##") +
-     ',"stop":' + str.tostring(stop, "#.##") + ',"target":' + str.tostring(target, "#.##") +
-     ',"max_contracts":5}'
+// ── Plots ────────────────────────────────────────────────────────────────────────
+plot(emaFast, "EMA fast", color.new(color.aqua,   0))
+plot(emaSlow, "EMA slow", color.new(color.orange, 0))
+plot(vwap,    "VWAP",     color.new(color.purple, 0))
+bgcolor(not inRTH ? color.new(color.gray, 90) : (not (tradesCapOk and lossLimitOk) ? color.new(color.red, 85) : na),
+     title="Muted (outside RTH / daily stop)")
 
-// ── Entries, brackets, and alerts ────────────────────────────────────────────────
+// ── Rich JSON alert payload (TradingView → alerts/tv_to_discord.py → Discord) ─────────
+f_msg(action, entry, stop, target, reason) =>
+    '{"strat":"mnq-rth-long-bias","v":2' +
+     ',"action":"' + action + '"' +
+     ',"symbol":"' + syminfo.ticker + '"' +
+     ',"tf":"' + timeframe.period + '"' +
+     ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+     ',"entry":' + str.tostring(entry, "#.##") +
+     ',"stop":' + str.tostring(stop, "#.##") +
+     ',"target":' + str.tostring(target, "#.##") +
+     ',"atr":' + str.tostring(atr, "#.##") +
+     ',"rr":' + str.tostring(targetR, "#.#") +
+     ',"risk_pts":' + str.tostring(riskPts, "#.##") +
+     ',"risk_usd_per_contract":' + str.tostring(riskUsdPer, "#.##") +
+     ',"risk_usd_total":' + str.tostring(riskUsdTot, "#.##") +
+     ',"contracts":' + str.tostring(contracts) +
+     ',"max_contracts":' + str.tostring(maxContracts) +
+     ',"trades_today":' + str.tostring(tradesToday + 1) +
+     ',"reason":"' + reason + '"}'
+
+// ── Entries, brackets, alerts (all guardrail-gated) ──────────────────────────────────
 if longOk
-    strategy.entry("Long", strategy.long)
+    strategy.entry("Long", strategy.long, qty=contracts)
     strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
-    alert(f_msg("BUY", close, longStop, longTarget), alert.freq_once_per_bar_close)
+    alert(f_msg("BUY", close, longStop, longTarget,
+         "EMA" + str.tostring(emaFastLen) + ">" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", above VWAP" : "")),
+         alert.freq_once_per_bar_close)
+    tradesToday := tradesToday + 1
 
 if shortOk
-    strategy.entry("Short", strategy.short)
+    strategy.entry("Short", strategy.short, qty=contracts)
     strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
-    alert(f_msg("SELL", close, shortStop, shortTarget), alert.freq_once_per_bar_close)
+    alert(f_msg("SELL", close, shortStop, shortTarget,
+         "EMA" + str.tostring(emaFastLen) + "<" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", below VWAP" : "")),
+         alert.freq_once_per_bar_close)
+    tradesToday := tradesToday + 1
 
-// Never hold overnight: flatten at the RTH close.
+// ── Daily-stop discipline alert (fires ONCE per day when a cap is hit during RTH) ─────
+hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
+hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
+if inRTH and not dailyStopFired and (hitTrades or hitLoss)
+    dailyStopFired := true
+    alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
+         ',"symbol":"' + syminfo.ticker + '"' +
+         ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +
+         ',"daily_pnl_usd":' + str.tostring(dailyPnlUsd, "#.##") +
+         ',"trades_today":' + str.tostring(tradesToday) + '}',
+         alert.freq_once_per_bar_close)
+
+// ── Lightweight alertcondition() fallbacks (for condition-based alerts / study use) ───
+// The RICH JSON above comes via alert() ("Any alert() function call"); these carry a
+// minimal placeholder payload for users who prefer TradingView's condition alerts.
+alertcondition(longOk,  title="PearlAlgo MNQ — Long",
+     message='{"strat":"mnq-rth-long-bias","action":"BUY","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
+alertcondition(shortOk, title="PearlAlgo MNQ — Short",
+     message='{"strat":"mnq-rth-long-bias","action":"SELL","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
+
+// ── Never hold overnight: flatten at the RTH close ───────────────────────────────────
 if rthOnly and not inRTH
     strategy.close_all("RTH end")
