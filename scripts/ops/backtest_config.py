@@ -289,8 +289,14 @@ def run_backtest(
     max_concurrent: int = 1,
     slippage_points: float = 0.25,
     commission_points: float = 1.0,
+    strategy_fn: Optional[Any] = None,
+    strategy_name: str = "composite",
 ) -> Dict[str, Any]:
     """Replay the archive through ``config_path`` and return the scorecard dict.
+
+    ``strategy_fn`` overrides the signal source (default: the live
+    ``generate_signals``). Isolated validation strategies live in
+    ``pearlalgo.validation.strategies`` and share the same call contract.
 
     ``commission_points`` is the round-trip cost per contract in index points
     (MNQ: ~$2 RT / $2 per point ≈ 1.0 pt). Set 0.0 to see gross-of-commission.
@@ -306,6 +312,7 @@ def run_backtest(
         generate_signals,
     )
 
+    sig_fn = strategy_fn or generate_signals
     tf_min = _tf_minutes(tf)
     now_ts = int(time.time())
     ts_from = now_ts - days * 86400
@@ -355,7 +362,7 @@ def run_backtest(
         bar_ts = int(bar["time"])
         bar_time = datetime.fromtimestamp(bar_ts, tz=timezone.utc)
         try:
-            signals = generate_signals(df_slice, config=merged, current_time=bar_time)
+            signals = sig_fn(df_slice, config=merged, current_time=bar_time)
         except Exception as exc:  # pragma: no cover — surfaced in the scorecard
             return {
                 "error": f"generate_signals raised: {type(exc).__name__}: {exc}",
@@ -411,6 +418,7 @@ def run_backtest(
     scorecard_dict["net_points_per_trade"] = per_trade_net_points
     scorecard_dict["meta"] = {
         "config_path": str(config_path),
+        "strategy": strategy_name,
         "symbol": symbol,
         "timeframe": tf,
         "days_requested": days,
@@ -504,8 +512,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             "= ~$2 RT on MNQ at $2/pt). Set 0.0 for gross-of-commission."
         ),
     )
+    parser.add_argument(
+        "--strategy",
+        default="composite",
+        choices=["composite", "pine", "orb", "vwap_reversion"],
+        help=(
+            "Signal source: 'composite' = live generate_signals (the RICH strategy); "
+            "pine/orb/vwap_reversion = isolated validation strategies."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON scorecard on stdout")
     args = parser.parse_args(argv)
+
+    sfn = None
+    if args.strategy != "composite":
+        from pearlalgo.validation.strategies import STRATEGY_FNS
+        sfn = STRATEGY_FNS[args.strategy]
 
     result = run_backtest(
         config_path=Path(args.config),
@@ -517,6 +539,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_concurrent=args.max_concurrent,
         slippage_points=args.slippage_points,
         commission_points=args.commission_points,
+        strategy_fn=sfn,
+        strategy_name=args.strategy,
     )
 
     if args.json:
