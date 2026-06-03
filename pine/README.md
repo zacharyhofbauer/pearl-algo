@@ -17,7 +17,9 @@ All toggleable in the **Style** input group (colors are pickers):
 - **Dashboard** — themed table (position selectable) with trend, session, status (`ARMED` / `MAX TRADES` / `DAILY STOP` / `CLOSED`), last signal, entry/stop/target, R:R, $-risk/contract, trades-today, daily P&L.
 - **EMA ribbon** — fill between fast/slow EMAs, green/red by trend.
 - **VWAP** (+ optional ±1σ bands).
-- **Signal markers** — BUY/SELL triangles at the bar that fires.
+- **Signal markers** — large BUY MNQ / SELL MNQ triangles at the bar that fires.
+- **Big signal callouts** — default-on labels that print direction, entry, stop, and target directly on the signal candle.
+- **Signal bar flash** — default-on green/red background wash on the firing bar so the trigger is obvious even on a crowded chart.
 - **Trade levels** — entry (solid) + stop/target (dashed) rays drawn forward with price labels; only the current setup is shown.
 - **Trend bar-coloring** — candles tinted by EMA trend.
 - Session shading: grey outside RTH, red wash when entries are muted by a guardrail.
@@ -29,6 +31,12 @@ All toggleable in the **Style** input group (colors are pickers):
 
 The original indicator library (Volume, VWAP_AA, EMA_Crossover, Supply & Demand, key levels,
 sessions) lives in `../resources/pinescript/pearlbot/` — use those as building blocks.
+
+## If markers are not visible
+
+- Make sure the chart is running the current `mnq_rth_long_bias.pine` script, not an older generic strategy alert. The screenshot alert body using `{{strategy.order.action}}` does not match this script's v2 `alert()` payload.
+- In the strategy settings, keep **Signal markers**, **Big signal callouts**, and **Signal bar flash** enabled in the Style group.
+- Use **Condition = PearlAlgo MNQ — RTH Long-Bias Pro** and trigger **Any alert() function call** so chart signals, strategy entries, and Discord payloads stay tied to the same Pine source.
 
 ## How to wire an alert (per strategy)
 

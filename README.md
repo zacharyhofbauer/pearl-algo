@@ -70,21 +70,16 @@ Strategy parameters (EMA periods, entry triggers, confidence thresholds) are con
 ### Run (operator scripts)
 
 ```bash
-# Audit the live runtime layout first after a revamp
-python3 scripts/ops/audit_runtime_paths.py
-
-# Start everything
-./pearl.sh start
-
-# One-line health check
+# One-line manual-model validation: Pine present, alert bridge present,
+# execution disarmed, automated bot dormant.
 ./pearl.sh quick
 
-# Start without the chart if needed
-./pearl.sh start --no-chart
-
-# Tradovate Paper only
+# Legacy automated bot status only; should stay dormant during the manual pivot.
 ./pearl.sh tv-paper status
 ```
+
+`./pearl.sh start` is retained for the parked automated stack. Do not use it for the
+current TradingView-alert → manual MFF execution workflow.
 
 ## Operating model
 

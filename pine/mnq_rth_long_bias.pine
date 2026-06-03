@@ -35,9 +35,11 @@ showBands   = input.bool(false, "VWAP σ-bands",   group=gV, inline="v1")
 showSignals = input.bool(true,  "Signal markers", group=gV, inline="v2")
 showLevels  = input.bool(true,  "Trade levels",   group=gV, inline="v2")
 colorBars   = input.bool(true,  "Color bars",     group=gV, inline="v2")
-showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v3")
+showCallouts = input.bool(true, "Big signal callouts", group=gV, inline="v3")
+showSignalFlash = input.bool(true, "Signal bar flash", group=gV, inline="v3")
+showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v4")
 dashPos     = input.string("Top Right", "Pos",
-     options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v3")
+     options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v4")
 colUp = input.color(#26a69a, "Up",   group=gV, inline="c")
 colDn = input.color(#ef5350, "Down", group=gV, inline="c")
 colVw = input.color(#ab47bc, "VWAP", group=gV, inline="c")
@@ -92,11 +94,12 @@ fill(ub, lb, color = showBands ? color.new(colVw, 93) : na, title="VWAP band")
 
 barcolor(colorBars ? color.new(trendUp ? colUp : colDn, 35) : na, title="Trend bars")
 
-plotshape(showSignals and longOk,  "Buy",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.small, text="BUY",  textcolor=color.white)
-plotshape(showSignals and shortOk, "Sell", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.small, text="SELL", textcolor=color.white)
+plotshape(showSignals and longOk,  "Buy",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.large, text="BUY\nMNQ",  textcolor=color.white)
+plotshape(showSignals and shortOk, "Sell", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.large, text="SELL\nMNQ", textcolor=color.white)
 
 // Grey wash outside RTH; red wash when entries are muted (daily stop / max trades) during RTH.
 bgcolor(not inRTH ? color.new(color.gray, 92) : (not (tradesCapOk and lossLimitOk) ? color.new(colDn, 90) : na), title="Session / mute")
+bgcolor(showSignalFlash and longOk ? color.new(colUp, 78) : (showSignalFlash and shortOk ? color.new(colDn, 78) : na), title="Signal bar flash")
 
 // Managed trade-level rays — only the current setup is drawn (prior set deleted on each signal).
 var line  lnE = na
@@ -120,6 +123,13 @@ if sigFired
     lastE := sEntry
     lastS := sStop
     lastT := sTgt
+    if showCallouts
+        calloutDir = longOk ? "BUY MNQ" : "SELL MNQ"
+        calloutText = calloutDir + "\nEntry " + str.tostring(sEntry, format.mintick) + "\nStop " + str.tostring(sStop, format.mintick) + "  Target " + str.tostring(sTgt, format.mintick)
+        label.new(bar_index, longOk ? low : high, calloutText,
+             yloc=longOk ? yloc.belowbar : yloc.abovebar,
+             style=longOk ? label.style_label_up : label.style_label_down,
+             color=color.new(longOk ? colUp : colDn, 0), textcolor=color.white, size=size.large)
     if showLevels
         line.delete(lnE)
         line.delete(lnS)

@@ -61,51 +61,45 @@ parse_options() {
 
 # Sync web app env vars into .env.local (merge, don't overwrite)
 # Keep NEXT_PUBLIC_API_KEY as a compatibility fallback until the frontend no
-# longer reads the legacy variable name anywhere.
+# longer reads the legacy variable name anywhere. Avoid associative arrays so
+# this also works with macOS /bin/bash 3.2.
 sync_env_local() {
     local env_local="$SCRIPT_DIR/apps/pearl-algo-app/.env.local"
-    local changed=false
     local temp_file="${env_local}.tmp"
+    local next_file="${env_local}.next"
+    local updates=()
 
-    # Vars to sync: target_key=source_value
-    declare -A sync_vars
-    [ -n "${PEARL_API_KEY:-}" ] && sync_vars[NEXT_PUBLIC_READONLY_API_KEY]="$PEARL_API_KEY"
-    [ -n "${PEARL_API_KEY:-}" ] && sync_vars[NEXT_PUBLIC_API_KEY]="$PEARL_API_KEY"
-    [ -n "${PEARL_WEBAPP_AUTH_ENABLED:-}" ] && sync_vars[PEARL_WEBAPP_AUTH_ENABLED]="$PEARL_WEBAPP_AUTH_ENABLED"
-    [ -n "${PEARL_WEBAPP_PASSCODE:-}" ] && sync_vars[PEARL_WEBAPP_PASSCODE]="$PEARL_WEBAPP_PASSCODE"
+    [ -n "${PEARL_API_KEY:-}" ] && updates+=("NEXT_PUBLIC_READONLY_API_KEY=$PEARL_API_KEY")
+    [ -n "${PEARL_API_KEY:-}" ] && updates+=("NEXT_PUBLIC_API_KEY=$PEARL_API_KEY")
+    [ -n "${PEARL_WEBAPP_AUTH_ENABLED:-}" ] && updates+=("PEARL_WEBAPP_AUTH_ENABLED=$PEARL_WEBAPP_AUTH_ENABLED")
+    [ -n "${PEARL_WEBAPP_PASSCODE:-}" ] && updates+=("PEARL_WEBAPP_PASSCODE=$PEARL_WEBAPP_PASSCODE")
 
-    # If no vars to sync, skip
-    [ ${#sync_vars[@]} -eq 0 ] && return
+    [ ${#updates[@]} -eq 0 ] && return
 
-    # Read existing file into associative array (preserve non-synced vars)
-    declare -A existing
+    mkdir -p "$(dirname "$env_local")"
     if [ -f "$env_local" ]; then
-        while IFS='=' read -r key val; do
-            # Skip comments and empty lines
-            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-            # Remove quotes if present
-            val="${val#\"}"
-            val="${val%\"}"
-            existing["$key"]="$val"
-        done < <(grep -v '^#' "$env_local" | grep -v '^$' || true)
+        cp "$env_local" "$temp_file"
+    else
+        echo "# API + Auth Configuration (auto-synced by pearl.sh)" > "$temp_file"
     fi
 
-    # Merge synced vars (update if changed)
-    for key in "${!sync_vars[@]}"; do
-        if [ "${existing[$key]:-}" != "${sync_vars[$key]}" ]; then
-            existing["$key"]="${sync_vars[$key]}"
-            changed=true
-        fi
+    local pair key value
+    for pair in "${updates[@]}"; do
+        key="${pair%%=*}"
+        value="${pair#*=}"
+        awk -v k="$key" -v v="$value" '
+            BEGIN { replaced = 0 }
+            $0 ~ "^" k "=" { print k "=" v; replaced = 1; next }
+            { print }
+            END { if (!replaced) print k "=" v }
+        ' "$temp_file" > "$next_file"
+        mv "$next_file" "$temp_file"
     done
 
-    # Write back if changed or file doesn't exist
-    if [ "$changed" = true ] || [ ! -f "$env_local" ]; then
-        echo "# API + Auth Configuration (auto-synced by pearl.sh)" > "$temp_file"
-        # Write vars in sorted order for consistency
-        for key in $(printf '%s\n' "${!existing[@]}" | sort); do
-            echo "$key=${existing[$key]}" >> "$temp_file"
-        done
+    if [ ! -f "$env_local" ] || ! cmp -s "$temp_file" "$env_local"; then
         mv "$temp_file" "$env_local"
+    else
+        rm -f "$temp_file"
     fi
 }
 
@@ -270,59 +264,47 @@ show_status() {
     echo ""
 }
 
-# Quick one-liner status
+# Quick one-liner status for the active manual TradingView-alert model.
+# The automated Tradovate paper bot is dormant after the manual pivot, so quick
+# validates manual-readiness instead of requiring the legacy bot to be running.
 show_quick_status() {
     activate_venv
-    load_env_files
 
-    local gw_status=$(./scripts/gateway/gateway.sh api-ready &>/dev/null && echo "✅" || echo "❌")
-    local tv_paper_status="❌"
-    local agent_running=false
+    local pine_status="❌"
+    if [ -f "$SCRIPT_DIR/pine/mnq_rth_long_bias.pine" ] \
+        && grep -q "BUY MNQ" "$SCRIPT_DIR/pine/mnq_rth_long_bias.pine" \
+        && grep -q "SELL MNQ" "$SCRIPT_DIR/pine/mnq_rth_long_bias.pine"; then
+        pine_status="✅"
+    fi
+
+    local alerts_status="❌"
+    if [ -f "$SCRIPT_DIR/alerts/tv_to_discord.py" ] \
+        && grep -q "TradingView-webhook -> Discord" "$SCRIPT_DIR/alerts/tv_to_discord.py"; then
+        alerts_status="✅"
+    fi
+
+    local exec_disarmed_status="❌"
+    exec_disarmed_status=$(python3 - <<'CONFIG_CHECK' 2>/dev/null || echo "❌"
+from pathlib import Path
+import yaml
+cfg = yaml.safe_load(Path("config/live/tradovate_paper.yaml").read_text()) or {}
+execution = cfg.get("execution") or {}
+print("✅" if execution.get("armed") is False else "❌")
+CONFIG_CHECK
+)
+
+    local autobot_status="✅"
+    local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_${MARKET}.pid"
+    if [ ! -f "$tv_paper_pid_file" ]; then
+        tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
+    fi
     if systemctl is-active --quiet pearlalgo-agent 2>/dev/null; then
-        agent_running=true
-    else
-        local tv_paper_pid_file="$SCRIPT_DIR/logs/agent_${MARKET}.pid"
-        if [ ! -f "$tv_paper_pid_file" ]; then
-            tv_paper_pid_file="$SCRIPT_DIR/logs/agent_TV_PAPER.pid"
-        fi
-        if [ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null; then
-            agent_running=true
-        fi
+        autobot_status="❌"
+    elif [ -f "$tv_paper_pid_file" ] && kill -0 "$(cat "$tv_paper_pid_file")" 2>/dev/null; then
+        autobot_status="❌"
     fi
 
-    if [ "$agent_running" = true ]; then
-        local header=()
-        if [ -n "${PEARL_API_KEY:-}" ]; then
-            header=(-H "X-API-Key: $PEARL_API_KEY")
-        fi
-        local state_json
-        state_json=$(curl -fsS "${header[@]}" "http://localhost:8001/api/state" 2>/dev/null || true)
-        if [ -n "$state_json" ]; then
-            local execution_health
-            execution_health=$(printf '%s' "$state_json" | python3 -c '
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    e = d.get("execution") or {}
-    ok = bool(e.get("connected")) and bool(e.get("authenticated")) and bool(e.get("ws_connected"))
-    print("ok" if ok else "bad")
-except Exception:
-    print("unknown")
-' 2>/dev/null || echo "unknown")
-            if [ "$execution_health" = "ok" ]; then
-                tv_paper_status="✅"
-            else
-                tv_paper_status="❌"
-            fi
-        else
-            tv_paper_status="✅"
-        fi
-    fi
-
-    local chart_status=$(pgrep -f "api_server.py" &>/dev/null && (pgrep -f "next-server" &>/dev/null || pgrep -f "next dev" &>/dev/null) && echo "✅" || echo "❌")
-    local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
-
-    echo -e "PEARL: GW $gw_status | TV-Paper $tv_paper_status | Chart $chart_status | Tunnel $tunnel_status"
+    echo -e "PEARL: Pine $pine_status | Alerts $alerts_status | ExecDisarmed $exec_disarmed_status | AutoBotDormant $autobot_status"
 }
 
 # ============================================================================
