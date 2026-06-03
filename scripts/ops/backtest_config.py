@@ -525,10 +525,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--strategy",
         default="composite",
-        choices=["composite", "pine", "orb", "vwap_reversion"],
+        choices=[
+            "composite", "pine", "orb", "vwap_reversion",
+            "opening_drive", "opening_drive_5", "tod_rth_long", "overnight_seasonality",
+        ],
         help=(
             "Signal source: 'composite' = live generate_signals (the RICH strategy); "
-            "pine/orb/vwap_reversion = isolated validation strategies."
+            "pine/orb/vwap_reversion = isolated validation strategies; "
+            "opening_drive[_5]/tod_rth_long/overnight_seasonality = Path-B time-based hypotheses."
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON scorecard on stdout")

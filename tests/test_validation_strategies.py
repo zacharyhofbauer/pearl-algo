@@ -15,8 +15,12 @@ from pearlalgo.validation.strategies.signal_fns import (
     _ema,
     _in_rth,
     _wilder_atr,
+    opening_drive_5_signals,
+    opening_drive_signals,
     orb_signals,
+    overnight_seasonality_signals,
     pine_simple_signals,
+    tod_rth_long_signals,
     vwap_reversion_signals,
 )
 
@@ -108,3 +112,76 @@ def test_vwap_reversion_fires_on_dip_below_band():
     assert s["entry_trigger"] == "vwap_reversion"
     assert s["take_profit"] > s["entry_price"]   # target = VWAP (above a dip)
     assert s["stop_loss"] < s["entry_price"]
+
+
+# ── Path-B: opening-drive (sign of opening return, hold to session close) ─────────
+# Anchored at 07:00 ET (Mon) so the RTH open (09:30) lands at index 30 — past
+# _run's warmup=25 and _base's 25-bar minimum — and the entry bars are visited.
+def test_opening_drive_long_on_up_open():
+    sigs = _run(opening_drive_signals, _df([100.0 + 0.5 * k for k in range(60)], start="2026-01-05 07:00"))
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "long" and s["entry_trigger"] == "opening_drive"
+    assert s["stop_loss"] < s["entry_price"] < s["take_profit"]
+
+
+def test_opening_drive_short_on_down_open():
+    sigs = _run(opening_drive_signals, _df([200.0 - 0.5 * k for k in range(60)], start="2026-01-05 07:00"))
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "short"
+    assert s["stop_loss"] > s["entry_price"] > s["take_profit"]
+
+
+def test_opening_drive_fires_once_per_session():
+    sigs = _run(opening_drive_signals, _df([100.0 + 0.5 * k for k in range(90)], start="2026-01-05 07:00"))
+    assert len(sigs) == 1
+
+
+def test_opening_drive_gated_out_overnight():
+    # Anchored entirely overnight -> _base RTH gate -> never fires.
+    assert _run(opening_drive_signals, _df([100.0 + 0.5 * k for k in range(60)], start="2026-01-05 00:00")) == []
+
+
+def test_opening_drive_5_uses_five_minute_window():
+    sigs = _run(opening_drive_5_signals, _df([100.0 + 0.5 * k for k in range(60)], start="2026-01-05 07:00"))
+    assert len(sigs) == 1
+    assert sigs[0]["entry_trigger"] == "opening_drive_5" and sigs[0]["direction"] == "long"
+
+
+# ── Path-B: tod_rth_long (unconditional long on the RTH open, hold to close) ──────
+def test_tod_rth_long_fires_long_once_at_open():
+    sigs = _run(tod_rth_long_signals, _df([100.0] * 60, start="2026-01-05 07:00"))
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "long" and s["entry_trigger"] == "tod_rth_long"
+    assert s["stop_loss"] < s["entry_price"] < s["take_profit"]
+
+
+def test_tod_rth_long_gated_out_overnight():
+    assert _run(tod_rth_long_signals, _df([100.0] * 60, start="2026-01-05 00:00")) == []
+
+
+# ── Path-B: overnight_seasonality (short at 18:00 ET, hold overnight) ─────────────
+# Anchored at 15:55 ET (Mon) so the 18:00 overnight open lands at index 25.
+def test_overnight_seasonality_fires_short_at_overnight_open():
+    sigs = _run(overnight_seasonality_signals, _df([100.0] * 45, start="2026-01-05 15:55"))
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "short" and s["entry_trigger"] == "overnight_seasonality"
+    assert s["stop_loss"] > s["entry_price"] > s["take_profit"]   # short geometry
+
+
+def test_overnight_seasonality_not_gated_out_at_night():
+    # Regression guard: it MUST fire at 18:00+ ET (must NOT use the RTH-only helpers).
+    assert len(_run(overnight_seasonality_signals, _df([100.0] * 45, start="2026-01-05 15:55"))) >= 1
+
+
+def test_overnight_seasonality_no_signal_during_rth():
+    # Bars entirely inside RTH (09:30 -> ~12:55) never reach 18:00 ET -> no signal.
+    assert _run(overnight_seasonality_signals, _df([100.0] * 40, start="2026-01-05 09:30")) == []
+
+
+def test_overnight_seasonality_fires_once_per_date():
+    sigs = _run(overnight_seasonality_signals, _df([100.0] * 70, start="2026-01-05 15:55"))
+    assert len(sigs) == 1
