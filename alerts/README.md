@@ -13,16 +13,26 @@ No code, no tunnel. In TradingView's alert dialog:
 That's enough to validate the loop (alert → phone → manual order). You lose structured
 journaling, which is fine until the edge is proven.
 
-## 2. Structured receiver (when you want journaling)
+## 2. Structured receiver (v2 — recommended once you want journaling)
 
-`tv_to_discord.py` (FastAPI) parses the Pine JSON payload, posts a clean Discord message, and
-appends every signal to `journal/signals.jsonl` so the journal can reconcile what *fired* against
-what you *traded*.
+`tv_to_discord.py` (FastAPI) parses the Pine v2 JSON, posts a **rich Discord embed** (color-coded
+BUY/SELL/`DAILY_STOP`, with entry/stop/target/ATR/R:R/$-risk fields), and appends every signal to
+`journal/signals.jsonl` for reconciliation. v2 hardening:
+
+- **Embeds** instead of plain text; back-compatible with old v1 payloads.
+- **Retry/backoff** on Discord `429` (honors `retry_after`) and `5xx`.
+- **Dedup** of TradingView retry-duplicates (same strat+action+symbol+bar+entry within `TV_DEDUP_TTL_SEC`).
+- **Stdlib HTTP** — no `requests` dependency (only `fastapi`+`uvicorn` to serve).
 
 ```bash
 DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." \
 TV_SHARED_SECRET="$(openssl rand -hex 16)" \
     uvicorn alerts.tv_to_discord:app --host 0.0.0.0 --port 8009
+
+# See exactly what gets posted, no network/TradingView needed:
+python -m alerts.tv_to_discord --selftest
+# Run the test suite:
+python -m pytest tests/test_tv_to_discord.py -q --no-cov
 ```
 
 Then make port 8009 reachable from TradingView and set that `/tv` URL as the alert webhook:

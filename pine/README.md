@@ -8,7 +8,12 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | EMA(9/21) cross + VWAP filter, **RTH-only**, **long-biased**, ATR stop/target. Encodes the 922-trade edges (overnight loses, shorts weak). The starting template to validate. |
+| `mnq_rth_long_bias.pine` | EMA(9/21) cross + VWAP filter, **RTH-only**, **long-biased**, ATR stop/target. **v2** adds a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP` alert). The **signal is unchanged and unproven** — see the status note below. |
+
+> ⚠️ **Honest status (2026-06-03):** this EMA/VWAP signal **failed** cost-viability validation
+> (`docs/audits/validation-trial-ledger.md`). v2 deliberately does **not** add more indicator
+> confluence (that curve-fitting cost the auto-bot −2,026 pts). It only makes the *alerts* richer
+> and adds *discipline* guardrails. Paper-trade the validation gate before risking funded capital.
 
 The original indicator library (Volume, VWAP_AA, EMA_Crossover, Supply & Demand, key levels,
 sessions) lives in `../resources/pinescript/pearlbot/` — use those as building blocks.
@@ -21,8 +26,17 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
    meaningful sample, fix the strategy *before* trading it.
 3. Create an alert: **Condition = the strategy**, trigger = **"Any alert() function call"**,
    **Webhook URL** = your receiver (or Discord webhook directly — see `../alerts/`).
-4. The alert body is auto-filled by the strategy's `alert()` JSON:
-   `{"strat":...,"action":"BUY","symbol":"MNQ...","entry":...,"stop":...,"target":...,"max_contracts":5}`
+   *(Prefer condition-based alerts? The script also exposes `alertcondition()` triggers
+   "PearlAlgo MNQ — Long/Short" with a minimal placeholder payload.)*
+4. The alert body is auto-filled by the strategy's `alert()` JSON (v2):
+   ```json
+   {"strat":"mnq-rth-long-bias","v":2,"action":"BUY","symbol":"MNQ1!","tf":"5",
+    "bar_time":"2026-06-03 10:15 ET","entry":21850.25,"stop":21835.0,"target":21880.75,
+    "atr":10.17,"rr":2.0,"risk_pts":15.25,"risk_usd_per_contract":30.5,"risk_usd_total":30.5,
+    "contracts":1,"max_contracts":5,"trades_today":1,"reason":"EMA9>21 cross, above VWAP"}
+   ```
+   A `DAILY_STOP` payload (`action`,`reason`,`daily_pnl_usd`,`trades_today`) fires once when a
+   guardrail trips. The `../alerts/` receiver renders all of these as Discord embeds.
 
 ## Two delivery modes
 
@@ -37,3 +51,14 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
 - **Max 5 MNQ total** (MFF compliance) — in the payload as `max_contracts`.
 - **RTH only** — strategy flattens at the RTH close; never hold overnight.
 - **Long bias** — shorts are off by default.
+
+## MFF discipline guardrails (v2 — robust levers, not signal)
+
+These mute alerts/entries to protect the funded account; tune in the "MFF guardrails" input group:
+
+- **Max trades / day** (default 3, `0` = off) — after N entries, further signals are muted until
+  the next RTH session.
+- **Daily loss limit $** (default off) — when realized session P&L breaches `-$X`, signals mute.
+- **`DAILY_STOP` alert** — fires **once** when either cap trips, so you get a "stop for the day" ping.
+- **Risk context** — every entry alert carries `risk_pts` and `risk_usd_per_contract` (using
+  TradingView's real point value) so you size against the MFF trailing drawdown, not by guesswork.
