@@ -15,8 +15,12 @@ from __future__ import annotations
 
 from .signal_fns import (
     STRATEGY_FNS,
+    opening_drive_5_signals,
+    opening_drive_signals,
     orb_signals,
+    overnight_seasonality_signals,
     pine_simple_signals,
+    tod_rth_long_signals,
     vwap_reversion_signals,
 )
 
@@ -25,4 +29,8 @@ __all__ = [
     "pine_simple_signals",
     "orb_signals",
     "vwap_reversion_signals",
+    "opening_drive_signals",
+    "opening_drive_5_signals",
+    "tod_rth_long_signals",
+    "overnight_seasonality_signals",
 ]

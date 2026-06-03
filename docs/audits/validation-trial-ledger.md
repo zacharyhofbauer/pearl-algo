@@ -81,4 +81,42 @@ should a genuinely new candidate ever clear Tiers 0–4.
 - Make `strategy_fn` pluggable in the engine; build faithful Pine-simple +
   ORB-only + VWAP-reversion-only signal sources; re-run the 4-way Tier 0.
 - For any survivor: Tier 1 (robust levers) → WFA → MC → trailing-DD survival → held-out.
-- Install `scipy` before Tier 3 (DSR).
+- ~~Install `scipy` before Tier 3 (DSR).~~ Correction 2026-06-03: `scipy` IS importable
+  in `.venv` (`from scipy.stats import norm` works) — the earlier "not installed" note was
+  stale. Irrelevant to Tier 0; only matters at a future Tier-3 DSR.
+
+---
+
+## Path B — genuinely-different time-based hypotheses (pre-registered 2026-06-03)
+
+After all four intraday families were killed at Tier-0, the operator chose to test
+**genuinely different** hypotheses (NOT more EMA/VWAP/ORB) on the existing free 5m dev
+data before any data spend. Two families: **opening-drive** (does the sign of the first
+few minutes of RTH continue?) and **time-of-day / overnight seasonality** (is there
+directional drift conditioned on the ET clock?).
+
+**Pre-registration (immutable):** the 4 trials below are a fixed set chosen BEFORE the
+official full-slice runs. Directions are fixed pre-hoc from priors, never grid-searched
+(opening-drive = continuation; RTH = long from the 922-trade long-bias; overnight = short
+from the local prior that the overnight long-biased bot lost −$4,477). Exits hold to a
+session boundary via the engine's max-hold timeout (far sentinel stops — no ATR-stop
+lever). **DSR `n_trials` is now 15** (6 dead Phase-E seed + trials 7–11 + these 4).
+**H1 (trial 12) is the single primary read; H2–H4 are secondaries — best-of-4 expectancy
+is upward-biased (family-wise ≈19% chance of ≥1 false positive at nominal 95%).** Honest
+ceiling (operator-acknowledged): a Tier-0 PASS on this ~5.5-month slice is NOT an edge and
+NOT a fund signal — it only justifies procuring deep multi-year data to confirm.
+
+| # | Date | Strategy | Window | Trades | Net exp (pt/trade) | Tier | Verdict |
+|---|------|----------|--------|--------|--------------------|------|---------|
+| 12 | 2026-06-03 | **opening_drive** (PRIMARY: continue sign of first-15min RTH move, hold to close) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
+| 13 | 2026-06-03 | opening_drive_5 (5-min drive window) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
+| 14 | 2026-06-03 | overnight_seasonality (SHORT @18:00 ET, hold overnight) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
+| 15 | 2026-06-03 | tod_rth_long (unconditional LONG @RTH open, hold to close) | dev-only 2025-10-26→2026-04-19 | pending | pending | 0 | pre-registered — pending |
+
+Commands (held-out discipline = explicit `--end 2026-04-19`; `--max-hold` per the hold target):
+```
+backtest_config.py --strategy opening_drive         --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy opening_drive_5        --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy overnight_seasonality  --tf 5m --max-hold-minutes 900 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy tod_rth_long           --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+```
