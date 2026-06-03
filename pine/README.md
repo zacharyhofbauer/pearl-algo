@@ -8,7 +8,19 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | EMA(9/21) cross + VWAP filter, **RTH-only**, **long-biased**, ATR stop/target. **v2** adds a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP` alert). The **signal is unchanged and unproven** — see the status note below. |
+| `mnq_rth_long_bias.pine` | **Pro build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, BUY/SELL markers, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). The **signal is unchanged and unproven** — see the status note below. |
+
+## On-chart visuals (Pro)
+
+All toggleable in the **Style** input group (colors are pickers):
+
+- **Dashboard** — themed table (position selectable) with trend, session, status (`ARMED` / `MAX TRADES` / `DAILY STOP` / `CLOSED`), last signal, entry/stop/target, R:R, $-risk/contract, trades-today, daily P&L.
+- **EMA ribbon** — fill between fast/slow EMAs, green/red by trend.
+- **VWAP** (+ optional ±1σ bands).
+- **Signal markers** — BUY/SELL triangles at the bar that fires.
+- **Trade levels** — entry (solid) + stop/target (dashed) rays drawn forward with price labels; only the current setup is shown.
+- **Trend bar-coloring** — candles tinted by EMA trend.
+- Session shading: grey outside RTH, red wash when entries are muted by a guardrail.
 
 > ⚠️ **Honest status (2026-06-03):** this EMA/VWAP signal **failed** cost-viability validation
 > (`docs/audits/validation-trial-ledger.md`). v2 deliberately does **not** add more indicator

@@ -1,51 +1,58 @@
 //@version=5
-// PearlAlgo MNQ — RTH Long-Bias EMA/VWAP  (v2: rich alerts + MFF discipline guardrails)
-//
-// Signal (UNCHANGED from v1, and DELIBERATELY not "improved"):
-//   • RTH only        — overnight (18:00–08:30 ET) historically lost money
-//   • Long bias       — shorts had a poor win rate (off by default)
-//   • EMA cross + VWAP — the existing signal family, kept simple
-//
-// ⚠️  HONEST STATUS: this EMA/VWAP signal FAILED cost-viability validation (see
-// docs/audits/validation-trial-ledger.md, 2026-06-03). It is NOT a proven edge. v2 does
-// NOT add more indicator confluence (that is the disproven curve-fitting that cost the
-// auto-bot −2,026 pts). v2 only makes the ALERTS richer and adds DISCIPLINE guardrails
-// (robust levers) so that *if* you trade it on an MFF demo, the funded account is protected
-// by hard daily-stop rules. Paper-trade the validation gate before risking real capital.
-strategy("PearlAlgo MNQ — RTH Long-Bias (alerts+guardrails)", overlay=true,
-     default_qty_type=strategy.fixed, default_qty_value=1,
-     pyramiding=0, calc_on_every_tick=false, process_orders_on_close=true)
+// PearlAlgo MNQ — RTH Long-Bias Pro
+// Polished TradingView build: trend ribbon, VWAP(+σ bands), signal markers, drawn trade levels,
+// trend bar-coloring, session/mute shading, and an on-chart dashboard. Signal (EMA9/21 cross +
+// VWAP, RTH-only, long-bias) is UNCHANGED and unproven — paper-trade the gate before funded capital.
+strategy("PearlAlgo MNQ — RTH Long-Bias Pro", overlay = true,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
+     calc_on_every_tick = false, process_orders_on_close = true,
+     max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
-// ── Inputs: signal ───────────────────────────────────────────────────────────────
-emaFastLen  = input.int(9,  "EMA fast", minval=1, group="Signal")
-emaSlowLen  = input.int(21, "EMA slow", minval=2, group="Signal")
-useVwap     = input.bool(true,  "Require price on correct side of VWAP", group="Signal")
-atrLen      = input.int(14, "ATR length", minval=1, group="Signal")
-stopAtr     = input.float(1.5, "Stop = ATR ×", minval=0.1, step=0.1, group="Signal")
-targetR     = input.float(2.0, "Target = R ×", minval=0.1, step=0.1, group="Signal")
-allowShorts = input.bool(false, "Allow shorts (off — shorts had poor win rate)", group="Signal")
+// ─────────────────────────────────  INPUTS  ─────────────────────────────────
+gS = "➞ Signal"
+emaFastLen  = input.int(9,  "EMA fast", minval=1, group=gS, inline="ema")
+emaSlowLen  = input.int(21, "EMA slow", minval=2, group=gS, inline="ema")
+useVwap     = input.bool(true, "Require correct side of VWAP", group=gS)
+atrLen      = input.int(14, "ATR len", minval=1, group=gS, inline="atr")
+stopAtr     = input.float(1.5, "Stop ×ATR", minval=0.1, step=0.1, group=gS, inline="atr")
+targetR     = input.float(2.0, "Target ×R", minval=0.1, step=0.1, group=gS, inline="atr")
+allowShorts = input.bool(false, "Allow shorts (weak win rate)", group=gS)
 
-// ── Inputs: session ────────────────────────────────────────────────────────────────
-rthOnly     = input.bool(true,  "RTH only (overnight historically loses)", group="Session")
-sessRTH     = input.session("0930-1600", "RTH session (ET)", group="Session")
+gSe = "➞ Session"
+rthOnly = input.bool(true, "RTH only (overnight loses)", group=gSe)
+sessRTH = input.session("0930-1600", "RTH session (ET)", group=gSe)
 
-// ── Inputs: MFF discipline guardrails (robust levers, not signal) ────────────────────
-contracts    = input.int(1, "Contracts per trade", minval=1, maxval=5, group="MFF guardrails")
-maxContracts = input.int(5, "Max MNQ total (MFF cap)", minval=1, maxval=5, group="MFF guardrails")
-maxTradesDay = input.int(3, "Max trades / day (0 = no cap)", minval=0, group="MFF guardrails")
-dailyLossUsd = input.float(0.0, "Daily loss limit $ (0 = off)", minval=0, step=25, group="MFF guardrails")
+gM = "➞ MFF guardrails"
+contracts    = input.int(1, "Contracts/trade", minval=1, maxval=5, group=gM, inline="sz")
+maxContracts = input.int(5, "Max MNQ (MFF)", minval=1, maxval=5, group=gM, inline="sz")
+maxTradesDay = input.int(3, "Max trades/day (0=off)", minval=0, group=gM)
+dailyLossUsd = input.float(0.0, "Daily loss limit $ (0=off)", minval=0, step=25, group=gM)
 
-// ── Session gate ─────────────────────────────────────────────────────────────────
-inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
-newSession = inRTH and not inRTH[1]
+gV = "➞ Style"
+showRibbon  = input.bool(true,  "EMA ribbon",     group=gV, inline="v1")
+showVwap    = input.bool(true,  "VWAP",           group=gV, inline="v1")
+showBands   = input.bool(false, "VWAP σ-bands",   group=gV, inline="v1")
+showSignals = input.bool(true,  "Signal markers", group=gV, inline="v2")
+showLevels  = input.bool(true,  "Trade levels",   group=gV, inline="v2")
+colorBars   = input.bool(true,  "Color bars",     group=gV, inline="v2")
+showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v3")
+dashPos     = input.string("Top Right", "Pos",
+     options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v3")
+colUp = input.color(#26a69a, "Up",   group=gV, inline="c")
+colDn = input.color(#ef5350, "Down", group=gV, inline="c")
+colVw = input.color(#ab47bc, "VWAP", group=gV, inline="c")
 
-// ── Indicators ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────  CALC  ───────────────────────────────────
 emaFast = ta.ema(close, emaFastLen)
 emaSlow = ta.ema(close, emaSlowLen)
 vwap    = ta.vwap(hlc3)
 atr     = ta.atr(atrLen)
+vwStd   = ta.stdev(close, 20)
+trendUp = emaFast > emaSlow
 
-// ── Daily discipline state (reset at each RTH session open) ──────────────────────────
+inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = inRTH and not inRTH[1]
+
 var int   tradesToday    = 0
 var float dayStartProfit = 0.0
 var bool  dailyStopFired = false
@@ -53,13 +60,11 @@ if newSession
     tradesToday    := 0
     dayStartProfit := strategy.netprofit
     dailyStopFired := false
-dailyPnlUsd = strategy.netprofit - dayStartProfit   // strategy.netprofit is in account $ (syminfo.pointvalue)
-
+dailyPnlUsd = strategy.netprofit - dayStartProfit
 tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
 lossLimitOk = dailyLossUsd == 0.0 or dailyPnlUsd > -dailyLossUsd
 canTrade    = inRTH and tradesCapOk and lossLimitOk
 
-// ── Signals ──────────────────────────────────────────────────────────────────────
 bullCross   = ta.crossover(emaFast, emaSlow)
 bearCross   = ta.crossunder(emaFast, emaSlow)
 vwapLongOk  = not useVwap or close > vwap
@@ -67,7 +72,6 @@ vwapShortOk = not useVwap or close < vwap
 longOk  = bullCross and vwapLongOk  and canTrade
 shortOk = allowShorts and bearCross and vwapShortOk and canTrade
 
-// ── Levels + risk context ($ uses TradingView's real point value) ────────────────────
 longStop    = close - stopAtr * atr
 longTarget  = close + targetR * stopAtr * atr
 shortStop   = close + stopAtr * atr
@@ -76,16 +80,63 @@ riskPts     = stopAtr * atr
 riskUsdPer  = riskPts * syminfo.pointvalue
 riskUsdTot  = riskUsdPer * contracts
 
-// ── Plots ────────────────────────────────────────────────────────────────────────
-plot(emaFast, "EMA fast", color.new(color.aqua,   0))
-plot(emaSlow, "EMA slow", color.new(color.orange, 0))
-plot(vwap,    "VWAP",     color.new(color.purple, 0))
-bgcolor(not inRTH ? color.new(color.gray, 90) : (not (tradesCapOk and lossLimitOk) ? color.new(color.red, 85) : na),
-     title="Muted (outside RTH / daily stop)")
+// ────────────────────────────────  VISUALS  ─────────────────────────────────
+pFast = plot(emaFast, "EMA fast", color = showRibbon ? color.new(colUp, 10) : na, linewidth=1)
+pSlow = plot(emaSlow, "EMA slow", color = showRibbon ? color.new(colDn, 10) : na, linewidth=1)
+fill(pFast, pSlow, color = not showRibbon ? na : color.new(trendUp ? colUp : colDn, 88), title="EMA ribbon")
 
-// ── Rich JSON alert payload (TradingView → alerts/tv_to_discord.py → Discord) ─────────
+plot(showVwap ? vwap : na, "VWAP", color=color.new(colVw, 0), linewidth=2)
+ub = plot(showBands ? vwap + vwStd : na, "VWAP +1σ", color=color.new(colVw, 70))
+lb = plot(showBands ? vwap - vwStd : na, "VWAP -1σ", color=color.new(colVw, 70))
+fill(ub, lb, color = showBands ? color.new(colVw, 93) : na, title="VWAP band")
+
+barcolor(colorBars ? color.new(trendUp ? colUp : colDn, 35) : na, title="Trend bars")
+
+plotshape(showSignals and longOk,  "Buy",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.small, text="BUY",  textcolor=color.white)
+plotshape(showSignals and shortOk, "Sell", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.small, text="SELL", textcolor=color.white)
+
+// Grey wash outside RTH; red wash when entries are muted (daily stop / max trades) during RTH.
+bgcolor(not inRTH ? color.new(color.gray, 92) : (not (tradesCapOk and lossLimitOk) ? color.new(colDn, 90) : na), title="Session / mute")
+
+// Managed trade-level rays — only the current setup is drawn (prior set deleted on each signal).
+var line  lnE = na
+var line  lnS = na
+var line  lnT = na
+var label lbE = na
+var label lbS = na
+var label lbT = na
+var string lastDir = "—"
+var float  lastE = na
+var float  lastS = na
+var float  lastT = na
+
+sigFired = longOk or shortOk
+sEntry   = close
+sStop    = longOk ? longStop   : shortStop
+sTgt     = longOk ? longTarget : shortTarget
+
+if sigFired
+    lastDir := longOk ? "▲ LONG" : "▼ SHORT"
+    lastE := sEntry
+    lastS := sStop
+    lastT := sTgt
+    if showLevels
+        line.delete(lnE)
+        line.delete(lnS)
+        line.delete(lnT)
+        label.delete(lbE)
+        label.delete(lbS)
+        label.delete(lbT)
+        lnE := line.new(bar_index, sEntry, bar_index + 1, sEntry, extend=extend.right, color=color.new(color.gray, 0), width=1)
+        lnS := line.new(bar_index, sStop,  bar_index + 1, sStop,  extend=extend.right, color=color.new(colDn, 20), width=1, style=line.style_dashed)
+        lnT := line.new(bar_index, sTgt,   bar_index + 1, sTgt,   extend=extend.right, color=color.new(colUp, 20), width=1, style=line.style_dashed)
+        lbE := label.new(bar_index, sEntry, "entry "  + str.tostring(sEntry, format.mintick), style=label.style_label_left, color=color.new(color.gray, 10), textcolor=color.white, size=size.small)
+        lbS := label.new(bar_index, sStop,  "stop "   + str.tostring(sStop,  format.mintick), style=label.style_label_left, color=color.new(colDn, 10),      textcolor=color.white, size=size.small)
+        lbT := label.new(bar_index, sTgt,   "target " + str.tostring(sTgt,   format.mintick), style=label.style_label_left, color=color.new(colUp, 10),      textcolor=color.white, size=size.small)
+
+// ─────────────────────────────  ALERTS + ENTRIES  ───────────────────────────
 f_msg(action, entry, stop, target, reason) =>
-    '{"strat":"mnq-rth-long-bias","v":2' +
+    ('{"strat":"mnq-rth-long-bias","v":2' +
      ',"action":"' + action + '"' +
      ',"symbol":"' + syminfo.ticker + '"' +
      ',"tf":"' + timeframe.period + '"' +
@@ -101,9 +152,8 @@ f_msg(action, entry, stop, target, reason) =>
      ',"contracts":' + str.tostring(contracts) +
      ',"max_contracts":' + str.tostring(maxContracts) +
      ',"trades_today":' + str.tostring(tradesToday + 1) +
-     ',"reason":"' + reason + '"}'
+     ',"reason":"' + reason + '"}')
 
-// ── Entries, brackets, alerts (all guardrail-gated) ──────────────────────────────────
 if longOk
     strategy.entry("Long", strategy.long, qty=contracts)
     strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
@@ -120,7 +170,6 @@ if shortOk
          alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
-// ── Daily-stop discipline alert (fires ONCE per day when a cap is hit during RTH) ─────
 hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
 hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
 if inRTH and not dailyStopFired and (hitTrades or hitLoss)
@@ -132,14 +181,46 @@ if inRTH and not dailyStopFired and (hitTrades or hitLoss)
          ',"trades_today":' + str.tostring(tradesToday) + '}',
          alert.freq_once_per_bar_close)
 
-// ── Lightweight alertcondition() fallbacks (for condition-based alerts / study use) ───
-// The RICH JSON above comes via alert() ("Any alert() function call"); these carry a
-// minimal placeholder payload for users who prefer TradingView's condition alerts.
 alertcondition(longOk,  title="PearlAlgo MNQ — Long",
      message='{"strat":"mnq-rth-long-bias","action":"BUY","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
 alertcondition(shortOk, title="PearlAlgo MNQ — Short",
      message='{"strat":"mnq-rth-long-bias","action":"SELL","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
 
-// ── Never hold overnight: flatten at the RTH close ───────────────────────────────────
 if rthOnly and not inRTH
     strategy.close_all("RTH end")
+
+// ───────────────────────────────  DASHBOARD  ────────────────────────────────
+f_pos(s) =>
+    switch s
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=1, frame_color=color.new(color.gray, 60),
+     border_width=1, border_color=color.new(color.gray, 80))
+
+f_row(_r, _k, _v, _vc) =>
+    table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, 30))
+    table.cell(dash, 1, _r, _v, text_color=_vc,          text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, 30))
+
+f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
+
+if showDash and barstate.islast
+    statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : "ARMED"))
+    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" ? color.silver : colDn)
+    table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_right)
+    f_row(1,  "Trend",     trendUp ? "▲ Up" : "▼ Down",   trendUp ? colUp : colDn)
+    f_row(2,  "Session",   inRTH ? "RTH open" : "closed",  inRTH ? colUp : color.silver)
+    f_row(3,  "Status",    statusTxt,                      statusCol)
+    f_row(4,  "Last sig",  lastDir,                        lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver))
+    f_row(5,  "Entry",     f_px(lastE),                    color.white)
+    f_row(6,  "Stop",      f_px(lastS),                    colDn)
+    f_row(7,  "Target",    f_px(lastT),                    colUp)
+    f_row(8,  "R : R",     "1 : " + str.tostring(targetR, "#.#"),  color.white)
+    f_row(9,  "Risk/ct",   "$" + str.tostring(riskUsdPer, "#.##"), color.white)
+    f_row(10, "Trades",    str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
+    f_row(11, "Daily P&L", "$" + str.tostring(dailyPnlUsd, "#.##"), dailyPnlUsd >= 0 ? colUp : colDn)
