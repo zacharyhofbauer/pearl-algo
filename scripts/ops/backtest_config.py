@@ -82,11 +82,14 @@ class Scorecard:
     by_trigger: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     hold_minutes_distribution: Dict[str, int] = field(default_factory=dict)
 
-    def record(self, trade: SimTrade, tf_minutes: int) -> None:
+    def record(self, trade: SimTrade, tf_minutes: int, commission_points: float = 0.0) -> float:
+        """Record a closed trade. ``commission_points`` is the round-trip cost
+        (in index points) subtracted from this trade's P&L so totals/expectancy
+        are net-of-cost. Returns the trade's NET points (for bootstrap CIs)."""
         if not trade.is_closed:
-            return
+            return 0.0
         self.entries += 1
-        pnl = trade.pnl_points()
+        pnl = trade.pnl_points() - commission_points
         self.total_points += pnl
 
         if trade.exit_reason == "tp":
@@ -129,6 +132,7 @@ class Scorecard:
             self.hold_minutes_distribution[bucket_key] = (
                 self.hold_minutes_distribution.get(bucket_key, 0) + 1
             )
+        return pnl
 
     def to_dict(self) -> Dict[str, Any]:
         win_rate = self.wins / self.entries if self.entries else 0.0
@@ -284,8 +288,21 @@ def run_backtest(
     max_hold_minutes: int = 180,
     max_concurrent: int = 1,
     slippage_points: float = 0.25,
+    commission_points: float = 1.0,
+    ts_from: Optional[int] = None,
+    ts_to: Optional[int] = None,
+    strategy_fn: Optional[Any] = None,
+    strategy_name: str = "composite",
 ) -> Dict[str, Any]:
-    """Replay the archive through ``config_path`` and return the scorecard dict."""
+    """Replay the archive through ``config_path`` and return the scorecard dict.
+
+    ``strategy_fn`` overrides the signal source (default: the live
+    ``generate_signals``). Isolated validation strategies live in
+    ``pearlalgo.validation.strategies`` and share the same call contract.
+
+    ``commission_points`` is the round-trip cost per contract in index points
+    (MNQ: ~$2 RT / $2 per point ≈ 1.0 pt). Set 0.0 to see gross-of-commission.
+    """
     import pandas as pd
     from pearlalgo.config.config_loader import (
         build_strategy_config_from_yaml,
@@ -297,12 +314,17 @@ def run_backtest(
         generate_signals,
     )
 
+    sig_fn = strategy_fn or generate_signals
     tf_min = _tf_minutes(tf)
     now_ts = int(time.time())
-    ts_from = now_ts - days * 86400
+    # Explicit [ts_from, ts_to] wins; otherwise fall back to the trailing --days
+    # window. Explicit ranges let us run dev-only and hold out the recent slice.
+    win_to = now_ts if ts_to is None else int(ts_to)
+    win_from = (win_to - days * 86400) if ts_from is None else int(ts_from)
     archive = get_archive()
     rows = archive.query_range(
-        symbol=symbol, tf=tf, ts_from=ts_from, ts_to=now_ts, limit=days * 24 * 60 // tf_min + 500
+        symbol=symbol, tf=tf, ts_from=win_from, ts_to=win_to,
+        limit=(win_to - win_from) // (tf_min * 60) + 500,
     )
     if len(rows) <= warmup_bars:
         return {
@@ -325,18 +347,28 @@ def run_backtest(
     merged.setdefault("timeframe", tf)
 
     scorecard = Scorecard()
-    open_trades: List[SimTrade] = []
+    open_trades: List[SimTrade] = []  # resolved trades still occupying a concurrency slot
     closed_trades: List[SimTrade] = []
+    per_trade_net_points: List[float] = []
     total_signals = 0
+    # Bound the forward scan so we don't copy the whole tail per admission;
+    # simulate_exit returns at the deadline anyway, but a bounded window keeps
+    # this O(trades * max_hold) instead of O(trades * n).
+    max_fwd_bars = (max_hold_minutes // tf_min) + 2
 
     from datetime import datetime, timezone
 
+    # Build the frame once and slice it per bar (cheaper than reconstructing a
+    # DataFrame from list-of-dicts every iteration; same data, same RangeIndex).
+    full_df = pd.DataFrame(rows)
+
     for i in range(warmup_bars, len(rows)):
-        df_slice = pd.DataFrame(rows[: i + 1])
+        df_slice = full_df.iloc[: i + 1].copy()
         bar = rows[i]
-        bar_time = datetime.fromtimestamp(int(bar["time"]), tz=timezone.utc)
+        bar_ts = int(bar["time"])
+        bar_time = datetime.fromtimestamp(bar_ts, tz=timezone.utc)
         try:
-            signals = generate_signals(df_slice, config=merged, current_time=bar_time)
+            signals = sig_fn(df_slice, config=merged, current_time=bar_time)
         except Exception as exc:  # pragma: no cover — surfaced in the scorecard
             return {
                 "error": f"generate_signals raised: {type(exc).__name__}: {exc}",
@@ -344,73 +376,65 @@ def run_backtest(
             }
         total_signals += len(signals or [])
 
-        # Close any open trades that resolved between the previous bar and this one.
-        still_open = []
-        for trade in open_trades:
-            simulate_exit(
-                trade, [bar],
-                max_hold_minutes=max_hold_minutes,
-                slippage_points=slippage_points,
-            )
-            if trade.is_closed:
-                scorecard.record(trade, tf_min)
-                closed_trades.append(trade)
-            else:
-                still_open.append(trade)
-        open_trades = still_open
+        # Free concurrency slots held by trades whose exit has already passed.
+        open_trades = [t for t in open_trades if (t.exit_time or 0) > bar_ts]
 
-        # Admit new signals up to the concurrency cap.
+        # Admit new signals up to the concurrency cap. Each admitted trade is
+        # resolved IMMEDIATELY against the forward window (first-touch SL/TP, or
+        # max-hold timeout) so it is held across bars rather than force-closed at
+        # the next bar — the prior single-bar call was the exit-sim bug.
         for sig in signals or []:
             if len(open_trades) >= max_concurrent:
                 break
+            stop = sig.get("stop_loss")
+            take = sig.get("take_profit")
+            if stop is None or take is None:
+                continue
             entry_price = float(sig.get("entry_price") or bar["close"])
-            # Issue #53: apply entry slippage too. For a long, the real
-            # fill at market is ~1 tick above the last print; for a
-            # short, ~1 tick below. Mirror the live-broker bias.
+            # Entry slippage: long fills ~1 tick above the last print, short ~1
+            # tick below (mirror the live-broker bias).
             direction = str(sig.get("direction") or "long")
             if direction == "long":
                 entry_price += slippage_points
             else:
                 entry_price -= slippage_points
-            stop = sig.get("stop_loss")
-            take = sig.get("take_profit")
-            if stop is None or take is None:
-                continue
             trade = SimTrade(
                 signal_id=str(sig.get("signal_id") or f"sim-{i}-{len(closed_trades)}"),
                 trigger=_extract_trigger(sig),
                 direction=direction,
-                entry_time=int(bar["time"]),
+                entry_time=bar_ts,
                 entry_price=entry_price,
                 stop_loss=float(stop),
                 take_profit=float(take),
                 confidence=float(sig.get("confidence") or 0.0),
             )
-            open_trades.append(trade)
-
-    # Close any positions still open at the end of the window on the last close.
-    if rows:
-        tail = [rows[-1]]
-        for trade in open_trades:
             simulate_exit(
-                trade, tail,
+                trade, rows[i + 1: i + 1 + max_fwd_bars],
                 max_hold_minutes=max_hold_minutes,
                 slippage_points=slippage_points,
             )
-            if trade.is_closed:
-                scorecard.record(trade, tf_min)
-                closed_trades.append(trade)
+            if not trade.is_closed:
+                continue  # no forward bars left (end of data) — skip unresolved
+            net = scorecard.record(trade, tf_min, commission_points=commission_points)
+            per_trade_net_points.append(round(net, 4))
+            closed_trades.append(trade)
+            open_trades.append(trade)  # occupies a slot until exit_time passes
 
     scorecard_dict = scorecard.to_dict()
+    scorecard_dict["net_points_per_trade"] = per_trade_net_points
     scorecard_dict["meta"] = {
         "config_path": str(config_path),
+        "strategy": strategy_name,
         "symbol": symbol,
         "timeframe": tf,
         "days_requested": days,
+        "window_from": win_from,
+        "window_to": win_to,
         "warmup_bars": warmup_bars,
         "max_hold_minutes": max_hold_minutes,
         "max_concurrent": max_concurrent,
         "slippage_points": slippage_points,
+        "commission_points": commission_points,
         "candles_processed": len(rows),
         "signals_generated": total_signals,
         "trades_opened": len(closed_trades),
@@ -435,6 +459,10 @@ def _format_scorecard_text(sc: Dict[str, Any]) -> str:
     if slippage is not None:
         flag = "(NO-SLIPPAGE — results flattered)" if slippage == 0 else ""
         lines.append(f"Slippage applied: {slippage} pts / side {flag}")
+    commission = m.get("commission_points")
+    if commission is not None:
+        cflag = "(NO-COMMISSION — results flattered)" if commission == 0 else ""
+        lines.append(f"Commission applied: {commission} pts / round-trip {cflag}  (expectancy below is NET)")
     lines.append("")
     lines.append(f"Entries:         {sc['entries']}")
     lines.append(f"Wins / Losses:   {sc['wins']} / {sc['losses']}  (timeouts: {sc['timeouts']})")
@@ -470,6 +498,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--symbol", default="MNQ")
     parser.add_argument("--tf", default="5m", help="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d")
     parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--start", default=None, help="Window start date YYYY-MM-DD (ET); overrides --days")
+    parser.add_argument("--end", default=None, help="Window end date YYYY-MM-DD (ET, inclusive); overrides --days")
     parser.add_argument("--warmup-bars", type=int, default=120)
     parser.add_argument("--max-hold-minutes", type=int, default=180)
     parser.add_argument("--max-concurrent", type=int, default=1)
@@ -483,18 +513,56 @@ def main(argv: Optional[List[str]] = None) -> int:
             "no-slippage behavior (not recommended — flatters scorecards)."
         ),
     )
+    parser.add_argument(
+        "--commission-points",
+        type=float,
+        default=1.0,
+        help=(
+            "Round-trip commission per contract in index points (default 1.0 "
+            "= ~$2 RT on MNQ at $2/pt). Set 0.0 for gross-of-commission."
+        ),
+    )
+    parser.add_argument(
+        "--strategy",
+        default="composite",
+        choices=["composite", "pine", "orb", "vwap_reversion"],
+        help=(
+            "Signal source: 'composite' = live generate_signals (the RICH strategy); "
+            "pine/orb/vwap_reversion = isolated validation strategies."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON scorecard on stdout")
     args = parser.parse_args(argv)
+
+    sfn = None
+    if args.strategy != "composite":
+        from pearlalgo.validation.strategies import STRATEGY_FNS
+        sfn = STRATEGY_FNS[args.strategy]
+
+    ts_from = ts_to = None
+    if args.start or args.end:
+        from datetime import datetime as _dt, timedelta as _td
+        from zoneinfo import ZoneInfo as _ZI
+        _ET = _ZI("America/New_York")
+        if args.start:
+            ts_from = int(_dt.strptime(args.start, "%Y-%m-%d").replace(tzinfo=_ET).timestamp())
+        if args.end:  # inclusive: end-of-day
+            ts_to = int((_dt.strptime(args.end, "%Y-%m-%d").replace(tzinfo=_ET) + _td(days=1)).timestamp())
 
     result = run_backtest(
         config_path=Path(args.config),
         symbol=args.symbol,
         tf=args.tf,
         days=args.days,
+        ts_from=ts_from,
+        ts_to=ts_to,
         warmup_bars=args.warmup_bars,
         max_hold_minutes=args.max_hold_minutes,
         max_concurrent=args.max_concurrent,
         slippage_points=args.slippage_points,
+        commission_points=args.commission_points,
+        strategy_fn=sfn,
+        strategy_name=args.strategy,
     )
 
     if args.json:
