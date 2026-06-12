@@ -126,9 +126,10 @@ def main() -> int:
     # from different contracts, so the "gap" embeds the calendar spread.
     ROLL_EXCLUDE = {"2025-12-22", "2026-03-23"}
     for d in ROLL_EXCLUDE:
-        s = next((x for x in sessions if x["date"] == d), None)
+        matches = [x for x in sessions if x["date"] == d]
+        m = matches[0] if matches else None
         print(f"\nroll-splice session {d}: "
-              + (f"gap={s['gap']:+.1f} ATR_d={s['atr'] or float('nan'):.1f}" if s else "no RTH session"))
+              + (f"gap={m['gap']:+.1f} ATR_d={m['atr'] or float('nan'):.1f}" if m else "no RTH session"))
 
     kept = [s for s in sessions if s["date"] not in ROLL_EXCLUDE]
     valid = [s for s in kept if s["atr"]]
