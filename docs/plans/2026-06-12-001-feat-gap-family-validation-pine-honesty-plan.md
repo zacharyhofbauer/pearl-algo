@@ -69,10 +69,13 @@ Honest disclosures baked into the ledger entry: trial 17 contains trial 16's tra
 
 ### KTD-3: Tier-0 + Tier-1 verdicts gate the Pine signal swap
 
-The Pine entry logic changes **only if** trial 16 (the primary) clears ALL of the following, stated here and in the U1 ledger entry before any run:
+*(Amended 2026-06-12 at registration time, before any trial ran: the pre-registration census showed trial 16's maximum attainable n is ~58 — it can never satisfy an n ≥ 100 bar on this window — so the powered-n requirement moves to trial 17, the only adequately-sized read in the family, with trial 16 required to concur directionally. Strictly a refinement decided on conditioning data only; the binding text is the ledger's Path-C entry.)*
 
-1. **Tier-0 PASS with `undersized` false** (n ≥ 100) per the committed gate (`tier0_verdict` in `src/pearlalgo/validation/stats.py`). The gate's own docstring calls an undersized sample "a caveat, not a pass" — so a PASS with `undersized=true` routes to the record-only branch as INCONCLUSIVE, no Pine swap, absent an explicit ledger-recorded operator override.
-2. **Tier-1 split-half stability** (H1 2025-10-26→2026-01-22 / H2 2026-01-23→2026-04-19, same halves as Path B): positive expectancy in **both** halves AND neither half carrying more than 70% of total profit — a two-way-split operationalization of the ledger's committed W13 concentration guard (the literal "any single regime > 40%" wording targets finer regime partitions; the deviation is acknowledged in the ledger entry).
+The Pine entry logic changes **only if** ALL of the following hold, stated here and in the U1 ledger entry before any run:
+
+1. **Trial 16 (primary) Tier-0 PASS** (any n) per the committed gate (`tier0_verdict` in `src/pearlalgo/validation/stats.py`) — the strongest-prior hypothesis must at least pass directionally.
+2. **Trial 17 Tier-0 PASS with `undersized` false** (n ≥ 100) — the only trial whose expected n (~107 per census) can power a read. A PASS with `undersized=true` on every fade trial routes to the record-only branch as INCONCLUSIVE, no Pine swap, absent an explicit ledger-recorded operator override.
+3. **Tier-1 split-half stability on trial 17** (H1 2025-10-26→2026-01-22 / H2 2026-01-23→2026-04-19, same halves as Path B): positive expectancy in **both** halves AND neither half carrying more than 70% of total profit — a two-way-split operationalization of the ledger's committed W13 concentration guard (the literal "any single regime > 40%" wording targets finer regime partitions; the deviation is acknowledged in the ledger entry).
 
 Anything less → R6: record the verdict, don't ship the signal. On a full PASS, the swap ships the **validated two-sided configuration as the default** — up-gap fade shorts ON; disabling shorts departs from the validated read and the script must say so, because the long-only slice was never a promotion basis — labeled "candidate — paper-trade the gate before funded capital" (operator directive; nothing is "validated" by Tier-0/1 alone).
 

@@ -174,3 +174,122 @@ the weak free-data signal (operator's $ call).
 The held-out slice (2026-04-20→2026-06-03) remains **untouched** (all runs verified
 `window_to ≤ 2026-04-20`). DSR `n_trials` is now **15**. Per-strategy JSON saved at
 `docs/audits/2026-06-03-pathb-*.json`.
+
+---
+
+## Path C — overnight-gap conditioning (pre-registered 2026-06-12)
+
+A genuinely different signal family: the conditioning variable is the **overnight gap**
+(today's RTH open vs yesterday's RTH close) — never used by trials 7–15 (those were
+indicator crosses, range breakouts, band fades, and unconditional clock bets). Plan:
+`docs/plans/2026-06-12-001-feat-gap-family-validation-pine-honesty-plan.md`.
+
+**Pre-registration (immutable; this entry is committed BEFORE any trial runs).**
+
+### Frozen definitions
+
+- `prior_rth_close` = close of the last 5m bar with ET time in [09:30, 16:00) on the most
+  recent prior trading date.
+- `gap` = open of the FIRST RTH 5m bar today − `prior_rth_close` (points; + = up-gap).
+- `ATR_d(14)` = Wilder ATR over daily aggregates (ET calendar date, full ETH range) of all
+  bars **strictly before today**. Valid only once **14 complete prior daily aggregates**
+  exist; the archive's first (possibly partial) calendar day is excluded from aggregates.
+- Decision/entry bar = the first RTH bar of the session; entries at its CLOSE (engine
+  convention, same as Path B). Fire at most once per session.
+- Cost floor: no fade trade unless the remaining distance to target at the entry-bar close
+  is ≥ **5.0 pt** (≥5× the ~1.0 pt RT cost). Skip the session if the gap has already
+  filled by the entry-bar close (fades only).
+- **Roll-splice exclusion:** sessions **2025-12-22** and **2026-03-23** are excluded from
+  all three trials. The dev window is IBKR continuous (`ibkr_historical`), spliced
+  unadjusted at expiry; on the first session after the Dec 19, 2025 / Mar 20, 2026
+  expirations, `gap` embeds the calendar spread (a phantom gap). Census found no
+  basis-jump outlier at these dates (spread hides inside the 120-pt median gap), so this
+  is conservative hygiene, not outlier surgery. The three genuine |gap| outliers found
+  (2025-11-20 +486.5, 2026-03-03 −487.8, 2026-04-08 +830.0) are real market gaps and are
+  KEPT.
+- Exits, frozen: fades target `prior_rth_close` (the fill), stop = entry ∓ remaining
+  distance (1:1 R on the remaining gap), max-hold to RTH close (`--max-hold-minutes 385`).
+  `gap_continue_large` holds to RTH close via the `_HOLD_SENTINEL` convention (pure
+  conditional-drift read, no stop lever — same mechanics as Path B).
+- ATR-validity gate applies to trials 16 and 18 (their conditions use ATR_d). **Trial 17's
+  condition uses no ATR and carries NO ATR-warmup gate** (decided here, pre-hoc).
+- Two-sided by design; the two-sided read is THE read. Per-side breakdowns are diagnostics
+  and never a promotion basis.
+
+### Trials (DSR `n_trials` 15 → 18)
+
+| # | Strategy | Condition (at entry-bar close) | Direction | Exit |
+|---|----------|-------------------------------|-----------|------|
+| 16 (PRIMARY) | `gap_fade_small` | 5.0 pt ≤ \|gap\| ≤ 0.30 × ATR_d | against gap | fill target / 1:1 stop / 385m |
+| 17 (secondary) | `gap_fade_all` | \|gap\| ≥ 5.0 pt (no ceiling, no ATR gate) | against gap | fill target / 1:1 stop / 385m |
+| 18 (secondary) | `gap_continue_large` | \|gap\| ≥ 0.70 × ATR_d | with gap | sentinel hold to RTH close |
+
+**External priors (fixed pre-hoc, never fitted):** NQ gap-fill 2015–2025 (n=2,791,
+TradingStats.net): <0.3×ATR fills 77.8% → trial 16 fade prior **moderate**; all-gaps fills
+60.3% → trial 17 prior **WEAK** (registered honestly as the dilution control; 17 ⊇ 16);
+>1.2×ATR fills only 8.2% → large gaps continue, trial 18 prior directional-only at
+0.70×ATR. Overnight-drift literature (Cooper/Cliff/Gulen; Boyarchenko et al. NY Fed)
+implies RTH-session weakness but its "opening reversal" is only weakly coupled to the gap;
+Plastun et al. 2020 finds gap-day *continuation* in stocks/daily. Net: smallest honest
+family that respects the size-regime split. **Family-wise: ≈14% chance of ≥1 false
+positive at nominal 95% across 3 trials.**
+
+### Conditioning census (outcome-blind, run BEFORE registration was finalized)
+
+`scripts/ops/pathc_conditioning_census.py` — reads gap sizes, ATR_d, and entry-bar-close
+position only; simulates no entries/exits/P&L. Dev window: 121 RTH sessions; median |gap|
+120.8 pt; median ATR_d 434.1 pt. **Expected n (after roll exclusion): trial 16 ≈ 50
+(max 58), trial 17 ≈ 107, trial 18 ≈ 15.** Disclosed consequences, pre-hoc: trial 16 can
+NEVER satisfy the n ≥ 100 powered-read bar on this window; trial 18 is expected
+INCONCLUSIVE unless the effect is enormous.
+
+### Pre-registered verdict → action mapping
+
+- **Promotion to the Pine manual toolkit ("candidate — paper-trade the gate") requires ALL
+  of:** (1) trial 16 Tier-0 PASS (any n) — the strongest-prior read concurs directionally;
+  (2) trial 17 Tier-0 PASS with `undersized=false` (n ≥ 100) — the only powered read;
+  (3) Tier-1 split-half on trial 17 (H1 2025-10-26→2026-01-22 / H2 2026-01-23→2026-04-19):
+  positive expectancy in BOTH halves AND neither half > 70% of total profit (two-way
+  operationalization of the W13 concentration guard; noted deviation from the literal 40%
+  wording, which targets finer partitions). On promotion, the shipped Pine defaults to the
+  validated TWO-SIDED configuration.
+- **Any Tier-0 PASS that fails the above** (incl. PASS+undersized) → recorded
+  **INCONCLUSIVE**, record-only, NO Pine signal swap. Sanctioned next steps are an
+  operator decision recorded here (paper-trade off chart visuals, or the deep-data $ call).
+- **KILL** (per committed `tier0_verdict` gate) → recorded; Pine entry alerts stay muted.
+- Operator override of any routing must be recorded in this ledger to take effect.
+- Honest ceiling (Path-B precedent, restated): a Tier-0 PASS on this ~5.5-month free slice
+  is NOT an edge and NOT a fund signal.
+
+### Integrity preflight (pinned; run before trial 16)
+
+Reproduce trial 11 with every flag explicit — a mismatch is data/engine drift and a hard
+STOP; varying flags until n=152 reappears is forbidden (flag-fitting):
+
+```
+backtest_config.py --strategy pine --tf 5m --start 2025-10-26 --end 2026-04-19 \
+  --warmup-bars 120 --max-hold-minutes 180 --slippage-points 0.25 --commission-points 1.0 --json
+```
+
+Expected: n=152, net expectancy −4.46 pt/trade. (Reconstructed engine defaults; trial 11's
+flags were never recorded — that reconstruction is itself part of what this pin freezes.)
+
+### Commands (dev-window only; engine-default costs, identical to trials 7–15)
+
+```
+backtest_config.py --strategy gap_fade_small     --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy gap_fade_all       --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy gap_continue_large --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+# Tier-1 split-half (only on a trial-17 Tier-0 PASS):
+#   same commands with --start 2025-10-26 --end 2026-01-22  and  --start 2026-01-23 --end 2026-04-19
+```
+
+**Development prohibition:** no gap-family strategy may be run against `data/candles.db`
+until the strategy functions and their synthetic-frame tests are committed and the official
+runs (above) begin. Development uses synthetic frames exclusively — this closes the
+informal-peek channel that commit ordering alone does not.
+
+### Path C results
+
+*(to be filled by the official runs — verdict rows append below; this section header is
+part of the pre-registration so results cannot be reframed)*
