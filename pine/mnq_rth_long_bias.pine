@@ -1,12 +1,26 @@
 //@version=5
-// PearlAlgo PINSTRIPE MNQ — Manual v3
+// PearlAlgo PINSTRIPE MNQ — Manual v4 (honesty build)
 // Polished TradingView build: trend ribbon, VWAP(+σ bands), signal markers, drawn trade levels,
 // bright manual-alert pinstripes, trend bar-coloring, session/mute shading, and an on-chart dashboard.
-// Signal (EMA9/21 cross +
-// VWAP, RTH-only, long-bias) is UNCHANGED and unproven — paper-trade the gate before funded capital.
-strategy("PearlAlgo PINSTRIPE MNQ — Manual v3", overlay = true,
+//
+// ⚠️ SIGNAL STATUS: KILLED. The EMA9/21+VWAP signal FAILED cost-honest validation
+// (trial 11: −4.46 pt/trade, n=152, dev-clean). The pre-registered overnight-gap
+// replacement family ALSO failed (trials 16–18, all KILL, 2026-06-12). See
+// docs/audits/validation-trial-ledger.md. Entry ALERTS ARE MUTED BY DEFAULT
+// (Signal status input); chart visuals stay live for study. Do NOT trade this
+// signal on funded capital. Honesty checklist: pine/README.md.
+//
+// Strategy Tester honesty: real per-side costs + slippage are modeled in the
+// declaration below, and the Tester is window-gated to the registered dev slice
+// (2025-10-26 → 2026-04-19) by default so reads match the validation ledger and
+// never touch the held-out slice (2026-04-20+, reserved for a one-shot Tier-5).
+strategy("PearlAlgo PINSTRIPE MNQ — Manual v4", overlay = true,
      default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
      calc_on_every_tick = false, process_orders_on_close = true,
+     commission_type = strategy.commission.cash_per_contract,
+     commission_value = 0.95,  // Tradovate free-tier all-in per side (2025-11 schedule)
+     slippage = 1,             // 1 tick = $0.50 adverse on market/stop fills
+     backtest_fill_limits_assumption = 1,  // no touch-fills on limit targets
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
 // ─────────────────────────────────  INPUTS  ─────────────────────────────────
@@ -22,6 +36,22 @@ allowShorts = input.bool(false, "Allow shorts (weak win rate)", group=gS)
 gSe = "➞ Session"
 rthOnly = input.bool(true, "RTH only (overnight loses)", group=gSe)
 sessRTH = input.session("0930-1600", "RTH session (ET)", group=gSe)
+
+gH = "➞ Honesty"
+// Entry alerts are MUTED while the signal is KILLED (validation ledger). Flip to
+// "Candidate — alerts on" ONLY when a pre-registered trial family passes the
+// promotion gate and the ledger records it. Visuals stay live either way.
+signalStatus = input.string("KILLED — alerts muted", "Signal status",
+     options=["KILLED — alerts muted", "Candidate — alerts on"], group=gH,
+     tooltip="docs/audits/validation-trial-ledger.md: EMA/VWAP killed (trial 11); gap family killed (trials 16-18).")
+alertsLive = signalStatus == "Candidate — alerts on"
+// Strategy Tester window — defaults to the registered dev slice so Tester reads
+// match the ledger and never touch the held-out slice (2026-04-20+). Order
+// placement only: signals, visuals, and (if un-muted) alerts are NOT window-gated.
+useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH)
+btStart = input.time(timestamp("2025-10-26T00:00:00-0400"), "Dev window start", group=gH)
+btEnd   = input.time(timestamp("2026-04-20T00:00:00-0400"), "Dev window end (exclusive)", group=gH)
+ordersOk = not useBtWindow or (time >= btStart and time < btEnd)
 
 gM = "➞ MFF guardrails"
 contracts    = input.int(1, "Contracts/trade", minval=1, maxval=5, group=gM, inline="sz")
@@ -157,7 +187,8 @@ if sigFired
 
 // ─────────────────────────────  ALERTS + ENTRIES  ───────────────────────────
 f_msg(action, entry, stop, target, reason) =>
-    ('{"strat":"mnq-rth-long-bias","v":2' +
+    ('{"strat":"mnq-rth-long-bias","v":3' +
+     ',"status":"' + signalStatus + '"' +
      ',"action":"' + action + '"' +
      ',"symbol":"' + syminfo.ticker + '"' +
      ',"tf":"' + timeframe.period + '"' +
@@ -175,36 +206,48 @@ f_msg(action, entry, stop, target, reason) =>
      ',"trades_today":' + str.tostring(tradesToday + 1) +
      ',"reason":"' + reason + '"}')
 
+// Order placement is gated to the dev window (Tester honesty); alert() is gated
+// by the KILLED-by-default signal status. tradesToday counts SIGNALS (not fills)
+// so the trades/day guardrail keeps working regardless of either gate. The
+// $-loss guardrail reads strategy.netprofit (hypothetical fills) and is only
+// meaningful inside the Tester window — on a manual account your real P&L lives
+// at the broker, not here.
 if longOk
-    strategy.entry("Long", strategy.long, qty=contracts)
-    strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
-    alert(f_msg("BUY", close, longStop, longTarget,
-         "EMA" + str.tostring(emaFastLen) + ">" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", above VWAP" : "")),
-         alert.freq_once_per_bar_close)
+    if ordersOk
+        strategy.entry("Long", strategy.long, qty=contracts)
+        strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    if alertsLive
+        alert(f_msg("BUY", close, longStop, longTarget,
+             "EMA" + str.tostring(emaFastLen) + ">" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", above VWAP" : "")),
+             alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
 if shortOk
-    strategy.entry("Short", strategy.short, qty=contracts)
-    strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
-    alert(f_msg("SELL", close, shortStop, shortTarget,
-         "EMA" + str.tostring(emaFastLen) + "<" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", below VWAP" : "")),
-         alert.freq_once_per_bar_close)
+    if ordersOk
+        strategy.entry("Short", strategy.short, qty=contracts)
+        strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    if alertsLive
+        alert(f_msg("SELL", close, shortStop, shortTarget,
+             "EMA" + str.tostring(emaFastLen) + "<" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", below VWAP" : "")),
+             alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
 hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
 hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
 if dailyStopWillFire
     dailyStopFired := true
-    alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
-         ',"symbol":"' + syminfo.ticker + '"' +
-         ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +
-         ',"daily_pnl_usd":' + str.tostring(dailyPnlUsd, "#.##") +
-         ',"trades_today":' + str.tostring(tradesToday) + '}',
-         alert.freq_once_per_bar_close)
+    if alertsLive
+        alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
+             ',"status":"' + signalStatus + '"' +
+             ',"symbol":"' + syminfo.ticker + '"' +
+             ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +
+             ',"daily_pnl_usd":' + str.tostring(dailyPnlUsd, "#.##") +
+             ',"trades_today":' + str.tostring(tradesToday) + '}',
+             alert.freq_once_per_bar_close)
 
-alertcondition(longOk,  title="PearlAlgo MNQ — Long",
+alertcondition(longOk and alertsLive,  title="PearlAlgo MNQ — Long",
      message='{"strat":"mnq-rth-long-bias","action":"BUY","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
-alertcondition(shortOk, title="PearlAlgo MNQ — Short",
+alertcondition(shortOk and alertsLive, title="PearlAlgo MNQ — Short",
      message='{"strat":"mnq-rth-long-bias","action":"SELL","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
 
 if rthOnly and not inRTH
@@ -220,7 +263,7 @@ f_pos(s) =>
         "Bottom Left"  => position.bottom_left
         => position.top_right
 
-var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=1, frame_color=color.new(color.gray, 60),
+var table dash = table.new(f_pos(dashPos), 2, 13, frame_width=1, frame_color=color.new(color.gray, 60),
      border_width=1, border_color=color.new(color.gray, 80))
 
 f_row(_r, _k, _v, _vc) =>
@@ -230,8 +273,8 @@ f_row(_r, _k, _v, _vc) =>
 f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
 
 if showDash and barstate.islast
-    statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : "ARMED"))
-    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" ? color.silver : colDn)
+    statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : (alertsLive ? "ARMED" : "MUTED")))
+    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" or statusTxt == "MUTED" ? color.silver : colDn)
     table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_left)
     table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_right)
     f_row(1,  "Trend",     trendUp ? "▲ Up" : "▼ Down",   trendUp ? colUp : colDn)
@@ -245,3 +288,4 @@ if showDash and barstate.islast
     f_row(9,  "Risk/ct",   "$" + str.tostring(riskUsdPer, "#.##"), color.white)
     f_row(10, "Trades",    str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
     f_row(11, "Daily P&L", "$" + str.tostring(dailyPnlUsd, "#.##"), dailyPnlUsd >= 0 ? colUp : colDn)
+    f_row(12, "Validation", alertsLive ? "CANDIDATE" : "KILLED T11+T16-18", alertsLive ? color.yellow : colDn)
