@@ -278,6 +278,40 @@ def _extract_trigger(sig: Dict[str, Any]) -> str:
     return "unknown"
 
 
+# Registered held-out slice (docs/audits/validation-trial-ledger.md): data from
+# this ET date onward is reserved for the one-shot Tier-5 read. The harness
+# refuses to load it unless the caller explicitly opts in (--tier5-held-out).
+HELD_OUT_START_DATE = "2026-04-20"
+
+
+def _held_out_start_ts() -> int:
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    return int(
+        _dt.strptime(HELD_OUT_START_DATE, "%Y-%m-%d")
+        .replace(tzinfo=_ZI("America/New_York"))
+        .timestamp()
+    )
+
+
+def clamp_to_held_out(win_from: int, win_to: int, *, allow_held_out: bool):
+    """Apply the held-out guard to a resolved [win_from, win_to] window.
+
+    Returns ``(win_from, win_to, clamped)``. Trailing windows that would
+    silently overlap the held-out slice (the trial 7-10 contamination
+    mechanism) are clamped to the boundary; explicit ``--end`` violations are
+    rejected earlier, in ``main()``, so the user sees an error rather than a
+    silent clamp.
+    """
+    if allow_held_out:
+        return win_from, win_to, False
+    boundary = _held_out_start_ts()
+    if win_to <= boundary:
+        return win_from, win_to, False
+    return min(win_from, boundary), boundary, True
+
+
 def run_backtest(
     config_path: Path,
     *,
@@ -293,6 +327,7 @@ def run_backtest(
     ts_to: Optional[int] = None,
     strategy_fn: Optional[Any] = None,
     strategy_name: str = "composite",
+    allow_held_out: bool = False,
 ) -> Dict[str, Any]:
     """Replay the archive through ``config_path`` and return the scorecard dict.
 
@@ -302,6 +337,9 @@ def run_backtest(
 
     ``commission_points`` is the round-trip cost per contract in index points
     (MNQ: ~$2 RT / $2 per point ≈ 1.0 pt). Set 0.0 to see gross-of-commission.
+
+    ``allow_held_out`` lifts the registered held-out guard (Tier-5 one-shot
+    read only); by default the window is clamped to ``HELD_OUT_START_DATE``.
     """
     import pandas as pd
     from pearlalgo.config.config_loader import (
@@ -321,6 +359,19 @@ def run_backtest(
     # window. Explicit ranges let us run dev-only and hold out the recent slice.
     win_to = now_ts if ts_to is None else int(ts_to)
     win_from = (win_to - days * 86400) if ts_from is None else int(ts_from)
+    win_from, win_to, clamped = clamp_to_held_out(
+        win_from, win_to, allow_held_out=allow_held_out
+    )
+    if clamped:
+        if ts_from is None:
+            win_from = win_to - days * 86400  # keep the full trailing span, pre-boundary
+        print(
+            f"[held-out guard] window end clamped to {HELD_OUT_START_DATE} (ET) — the "
+            f"registered held-out slice is untouched by default "
+            f"(docs/audits/validation-trial-ledger.md). Pass --tier5-held-out for the "
+            f"one-shot Tier-5 read.",
+            file=sys.stderr,
+        )
     archive = get_archive()
     rows = archive.query_range(
         symbol=symbol, tf=tf, ts_from=win_from, ts_to=win_to,
@@ -536,7 +587,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON scorecard on stdout")
+    parser.add_argument(
+        "--tier5-held-out",
+        action="store_true",
+        help=(
+            f"Allow loading the registered held-out slice ({HELD_OUT_START_DATE} onward). "
+            "Reserved for the one-shot Tier-5 read — see docs/audits/validation-trial-ledger.md."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    # Held-out guard, explicit-date branch: a typed --end inside the held-out
+    # slice is an error (the user asked for something registration forbids),
+    # not a silent clamp. ISO dates compare lexicographically.
+    if args.end and args.end >= HELD_OUT_START_DATE and not args.tier5_held_out:
+        print(
+            f"ERROR: --end {args.end} reaches into the registered held-out slice "
+            f"({HELD_OUT_START_DATE} onward, reserved for the one-shot Tier-5 read — "
+            f"docs/audits/validation-trial-ledger.md). Last legal --end is the day "
+            f"before; pass --tier5-held-out only for the sanctioned Tier-5 run.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.tier5_held_out:
+        print(
+            "=== TIER-5 HELD-OUT RUN — this is the one-shot read of the registered "
+            "held-out slice. ===",
+            file=sys.stderr,
+        )
 
     sfn = None
     if args.strategy != "composite":
@@ -567,6 +645,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         commission_points=args.commission_points,
         strategy_fn=sfn,
         strategy_name=args.strategy,
+        allow_held_out=args.tier5_held_out,
     )
 
     if args.json:
