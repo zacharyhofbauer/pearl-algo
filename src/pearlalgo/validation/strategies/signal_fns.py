@@ -319,6 +319,166 @@ def overnight_seasonality_signals(df, config=None, current_time=None) -> List[Di
     return [_hold_signal(direction, last["close"], "overnight_seasonality", ts)]
 
 
+# ── Path-C hypotheses: overnight-gap conditioning (pre-registered 2026-06-12) ───
+# Genuinely different family: conditions on the OVERNIGHT GAP (today's first RTH
+# bar open vs the prior trading date's RTH close) — a variable no prior trial
+# used. Frozen spec in docs/audits/validation-trial-ledger.md (Path C); do NOT
+# vary thresholds/exits without a new ledger registration.
+
+# First sessions on the new contract after the Dec-2025/Mar-2026 expirations.
+# The archive is IBKR continuous spliced unadjusted at expiry, so these "gaps"
+# embed the calendar spread (phantom gaps). Registered exclusion — Path C.
+PATHC_ROLL_EXCLUDED_DATES = frozenset({"2025-12-22", "2026-03-23"})
+_PATHC_GAP_FLOOR_PTS = 5.0   # cost floor: target must clear >=5x the ~1 pt RT cost
+_PATHC_SMALL_CEIL = 0.30     # |gap| <= 0.30 x ATR_d for gap_fade_small
+_PATHC_LARGE_FLOOR = 0.70    # |gap| >= 0.70 x ATR_d for gap_continue_large
+_PATHC_ATR_DAYS = 14
+# Bars to walk back from the session's first RTH bar to find the prior RTH
+# close. Fri 09:30 -> Mon 09:30 spans ~250 5m bars incl. Sunday ETH; 1000
+# tolerates holidays and data gaps.
+_PATHC_PRIOR_CLOSE_LOOKBACK = 1000
+
+
+def _daily_atr(df: pd.DataFrame, today: str, n: int = _PATHC_ATR_DAYS) -> Optional[float]:
+    """Wilder ATR over ET-calendar-date aggregates STRICTLY BEFORE ``today``.
+
+    Full ETH range per date; the archive's first (possibly partial) calendar
+    date is excluded. Returns None until ``n`` TRs exist (i.e. until 14
+    complete prior daily aggregates are available) — per the Path-C frozen
+    spec, sessions without a valid ATR_d fire nothing in the ATR-gated trials.
+    """
+    ts_arr = df["time"].to_numpy()
+    hi_arr = df["high"].to_numpy(dtype=float)
+    lo_arr = df["low"].to_numpy(dtype=float)
+    cl_arr = df["close"].to_numpy(dtype=float)
+    days: Dict[str, list] = {}
+    order: list = []
+    for k in range(len(df)):
+        d = _et_dt(int(ts_arr[k])).strftime("%Y-%m-%d")
+        if d >= today:  # df is time-ordered; nothing after today's bars matters
+            break
+        rec = days.get(d)
+        if rec is None:
+            days[d] = [hi_arr[k], lo_arr[k], cl_arr[k]]
+            order.append(d)
+        else:
+            rec[0] = max(rec[0], hi_arr[k])
+            rec[1] = min(rec[1], lo_arr[k])
+            rec[2] = cl_arr[k]
+    daily = [days[d] for d in order[1:]]  # drop first (possibly partial) date
+    if len(daily) < n + 1:
+        return None
+    atr: Optional[float] = None
+    trs: list = []
+    for i in range(1, len(daily)):
+        h, l, _c = daily[i]
+        pc = daily[i - 1][2]
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        if atr is None:
+            trs.append(tr)
+            if len(trs) == n:
+                atr = sum(trs) / n
+        else:
+            atr = (atr * (n - 1) + tr) / n
+    return atr
+
+
+def _gap_context(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+    """Conditioning context at the FIRST RTH bar of a session, else None.
+
+    Fires once per session by construction: the current bar must be in the
+    opening half-hour, in RTH, with the prior bar outside the same session.
+    Roll-excluded dates return None (registered exclusion).
+    """
+    if df is None or len(df) < 2:
+        return None
+    cur = df.iloc[-1]
+    cur_ts = int(cur["time"])
+    cur_dt = _et_dt(cur_ts)
+    # O(1) gate: only a bar in the opening half-hour can be the session's first.
+    if cur_dt.weekday() >= 5 or not (_RTH_OPEN <= cur_dt.time() < dtime(10, 0)):
+        return None
+    prev_dt = _et_dt(int(df.iloc[-2]["time"]))
+    prev_in_session = (prev_dt.date() == cur_dt.date()) and (
+        _RTH_OPEN <= prev_dt.time() < _RTH_CLOSE
+    )
+    if prev_in_session:
+        return None
+    today = cur_dt.strftime("%Y-%m-%d")
+    if today in PATHC_ROLL_EXCLUDED_DATES:
+        return None
+    prior_close: Optional[float] = None
+    lo_idx = max(-1, len(df) - 2 - _PATHC_PRIOR_CLOSE_LOOKBACK)
+    for i in range(len(df) - 2, lo_idx, -1):
+        d = _et_dt(int(df.iloc[i]["time"]))
+        if (
+            d.strftime("%Y-%m-%d") != today
+            and d.weekday() < 5
+            and _RTH_OPEN <= d.time() < _RTH_CLOSE
+        ):
+            prior_close = float(df.iloc[i]["close"])
+            break
+    if prior_close is None:
+        return None
+    return {
+        "ts": cur_ts,
+        "close": float(cur["close"]),
+        "gap": float(cur["open"]) - prior_close,
+        "prior_close": prior_close,
+        "atr_d": _daily_atr(df, today),
+    }
+
+
+def _gap_fade_signal(ctx: Dict[str, Any], trigger: str) -> List[Dict[str, Any]]:
+    """Shared fade exit geometry: target = prior RTH close (the fill), stop =
+    entry -+ remaining distance (1:1 R), engine max-hold to RTH close. Skips
+    when the gap pre-filled by the entry-bar close or the remaining distance
+    is below the cost floor."""
+    gap, close, target = ctx["gap"], ctx["close"], ctx["prior_close"]
+    pre_filled = (gap > 0 and close <= target) or (gap < 0 and close >= target)
+    remaining = abs(target - close)
+    if pre_filled or remaining < _PATHC_GAP_FLOOR_PTS:
+        return []
+    if gap < 0:  # down-gap: fade = long, fill target above
+        return [_signal("long", close, close - remaining, target, trigger, ctx["ts"])]
+    return [_signal("short", close, close + remaining, target, trigger, ctx["ts"])]
+
+
+def gap_fade_small_signals(df, config=None, current_time=None) -> List[Dict[str, Any]]:
+    """Trial 16 (PRIMARY): fade small overnight gaps.
+    Condition: 5.0 pt <= |gap| <= 0.30 x ATR_d(14); requires valid ATR_d."""
+    ctx = _gap_context(df)
+    if ctx is None or ctx["atr_d"] is None:
+        return []
+    g = abs(ctx["gap"])
+    if not (_PATHC_GAP_FLOOR_PTS <= g <= _PATHC_SMALL_CEIL * ctx["atr_d"]):
+        return []
+    return _gap_fade_signal(ctx, "gap_fade_small")
+
+
+def gap_fade_all_signals(df, config=None, current_time=None) -> List[Dict[str, Any]]:
+    """Trial 17: fade ALL overnight gaps >= the cost floor (no size ceiling).
+    Deliberately carries NO ATR_d gate — its condition uses no ATR (registered
+    pre-hoc; this is the dilution control containing trial 16's trades)."""
+    ctx = _gap_context(df)
+    if ctx is None or abs(ctx["gap"]) < _PATHC_GAP_FLOOR_PTS:
+        return []
+    return _gap_fade_signal(ctx, "gap_fade_all")
+
+
+def gap_continue_large_signals(df, config=None, current_time=None) -> List[Dict[str, Any]]:
+    """Trial 18: continue LARGE overnight gaps (|gap| >= 0.70 x ATR_d).
+    Direction WITH the gap sign; sentinel hold to RTH close (pure conditional
+    drift read, no stop lever — Path-B mechanics)."""
+    ctx = _gap_context(df)
+    if ctx is None or ctx["atr_d"] is None:
+        return []
+    if abs(ctx["gap"]) < _PATHC_LARGE_FLOOR * ctx["atr_d"]:
+        return []
+    direction = "long" if ctx["gap"] > 0 else "short"
+    return [_hold_signal(direction, ctx["close"], "gap_continue_large", ctx["ts"])]
+
+
 STRATEGY_FNS = {
     "pine": pine_simple_signals,
     "orb": orb_signals,
@@ -327,4 +487,7 @@ STRATEGY_FNS = {
     "opening_drive_5": opening_drive_5_signals,
     "tod_rth_long": tod_rth_long_signals,
     "overnight_seasonality": overnight_seasonality_signals,
+    "gap_fade_small": gap_fade_small_signals,
+    "gap_fade_all": gap_fade_all_signals,
+    "gap_continue_large": gap_continue_large_signals,
 }

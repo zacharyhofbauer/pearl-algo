@@ -185,3 +185,177 @@ def test_overnight_seasonality_no_signal_during_rth():
 def test_overnight_seasonality_fires_once_per_date():
     sigs = _run(overnight_seasonality_signals, _df([100.0] * 70, start="2026-01-05 15:55"))
     assert len(sigs) == 1
+
+
+# ── Path-C: overnight-gap conditioning (frozen spec — validation-trial-ledger.md) ──
+import pytest  # noqa: E402
+
+from pearlalgo.validation.strategies.signal_fns import (  # noqa: E402
+    PATHC_ROLL_EXCLUDED_DATES,
+    STRATEGY_FNS,
+    gap_continue_large_signals,
+    gap_fade_all_signals,
+    gap_fade_small_signals,
+)
+
+
+def _wd_dates(end_date: str, count: int):
+    """``count`` weekday date-strings ending at (and including) ``end_date``."""
+    d = datetime.strptime(end_date, "%Y-%m-%d")
+    out = []
+    while len(out) < count:
+        if d.weekday() < 5:
+            out.append(d.strftime("%Y-%m-%d"))
+        d -= timedelta(days=1)
+    return list(reversed(out))
+
+
+def _bar_at(date: str, hh: int, mm: int, o: float, h: float, lo: float, c: float):
+    ts = int(
+        datetime.strptime(f"{date} {hh:02d}:{mm:02d}", "%Y-%m-%d %H:%M")
+        .replace(tzinfo=ET)
+        .timestamp()
+    )
+    return {"time": ts, "open": float(o), "high": float(h), "low": float(lo),
+            "close": float(c), "volume": 100.0}
+
+
+# 17 full prior days -> 16 daily aggregates after the first-archive-day
+# exclusion -> >=14 TRs -> ATR_d valid. Flat days with range +-50 -> ATR_d = 100.
+_VALID_DAYS = 17
+_BASE = 20000.0
+_ATR = 100.0
+
+
+def _gap_frame(gap: float, close_off: float, *, prior_days: int = _VALID_DAYS,
+               today_date: str = "2026-02-06", today_high: float | None = None,
+               extra_today_bars: int = 0):
+    """Sparse multi-session frame: ``prior_days`` flat days (3 bars each: RTH
+    open, midday range bar, RTH last bar at 15:55), then today's session whose
+    first RTH bar opens at base+gap and closes at base+close_off."""
+    dates = _wd_dates(today_date, prior_days + 1)
+    rows = []
+    for d in dates[:-1]:
+        rows.append(_bar_at(d, 9, 30, _BASE, _BASE, _BASE, _BASE))
+        rows.append(_bar_at(d, 12, 0, _BASE, _BASE + 50, _BASE - 50, _BASE))
+        rows.append(_bar_at(d, 15, 55, _BASE, _BASE, _BASE, _BASE))
+    o, c = _BASE + gap, _BASE + close_off
+    hi = today_high if today_high is not None else max(o, c) + 1
+    rows.append(_bar_at(dates[-1], 9, 30, o, hi, min(o, c) - 1, c))
+    for k in range(extra_today_bars):
+        rows.append(_bar_at(dates[-1], 9, 35 + 5 * k, c, c + 1, c - 1, c))
+    return pd.DataFrame(rows)
+
+
+def test_gap_fade_small_happy_path_long():
+    # Down-gap -20 (5 <= 20 <= 0.3*100); first bar close at -15 -> remaining 15.
+    df = _gap_frame(gap=-20.0, close_off=-15.0)
+    sigs = gap_fade_small_signals(df)
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "long"
+    assert s["entry_trigger"] == "gap_fade_small"
+    assert s["entry_price"] == pytest.approx(_BASE - 15.0)
+    assert s["take_profit"] == pytest.approx(_BASE)          # fill target = prior RTH close
+    assert s["stop_loss"] == pytest.approx(_BASE - 30.0)     # 1:1 on remaining distance
+    # The dilution control (trial 17) contains the same trade.
+    all_sigs = gap_fade_all_signals(df)
+    assert len(all_sigs) == 1 and all_sigs[0]["direction"] == "long"
+
+
+def test_gap_fade_small_happy_path_short():
+    df = _gap_frame(gap=+20.0, close_off=+12.0)
+    sigs = gap_fade_small_signals(df)
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "short"
+    assert s["take_profit"] == pytest.approx(_BASE)
+    assert s["stop_loss"] == pytest.approx(_BASE + 24.0)
+
+
+def test_gap_size_stratification_mid_gap_only_fade_all():
+    # 0.5 x ATR: above the small ceiling, below the large floor.
+    df = _gap_frame(gap=+50.0, close_off=+40.0)
+    assert gap_fade_small_signals(df) == []
+    assert gap_continue_large_signals(df) == []
+    sigs = gap_fade_all_signals(df)
+    assert len(sigs) == 1 and sigs[0]["direction"] == "short"
+
+
+def test_gap_size_stratification_large_gap_continues_with_sign():
+    df = _gap_frame(gap=+90.0, close_off=+85.0)
+    assert gap_fade_small_signals(df) == []
+    sigs = gap_continue_large_signals(df)
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s["direction"] == "long" and s["entry_trigger"] == "gap_continue_large"
+    # Sentinel hold: stop/target far enough that first-touch never fires.
+    c = s["entry_price"]
+    assert s["stop_loss"] == pytest.approx(c * 0.5)
+    assert s["take_profit"] == pytest.approx(c * 1.5)
+    # Fade-all still fires its (short) fade on the same session.
+    assert gap_fade_all_signals(df)[0]["direction"] == "short"
+
+
+def test_gap_below_cost_floor_all_silent():
+    df = _gap_frame(gap=+3.0, close_off=+2.0)
+    assert gap_fade_small_signals(df) == []
+    assert gap_fade_all_signals(df) == []
+    assert gap_continue_large_signals(df) == []
+
+
+def test_gap_pre_filled_by_entry_bar_close_skips_fades():
+    # Down-gap, but the first bar closes back ABOVE the prior close.
+    df = _gap_frame(gap=-20.0, close_off=+2.0)
+    assert gap_fade_small_signals(df) == []
+    assert gap_fade_all_signals(df) == []
+
+
+def test_gap_remaining_distance_below_floor_skips():
+    df = _gap_frame(gap=-20.0, close_off=-4.0)  # remaining 4 < 5.0 pt floor
+    assert gap_fade_small_signals(df) == []
+    assert gap_fade_all_signals(df) == []
+
+
+def test_gap_fires_once_per_session_only_on_first_rth_bar():
+    df = _gap_frame(gap=-20.0, close_off=-15.0, extra_today_bars=4)
+    sigs = _run(gap_fade_all_signals, df, warmup=len(df) - 6)
+    assert len(sigs) == 1
+
+
+def test_gap_atr_no_lookahead_today_range_excluded():
+    # gap +35 > 0.30 x ATR_d(=100) -> small must stay silent. If today's huge
+    # range leaked into ATR_d, the ceiling would inflate and small would fire.
+    df = _gap_frame(gap=+35.0, close_off=+30.0, today_high=_BASE + 1000.0)
+    assert gap_fade_small_signals(df) == []
+    assert len(gap_fade_all_signals(df)) == 1  # session itself is tradable
+
+
+def test_gap_atr_warmup_gates_atr_trials_but_not_fade_all():
+    df = _gap_frame(gap=-20.0, close_off=-15.0, prior_days=5)
+    assert gap_fade_small_signals(df) == []      # no valid ATR_d yet
+    assert gap_continue_large_signals(df) == []
+    assert len(gap_fade_all_signals(df)) == 1    # trial 17 has no ATR gate
+
+
+def test_gap_roll_excluded_session_all_silent():
+    assert "2026-03-23" in PATHC_ROLL_EXCLUDED_DATES
+    df = _gap_frame(gap=-20.0, close_off=-15.0, prior_days=2, today_date="2026-03-23")
+    assert gap_fade_small_signals(df) == []
+    assert gap_fade_all_signals(df) == []
+    assert gap_continue_large_signals(df) == []
+
+
+def test_gap_first_session_in_history_silent():
+    rows = [
+        _bar_at("2026-02-06", 9, 30, _BASE - 20, _BASE - 19, _BASE - 21, _BASE - 15),
+        _bar_at("2026-02-06", 9, 35, _BASE - 15, _BASE - 14, _BASE - 16, _BASE - 15),
+    ]
+    df = pd.DataFrame(rows)
+    assert gap_fade_all_signals(df.iloc[:1]) == []  # len < 2
+    assert gap_fade_all_signals(df) == []           # no prior RTH close exists
+
+
+def test_gap_strategies_registered():
+    for name in ("gap_fade_small", "gap_fade_all", "gap_continue_large"):
+        assert name in STRATEGY_FNS
