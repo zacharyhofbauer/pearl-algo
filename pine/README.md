@@ -8,7 +8,7 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | **Manual v3 / pinstripe build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). The **signal is unchanged and unproven** — see the status note below. |
+| `mnq_rth_long_bias.pine` | **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. |
 
 ## On-chart visuals (Manual v3 / pinstripe)
 
@@ -25,33 +25,39 @@ All toggleable in the **Style** input group (colors are pickers):
 - **Trend bar-coloring** — candles tinted by EMA trend.
 - Session shading: grey outside RTH, red wash when entries are muted by a guardrail.
 
-> ⚠️ **Honest status (2026-06-03):** this EMA/VWAP signal **failed** cost-viability validation
-> (`docs/audits/validation-trial-ledger.md`). v2 deliberately does **not** add more indicator
-> confluence (that curve-fitting cost the auto-bot −2,026 pts). It only makes the *alerts* richer
-> and adds *discipline* guardrails. Paper-trade the validation gate before risking funded capital.
+> ⚠️ **Honest status (updated 2026-06-12):** this EMA/VWAP signal **failed** cost-honest
+> validation (trial 11: **−4.46 pt/trade, n=152**, dev-clean). The pre-registered replacement
+> family — overnight-gap conditioning (small-gap fade / all-gaps fade / large-gap continuation,
+> trials 16–18) — **also failed**: −25.61 / −1.25 / −220.07 pt/trade, all KILL at Tier-0. Per the
+> pre-registered gate, **no signal swap shipped and entry alerts are muted by default** (the
+> `Signal status` input). Full record: `docs/audits/validation-trial-ledger.md`. Flip alerts on
+> ONLY when a future pre-registered family clears the ledger's promotion gate.
 
 The original indicator library (Volume, VWAP_AA, EMA_Crossover, Supply & Demand, key levels,
 sessions) lives in `../resources/pinescript/pearlbot/` — use those as building blocks.
 
 ## If markers are not visible
 
-- Make sure the chart label starts with **PearlAlgo PINSTRIPE MNQ — Manual v3**. If TradingView still shows **RTH Long-Bias EMA/VWAP** or any non-pinstripe name, the chart is running an older saved script.
+- Make sure the chart label starts with **PearlAlgo PINSTRIPE MNQ — Manual v4**. If TradingView still shows **Manual v3**, **RTH Long-Bias EMA/VWAP**, or any non-pinstripe name, the chart is running an older saved script.
 - In the strategy settings, keep **Signal markers**, **Alert pinstripe**, **Big signal callouts**, and **Signal flash** enabled in the Style group.
-- Use **Condition = PearlAlgo PINSTRIPE MNQ — Manual v3** and trigger **Any alert() function call** so chart signals, strategy entries, and Discord payloads stay tied to the same Pine source. Avoid strategy order-fill placeholders like `{{strategy.order.action}}`; those can notify on fills/exits that are not manual entry alerts.
+- Use **Condition = PearlAlgo PINSTRIPE MNQ — Manual v4** and trigger **Any alert() function call** so chart signals, strategy entries, and Discord payloads stay tied to the same Pine source. Avoid strategy order-fill placeholders like `{{strategy.order.action}}`; those can notify on fills/exits that are not manual entry alerts.
+- **No alerts arriving is the DEFAULT.** The `Signal status` input ships as "KILLED — alerts muted" because the signal failed validation. Markers/visuals still draw; only `alert()` delivery is muted.
 
 ## How to wire an alert (per strategy)
 
 1. Paste the `.pine` into TradingView → **Pine Editor** → *Add to chart* (use an **MNQ** chart,
    your trading timeframe).
-2. Check the **Strategy Tester** tab — this is your first, free backtest. If it's not green on a
-   meaningful sample, fix the strategy *before* trading it.
+2. Check the **Strategy Tester** tab — this is your first, free backtest. A green report is
+   NOT a go signal: run the **Strategy Tester honesty checklist** below before believing
+   anything it says, and remember the binding verdicts live in
+   `docs/audits/validation-trial-ledger.md`, not in the Tester.
 3. Create an alert: **Condition = PearlAlgo PINSTRIPE MNQ — Manual v3**, trigger = **"Any alert() function call"**,
    **Webhook URL** = your receiver (or Discord webhook directly — see `../alerts/`).
    *(Prefer condition-based alerts? The script also exposes `alertcondition()` triggers
    "PearlAlgo MNQ — Long/Short" with a minimal placeholder payload.)*
-4. The alert body is auto-filled by the strategy's `alert()` JSON (v2):
+4. The alert body is auto-filled by the strategy's `alert()` JSON (v3 — adds `status`):
    ```json
-   {"strat":"mnq-rth-long-bias","v":2,"action":"BUY","symbol":"MNQ1!","tf":"5",
+   {"strat":"mnq-rth-long-bias","v":3,"status":"Candidate — alerts on","action":"BUY","symbol":"MNQ1!","tf":"5",
     "bar_time":"2026-06-03 10:15 ET","entry":21850.25,"stop":21835.0,"target":21880.75,
     "atr":10.17,"rr":2.0,"risk_pts":15.25,"risk_usd_per_contract":30.5,"risk_usd_total":30.5,
     "contracts":1,"max_contracts":5,"trades_today":1,"reason":"EMA9>21 cross, above VWAP"}
@@ -72,6 +78,53 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
 - **Max 5 MNQ total** (MFF compliance) — in the payload as `max_contracts`.
 - **RTH only** — strategy flattens at the RTH close; never hold overnight.
 - **Long bias** — shorts are off by default.
+
+## Strategy Tester honesty checklist (run BEFORE believing any Tester report)
+
+TradingView's Strategy Tester defaults to a fantasy: zero commission, zero slippage, and a
+synthetic intrabar price path. v4 bakes the honest settings into the code; this checklist is
+how you verify nothing has un-baked them and the report means what it appears to mean.
+
+1. **Costs are in code, not the UI.** The declaration sets
+   `commission_type = strategy.commission.cash_per_contract`, `commission_value = 0.95`
+   (Tradovate free-tier all-in per side, 2025-11 schedule: $0.39 commission + $0.35 CME
+   exchange + $0.02 NFA + $0.19 clearing), `slippage = 1` (1 tick = $0.50 adverse on
+   market/stop fills; limit targets never slip), `backtest_fill_limits_assumption = 1` (no
+   touch-fills). That models ~$2.40–$2.90 per round trip — at/above the engine's modeled
+   costs and the real broker bill. ⚠️ Values changed in the chart's **Properties** tab
+   silently OVERRIDE the code for that chart — reset to defaults before reading any report.
+2. **Cost sensitivity.** Re-run with commission/slippage zeroed vs the honest settings. If
+   the edge dies between the two, there is no edge — that exact failure killed all four
+   2026-06-03 families and the gap family (trial 17 was break-even gross, dead net).
+3. **Frozen stops/targets.** Stops/targets are structure-derived (ATR at signal, gap
+   geometry) and registered in the ledger. Tuning ANY input against the Tester and re-reading
+   is a new trial that needs a new ledger pre-registration — `n_trials` exists because every
+   peek is a draw from the multiple-testing well.
+4. **Dev-window discipline.** The `Limit Strategy Tester to dev window` input (default ON)
+   restricts order placement to 2025-10-26 → 2026-04-19 — the same registered window the
+   validation engine reads. The held-out slice (2026-04-20+) is a ONE-SHOT Tier-5 resource:
+   reading it casually in the Tester spends it forever. Deep Backtesting (Premium+) must use
+   the same date range.
+5. **Repaint checks.** `calc_on_every_tick = false`, `process_orders_on_close = true`, all
+   `alert()` calls fire once per bar close, and the script uses NO `request.security()` —
+   the whole HTF-lookahead repaint class is structurally absent. Verify the Tester shows no
+   warning icon, and bar-replay a few sessions: signals must appear only at bar close and
+   never vanish.
+6. **Broker-emulator skepticism.** Without Bar Magnifier the emulator invents the intrabar
+   path (open→high→low→close or open→low→high→close by which extreme is nearer the open).
+   When a bar's range contains BOTH the stop and the target, the credited outcome is pure
+   heuristic. Audit the List of Trades for those bars and for same-bar entry+exit trades;
+   re-check with Bar Magnifier (Premium+) where available.
+7. **Contract-roll sanity** — roll boundaries create phantom gaps: on roll-adjacent sessions
+   the open-vs-prior-close difference includes the calendar spread, and back-adjusted vs
+   unadjusted charts disagree exactly there. The registered trials exclude pinned
+   roll-adjacent sessions (2025-12-22, 2026-03-23); any Pine gap signal must skip the same
+   dates. Also compare `MNQ1!` back-adjusted vs unadjusted for anything dollar-anchored, and
+   note ETH vs RTH chart sessions change VWAP anchoring.
+8. **Paper period.** Before ANY funded trade on a future validated candidate: 2+ weeks of
+   live bar-close alerts journaled against your actual hand-fill prices. A human acting on a
+   phone alert fills later and worse than the emulator's close-price fill — this is the only
+   test of that gap, and it calibrates whether 1 tick of modeled slippage is enough.
 
 ## MFF discipline guardrails (v2 — robust levers, not signal)
 
