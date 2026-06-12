@@ -14,6 +14,12 @@
 // declaration below, and the Tester is window-gated to the registered dev slice
 // (2025-10-26 → 2026-04-19) by default so reads match the validation ledger and
 // never touch the held-out slice (2026-04-20+, reserved for a one-shot Tier-5).
+//
+// Visual posture (v4.1): while Signal status is KILLED/muted the chart stays
+// QUIET — tiny direction-tinted study markers only; the loud manual-alert kit (huge
+// BUY/SELL markers, callouts, pinstripe, flash, trade-level rays) renders ONLY
+// when status = Candidate. Pinstripe and callout are single-instance managed
+// drawings (prior one deleted on each signal) so they can never pile up.
 strategy("PearlAlgo PINSTRIPE MNQ — Manual v4", overlay = true,
      default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
      calc_on_every_tick = false, process_orders_on_close = true,
@@ -49,8 +55,8 @@ alertsLive = signalStatus == "Candidate — alerts on"
 // match the ledger and never touch the held-out slice (2026-04-20+). Order
 // placement only: signals, visuals, and (if un-muted) alerts are NOT window-gated.
 useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH)
-btStart = input.time(timestamp("2025-10-26T00:00:00-0400"), "Dev window start", group=gH)
-btEnd   = input.time(timestamp("2026-04-20T00:00:00-0400"), "Dev window end (exclusive)", group=gH)
+btStart = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
+btEnd   = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
 ordersOk = not useBtWindow or (time >= btStart and time < btEnd)
 
 gM = "➞ MFF guardrails"
@@ -85,7 +91,11 @@ vwStd   = ta.stdev(close, 20)
 trendUp = emaFast > emaSlow
 
 inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
-newSession = inRTH and not inRTH[1]
+// Daily-state reset: RTH-session open when rthOnly; otherwise calendar-day
+// change. (Without the newDay branch, rthOnly=false made inRTH constant-true,
+// the reset never fired, and max-trades/DAY silently became max-trades-EVER.)
+newDay = ta.change(time("D")) != 0
+newSession = rthOnly ? (inRTH and not inRTH[1]) : newDay
 
 var int   tradesToday    = 0
 var float dayStartProfit = 0.0
@@ -132,18 +142,26 @@ fill(ub, lb, color = showBands ? color.new(colVw, 93) : na, title="VWAP band")
 
 barcolor(colorBars ? color.new(trendUp ? colUp : colDn, 35) : na, title="Trend bars")
 
-plotshape(showSignals and longOk,  "BUY MNQ alert marker",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.huge, text="BUY\nMNQ",  textcolor=color.white)
-plotshape(showSignals and shortOk, "SELL MNQ alert marker", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.huge, text="SELL\nMNQ", textcolor=color.white)
-plotshape(showSignals and dailyStopWillFire and not sigFired, "DAILY STOP alert marker", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.huge, text="STOP\nTODAY", textcolor=color.white)
+// Armed: huge labeled markers (the manual-alert kit). Muted: tiny neutral
+// study marks — a killed signal must not shout trade instructions.
+plotshape(showSignals and longOk and alertsLive,  "BUY MNQ alert marker",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.huge, text="BUY\nMNQ",  textcolor=color.white)
+plotshape(showSignals and shortOk and alertsLive, "SELL MNQ alert marker", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.huge, text="SELL\nMNQ", textcolor=color.white)
+plotshape(showSignals and dailyStopWillFire and not sigFired and alertsLive, "DAILY STOP alert marker", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.huge, text="STOP\nTODAY", textcolor=color.white)
+plotshape(showSignals and longOk and not alertsLive,  "Muted study marker (long)",  shape.triangleup,   location.belowbar, color.new(colUp, 45), size=size.tiny)
+plotshape(showSignals and shortOk and not alertsLive, "Muted study marker (short)", shape.triangledown, location.abovebar, color.new(colDn, 45), size=size.tiny)
 
 // Grey wash outside RTH; red wash when entries are muted (daily stop / max trades) during RTH.
 bgcolor(not inRTH ? color.new(color.gray, 92) : (not (tradesCapOk and lossLimitOk) ? color.new(colDn, 90) : na), title="Session / mute")
-bgcolor(showSignalFlash and alertVisual ? color.new(sigFired ? (longOk ? colUp : colDn) : color.orange, 58) : na, title="Manual alert flash")
+bgcolor(showSignalFlash and alertVisual and alertsLive ? color.new(sigFired ? (longOk ? colUp : colDn) : color.orange, 58) : na, title="Manual alert flash")
 
+// Single MANAGED pinstripe (v3 bug: stripes were never deleted and piled up as
+// giant towers). Armed-only, and ±1.5×ATR instead of ±4 so it flags the bar
+// without dwarfing the price action.
 var box alertStripe = na
-if showPinstripe and alertVisual
+if showPinstripe and alertVisual and alertsLive
+    box.delete(alertStripe)
     stripeColor = sigFired ? (longOk ? colUp : colDn) : color.orange
-    box.new(bar_index, high + atr * 4.0, bar_index + 1, low - atr * 4.0,
+    alertStripe := box.new(bar_index, high + atr * 1.5, bar_index + 1, low - atr * 1.5,
          border_color=color.new(stripeColor, 0), border_width=2, bgcolor=color.new(stripeColor, 72),
          text=sigFired ? (longOk ? "BUY MNQ" : "SELL MNQ") : "DAILY STOP", text_color=color.white, text_size=size.large)
 
@@ -159,19 +177,24 @@ var float  lastE = na
 var float  lastS = na
 var float  lastT = na
 
+var label lastCallout = na
 if sigFired
     lastDir := longOk ? "▲ LONG" : "▼ SHORT"
     lastE := sEntry
     lastS := sStop
     lastT := sTgt
-    if showCallouts
+    // Single MANAGED callout (v3 bug: one label per signal accumulated forever
+    // and stacked into overlapping boxes). Armed-only — when muted, the same
+    // numbers live in the dashboard's Entry/Stop/Target rows instead.
+    if showCallouts and alertsLive
+        label.delete(lastCallout)
         calloutDir = longOk ? "BUY MNQ" : "SELL MNQ"
         calloutText = calloutDir + "\nEntry " + str.tostring(sEntry, format.mintick) + "\nStop " + str.tostring(sStop, format.mintick) + "  Target " + str.tostring(sTgt, format.mintick)
-        label.new(bar_index, longOk ? low : high, calloutText,
+        lastCallout := label.new(bar_index, longOk ? low : high, calloutText,
              yloc=longOk ? yloc.belowbar : yloc.abovebar,
              style=longOk ? label.style_label_up : label.style_label_down,
              color=color.new(longOk ? colUp : colDn, 0), textcolor=color.white, size=size.large)
-    if showLevels
+    if showLevels and alertsLive
         line.delete(lnE)
         line.delete(lnS)
         line.delete(lnT)
@@ -245,10 +268,10 @@ if dailyStopWillFire
              ',"trades_today":' + str.tostring(tradesToday) + '}',
              alert.freq_once_per_bar_close)
 
-alertcondition(longOk and alertsLive,  title="PearlAlgo MNQ — Long",
-     message='{"strat":"mnq-rth-long-bias","action":"BUY","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
-alertcondition(shortOk and alertsLive, title="PearlAlgo MNQ — Short",
-     message='{"strat":"mnq-rth-long-bias","action":"SELL","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
+// NOTE: alertcondition() is removed — it is nonfunctional in strategy scripts
+// (Pine docs: alerts cannot be created from alertcondition() in a strategy).
+// The ONLY working alert path is the alert() calls above, wired via
+// "Any alert() function call" per pine/README.md.
 
 if rthOnly and not inRTH
     strategy.close_all("RTH end")

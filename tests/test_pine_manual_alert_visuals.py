@@ -46,3 +46,22 @@ def test_every_manual_alert_path_has_a_chart_visual() -> None:
     assert "SELL MNQ" in source
     assert "DAILY STOP" in source
     assert "Manual alert flash" in source
+
+
+def test_manual_pine_muted_state_quiets_loud_visuals() -> None:
+    source = _pine()
+
+    # The loud manual-alert kit renders only when armed (Candidate status).
+    assert "longOk and alertsLive" in source                              # huge markers
+    assert "showSignalFlash and alertVisual and alertsLive" in source     # flash
+    assert "showPinstripe and alertVisual and alertsLive" in source       # pinstripe
+    assert "showCallouts and alertsLive" in source                        # callouts
+    assert "showLevels and alertsLive" in source                          # level rays
+    # Muted state still shows small neutral study markers.
+    assert "Muted study marker (long)" in source
+    assert "Muted study marker (short)" in source
+    # Pinstripe and callout are single-instance managed (no accumulation).
+    assert "box.delete(alertStripe)" in source
+    assert "alertStripe := box.new(" in source
+    assert "label.delete(lastCallout)" in source
+    assert "lastCallout := label.new(" in source

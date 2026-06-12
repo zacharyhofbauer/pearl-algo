@@ -12,6 +12,16 @@ order by hand on MFF.
 
 ## On-chart visuals (Manual v4 / pinstripe)
 
+**Two visual postures (v4.1).** While `Signal status` is **KILLED — alerts muted** (the
+shipped default), the chart stays *quiet*: tiny direction-tinted study triangles at signal bars,
+plus ribbon/VWAP/bar-coloring and the dashboard (which still carries Entry/Stop/Target
+numbers). The loud manual-alert kit — huge BUY/SELL markers, big callouts, pinstripe,
+signal flash, and trade-level rays — renders **only** when status is flipped to
+**Candidate — alerts on**. A killed signal does not shout trade instructions. The
+pinstripe and callout are also single-instance managed drawings now (the prior one is
+deleted on each new signal), fixing the v3 bug where they accumulated forever and
+buried the chart under stacked boxes and giant stripes.
+
 All toggleable in the **Style** input group (colors are pickers):
 
 - **Dashboard** — themed table (position selectable) with trend, session, status (`ARMED` / `MAX TRADES` / `DAILY STOP` / `CLOSED`), last signal, entry/stop/target, R:R, $-risk/contract, trades-today, daily P&L.
@@ -53,8 +63,9 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
    `docs/audits/validation-trial-ledger.md`, not in the Tester.
 3. Create an alert: **Condition = PearlAlgo PINSTRIPE MNQ — Manual v4**, trigger = **"Any alert() function call"**,
    **Webhook URL** = your receiver (or Discord webhook directly — see `../alerts/`).
-   *(Prefer condition-based alerts? The script also exposes `alertcondition()` triggers
-   "PearlAlgo MNQ — Long/Short" with a minimal placeholder payload.)*
+   *(There are no `alertcondition()` triggers — Pine cannot create alerts from
+   `alertcondition()` inside a strategy script, so v4.1 removed those dead lines. The
+   "Any alert() function call" wiring above is the only working path.)*
 4. The alert body is auto-filled by the strategy's `alert()` JSON (v3 — adds `status`):
    ```json
    {"strat":"mnq-rth-long-bias","v":3,"status":"Candidate — alerts on","action":"BUY","symbol":"MNQ1!","tf":"5",
