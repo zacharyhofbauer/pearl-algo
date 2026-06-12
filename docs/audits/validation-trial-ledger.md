@@ -291,5 +291,47 @@ informal-peek channel that commit ordering alone does not.
 
 ### Path C results
 
-*(to be filled by the official runs — verdict rows append below; this section header is
-part of the pre-registration so results cannot be reframed)*
+**Integrity preflight (2026-06-12): PASSED.** The pinned trial-11 command reproduced
+exactly — n=152, net expectancy −4.46 pt/trade — proving engine + dev-window data are
+unchanged since the 2026-06-03 snapshot (the post-snapshot WAL activity added no MNQ 5m
+bars: count is still 41,423).
+
+| # | Date | Strategy | Window | Trades | Net exp (pt/trade) | Tier | Verdict |
+|---|------|----------|--------|--------|--------------------|------|---------|
+| 16 | 2026-06-12 | gap_fade_small (PRIMARY) | dev-only 2025-10-26→2026-04-19 | 50 | **−25.61**, CI95 [−51.56, +0.04] | 0 | **KILL** (exp ≤ 0) |
+| 17 | 2026-06-12 | gap_fade_all | dev-only | 107 | **−1.25**, CI95 [−29.02, +27.19] | 0 | **KILL** (exp ≤ 0) |
+| 18 | 2026-06-12 | gap_continue_large | dev-only | 15 | **−220.07**, CI95 [−368.99, −103.40] | 0 | **KILL** (exp ≤ 0) |
+
+Census accuracy: predicted n of ≈50 / ≈107 / ≈15 — actuals 50 / 107 / 15. JSON artifacts:
+`docs/audits/2026-06-12-pathc-*.json`. Held-out untouched (every `window_to` =
+2026-04-20T00:00 ET boundary; the guard is now machine-enforced). **DSR `n_trials` = 18.**
+
+## CONCLUSION — Path C (2026-06-12)
+
+**The overnight-gap family is dead on this data. All three pre-registered trials KILL at
+Tier-0; per the pre-registered mapping there is no promotion, no Pine signal swap, and the
+Pine toolkit's entry alerts stay muted.**
+
+- **gap_fade_small (PRIMARY): KILL** at −25.61 pt/trade, 42% win rate. The external prior
+  (78% small-gap fill rate on NQ 2015–2025) did not survive contact: "fills by the close"
+  is not the same trade as "1:1 stop on the remaining distance" — the stop got hit before
+  the fill often enough to lose 25 pt/trade. Conditioning on small size made the fade
+  WORSE than unconditional in this window, the opposite of the external evidence's
+  size-regime story.
+- **gap_fade_all: KILL** at −1.25 pt/trade on the only powered read (n=107). Gross of the
+  ~1.5 pt modeled costs this is ≈ break-even — the unconditional gap fade is a coin flip
+  that costs eat. No regime of hope here: CI spans ±28.
+- **gap_continue_large: KILL** at −220.07 pt/trade, 1 win in 15. Large gaps in this window
+  mean-reverted hard rather than continuing. **Anti-fishing note (binding):** the symmetric
+  large-gap FADE would show ≈ +220 ex-costs *by construction* on the same 15 sessions —
+  that is a post-hoc sign flip on n=15, exactly the move Path B's conclusion forbids ("a
+  lone direction-flip on noisy data is no green light"). It is recorded here as
+  NOT-actionable. Any future test of it must be a fresh pre-registration on NEW deep data,
+  not this slice.
+- Program-level: a fifth signal family is now cost-dead on this 121-session slice
+  (after EMA/VWAP cross, ORB, VWAP-band reversion, and the Path-B time family). The free
+  5m data has been mined by 18 registered trials; survivorship pressure on any future
+  "discovery" here is severe. This further strengthens the existing recommendation:
+  **lean Path A (redirect off intraday MNQ); do not fund; do not buy deep data to chase
+  gap conditioning** — the powered read was break-even gross, which prices the family's
+  ceiling near zero before costs.
