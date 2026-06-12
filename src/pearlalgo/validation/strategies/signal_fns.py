@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 _ET = ZoneInfo("America/New_York")
+_UTC = ZoneInfo("UTC")
 _RTH_OPEN = dtime(9, 30)
 _RTH_CLOSE = dtime(16, 0)
 # "No-touch" stop/target offset (fraction of price) for hold-to-time strategies:
@@ -49,7 +50,7 @@ def _wilder_atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
 
 
 def _et_dt(ts: int) -> datetime:
-    return datetime.fromtimestamp(int(ts), tz=ZoneInfo("UTC")).astimezone(_ET)
+    return datetime.fromtimestamp(int(ts), tz=_UTC).astimezone(_ET)
 
 
 def _in_rth(ts: int) -> bool:
@@ -343,9 +344,11 @@ def _daily_atr(df: pd.DataFrame, today: str, n: int = _PATHC_ATR_DAYS) -> Option
     """Wilder ATR over ET-calendar-date aggregates STRICTLY BEFORE ``today``.
 
     Full ETH range per date; the archive's first (possibly partial) calendar
-    date is excluded. Returns None until ``n`` TRs exist (i.e. until 14
-    complete prior daily aggregates are available) — per the Path-C frozen
-    spec, sessions without a valid ATR_d fire nothing in the ATR-gated trials.
+    date is excluded. Returns None until ``n`` TRs exist — which requires
+    ``n + 1`` (15) complete prior daily aggregates, the operationalization of
+    the ledger's "14 complete prior daily aggregates" wording (census and
+    engine agree; see the Path-C implementation clarifications). Sessions
+    without a valid ATR_d fire nothing in the ATR-gated trials.
     """
     ts_arr = df["time"].to_numpy()
     hi_arr = df["high"].to_numpy(dtype=float)

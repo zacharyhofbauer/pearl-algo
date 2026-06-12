@@ -10,7 +10,7 @@ order by hand on MFF.
 |---|---|
 | `mnq_rth_long_bias.pine` | **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. |
 
-## On-chart visuals (Manual v3 / pinstripe)
+## On-chart visuals (Manual v4 / pinstripe)
 
 All toggleable in the **Style** input group (colors are pickers):
 
@@ -51,7 +51,7 @@ sessions) lives in `../resources/pinescript/pearlbot/` — use those as building
    NOT a go signal: run the **Strategy Tester honesty checklist** below before believing
    anything it says, and remember the binding verdicts live in
    `docs/audits/validation-trial-ledger.md`, not in the Tester.
-3. Create an alert: **Condition = PearlAlgo PINSTRIPE MNQ — Manual v3**, trigger = **"Any alert() function call"**,
+3. Create an alert: **Condition = PearlAlgo PINSTRIPE MNQ — Manual v4**, trigger = **"Any alert() function call"**,
    **Webhook URL** = your receiver (or Discord webhook directly — see `../alerts/`).
    *(Prefer condition-based alerts? The script also exposes `alertcondition()` triggers
    "PearlAlgo MNQ — Long/Short" with a minimal placeholder payload.)*
@@ -131,8 +131,13 @@ how you verify nothing has un-baked them and the report means what it appears to
 These mute alerts/entries to protect the funded account; tune in the "MFF guardrails" input group:
 
 - **Max trades / day** (default 3, `0` = off) — after N entries, further signals are muted until
-  the next RTH session.
-- **Daily loss limit $** (default off) — when realized session P&L breaches `-$X`, signals mute.
-- **`DAILY_STOP` alert** — fires **once** when either cap trips, so you get a "stop for the day" ping.
+  the next RTH session. Counts **signals** (not fills), so it works in live alerting regardless of
+  the Tester window or mute state. **This is the only guardrail that protects you live.**
+- **Daily loss limit $** (default off) — ⚠️ **Tester-only in v4.** It reads `strategy.netprofit`
+  (hypothetical emulator fills), and with the dev-window Tester gate ON (the shipped default)
+  no emulator fills occur on live bars — so this guardrail and the dashboard Daily P&L row are
+  frozen at $0 in live use. Your real P&L lives at the broker; track the daily loss limit there.
+- **`DAILY_STOP` alert** — fires **once** when a cap trips (live: the trades/day cap only, per
+  the limitation above), so you get a "stop for the day" ping.
 - **Risk context** — every entry alert carries `risk_pts` and `risk_usd_per_contract` (using
   TradingView's real point value) so you size against the MFF trailing drawdown, not by guesswork.

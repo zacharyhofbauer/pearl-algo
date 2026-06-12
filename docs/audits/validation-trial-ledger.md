@@ -335,3 +335,34 @@ Pine toolkit's entry alerts stay muted.**
   **lean Path A (redirect off intraday MNQ); do not fund; do not buy deep data to chase
   gap conditioning** — the powered read was break-even gross, which prices the family's
   ceiling near zero before costs.
+
+### Post-registration implementation clarifications & errata (2026-06-12, appended — never edited)
+
+From the multi-agent code review run after the official trials (all items independently
+validated; none changes any verdict):
+
+1. **Held-out boundary off-by-one (fixed post-run).** The guard's original `<=` boundary
+   let the single bar stamped 2026-04-20T00:00 ET (a Sunday-evening ETH bar — the first
+   held-out calendar date) load on maximal dev runs, and the three Path-C runs loaded it
+   (`candles_processed` 33694 vs 33693 without it). Validated **outcome-inert**: no RTH
+   strategy can signal on a 00:00 ET bar and no position could extend there. The harness
+   boundary is now exclusive; the trial-11 preflight was re-verified post-fix.
+2. **ATR_d validity operationalization.** The frozen "14 complete prior daily aggregates"
+   wording is implemented as **14 TRs, which require 15 complete prior daily aggregates**.
+   Census and engine agree (that is why predicted n matched actuals exactly); recorded
+   results unaffected.
+3. **Decision-bar O(1) gate.** `_gap_context` accepts a session's first RTH bar only in
+   [09:30, 10:00) ET — an unregistered narrowing of "the first RTH bar of the session."
+   No dev-window session has a first RTH bar at/after 10:00, so no recorded trial was
+   affected; future windows with delayed opens would differ.
+4. **Window-relative ATR exclusion.** "The archive's first day is excluded" is implemented
+   relative to the LOADED window, not the archive. Identical here (window start == archive
+   start), but any future ATR-gated run starting mid-archive (e.g., a split-half H2) must
+   load a ≥15-day warmup prefix or ~16 sessions silently lose ATR validity.
+5. **Early-close erratum.** The engine's max-hold timeout exits at the first bar at/after
+   the deadline — on early-close sessions that is the NEXT session's 18:00 ET reopen, not
+   the early close. Affected dev-window sessions: 2025-11-27/28 (Thanksgiving), 2026-01-19
+   (MLK — including one of trial 18's 15 trades, held through a ~5-hour halt), 2026-02-16
+   (Presidents' Day). All three Path-C verdicts are KILL by margins that dwarf any
+   plausible effect. Future registrations must either pre-register early-close session
+   handling or make the timeout session-aware.

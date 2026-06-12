@@ -319,8 +319,19 @@ def test_gap_remaining_distance_below_floor_skips():
 
 def test_gap_fires_once_per_session_only_on_first_rth_bar():
     df = _gap_frame(gap=-20.0, close_off=-15.0, extra_today_bars=4)
-    sigs = _run(gap_fade_all_signals, df, warmup=len(df) - 6)
+    for fn in (gap_fade_all_signals, gap_fade_small_signals):
+        sigs = _run(fn, df, warmup=len(df) - 6)
+        assert len(sigs) == 1, fn.__name__
+
+
+def test_gap_continue_large_fires_once_and_short_on_down_gap():
+    # Covers both the once-per-session replay invariant for the third fn and
+    # the down-gap -> SHORT direction mapping of trial 18 (review findings).
+    df = _gap_frame(gap=-90.0, close_off=-85.0, extra_today_bars=4)
+    sigs = _run(gap_continue_large_signals, df, warmup=len(df) - 6)
     assert len(sigs) == 1
+    assert sigs[0]["direction"] == "short"
+    assert sigs[0]["entry_trigger"] == "gap_continue_large"
 
 
 def test_gap_atr_no_lookahead_today_range_excluded():

@@ -17,6 +17,13 @@ close vs prior close). It simulates no entries, exits, or P&L — running it
 before the trials is the pre-registered, outcome-blind n-disclosure step.
 See docs/audits/validation-trial-ledger.md (Path C) and
 docs/plans/2026-06-12-001-feat-gap-family-validation-pine-honesty-plan.md.
+
+CAVEAT (review finding #13): this census and the engine strategy fns compute
+eligibility independently. Their exact n agreement on the registered window
+holds because the archive's first bar coincides with the dev-window start and
+every session's first RTH bar is 09:30; neither is enforced. Before reusing on
+a different window, mirror the engine's loading semantics (window-relative ATR
+basis) and entry gates, or re-derive expectations from the engine itself.
 """
 from __future__ import annotations
 

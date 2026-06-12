@@ -237,7 +237,7 @@ hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
 if dailyStopWillFire
     dailyStopFired := true
     if alertsLive
-        alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
+        alert('{"strat":"mnq-rth-long-bias","v":3,"action":"DAILY_STOP"' +
              ',"status":"' + signalStatus + '"' +
              ',"symbol":"' + syminfo.ticker + '"' +
              ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +

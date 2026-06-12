@@ -306,10 +306,13 @@ def clamp_to_held_out(win_from: int, win_to: int, *, allow_held_out: bool):
     """
     if allow_held_out:
         return win_from, win_to, False
+    # Exclusive boundary: the bar stamped exactly at the held-out midnight
+    # belongs to the held-out date and must NOT load (review finding #1 —
+    # the prior <= let one 2026-04-20T00:00 ET bar through on maximal dev runs).
     boundary = _held_out_start_ts()
-    if win_to <= boundary:
+    if win_to < boundary:
         return win_from, win_to, False
-    return min(win_from, boundary), boundary, True
+    return min(win_from, boundary - 1), boundary - 1, True
 
 
 def run_backtest(
@@ -365,9 +368,20 @@ def run_backtest(
     if clamped:
         if ts_from is None:
             win_from = win_to - days * 86400  # keep the full trailing span, pre-boundary
+        elif win_from >= win_to:
+            # The requested explicit range lies entirely in the held-out slice:
+            # surface the guard, not a misleading not-enough-candles error.
+            return {
+                "error": (
+                    f"requested window lies in the registered held-out slice "
+                    f"({HELD_OUT_START_DATE} onward, reserved for the one-shot Tier-5 "
+                    f"read — docs/audits/validation-trial-ledger.md). Pass "
+                    f"allow_held_out/--tier5-held-out only for the sanctioned Tier-5 run."
+                ),
+            }
         print(
-            f"[held-out guard] window end clamped to {HELD_OUT_START_DATE} (ET) — the "
-            f"registered held-out slice is untouched by default "
+            f"[held-out guard] window end clamped to {HELD_OUT_START_DATE} (ET, exclusive) — "
+            f"the registered held-out slice is untouched by default "
             f"(docs/audits/validation-trial-ledger.md). Pass --tier5-held-out for the "
             f"one-shot Tier-5 read.",
             file=sys.stderr,
@@ -601,8 +615,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Held-out guard, explicit-date branch: a typed --end inside the held-out
     # slice is an error (the user asked for something registration forbids),
-    # not a silent clamp. ISO dates compare lexicographically.
-    if args.end and args.end >= HELD_OUT_START_DATE and not args.tier5_held_out:
+    # not a silent clamp. Parse the date so non-zero-padded inputs compare
+    # correctly; an unparsable date falls through to the conversion below,
+    # which raises the normal error.
+    _end_in_held_out = False
+    if args.end:
+        from datetime import datetime as _dt_guard
+        try:
+            _end_in_held_out = (
+                _dt_guard.strptime(args.end, "%Y-%m-%d").date().isoformat()
+                >= HELD_OUT_START_DATE
+            )
+        except ValueError:
+            pass
+    if _end_in_held_out and not args.tier5_held_out:
         print(
             f"ERROR: --end {args.end} reaches into the registered held-out slice "
             f"({HELD_OUT_START_DATE} onward, reserved for the one-shot Tier-5 read — "
@@ -630,8 +656,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         _ET = _ZI("America/New_York")
         if args.start:
             ts_from = int(_dt.strptime(args.start, "%Y-%m-%d").replace(tzinfo=_ET).timestamp())
-        if args.end:  # inclusive: end-of-day
-            ts_to = int((_dt.strptime(args.end, "%Y-%m-%d").replace(tzinfo=_ET) + _td(days=1)).timestamp())
+        if args.end:  # inclusive end-of-day: last second of the named ET date.
+            # Subtract 1s so a bar stamped exactly at the NEXT midnight (which
+            # belongs to the next calendar date) is excluded (review finding #1).
+            ts_to = int((_dt.strptime(args.end, "%Y-%m-%d").replace(tzinfo=_ET) + _td(days=1)).timestamp()) - 1
 
     result = run_backtest(
         config_path=Path(args.config),

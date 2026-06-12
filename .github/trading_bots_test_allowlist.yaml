@@ -16,6 +16,12 @@
 # To update (only when removing a file after migration):
 #   remove the path from this list and commit.
 
+# 2026-06-12 grandfather repair: test_confidence_clamp_7a.py,
+# test_confidence_literals_5a.py, and test_config_cascade_3a.py have imported
+# trading_bots since PRs #38-#40 -- BEFORE the Issue 11-A freeze (#47) -- and
+# were missed when this list was created (the guard meta-test has been red on
+# main since). Adding them restores the freeze's intent: the list captures the
+# legacy set as of the freeze. The only-shrinks ratchet still applies from here.
 allowed_tests:
   - tests/test_base_cache.py
   - tests/test_cadence.py
