@@ -19,6 +19,9 @@
 allowed_tests:
   - tests/test_base_cache.py
   - tests/test_cadence.py
+  - tests/test_confidence_clamp_7a.py
+  - tests/test_confidence_literals_5a.py
+  - tests/test_config_cascade_3a.py
   - tests/test_config_startup_integration.py
   - tests/test_edge_cases.py
   - tests/test_error_recovery.py
