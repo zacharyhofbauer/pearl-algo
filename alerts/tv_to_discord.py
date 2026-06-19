@@ -118,13 +118,22 @@ def build_embed(payload: dict) -> dict:
     if payload.get("trades_today") is not None:
         foot = f"trade #{payload['trades_today']} today • " + foot
 
+    # Reason: old payload uses "reason"; the mnq-hourly payload uses "trigger"
+    # (breakout/pullback). Regime + exec/regime timeframes are mnq-hourly extras.
     desc_bits = []
-    if payload.get("reason"):
-        desc_bits.append(str(payload["reason"]))
+    reason = payload.get("reason") or payload.get("trigger")
+    if reason:
+        desc_bits.append(str(reason))
+    if payload.get("regime"):
+        desc_bits.append(f"regime {payload['regime']}")
     if payload.get("bar_time"):
         desc_bits.append(f"bar: {payload['bar_time']}")
-    if payload.get("tf"):
-        desc_bits.append(f"tf {payload['tf']}")
+    tf = payload.get("tf") or payload.get("exec_tf")
+    if tf:
+        tf_txt = f"tf {tf}"
+        if payload.get("regime_tf"):
+            tf_txt += f"/{payload['regime_tf']}"
+        desc_bits.append(tf_txt)
 
     return {
         "title": f"{emoji} {action} {sym}",
@@ -241,6 +250,12 @@ def _selftest() -> int:
          "reason": "EMA9>21 cross, above VWAP"},
         {"strat": "mnq-rth-long-bias", "v": 2, "action": "DAILY_STOP", "symbol": "MNQ1!",
          "reason": "max trades/day hit — stop for the day", "daily_pnl_usd": -42.0, "trades_today": 3},
+        # mnq-hourly v1 payload (trigger/regime/exec_tf/regime_tf instead of reason/tf).
+        {"strat": "mnq-hourly", "v": 1, "status": "Candidate", "action": "SELL", "symbol": "MNQ1!",
+         "exec_tf": "60", "regime_tf": "240", "bar_time": "2026-06-19 10:00 ET", "regime": "DOWN",
+         "trigger": "pullback", "entry": 30592.75, "stop": 30625.0, "target": 30510.0, "atr": 40.0,
+         "rr": 2.5, "risk_pts": 32.75, "risk_usd_per_contract": 65.5, "risk_usd_total": 65.5,
+         "contracts": 1, "max_contracts": 5, "trades_today": 2},
     ]
     for s in samples:
         print(json.dumps(build_embed(s), indent=2))
