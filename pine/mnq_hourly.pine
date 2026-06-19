@@ -69,7 +69,7 @@ showGlow   = input.bool(true,  "EMA glow",    group=gV, inline="v1")
 showVwap   = input.bool(false, "RTH VWAP (live session)", group=gV, inline="v1")
 showExecEma= input.bool(false, "Exec EMA",    group=gV, inline="v2")
 showSignals= input.bool(true,  "Signals",     group=gV, inline="v2")
-showRegime = input.bool(true,  "Regime tint", group=gV, inline="v2")
+showBg     = input.bool(false, "Background tints", group=gV, inline="v2")
 showDash   = input.bool(true,  "Dashboard",   group=gV, inline="v2")
 colorBars  = input.bool(false, "Color candles by trend (off — cloud shows trend)", group=gV, tooltip="Optional: tints the price candles by trend. OFF by default because it muddies the up/down read — the cloud is the trend cue. Turn on if you want PEARL to fully own the candles.")
 boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV, tooltip="Heavier cloud fill and a wider EMA halo so the trend reads from across the chart.")
@@ -157,7 +157,7 @@ plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(clou
 plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane)
 plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane)
 pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane)
-pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 50) : na, linewidth=1, display=display.pane)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 78) : na, linewidth=1, display=display.pane)
 fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")
 
 // Exec EMA (the actual 1h signal EMA), optional + subtle.
@@ -179,9 +179,11 @@ plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=col
 // (toggle off for plain candles). Biggest single "pop" lever vs other indicators.
 barcolor(colorBars ? color.new(cloudFast > cloudSlow ? colUp : colDn, 25) : na, title="Trend candles")
 
-// 4h regime background tint + session/guardrail wash.
-bgcolor(showRegime and htfUp ? color.new(colUp, 93) : showRegime and htfDown ? color.new(colDn, 93) : na, title="Regime tint")
-bgcolor(not inRTH ? color.new(color.gray, 92) : (not tradesCapOk ? color.new(colDn, 90) : na), title="Session / mute")
+// Background tints OFF by default (they clutter the read). When toggled on: a faint
+// 4h-regime wash + grey outside RTH / red when a guardrail caps entries. The dashboard
+// carries the same info, so this is purely optional.
+bgcolor(showBg and htfUp ? color.new(colUp, 94) : showBg and htfDown ? color.new(colDn, 94) : na, title="Regime tint")
+bgcolor(showBg and not inRTH ? color.new(color.gray, 94) : showBg and not tradesCapOk ? color.new(colDn, 92) : na, title="Session / mute")
 
 // Markers: clean pro-style triangle + small Buy/Sell tag (no on-price box — detail
 // lives in the dashboard). Muted state = faint tiny triangle, no tag.
