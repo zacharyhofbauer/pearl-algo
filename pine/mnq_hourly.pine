@@ -81,6 +81,17 @@ colDn   = input.color(#ef5350, "Down",    group=gV, inline="c")
 colNeu  = input.color(#78909c, "Neutral", group=gV, inline="c")
 colVw   = input.color(#ab47bc, "VWAP",    group=gV, inline="c")
 
+gC = "➞ Confluence (decision support)"
+useTick = input.bool(true,  "TICK internals (USI:TICK)", group=gC, inline="c1")
+useVix  = input.bool(true,  "VIX regime (CBOE:VIX)",     group=gC, inline="c1")
+useEs   = input.bool(true,  "ES confirm (ES1!)",         group=gC, inline="c2")
+useAdx  = input.bool(true,  "ADX strength",              group=gC, inline="c2")
+vixLo   = input.float(13.0, "VIX band", step=0.5, group=gC, inline="vx")
+vixHi   = input.float(28.0, "to",       step=0.5, group=gC, inline="vx")
+adxMin  = input.int(20, "ADX min (trend)", minval=1, group=gC)
+requireConfluence = input.bool(false, "Require confluence to ARM (experimental, changes fills)", group=gC, tooltip="OFF = confluence is display-only decision support. ON = also gates entries on the score — this CHANGES backtest fills, so it is a new un-validated trial (pre-register before trusting any Tester read).")
+minConfluence     = input.int(3, "Min confluence score", minval=1, group=gC)
+
 visArmed = forceArmed or alertsLive
 
 // ────────────────────────────  SIGNAL (any-TF)  ─────────────────────────────
@@ -116,14 +127,52 @@ if newSession
 tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
 canTrade    = inRTH and tradesCapOk and not na(xAtr)
 
+// ─────────────────────────  CONFLUENCE (multi-factor)  ──────────────────────
+// Extra data points pulled in Pine (your IBKR Python stack can't get these) to
+// grade SETUP QUALITY. Each reads the previous CONFIRMED bar (anti-repaint) and
+// degrades gracefully (ignore_invalid_symbol → na) if a data plan lacks the feed.
+// DECISION SUPPORT by default; "Require confluence" also GATES entries, which
+// changes fills → an experimental, un-validated trial (default OFF).
+f_adx() =>
+    [_dp, _dm, adxV] = ta.dmi(14, 14)
+    adxV[1]
+tickMA = request.security("USI:TICK", execTf, ta.sma(close, 20)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+vixVal = request.security("CBOE:VIX", execTf, close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[esClose, esEma] = request.security("CME_MINI:ES1!", execTf, [close[1], ta.ema(close, htfFastLen)[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+execAdx = request.security(syminfo.tickerid, execTf, f_adx(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+tickBull = not na(tickMA) and tickMA > 0
+tickBear = not na(tickMA) and tickMA < 0
+vixOk    = not na(vixVal) and vixVal >= vixLo and vixVal <= vixHi
+esUp     = not na(esClose) and esClose > esEma
+esDown   = not na(esClose) and esClose < esEma
+adxOk    = not na(execAdx) and execAdx >= adxMin
+
+hourET = hour(time, "America/New_York")
+minET  = minute(time, "America/New_York")
+openDrive = inRTH and (hourET == 9 or (hourET == 10 and minET < 30))
+powerHour = inRTH and hourET == 15
+midday    = inRTH and hourET >= 12 and hourET < 14
+primeTime = openDrive or powerHour
+sessPhase = not inRTH ? "CLOSED" : openDrive ? "OPEN DRIVE" : powerHour ? "POWER HOUR" : midday ? "MIDDAY" : "RTH"
+
+// 1 pt each: regime, prime session, + each enabled+aligned factor. Disabled
+// factors do not count for or against. Score is for the regime's direction.
+sLong  = (htfUp ? 1 : 0)   + (primeTime ? 1 : 0) + (useTick and tickBull ? 1 : 0) + (useVix and vixOk ? 1 : 0) + (useEs and esUp ? 1 : 0)   + (useAdx and adxOk ? 1 : 0)
+sShort = (htfDown ? 1 : 0) + (primeTime ? 1 : 0) + (useTick and tickBear ? 1 : 0) + (useVix and vixOk ? 1 : 0) + (useEs and esDown ? 1 : 0) + (useAdx and adxOk ? 1 : 0)
+maxConf   = 2 + (useTick ? 1 : 0) + (useVix ? 1 : 0) + (useEs ? 1 : 0) + (useAdx ? 1 : 0)
+confScore = htfUp ? sLong : htfDown ? sShort : 0
+confLongOk  = not requireConfluence or sLong  >= minConfluence
+confShortOk = not requireConfluence or sShort >= minConfluence
+
 longBreakout  = allowBreakout and htfUp   and xBkL
 shortBreakout = allowBreakout and htfDown and xBkS
 longPullback  = allowPullback and htfUp   and xPbL
 shortPullback = allowPullback and htfDown and xPbS
 rawLong  = longBreakout or longPullback
 rawShort = allowShorts and (shortBreakout or shortPullback)
-longSig  = newExecBar and rawLong  and canTrade
-shortSig = newExecBar and rawShort and canTrade
+longSig  = newExecBar and rawLong  and canTrade and confLongOk
+shortSig = newExecBar and rawShort and canTrade and confShortOk
 triggerTxt = (longBreakout or shortBreakout) ? "breakout" : "pullback"
 
 // Tick-aligned stop/target off the confirmed exec close + exec ATR.
@@ -244,7 +293,7 @@ f_pos(p) =>
 
 // Compact corner panel (top-right by default) — small footprint, status pills, the
 // single home for entry/stop/target. Header size.normal (not large), rows size.small.
-var table dash = table.new(f_pos(dashPosIn), 2, 9, frame_width=1, frame_color=color.new(colAlgo, 40),
+var table dash = table.new(f_pos(dashPosIn), 2, 16, frame_width=1, frame_color=color.new(colAlgo, 40),
      border_width=1, border_color=color.new(colAlgo, 88))
 f_row(_r, _k, _v, _vc) =>
     table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 10), text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 16))
@@ -264,13 +313,32 @@ if showDash and barstate.islast
     entryStr  = (isLong or isShort) ? f_px(xClose) : "—"
     stopStr   = isShort ? f_px(shortStop) : isLong ? f_px(longStop) : "—"
     tgtStr    = isShort ? f_px(shortTarget) : isLong ? f_px(longTarget) : "—"
+    // Confluence cockpit reads (graceful "off"/"n/a" when a feed is disabled/absent).
+    esConfirm = (esUp and htfUp) or (esDown and htfDown)
+    tickTxt = not useTick ? "off" : na(tickMA) ? "n/a" : tickBull ? "▲ UP" : tickBear ? "▼ DOWN" : "flat"
+    tickC   = (not useTick) or na(tickMA) ? color.silver : tickBull ? colUp : tickBear ? colDn : color.silver
+    vixTxt  = not useVix ? "off" : na(vixVal) ? "n/a" : str.tostring(vixVal, "#.#") + (vixOk ? " ●" : " !")
+    vixC    = (not useVix) or na(vixVal) ? color.silver : vixOk ? colUp : color.orange
+    esTxt   = not useEs ? "off" : na(esClose) ? "n/a" : not (htfUp or htfDown) ? (esUp ? "▲ UP" : esDown ? "▼ DOWN" : "flat") : esConfirm ? "● CONFIRM" : "○ DIVERGE"
+    esC     = (not useEs) or na(esClose) ? color.silver : esConfirm ? colUp : color.orange
+    adxTxt  = not useAdx ? "off" : na(execAdx) ? "n/a" : str.tostring(execAdx, "#") + (adxOk ? " ●" : "")
+    adxC    = (not useAdx) or na(execAdx) ? color.silver : adxOk ? colUp : color.silver
+    sessC   = primeTime ? colUp : midday ? color.orange : color.silver
+    confTxt = str.tostring(confScore) + " / " + str.tostring(maxConf)
+    confC   = confScore >= minConfluence ? colUp : color.orange
     table.cell(dash, 0, 0, "◆ PEARL", text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 10), text_halign=text.align_left)
     table.cell(dash, 1, 0, tkr + " · " + tfLabel, text_color=color.white, text_size=size.small, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
-    f_row(1, "Status", "● " + statusTxt, statusCol)
-    f_row(2, "Regime", regimeTxt, regimeCol)
-    f_row(3, "Setup",  setupTxt, setupCol)
-    f_row(4, "Entry",  entryStr, color.white)
-    f_row(5, "Stop",   stopStr, colDn)
-    f_row(6, "Target", tgtStr, colUp)
-    f_row(7, "Trades", str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
-    f_row(8, "Signal", alertsLive ? "● CANDIDATE" : "● RESEARCH", alertsLive ? color.yellow : colDn)
+    f_row(1,  "Status",     "● " + statusTxt, statusCol)
+    f_row(2,  "Regime",     regimeTxt, regimeCol)
+    f_row(3,  "Setup",      setupTxt, setupCol)
+    f_row(4,  "Confluence", confTxt, confC)
+    f_row(5,  "Internals",  tickTxt, tickC)
+    f_row(6,  "Vol (VIX)",  vixTxt, vixC)
+    f_row(7,  "ES",         esTxt, esC)
+    f_row(8,  "ADX",        adxTxt, adxC)
+    f_row(9,  "Session",    sessPhase, sessC)
+    f_row(10, "Entry",      entryStr, color.white)
+    f_row(11, "Stop",       stopStr, colDn)
+    f_row(12, "Target",     tgtStr, colUp)
+    f_row(13, "Trades",     str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
+    f_row(14, "Signal",     alertsLive ? "● CANDIDATE" : "● RESEARCH", alertsLive ? color.yellow : colDn)

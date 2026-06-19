@@ -170,9 +170,19 @@ def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
     # ANY-TIMEFRAME: 1h exec + 4h regime both pulled via anti-repaint request.security,
     # signal fires once per confirmed exec bar regardless of chart timeframe.
     assert "ANY CHART TIMEFRAME" in source
-    assert source.count("request.security") >= 2
+    assert source.count("request.security") >= 4
     assert source.count("lookahead=barmerge.lookahead_off") >= 2
     assert "newExecBar = ta.change(time(execTf))" in source
+
+    # Confluence cockpit: external data points pulled in Pine (graceful degradation),
+    # display-only by default; the entry-gate filter is OFF by default (no fill change).
+    assert "USI:TICK" in source
+    assert "CBOE:VIX" in source
+    assert "CME_MINI:ES1!" in source
+    assert "ignore_invalid_symbol=true" in source
+    assert "Confluence" in source
+    assert 'input.bool(false, "Require confluence' in source
+    assert "confLongOk" in source
 
     # PREMIUM, CLUTTER-FREE: corner dashboard is the only home for trade detail — NO
     # on-price callout labels/boxes at all; markers are small glyphs; gradient cloud;
