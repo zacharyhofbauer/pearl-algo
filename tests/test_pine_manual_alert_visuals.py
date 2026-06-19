@@ -5,6 +5,7 @@ from pathlib import Path
 
 PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_rth_long_bias.pine"
 DEFENDER_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_1h_4h_defender.pine"
+HOURLY_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_hourly.pine"
 
 
 def _pine() -> str:
@@ -13,6 +14,10 @@ def _pine() -> str:
 
 def _defender_pine() -> str:
     return DEFENDER_PINE.read_text()
+
+
+def _hourly_pine() -> str:
+    return HOURLY_PINE.read_text()
 
 
 def test_manual_pine_has_mobile_obvious_pinstripe_identity() -> None:
@@ -53,18 +58,26 @@ def test_every_manual_alert_path_has_a_chart_visual() -> None:
     assert "Manual alert flash" in source
 
 
-def test_manual_pine_muted_state_quiets_loud_visuals() -> None:
+def test_manual_pine_visuals_decoupled_from_alert_delivery() -> None:
     source = _pine()
 
-    # The loud manual-alert kit renders only when armed (Candidate status).
-    assert "longOk and alertsLive" in source                              # huge markers
-    assert "showSignalFlash and alertVisual and alertsLive" in source     # flash
-    assert "showPinstripe and alertVisual and alertsLive" in source       # pinstripe
-    assert "showCallouts and alertsLive" in source                        # callouts
-    assert "showLevels and alertsLive" in source                          # level rays
-    # Muted state still shows small neutral study markers.
+    # The LOUD VISUAL kit is gated by visArmed (a display toggle), NOT by alert
+    # delivery. forceArmed defaults ON so the chart looks armed out of the box.
+    assert "visArmed = forceArmed or alertsLive" in source
+    assert "Force armed visuals (full kit even when KILLED)" in source
+    assert "longOk and visArmed" in source                                # markers
+    assert "showSignalFlash and alertVisual and visArmed" in source       # flash
+    assert "showPinstripe and alertVisual and visArmed" in source         # pinstripe
+    assert "showCallouts and visArmed" in source                          # callouts
+    assert "showLevels and visArmed" in source                            # level rays
+    # When visuals are NOT armed, only tiny neutral study marks render.
+    assert "longOk and not visArmed" in source
     assert "Muted study marker (long)" in source
     assert "Muted study marker (short)" in source
+    # LOAD-BEARING HONESTY: real alert() DELIVERY stays gated by alertsLive, so a
+    # KILLED signal never pings the phone even with the full armed visuals on.
+    assert "if alertsLive" in source
+    assert 'alert(f_msg("BUY"' in source
     # Pinstripe and callout are single-instance managed (no accumulation).
     assert "box.delete(alertStripe)" in source
     assert "alertStripe := box.new(" in source
@@ -83,6 +96,43 @@ def test_manual_pine_dashboard_is_compact_and_honest() -> None:
     assert "Active Signal" in source
     assert "KILLED" in source
     assert "CANDIDATE" in source
+
+
+def test_pine_scripts_are_v6() -> None:
+    # Both scripts pin margin_long/short = 0 explicitly, so the v5->v6 default
+    # margin change (0 -> 100) does not alter fills; the version bump is byte-safe.
+    assert "//@version=6" in _pine()
+    assert "//@version=6" in _defender_pine()
+    assert "margin_long = 0, margin_short = 0" in _pine()
+    assert "margin_long=0, margin_short=0" in _defender_pine()
+
+
+def test_robustness_sweep_is_a_disconfirmation_tool_not_an_optimizer() -> None:
+    source = _pine()
+
+    # Default OFF, and explicitly framed as a diagnostic — never a setting picker.
+    assert 'input.bool(false, "Show robustness sweep' in source
+    assert "diagnostic, not an optimizer" in source
+    # Ordered by the swept axis (shape view), NOT ranked best-on-top.
+    assert "ORDERED BY THE SWEPT AXIS" in source
+    # Numbers are RELATIVE, never mistaken for the honest Strategy Tester.
+    assert "RELATIVE" in source
+    assert "not be read as real P&L" in source
+    # Live setting stays frozen/highlighted; the in-sample peak is flagged DO-NOT-TRADE.
+    assert "FROZEN" in source
+    assert "DO NOT TRADE" in source
+    # Shape verdict, not an auto-pick.
+    assert '"PLATEAU"' in source
+    assert '"SPIKE"' in source
+    assert '"DEAD"' in source
+    # Runs only inside the dev window so it never spends the held-out slice.
+    assert "sweepActive = showSweep and ordersOk" in source
+    # It is a self-contained ARRAY backtest with manual recursive EMAs — it cannot
+    # use strategy.entry (one equity curve), so this must never become a real optimizer.
+    assert "array.new<float>(nSens" in source
+    assert "2.0 / (sLen + 1)" in source
+    assert 'input.int(50, "Warmup bars"' in source
+    assert "Potential Ratio" in source
 
 
 def test_defender_pine_uses_confirmed_4h_filter_and_1h_gate() -> None:
@@ -107,3 +157,46 @@ def test_defender_pine_has_breakout_pullback_and_guardrails() -> None:
     assert "maxTradesDay" in source
     assert "RTH only" in source
     assert '"strat":"mnq-1h-4h-defender"' in source
+
+
+def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
+    source = _hourly_pine()
+
+    # v6 + the byte-safe margin pin.
+    assert "//@version=6" in source
+    assert 'strategy("PearlAlgo MNQ — Hourly v5"' in source
+    assert "margin_long=0, margin_short=0" in source
+
+    # ANY-TIMEFRAME: 1h exec + 4h regime both pulled via anti-repaint request.security,
+    # signal fires once per confirmed exec bar regardless of chart timeframe.
+    assert "ANY CHART TIMEFRAME" in source
+    assert source.count("request.security") >= 2
+    assert source.count("lookahead=barmerge.lookahead_off") >= 2
+    assert "newExecBar = ta.change(time(execTf))" in source
+
+    # PREMIUM, CLUTTER-FREE: corner dashboard is the only home for trade detail — NO
+    # on-price callout labels/boxes at all; markers are small glyphs; gradient cloud;
+    # VWAP line broken at the session reset (no vertical jump).
+    assert "table.new(f_pos(dashPosIn)" in source
+    assert "label.new" not in source          # no on-price callouts/labels to collide
+    assert "box.new" not in source            # no over-candle boxes burying price
+    assert "size=size.small" in source
+    assert "BUY\\nMNQ" not in source          # no multiline marker text
+    assert "color.from_gradient(" in source
+    assert "not newSession ? rthVwap : na" in source
+
+    # Clean settings dropdowns (input.string + switch — enum tripped the v6 translator)
+    # and the cyan brand.
+    assert 'input.string("Research — alerts muted"' in source
+    assert 'input.string("Top Right", "Dashboard position"' in source
+    assert "enum " not in source          # enum syntax failed to translate — must stay out
+    assert 'input.color(#00e5ff, "Brand"' in source
+
+    # HONESTY: alerts gated by status (muted research default), dev-window Tester gate,
+    # MFF + RTH discipline preserved.
+    assert 'sigStatusIn == "Candidate — alerts on"' in source
+    assert "ordersOk    = not useBtWindow or" in source
+    assert "if alertsLive" in source
+    assert 'alert(f_msg("BUY"' in source
+    assert "Max MNQ (MFF)" in source
+    assert 'strategy.close_all("RTH end")' in source

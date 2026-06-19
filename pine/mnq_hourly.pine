@@ -1,0 +1,266 @@
+//@version=6
+// PearlAlgo MNQ — Hourly v5 (premium, any-timeframe)
+//
+// WHAT'S NEW vs mnq_1h_4h_defender.pine: the 1h execution AND 4h regime are both
+// pulled via request.security with the [1]-confirmed + lookahead_off anti-repaint
+// idiom, so this renders and fires CORRECTLY ON ANY CHART TIMEFRAME (view it on 5m,
+// the signal stays hourly). No more "use a 1h chart" gate. Premium visual layer:
+// gradient trend cloud, RTH-anchored VWAP with NO session-reset jump, tiny clean
+// markers, and a corner dashboard that is the ONLY home for entry/stop/target — no
+// on-price callout boxes burying the candles.
+//
+// HONEST STATUS: this hourly model is a RESEARCH candidate. It is NOT ledger-
+// registered and has NO backtest (docs/audits/validation-trial-ledger.md is 18
+// trials, all 5m, all KILL). Entry ALERTS ARE MUTED BY DEFAULT (Signal status).
+// Visuals can look armed (forceArmed) but a muted signal NEVER pings your phone.
+// Do NOT trade this on funded capital until a pre-registered trial clears the gate.
+//
+// ANTI-REPAINT: every request.security reads the previous CONFIRMED HTF/exec bar
+// ([1] + lookahead_off), so signals can never revise intrabar. The honest Strategy
+// Tester read is most faithful on a 1h chart (chart TF == exec TF); lower-TF charts
+// are for display/alerts. Tester order placement is dev-window gated by default.
+strategy("PearlAlgo MNQ — Hourly v5", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     margin_long=0, margin_short=0,       // v6 default is 100; pinned to 0 so fills match the validated runs
+     calc_on_every_tick=false, process_orders_on_close=true,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.95,
+     slippage=1,                          // 1 tick = $0.50 adverse on market/stop fills
+     backtest_fill_limits_assumption=1,   // no free touch-fills on limit (target) legs
+     max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+
+// ─────────────────────────────────  INPUTS  ─────────────────────────────────
+gR = "➞ Regime (4h)"
+regimeTf   = input.timeframe("240", "Regime timeframe", group=gR, inline="h")
+htfFastLen = input.int(8,  "EMA fast", minval=1, group=gR, inline="h")
+htfSlowLen = input.int(21, "EMA slow", minval=2, group=gR, inline="h")
+
+gE = "➞ Execution (1h)"
+execTf      = input.timeframe("60", "Execution timeframe", group=gE, inline="e", tooltip="The signal is evaluated on this timeframe via request.security, so it works on any chart. Default 60 (1h).")
+execEmaLen  = input.int(20, "Pullback EMA", minval=1, group=gE, inline="e")
+breakoutLen = input.int(8,  "Breakout lookback", minval=2, group=gE, tooltip="Breakout = close CROSSING the highest high of the prior N exec bars (an edge, not a held level).")
+allowBreakout = input.bool(true,  "Breakout", group=gE, inline="t")
+allowPullback = input.bool(true,  "Pullback", group=gE, inline="t")
+allowShorts   = input.bool(false, "Allow shorts (weak win rate)", group=gE)
+
+gX = "➞ Exits"
+atrLen  = input.int(14, "ATR len", minval=1, group=gX, inline="x")
+stopAtr = input.float(1.5, "Stop ×ATR", minval=0.1, step=0.1, group=gX, inline="x")
+targetR = input.float(2.5, "Target ×R", minval=0.1, step=0.1, group=gX, inline="x")
+
+gS = "➞ Session + Safety"
+rthOnly      = input.bool(true, "RTH only (flatten at close)", group=gS)
+sessRTH      = input.session("0930-1600", "RTH session (ET)", group=gS)
+contracts    = input.int(1, "Contracts/trade", minval=1, maxval=5, group=gS, inline="sz")
+maxContracts = input.int(5, "Max MNQ (MFF)", minval=1, maxval=5, group=gS, inline="sz")
+maxTradesDay = input.int(2, "Max trades/day (0=off)", minval=0, group=gS, tooltip="Caps NEW entry SIGNALS per session. The only guardrail that protects a live manual account.")
+
+gH = "➞ Honesty"
+sigStatusIn = input.string("Research — alerts muted", "Signal status", options=["Research — alerts muted", "Candidate — alerts on"], group=gH, tooltip="Muted until a pre-registered trial clears docs/audits/validation-trial-ledger.md. Visuals stay live; only alert() delivery is gated.")
+alertsLive  = sigStatusIn == "Candidate — alerts on"
+useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH, tooltip="ON restricts ORDER placement to the registered dev slice so the Tester never spends the held-out set (2026-04-20+).")
+btStart     = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
+btEnd       = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
+ordersOk    = not useBtWindow or (time >= btStart and time < btEnd)
+
+gV = "➞ Style"
+forceArmed = input.bool(true, "Force armed visuals (full kit even when muted)", group=gV, tooltip="Shows markers regardless of Signal status, so the chart looks armed. Alert DELIVERY stays gated by Signal status — a muted signal never pings your phone.")
+showCloud  = input.bool(true,  "Trend cloud", group=gV, inline="v1")
+showGlow   = input.bool(true,  "EMA glow",    group=gV, inline="v1")
+showVwap   = input.bool(false, "RTH VWAP (live session)", group=gV, inline="v1")
+showExecEma= input.bool(false, "Exec EMA",    group=gV, inline="v2")
+showSignals= input.bool(true,  "Signals",     group=gV, inline="v2")
+showRegime = input.bool(true,  "Regime tint", group=gV, inline="v2")
+showDash   = input.bool(true,  "Dashboard",   group=gV, inline="v2")
+colorBars  = input.bool(true,  "Color candles by trend (makes PEARL pop)", group=gV, tooltip="Tints the price candles by the trend cloud so this indicator visually owns the chart. Turn OFF when you want plain candles for your other tools.")
+boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV, tooltip="Heavier cloud fill and a wider EMA halo so the trend reads from across the chart.")
+dashPosIn  = input.string("Top Right", "Dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV)
+dashOpacity= input.int(20, "Dash opacity", minval=0, maxval=80, group=gV)
+colAlgo = input.color(#00e5ff, "Brand",   group=gV, inline="c", tooltip="Cyan PEARL accent.")
+colUp   = input.color(#26a69a, "Up",      group=gV, inline="c")
+colDn   = input.color(#ef5350, "Down",    group=gV, inline="c")
+colNeu  = input.color(#78909c, "Neutral", group=gV, inline="c")
+colVw   = input.color(#ab47bc, "VWAP",    group=gV, inline="c")
+
+visArmed = forceArmed or alertsLive
+
+// ────────────────────────────  SIGNAL (any-TF)  ─────────────────────────────
+// 4h regime — previous CONFIRMED 4h bar ([1] + lookahead_off = anti-repaint).
+[htfClose, htfFast, htfSlow, htfFastPrev] = request.security(
+     syminfo.tickerid, regimeTf,
+     [close[1], ta.ema(close, htfFastLen)[1], ta.ema(close, htfSlowLen)[1], ta.ema(close, htfFastLen)[2]],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfUp     = htfClose > htfFast and htfFast > htfSlow and htfFast >= htfFastPrev
+htfDown   = htfClose < htfFast and htfFast < htfSlow and htfFast <= htfFastPrev
+regimeTxt = htfUp ? "UP" : htfDown ? "DOWN" : "NEUTRAL"
+regimeCol = htfUp ? colUp : htfDown ? colDn : colNeu
+
+// 1h execution — previous CONFIRMED exec bar. Each element [1]-offset for anti-repaint.
+[xClose, xEma, xAtr, xBkL, xBkS, xPbL, xPbS] = request.security(
+     syminfo.tickerid, execTf,
+     [ close[1],
+       ta.ema(close, execEmaLen)[1],
+       ta.atr(atrLen)[1],
+       ta.crossover(close,  ta.highest(high[1], breakoutLen))[1],
+       ta.crossunder(close, ta.lowest(low[1], breakoutLen))[1],
+       ta.crossover(close,  ta.ema(close, execEmaLen))[1],
+       ta.crossunder(close, ta.ema(close, execEmaLen))[1] ],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Fire ONCE per exec bar: true on the first chart bar of each new exec period.
+newExecBar = ta.change(time(execTf)) != 0
+inRTH      = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = rthOnly ? (inRTH and not inRTH[1]) : (ta.change(time("D")) != 0)
+var int tradesToday = 0
+if newSession
+    tradesToday := 0
+tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
+canTrade    = inRTH and tradesCapOk and not na(xAtr)
+
+longBreakout  = allowBreakout and htfUp   and xBkL
+shortBreakout = allowBreakout and htfDown and xBkS
+longPullback  = allowPullback and htfUp   and xPbL
+shortPullback = allowPullback and htfDown and xPbS
+rawLong  = longBreakout or longPullback
+rawShort = allowShorts and (shortBreakout or shortPullback)
+longSig  = newExecBar and rawLong  and canTrade
+shortSig = newExecBar and rawShort and canTrade
+triggerTxt = (longBreakout or shortBreakout) ? "breakout" : "pullback"
+
+// Tick-aligned stop/target off the confirmed exec close + exec ATR.
+f_tick(x)   => na(x) ? na : math.round(x / syminfo.mintick) * syminfo.mintick
+longStop    = f_tick(xClose - stopAtr * xAtr)
+longTarget  = f_tick(xClose + stopAtr * xAtr * targetR)
+shortStop   = f_tick(xClose + stopAtr * xAtr)
+shortTarget = f_tick(xClose - stopAtr * xAtr * targetR)
+riskPts     = stopAtr * xAtr
+riskUsdPer  = riskPts * syminfo.pointvalue
+riskUsdTot  = riskUsdPer * contracts
+flat        = strategy.position_size == 0
+
+// ────────────────────────────────  VISUALS  ─────────────────────────────────
+// Premium trend cloud: smooth chart EMAs, colored by 4h regime, gradient by spread.
+cloudFast = ta.ema(close, 8)
+cloudSlow = ta.ema(close, 21)
+cAtr      = ta.atr(14)
+spread    = na(cAtr) or cAtr == 0 ? 0.0 : (cloudFast - cloudSlow) / cAtr
+cloudBase = htfUp ? colUp : htfDown ? colDn : colNeu
+fillTrns  = boldCloud ? 70 : 82
+cloudCol  = color.from_gradient(spread, -2.0, 2.0, color.new(colDn, fillTrns), color.new(colUp, fillTrns))
+// Premium neon glow on the leading EMA: layered plots, increasing width + transparency.
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3)
+pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 50) : na, linewidth=1)
+fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")
+
+// Exec EMA (the actual 1h signal EMA), optional + subtle.
+plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1)
+
+// RTH-anchored VWAP, line BROKEN at the session reset (no vertical jump).
+var float cumPV  = na
+var float cumVol = na
+if newSession or na(cumVol)
+    cumPV  := 0.0
+    cumVol := 0.0
+cumPV  += hlc3 * volume
+cumVol += volume
+rthVwap = cumVol > 0 ? cumPV / cumVol : na
+// Live-session only (show_last) so historical VWAP segments don't clutter the chart.
+plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10)
+
+// Color the candles by the trend cloud so THIS indicator visually owns the chart
+// (toggle off for plain candles). Biggest single "pop" lever vs other indicators.
+barcolor(colorBars ? color.new(cloudFast > cloudSlow ? colUp : colDn, 25) : na, title="Trend candles")
+
+// 4h regime background tint + session/guardrail wash.
+bgcolor(showRegime and htfUp ? color.new(colUp, 93) : showRegime and htfDown ? color.new(colDn, 93) : na, title="Regime tint")
+bgcolor(not inRTH ? color.new(color.gray, 92) : (not tradesCapOk ? color.new(colDn, 90) : na), title="Session / mute")
+
+// Markers: clean pro-style triangle + small Buy/Sell tag (no on-price box — detail
+// lives in the dashboard). Muted state = faint tiny triangle, no tag.
+plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colUp, 0), text="Buy",  textcolor=color.new(colUp, 0), size=size.small)
+plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colDn, 0), text="Sell", textcolor=color.new(colDn, 0), size=size.small)
+plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colUp, 55), size=size.tiny)
+plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colDn, 55), size=size.tiny)
+
+// ────────────────────────────  ALERTS + ENTRIES  ────────────────────────────
+f_msg(action, stop, target, reason) =>
+    ('{"strat":"mnq-hourly","v":1' +
+     ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+     ',"action":"' + action + '"' +
+     ',"symbol":"' + syminfo.ticker + '"' +
+     ',"exec_tf":"' + execTf + '","regime_tf":"' + regimeTf + '"' +
+     ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+     ',"regime":"' + regimeTxt + '","trigger":"' + reason + '"' +
+     ',"entry":' + str.tostring(xClose, format.mintick) +
+     ',"stop":' + str.tostring(stop, format.mintick) +
+     ',"target":' + str.tostring(target, format.mintick) +
+     ',"atr":' + str.tostring(xAtr, "#.##") +
+     ',"rr":' + str.tostring(targetR, "#.#") +
+     ',"risk_pts":' + str.tostring(riskPts, "#.##") +
+     ',"risk_usd_per_contract":' + str.tostring(riskUsdPer, "#.##") +
+     ',"risk_usd_total":' + str.tostring(riskUsdTot, "#.##") +
+     ',"contracts":' + str.tostring(contracts) +
+     ',"max_contracts":' + str.tostring(maxContracts) +
+     ',"trades_today":' + str.tostring(tradesToday + 1) + '}')
+
+if longSig
+    if ordersOk and flat
+        strategy.entry("Long", strategy.long, qty=contracts)
+        strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    if alertsLive
+        alert(f_msg("BUY", longStop, longTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+if shortSig
+    if ordersOk and flat
+        strategy.entry("Short", strategy.short, qty=contracts)
+        strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    if alertsLive
+        alert(f_msg("SELL", shortStop, shortTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+if rthOnly and not inRTH
+    strategy.close_all("RTH end")
+
+// ───────────────────────────────  DASHBOARD  ────────────────────────────────
+f_pos(p) =>
+    switch p
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+// Compact corner panel (top-right by default) — small footprint, status pills, the
+// single home for entry/stop/target. Header size.normal (not large), rows size.small.
+var table dash = table.new(f_pos(dashPosIn), 2, 9, frame_width=1, frame_color=color.new(colAlgo, 40),
+     border_width=1, border_color=color.new(colAlgo, 88))
+f_row(_r, _k, _v, _vc) =>
+    table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 10), text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 16))
+    table.cell(dash, 1, _r, _v, text_color=_vc,                         text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
+
+if showDash and barstate.islast
+    chartOk   = timeframe.in_seconds() <= timeframe.in_seconds(execTf)
+    statusTxt = not chartOk ? "VIEW ≤" + execTf : not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : visArmed ? "ARMED" : "MUTED"
+    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "MUTED" or statusTxt == "CLOSED") ? color.silver : color.orange
+    isLong    = longSig
+    isShort   = shortSig
+    setupTxt  = isLong ? "▲ BUY" : isShort ? "▼ SELL" : htfUp ? "▲ WAIT" : htfDown ? "▼ WAIT" : "● WAIT"
+    setupCol  = isLong ? colUp : isShort ? colDn : htfUp ? colUp : htfDown ? colDn : color.silver
+    entryStr  = (isLong or isShort) ? f_px(xClose) : "—"
+    stopStr   = isShort ? f_px(shortStop) : isLong ? f_px(longStop) : "—"
+    tgtStr    = isShort ? f_px(shortTarget) : isLong ? f_px(longTarget) : "—"
+    table.cell(dash, 0, 0, "◆ PEARL", text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 10), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + execTf, text_color=color.white, text_size=size.small, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
+    f_row(1, "Status", "● " + statusTxt, statusCol)
+    f_row(2, "Regime", regimeTxt, regimeCol)
+    f_row(3, "Setup",  setupTxt, setupCol)
+    f_row(4, "Entry",  entryStr, color.white)
+    f_row(5, "Stop",   stopStr, colDn)
+    f_row(6, "Target", tgtStr, colUp)
+    f_row(7, "Trades", str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
+    f_row(8, "Signal", alertsLive ? "● CANDIDATE" : "● RESEARCH", alertsLive ? color.yellow : colDn)

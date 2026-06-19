@@ -8,20 +8,26 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. Uses **no `request.security()`** (repaint class structurally absent). |
-| `mnq_1h_4h_defender.pine` | **Research candidate — alerts MUTED, NOT ledger-registered.** 1h execution / 4h regime: a long-biased breakout-or-pullback entry filtered by the last **confirmed** 4h EMA trend, read via `request.security(..., [close[1], …], lookahead=barmerge.lookahead_off)` — anti-repaint by construction (conservative/stale, never future-leaking; see the file header). **RTH-only**, shorts off by default, ATR stop/target (R=2.5), max-trades/day cap, MFF 5-contract echo, dev-window Tester gate + honest costs (same as the long-bias file), and a `mnq-1h-4h-defender` JSON alert payload. Mirrors the Python `hourly_defender_signals` validation candidate. **Unlike the long-bias file it DOES use `request.security`** — its repaint safety rests on the `lookahead_off` discipline, not on structural absence. |
+| `mnq_hourly.pine` | **★ PRIMARY — Hourly v5 (Pine v6).** 1h execution / 4h regime BOTH pulled via `request.security` ([1]+`lookahead_off`, anti-repaint), so it renders **and fires on ANY chart timeframe** (view on 5m, signal stays hourly). Premium visual layer: gradient trend cloud + EMA glow, **candle coloring** (makes it pop over other indicators), compact top-right dashboard (sole home for entry/stop/target), tiny clean Buy/Sell markers, RTH VWAP (live-session, no jump), `input.string` settings, MFF + RTH guardrails, `mnq-hourly` JSON payload. **RESEARCH — alerts MUTED by default; NOT ledger-registered (no validated edge; dev-window Tester ≈ −$269 / PF 0.884).** Supersedes the two legacy scripts below. |
+| `mnq_rth_long_bias.pine` | **(legacy / 5m study)** — **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. Uses **no `request.security()`** (repaint class structurally absent). |
+| `mnq_1h_4h_defender.pine` | **(legacy — folded into Hourly v5)** — **Research candidate — alerts MUTED, NOT ledger-registered.** 1h execution / 4h regime: a long-biased breakout-or-pullback entry filtered by the last **confirmed** 4h EMA trend, read via `request.security(..., [close[1], …], lookahead=barmerge.lookahead_off)` — anti-repaint by construction (conservative/stale, never future-leaking; see the file header). **RTH-only**, shorts off by default, ATR stop/target (R=2.5), max-trades/day cap, MFF 5-contract echo, dev-window Tester gate + honest costs (same as the long-bias file), and a `mnq-1h-4h-defender` JSON alert payload. Mirrors the Python `hourly_defender_signals` validation candidate. **Unlike the long-bias file it DOES use `request.security`** — its repaint safety rests on the `lookahead_off` discipline, not on structural absence. |
 
 ## On-chart visuals (Manual v4 / pinstripe)
 
-**Two visual postures (v4.1).** While `Signal status` is **KILLED — alerts muted** (the
-shipped default), the chart stays *quiet*: tiny direction-tinted study triangles at signal bars,
-plus ribbon/VWAP/bar-coloring and the dashboard (which still carries Entry/Stop/Target
-numbers). The loud manual-alert kit — huge BUY/SELL markers, big callouts, pinstripe,
-signal flash, and trade-level rays — renders **only** when status is flipped to
-**Candidate — alerts on**. A killed signal does not shout trade instructions. The
-pinstripe and callout are also single-instance managed drawings now (the prior one is
-deleted on each new signal), fixing the v3 bug where they accumulated forever and
-buried the chart under stacked boxes and giant stripes.
+**Visuals are decoupled from alert delivery (v4.2).** The loud visual kit — labeled
+BUY/SELL markers, callouts, pinstripe, signal flash, and trade-level rays — is driven by the
+**`Force armed visuals`** toggle in the Style group, which **defaults ON**, so the chart looks
+fully armed out of the box (matching the LuxAlgo aesthetic) even while the signal is KILLED.
+Turn it OFF for the quiet posture: only tiny direction-tinted study triangles plus
+ribbon/VWAP/bar-coloring/dashboard.
+
+The load-bearing honesty is now in exactly one place: real **`alert()` delivery stays gated by
+`Signal status`** (KILLED → muted), so a failed signal can look armed on the chart yet **never
+ping your phone**. The dashboard's `Signal Status` row reflects the visual posture, while the
+**`Validation` row stays the binding truth (KILLED/CANDIDATE)**. The VWAP is drawn **RTH-only**
+(no overnight segment, no session-reset "jump"), and the EMA cloud is trend-tinted with a bold
+leading edge. Pinstripe and callout remain single-instance managed drawings (the prior one is
+deleted on each new signal), fixing the v3 bug where they accumulated forever.
 
 All toggleable in the **Style** input group (colors are pickers):
 
@@ -46,6 +52,34 @@ All toggleable in the **Style** input group (colors are pickers):
 
 The original indicator library (Volume, VWAP_AA, EMA_Crossover, Supply & Demand, key levels,
 sessions) lives in `../resources/pinescript/pearlbot/` — use those as building blocks.
+
+## Robustness sweep (disconfirmation tool — NOT an optimizer)
+
+`mnq_rth_long_bias.pine` ships a read-only **robustness sweep** (Style → *➞ Robustness sweep*,
+**default OFF**). It is the honest answer to "LuxAlgo has an optimizer" — built to *disprove* an
+edge, not to mine one.
+
+- **What it shows.** It replays the long-only EMA/VWAP entry across a *range* of the EMA-slow
+  length and prints the metrics (Trades, Net$, Win%, Profit Factor, Max DD$, and φ = Σ MFE / Σ MAE)
+  for **every** value, **ordered by the swept axis** — never ranked "best on top." You read the
+  **shape**: a contiguous band of viable settings (a **PLATEAU**) is a robust edge; a lone
+  profitable **SPIKE** surrounded by losers is curve-fit luck; **DEAD** means nothing in the range
+  makes money net of honest costs.
+- **The live setting stays frozen.** The ledger-registered EMA-slow is only **highlighted (◆)**,
+  never auto-selected. The in-sample maximum of your chosen metric is flagged with **⚠ = DO NOT
+  TRADE** precisely so you can see — and resist — the cherry-pick.
+- **Why it is not an optimizer.** Using this table to *pick* a live setting is in-sample tuning —
+  a new trial that needs ledger pre-registration (Tester-honesty #3 below). An optimizer hands you
+  the peak; this hands you the *distribution* so you can judge whether the peak is real.
+- **The numbers are RELATIVE, not the Strategy Tester.** It is a self-contained backtest with
+  manual-seeded EMAs, pessimistic same-bar stop-first resolution, and simplified slippage — it will
+  **not** equal the Strategy Tester and must not be read as real P&L. Only the *shape across the
+  axis* carries signal. It runs **only inside the dev window** (reuses the same gate) so it never
+  spends the held-out slice, and a **Warmup Period** input (LuxAlgo's term) lets the manual EMAs
+  converge before trades are counted.
+
+For this KILLED EMA/VWAP signal the sweep is expected to read DEAD/SPIKE — which is the point: it
+visually corroborates the ledger verdict instead of dressing the dead signal up as alive.
 
 ## If markers are not visible
 

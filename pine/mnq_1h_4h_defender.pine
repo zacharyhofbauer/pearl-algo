@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 // PearlAlgo MNQ 1H/4H Defender - Research candidate
 //
 // Purpose: test Zach's 1h execution / 4h definition idea without touching live
@@ -28,7 +28,7 @@
 // ignored until flat (no reversals); exits are the ATR bracket or the RTH-close flat.
 strategy("PearlAlgo MNQ 1H/4H Defender - Research", overlay=true,
      default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
-     margin_long=0, margin_short=0,       // v5 default; explicit so a v6 engine (default 100) keeps identical fills
+     margin_long=0, margin_short=0,       // v6 default is 100; pinned to 0 (the v5 default) so fills stay identical to the validated runs
      calc_on_every_tick=false, process_orders_on_close=true,
      commission_type=strategy.commission.cash_per_contract, commission_value=0.95,
      slippage=1,                          // 1 tick = $0.50 adverse on market/stop fills
