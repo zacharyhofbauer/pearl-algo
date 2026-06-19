@@ -40,7 +40,7 @@ execEmaLen  = input.int(20, "Pullback EMA", minval=1, group=gE, inline="e")
 breakoutLen = input.int(8,  "Breakout lookback", minval=2, group=gE, tooltip="Breakout = close CROSSING the highest high of the prior N exec bars (an edge, not a held level).")
 allowBreakout = input.bool(true,  "Breakout", group=gE, inline="t")
 allowPullback = input.bool(true,  "Pullback", group=gE, inline="t")
-allowShorts   = input.bool(false, "Allow shorts (weak win rate)", group=gE)
+allowShorts   = input.bool(true, "Allow shorts — full Sell signal (weak/unvalidated)", group=gE, tooltip="ON makes Sell a full two-sided signal (markers + entries + alerts), like Buy. NOTE: shorts tested weak in the 922-trade study and are unvalidated — this also adds short trades to the Tester. Turn OFF to go long-only (Sells then show only as faint 'sell?' study markers).")
 showShortStudy= input.bool(true,  "Show SELL markers for study (no trade)", group=gE, tooltip="Renders short setups as faint 'sell?' markers WITHOUT placing orders — decoupled from 'Allow shorts'. Display-only; does NOT change fills or alerts.")
 
 gX = "➞ Exits"
@@ -83,6 +83,8 @@ colUp   = input.color(#26a69a, "Up",      group=gV, inline="c")
 colDn   = input.color(#ef5350, "Down",    group=gV, inline="c")
 colNeu  = input.color(#78909c, "Neutral", group=gV, inline="c")
 colVw   = input.color(#ab47bc, "VWAP",    group=gV, inline="c")
+colBuy  = input.color(#2979ff, "Buy signal",  group=gV, inline="sig", tooltip="Distinct entry/exit colors — deliberately OUTSIDE the cloud green/red, CHoCH orange, brand cyan, and VWAP purple so Buy/Sell pop off everything else. Vivid blue (Buy) / magenta (Sell) by default.")
+colSell = input.color(#ff2d9b, "Sell signal", group=gV, inline="sig")
 
 gC = "➞ Confluence (decision support)"
 useTick = input.bool(true,  "TICK internals (USI:TICK)", group=gC, inline="c1")
@@ -305,10 +307,10 @@ bgcolor(showBg and not inRTH ? color.new(color.gray, 94) : showBg and not trades
 
 // Markers: clean pro-style triangle + small Buy/Sell tag (no on-price box — detail
 // lives in the dashboard). Muted state = faint tiny triangle, no tag.
-plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colUp, 0), text="Buy",  textcolor=color.new(colUp, 0), size=size.small, force_overlay=true)
-plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colDn, 0), text="Sell", textcolor=color.new(colDn, 0), size=size.small, force_overlay=true)
-plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colUp, 55), size=size.tiny, force_overlay=true)
-plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colDn, 55), size=size.tiny, force_overlay=true)
+plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colBuy, 0),  text="Buy",  textcolor=color.new(colBuy, 0),  size=size.small, force_overlay=true)
+plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colSell, 0), text="Sell", textcolor=color.new(colSell, 0), size=size.small, force_overlay=true)
+plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colBuy, 55),  size=size.tiny, force_overlay=true)
+plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colSell, 55), size=size.tiny, force_overlay=true)
 // Study-only short: setup present but allowShorts=false → NEVER trades (labeled "sell?").
 plotshape(showSignals and showShortStudy and shortSigStudy and not shortSig, "Study short", shape.triangledown, location.abovebar, color.new(colNeu, 35), text="sell?", textcolor=color.new(colNeu, 25), size=size.tiny, force_overlay=true)
 

@@ -213,6 +213,13 @@ def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
     # plot/plotshape/line/label but NOT on fill() — fills must ride their plots' z-order.
     assert "force_overlay=true" in source
     assert 'input.bool(false, "Confirmation diamonds' in source
+    # Buy/Sell are full two-sided signals with DISTINCT colors (outside the cloud/
+    # structure/brand palette) so they pop off everything else.
+    assert 'input.bool(true, "Allow shorts' in source                 # Sell fully works
+    assert 'input.color(#2979ff, "Buy signal"' in source              # distinct blue
+    assert 'input.color(#ff2d9b, "Sell signal"' in source             # distinct magenta
+    assert "color.new(colBuy, 0),  text=\"Buy\"" in source
+    assert "color.new(colSell, 0), text=\"Sell\"" in source
     assert "fill(pF, pS" in source and "force_overlay=true)" not in source.split("fill(pF")[1].split("\n")[0]
 
     # PREMIUM, CLUTTER-FREE: corner dashboard is the only home for trade detail — NO
