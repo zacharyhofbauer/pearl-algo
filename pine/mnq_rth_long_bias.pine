@@ -283,6 +283,9 @@ if rthOnly and not inRTH
     strategy.close_all("RTH end")
 
 // ───────────────────────────────  DASHBOARD  ────────────────────────────────
+// LuxAlgo/ChartPrime-style panel: one consistent cyan brand header, status dots,
+// and colour-coded value pills so it reads at a glance on a busy chart. Pure
+// presentation — no signal/order/guardrail logic lives here.
 f_pos(s) =>
     switch s
         "Top Right"    => position.top_right
@@ -292,12 +295,13 @@ f_pos(s) =>
         "Bottom Left"  => position.bottom_left
         => position.top_right
 
-var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=2, frame_color=color.new(colAlgo, 0),
-     border_width=1, border_color=color.new(colAlgo, 78))
+var table dash = table.new(f_pos(dashPos), 2, 13, frame_width=2, frame_color=color.new(colAlgo, 0),
+     border_width=1, border_color=color.new(colAlgo, 82))
 
+// key cell: muted label left. val cell: bold-ish value right, on a colour pill.
 f_row(_r, _k, _v, _vc, _bg) =>
-    table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 12))
-    table.cell(dash, 1, _r, _v, text_color=_vc,          text_size=size.small, text_halign=text.align_right, bgcolor=_bg)
+    table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 5), text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 14))
+    table.cell(dash, 1, _r, _v, text_color=_vc,                        text_size=size.small, text_halign=text.align_right, bgcolor=_bg)
 
 f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
 
@@ -306,22 +310,27 @@ if showDash and barstate.islast
     statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" or statusTxt == "MUTED" ? color.silver : colDn)
     activeTxt = dailyStopWillFire and not sigFired ? "DAILY STOP" : (longOk ? "BUY" : (shortOk ? "SELL" : "NONE"))
     activeCol = activeTxt == "BUY" ? colUp : (activeTxt == "SELL" or activeTxt == "DAILY STOP" ? colDn : color.silver)
-    baseBg = color.new(color.black, dashOpacity)
-    upBg = color.new(colUp, 72)
-    downBg = color.new(colDn, 72)
-    warnBg = color.new(color.orange, 72)
-    mutedBg = color.new(color.gray, 78)
-    headerBg = color.new(alertsLive ? colUp : colDn, 42)
-    table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=headerBg, text_halign=text.align_left)
-    table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=headerBg, text_halign=text.align_right)
-    f_row(1,  "Trend",        trendUp ? "▲ UP" : "▼ DOWN", trendUp ? colUp : colDn, trendUp ? upBg : downBg)
-    f_row(2,  "Session",      inRTH ? "RTH OPEN" : "CLOSED", inRTH ? colUp : color.silver, inRTH ? upBg : mutedBg)
-    f_row(3,  "Signal Status", statusTxt, statusCol, statusTxt == "ARMED" ? upBg : (statusTxt == "MUTED" or statusTxt == "CLOSED" ? mutedBg : downBg))
-    f_row(4,  "HTF Filter",   "OFF", color.silver, mutedBg)
-    f_row(5,  "Active Signal", activeTxt, activeCol, activeTxt == "BUY" ? upBg : (activeTxt == "SELL" ? downBg : (activeTxt == "DAILY STOP" ? warnBg : baseBg)))
-    f_row(6,  "Last Signal",  lastDir, lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver), baseBg)
-    f_row(7,  "Entry",        f_px(lastE), color.white, baseBg)
-    f_row(8,  "Stop",         f_px(lastS), colDn, baseBg)
-    f_row(9,  "Target",       f_px(lastT), colUp, baseBg)
-    f_row(10, "Trades",       str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white, baseBg)
-    f_row(11, "Validation",   alertsLive ? "CANDIDATE" : "KILLED", alertsLive ? color.yellow : colDn, alertsLive ? warnBg : downBg)
+    baseBg  = color.new(color.black, dashOpacity)
+    upBg    = color.new(colUp, 78)
+    downBg  = color.new(colDn, 78)
+    warnBg  = color.new(color.orange, 75)
+    mutedBg = color.new(color.gray, 82)
+    // Brand header bar (consistent cyan) + a one-line plain-language read-out so
+    // a glance tells you what the algo is "doing" without decoding the rows.
+    headline = activeTxt == "BUY" ? "▲ LONG SETUP" : activeTxt == "SELL" ? "▼ SHORT SETUP" : activeTxt == "DAILY STOP" ? "✕ STOP FOR DAY" : trendUp ? "▲ TREND UP · WAIT" : "▼ TREND DOWN · WAIT"
+    headCol  = activeTxt == "BUY" or (activeTxt == "NONE" and trendUp) ? colUp : activeTxt == "SELL" or (activeTxt == "NONE" and not trendUp) ? colDn : color.orange
+    table.cell(dash, 0, 0, "◆ PEARLALGO", text_color=color.white, text_size=size.large, bgcolor=color.new(colAlgo, 6), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + "  ·  " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 6), text_halign=text.align_right)
+    table.cell(dash, 0, 1, "READ", text_color=color.new(color.silver, 5), text_size=size.small, text_halign=text.align_left, bgcolor=color.new(color.black, dashOpacity + 14))
+    table.cell(dash, 1, 1, headline, text_color=headCol, text_size=size.normal, text_halign=text.align_right, bgcolor=color.new(headCol, 80))
+    f_row(2,  "Trend",         trendUp ? "▲  UP" : "▼  DOWN", trendUp ? colUp : colDn, trendUp ? upBg : downBg)
+    f_row(3,  "Session",       inRTH ? "● RTH OPEN" : "○ CLOSED", inRTH ? colUp : color.silver, inRTH ? upBg : mutedBg)
+    f_row(4,  "Signal Status", "● " + statusTxt, statusCol, statusTxt == "ARMED" ? upBg : (statusTxt == "MUTED" or statusTxt == "CLOSED" ? mutedBg : downBg))
+    f_row(5,  "HTF Filter",    "OFF", color.silver, mutedBg)
+    f_row(6,  "Active Signal", activeTxt == "BUY" ? "▲ BUY" : (activeTxt == "SELL" ? "▼ SELL" : (activeTxt == "DAILY STOP" ? "✕ STOP" : "—  NONE")), activeCol, activeTxt == "BUY" ? upBg : (activeTxt == "SELL" ? downBg : (activeTxt == "DAILY STOP" ? warnBg : baseBg)))
+    f_row(7,  "Last Signal",   lastDir, lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver), baseBg)
+    f_row(8,  "Entry",         f_px(lastE), color.white, baseBg)
+    f_row(9,  "Stop",          f_px(lastS), colDn, baseBg)
+    f_row(10, "Target",        f_px(lastT), colUp, baseBg)
+    f_row(11, "Trades",        str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white, baseBg)
+    f_row(12, "Validation",    alertsLive ? "● CANDIDATE" : "● KILLED", alertsLive ? color.yellow : colDn, alertsLive ? warnBg : downBg)
