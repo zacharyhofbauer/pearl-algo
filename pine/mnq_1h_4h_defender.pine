@@ -1,0 +1,234 @@
+//@version=5
+// PearlAlgo MNQ 1H/4H Defender - Research candidate
+//
+// Purpose: test Zach's 1h execution / 4h definition idea without touching live
+// automation. Long-biased, RTH-only, alerts MUTED until the Python validation /
+// backtest path registers this family in docs/audits/validation-trial-ledger.md
+// and clears the promotion gate. This file is NOT yet ledger-registered, so any
+// Strategy Tester read is non-binding — and the dev-window gate below keeps a
+// casual Tester run from spending the one-shot held-out slice (2026-04-20+).
+//
+// Chart: MNQ on a 1h chart. Regime is read from the 4h timeframe via
+// request.security(..., [close[1], ema[1], ...], lookahead=barmerge.lookahead_off).
+// The [1]/[2] offsets + lookahead_off are anti-repaint BY CONSTRUCTION: lookahead_off
+// never leaks future data, and each referenced value is a CONFIRMED 4h bar, so a
+// forming 4h bar can never be read as final. Tradeoff: this errs on the STALE side —
+// vs the docs' canonical close[1]+lookahead_on idiom it can lag the freshest-confirmed
+// 4h bar by up to one extra 4h period. That is the safe direction for a slow regime
+// filter and it keeps a zero-lookahead discipline, so it is kept deliberately.
+// NOTE: unlike the sibling mnq_rth_long_bias.pine (which uses NO request.security),
+// this file DOES have an HTF surface, so it does not inherit the sibling's "repaint
+// structurally absent" guarantee — safety rests on the lookahead_off discipline above.
+// Bar-replay a few 4h transitions to confirm the regime EMAs never revise intrabar.
+//
+// Execution model: calc_on_every_tick=false + process_orders_on_close=true, so the
+// script evaluates once per CONFIRMED bar close (no intrabar repaint of signals),
+// market entries fill at the signal bar's close, and the stop/target bracket can only
+// fill from the NEXT bar. One position at a time: opposite-direction signals are
+// ignored until flat (no reversals); exits are the ATR bracket or the RTH-close flat.
+strategy("PearlAlgo MNQ 1H/4H Defender - Research", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     margin_long=0, margin_short=0,       // v5 default; explicit so a v6 engine (default 100) keeps identical fills
+     calc_on_every_tick=false, process_orders_on_close=true,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.95,
+     slippage=1,                          // 1 tick = $0.50 adverse on market/stop fills
+     backtest_fill_limits_assumption=1)   // no free touch-fills on limit (target) legs
+
+// ── Regime (4h) ──
+gR = "Regime"
+htfTf      = input.timeframe("240", "Regime timeframe", group=gR)
+htfFastLen = input.int(8,  "4h EMA fast", minval=1, group=gR, inline="h", tooltip="Fast EMA on the regime timeframe.")
+htfSlowLen = input.int(21, "4h EMA slow", minval=2, group=gR, inline="h")
+
+// ── 1h Execution ──
+gE = "1h Execution"
+execEmaLen    = input.int(20, "Pullback EMA", minval=1, group=gE, inline="e", tooltip="Pullback = a close back above this EMA (below for shorts).")
+breakoutLen   = input.int(8,  "Breakout lookback", minval=2, group=gE, inline="e", tooltip="Breakout = close CROSSING the highest high of the prior N bars (an edge, not a level held).")
+allowBreakout = input.bool(true, "Breakout", group=gE, inline="t")
+allowPullback = input.bool(true, "Pullback", group=gE, inline="t")
+allowShorts   = input.bool(false, "Allow shorts", group=gE, tooltip="Default false: PEARL MNQ evidence favors long bias.")
+
+// ── Exits ──
+gX = "Exits"
+atrLen  = input.int(14, "ATR len", minval=1, group=gX, inline="x", tooltip="ATR period for stop/target distance.")
+stopAtr = input.float(1.5, "Stop xATR", minval=0.1, step=0.1, group=gX, inline="x", tooltip="Stop distance in ATR multiples. 1R = stopAtr * ATR.")
+targetR = input.float(2.5, "Target R", minval=0.1, step=0.1, group=gX, inline="x", tooltip="Reward as a multiple of the stop (R). Target = entry +/- stopAtr*ATR*targetR.")
+
+// ── Session + Safety ──
+gS = "Session + Safety"
+rthOnly      = input.bool(true, "RTH only", group=gS, tooltip="Entries gated to RTH AND the position is flattened at the RTH close (never overnight).")
+sessRTH      = input.session("0930-1600", "RTH session ET", group=gS)
+contracts    = input.int(1, "Contracts", minval=1, maxval=5, group=gS, inline="s", tooltip="MNQ contracts per entry (overrides default_qty_value). MFF cap is 5.")
+maxContracts = input.int(5, "Max MNQ (MFF)", minval=1, maxval=5, group=gS, inline="s", tooltip="MFF max total contracts; echoed in the alert payload.")
+maxTradesDay = input.int(2, "Max trades/day", minval=0, group=gS, tooltip="Caps NEW entry SIGNALS per session. 0 = UNLIMITED (no cap). This is the only guardrail that protects a live manual account.")
+signalStatus = input.string("Research - alerts muted", "Signal status",
+     options=["Research - alerts muted", "Candidate - alerts on"], group=gS,
+     tooltip="Muted until a pre-registered trial family clears docs/audits/validation-trial-ledger.md. Visuals stay live; only alert() delivery is muted.")
+alertsLive = signalStatus == "Candidate - alerts on"
+
+// ── Honesty (Strategy Tester) ──
+gH = "Honesty"
+useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH,
+     tooltip="ON (default) restricts ORDER placement to the registered dev slice so the Tester never spends the held-out set (2026-04-20+). Signals/alerts are NOT window-gated.")
+btStart  = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
+btEnd    = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
+ordersOk = not useBtWindow or (time >= btStart and time < btEnd)
+
+// ── Style ──
+gV = "Style"
+showRegime  = input.bool(true, "Show 4h regime", group=gV, inline="v")
+showSignals = input.bool(true, "Signals", group=gV, inline="v")
+showDash    = input.bool(true, "Dashboard", group=gV, inline="v")
+colUp  = input.color(#26a69a, "Up",      group=gV, inline="c")
+colDn  = input.color(#ef5350, "Down",    group=gV, inline="c")
+colNeu = input.color(#78909c, "Neutral", group=gV, inline="c")
+
+// 4h regime. The [1]/[2] offsets deliberately reference the PREVIOUS confirmed 4h
+// bar; combined with lookahead_off this is anti-repaint by construction (see header).
+[htfClose, htfFast, htfSlow, htfFastPrev] = request.security(
+     syminfo.tickerid, htfTf,
+     [close[1], ta.ema(close, htfFastLen)[1], ta.ema(close, htfSlowLen)[1], ta.ema(close, htfFastLen)[2]],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+htfUp     = htfClose > htfFast and htfFast > htfSlow and htfFast >= htfFastPrev
+htfDown   = htfClose < htfFast and htfFast < htfSlow and htfFast <= htfFastPrev
+regimeTxt = htfUp ? "4H UP" : htfDown ? "4H DOWN" : "4H NEUTRAL"
+regimeCol = htfUp ? colUp : htfDown ? colDn : colNeu
+
+// 1h execution.
+isOneHour  = timeframe.isintraday and timeframe.multiplier == 60
+inRTH      = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = rthOnly ? (inRTH and not inRTH[1]) : ta.change(time("D")) != 0
+var int tradesToday = 0
+if newSession
+    tradesToday := 0
+tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
+
+execEma   = ta.ema(close, execEmaLen)
+atr       = ta.atr(atrLen)
+priorHigh = ta.highest(high[1], breakoutLen)
+priorLow  = ta.lowest(low[1], breakoutLen)
+
+// canTrade also requires a valid ATR so stop/target (and the JSON payload) are never
+// na — otherwise a pre-warmup alert would emit "NaN", which is not valid JSON.
+canTrade = isOneHour and inRTH and tradesCapOk and not na(atr)
+
+// Breakout is an EDGE (close CROSSING the prior-range high), not a STATE (close >
+// priorHigh stays true for many bars). The edge form fires once per fresh breakout,
+// which (a) stops duplicate alerts on a sustained move and (b) stops the exit bracket
+// from being re-armed/ratcheted every bar. Pullback is already a cross of execEma.
+longBreakout  = allowBreakout and htfUp and ta.crossover(close, priorHigh)
+shortBreakout = allowBreakout and htfDown and ta.crossunder(close, priorLow)
+longPullback  = allowPullback and htfUp and close[1] <= execEma[1] and close > execEma
+shortPullback = allowPullback and htfDown and close[1] >= execEma[1] and close < execEma
+
+longSig    = canTrade and (longBreakout or longPullback)
+shortSig   = canTrade and allowShorts and (shortBreakout or shortPullback)
+triggerTxt = longBreakout or shortBreakout ? "breakout" : "pullback"
+
+// Tick-align stops/targets: ATR-derived levels are arbitrary, but a manual MNQ order
+// can only sit on the 0.25 grid and the broker emulator should fill where a human
+// could. Round to mintick for BOTH the bracket and the alert payload.
+f_tick(x)   => na(x) ? na : math.round(x / syminfo.mintick) * syminfo.mintick
+longStop    = f_tick(close - stopAtr * atr)
+longTarget  = f_tick(close + stopAtr * atr * targetR)
+shortStop   = f_tick(close + stopAtr * atr)
+shortTarget = f_tick(close - stopAtr * atr * targetR)
+
+riskPts    = stopAtr * atr
+riskUsdPer = riskPts * syminfo.pointvalue
+riskUsdTot = riskUsdPer * contracts
+flat       = strategy.position_size == 0
+
+// Visuals.
+plot(execEma, "1h pullback EMA", color=color.new(color.white, 10), linewidth=1)
+plot(showRegime ? htfFast : na, "confirmed 4h EMA fast", color=color.new(colUp, 35), linewidth=2)
+plot(showRegime ? htfSlow : na, "confirmed 4h EMA slow", color=color.new(colDn, 35), linewidth=2)
+bgcolor(htfUp ? color.new(colUp, 92) : htfDown ? color.new(colDn, 92) : na, title="4h regime tint")
+
+plotshape(showSignals and longSig and alertsLive, "BUY MNQ 1H/4H", shape.triangleup, location.belowbar,
+     color.new(colUp, 0), size=size.large, text="BUY\n1H", textcolor=color.white)
+plotshape(showSignals and shortSig and alertsLive, "SELL MNQ 1H/4H", shape.triangledown, location.abovebar,
+     color.new(colDn, 0), size=size.large, text="SELL\n1H", textcolor=color.white)
+plotshape(showSignals and longSig and not alertsLive, "Muted 1H/4H long", shape.triangleup, location.belowbar,
+     color.new(colUp, 45), size=size.tiny)
+plotshape(showSignals and shortSig and not alertsLive, "Muted 1H/4H short", shape.triangledown, location.abovebar,
+     color.new(colDn, 45), size=size.tiny)
+
+// Alerts and tester orders. This strategy is alert()-only: wire the TradingView alert
+// with Condition = this script and trigger = "Any alert() function call". alertcondition()
+// is intentionally absent — Pine cannot create alerts from alertcondition() inside a
+// strategy, so it would be dead code (see pine/README.md).
+f_msg(action, stop, target, reason) =>
+    ('{"strat":"mnq-1h-4h-defender","v":1' +
+     ',"status":"' + signalStatus + '"' +
+     ',"action":"' + action + '"' +
+     ',"symbol":"' + syminfo.ticker + '"' +
+     ',"tf":"' + timeframe.period + '"' +
+     ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+     ',"regime":"' + regimeTxt + '"' +
+     ',"trigger":"' + reason + '"' +
+     ',"entry":' + str.tostring(close, format.mintick) +
+     ',"stop":' + str.tostring(stop, format.mintick) +
+     ',"target":' + str.tostring(target, format.mintick) +
+     ',"atr":' + str.tostring(atr, "#.##") +
+     ',"rr":' + str.tostring(targetR, "#.#") +
+     ',"risk_pts":' + str.tostring(riskPts, "#.##") +
+     ',"risk_usd_per_contract":' + str.tostring(riskUsdPer, "#.##") +
+     ',"risk_usd_total":' + str.tostring(riskUsdTot, "#.##") +
+     ',"contracts":' + str.tostring(contracts) +
+     ',"max_contracts":' + str.tostring(maxContracts) +
+     ',"trades_today":' + str.tostring(tradesToday + 1) + '}')
+
+// Order placement is gated to (a) the dev window — Tester honesty — and (b) flat, so
+// the bracket is set ONCE at entry and never re-priced on a later persisting-signal
+// bar. tradesToday counts SIGNALS (not fills), outside both gates, so the daily cap
+// and live alerting keep working regardless of the Tester window or backtest position.
+if longSig
+    if ordersOk and flat
+        strategy.entry("Long", strategy.long, qty=contracts)
+        strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    if alertsLive
+        alert(f_msg("BUY", longStop, longTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+if shortSig
+    if ordersOk and flat
+        strategy.entry("Short", strategy.short, qty=contracts)
+        strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    if alertsLive
+        alert(f_msg("SELL", shortStop, shortTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+// RTH discipline: flatten at the RTH close so the strategy never holds overnight
+// (matches pine/README.md "RTH only — flattens at the RTH close"). Ungated: it is a
+// no-op outside the dev window because no position can be open there.
+if rthOnly and not inRTH
+    strategy.close_all("RTH end")
+
+// Dashboard.
+var table dash = table.new(position.middle_right, 2, 9, frame_width=1, frame_color=color.new(color.gray, 70), border_width=1)
+f_row(r, k, v, vc) =>
+    table.cell(dash, 0, r, k, text_color=color.silver, text_size=size.small, bgcolor=color.new(color.black, 45), text_halign=text.align_left)
+    table.cell(dash, 1, r, v, text_color=vc, text_size=size.small, bgcolor=color.new(color.black, 45), text_halign=text.align_right)
+
+if showDash and barstate.islast
+    statusTxt = not isOneHour ? "USE 1H" : not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : alertsLive ? "ARMED" : "MUTED"
+    statusCol = statusTxt == "ARMED" ? colUp : statusTxt == "MUTED" or statusTxt == "CLOSED" ? color.silver : colDn
+    activeTxt = longSig ? "BUY" : shortSig ? "SELL" : "NONE"
+    activeCol = activeTxt == "BUY" ? colUp : activeTxt == "SELL" ? colDn : color.silver
+    isLong    = activeTxt == "BUY"
+    isShort   = activeTxt == "SELL"
+    entryStr  = activeTxt == "NONE" ? "—" : str.tostring(close, format.mintick)
+    stopStr   = isShort ? str.tostring(shortStop, format.mintick) : isLong ? str.tostring(longStop, format.mintick) : "—"
+    tgtStr    = isShort ? str.tostring(shortTarget, format.mintick) : isLong ? str.tostring(longTarget, format.mintick) : "—"
+    table.cell(dash, 0, 0, "PEARL 1H/4H", text_color=color.white, text_size=size.normal, bgcolor=color.new(regimeCol, 40), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white, text_size=size.normal, bgcolor=color.new(regimeCol, 40), text_halign=text.align_right)
+    f_row(1, "Status", statusTxt, statusCol)
+    f_row(2, "Regime", regimeTxt, regimeCol)
+    f_row(3, "Active", activeTxt, activeCol)
+    f_row(4, "Trigger", activeTxt == "NONE" ? "-" : triggerTxt, color.white)
+    f_row(5, "Entry", entryStr, color.white)
+    f_row(6, "Stop", stopStr, colDn)
+    f_row(7, "Target", tgtStr, colUp)
+    f_row(8, "Trades", str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)

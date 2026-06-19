@@ -22,6 +22,7 @@
 // drawings (prior one deleted on each signal) so they can never pile up.
 strategy("PearlAlgo PINSTRIPE MNQ — Manual v4", overlay = true,
      default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
+     margin_long = 0, margin_short = 0,  // v5 default; set explicitly so a v6 engine (default 100) keeps identical fills / trade count
      calc_on_every_tick = false, process_orders_on_close = true,
      commission_type = strategy.commission.cash_per_contract,
      commission_value = 0.95,  // Tradovate free-tier all-in per side (2025-11 schedule)
@@ -76,8 +77,9 @@ showCallouts = input.bool(true, "Big signal callouts", group=gV, inline="v3")
 showPinstripe = input.bool(true, "Alert pinstripe", group=gV, inline="v3")
 showSignalFlash = input.bool(true, "Signal flash", group=gV, inline="v4")
 showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v4")
-dashPos     = input.string("Top Right", "Pos",
+dashPos     = input.string("Middle Right", "Pos",
      options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v4")
+dashOpacity = input.int(42, "Dash opacity", minval=0, maxval=80, group=gV)
 colUp = input.color(#26a69a, "Up",   group=gV, inline="c")
 colDn = input.color(#ef5350, "Down", group=gV, inline="c")
 colVw = input.color(#ab47bc, "VWAP", group=gV, inline="c")
@@ -107,7 +109,11 @@ if newSession
 dailyPnlUsd = strategy.netprofit - dayStartProfit
 tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
 lossLimitOk = dailyLossUsd == 0.0 or dailyPnlUsd > -dailyLossUsd
-canTrade    = inRTH and tradesCapOk and lossLimitOk
+// not na(atr) keeps stop/target and the alert JSON from ever formatting a bare NaN
+// (invalid JSON) on a pre-warmup bar — parity with mnq_1h_4h_defender.pine. Today this
+// can't flip a firing bar (a cross needs EMA-21 warmed, well past ATR-14), so it changes
+// no in-window signal/entry; it only future-proofs a later non-cross trigger.
+canTrade    = inRTH and tradesCapOk and lossLimitOk and not na(atr)
 
 bullCross   = ta.crossover(emaFast, emaSlow)
 bearCross   = ta.crossunder(emaFast, emaSlow)
@@ -255,7 +261,6 @@ if shortOk
              alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
-hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
 hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
 if dailyStopWillFire
     dailyStopFired := true
@@ -286,29 +291,36 @@ f_pos(s) =>
         "Bottom Left"  => position.bottom_left
         => position.top_right
 
-var table dash = table.new(f_pos(dashPos), 2, 13, frame_width=1, frame_color=color.new(color.gray, 60),
-     border_width=1, border_color=color.new(color.gray, 80))
+var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=1, frame_color=color.new(color.gray, 68),
+     border_width=1, border_color=color.new(color.gray, 86))
 
-f_row(_r, _k, _v, _vc) =>
-    table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, 30))
-    table.cell(dash, 1, _r, _v, text_color=_vc,          text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, 30))
+f_row(_r, _k, _v, _vc, _bg) =>
+    table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 12))
+    table.cell(dash, 1, _r, _v, text_color=_vc,          text_size=size.small, text_halign=text.align_right, bgcolor=_bg)
 
 f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
 
 if showDash and barstate.islast
     statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : (alertsLive ? "ARMED" : "MUTED")))
     statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" or statusTxt == "MUTED" ? color.silver : colDn)
-    table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_left)
-    table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_right)
-    f_row(1,  "Trend",     trendUp ? "▲ Up" : "▼ Down",   trendUp ? colUp : colDn)
-    f_row(2,  "Session",   inRTH ? "RTH open" : "closed",  inRTH ? colUp : color.silver)
-    f_row(3,  "Status",    statusTxt,                      statusCol)
-    f_row(4,  "Last sig",  lastDir,                        lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver))
-    f_row(5,  "Entry",     f_px(lastE),                    color.white)
-    f_row(6,  "Stop",      f_px(lastS),                    colDn)
-    f_row(7,  "Target",    f_px(lastT),                    colUp)
-    f_row(8,  "R : R",     "1 : " + str.tostring(targetR, "#.#"),  color.white)
-    f_row(9,  "Risk/ct",   "$" + str.tostring(riskUsdPer, "#.##"), color.white)
-    f_row(10, "Trades",    str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
-    f_row(11, "Daily P&L", "$" + str.tostring(dailyPnlUsd, "#.##"), dailyPnlUsd >= 0 ? colUp : colDn)
-    f_row(12, "Validation", alertsLive ? "CANDIDATE" : "KILLED T11+T16-18", alertsLive ? color.yellow : colDn)
+    activeTxt = dailyStopWillFire and not sigFired ? "DAILY STOP" : (longOk ? "BUY" : (shortOk ? "SELL" : "NONE"))
+    activeCol = activeTxt == "BUY" ? colUp : (activeTxt == "SELL" or activeTxt == "DAILY STOP" ? colDn : color.silver)
+    baseBg = color.new(color.black, dashOpacity)
+    upBg = color.new(colUp, 72)
+    downBg = color.new(colDn, 72)
+    warnBg = color.new(color.orange, 72)
+    mutedBg = color.new(color.gray, 78)
+    headerBg = color.new(alertsLive ? colUp : colDn, 42)
+    table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=headerBg, text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=headerBg, text_halign=text.align_right)
+    f_row(1,  "Trend",        trendUp ? "▲ UP" : "▼ DOWN", trendUp ? colUp : colDn, trendUp ? upBg : downBg)
+    f_row(2,  "Session",      inRTH ? "RTH OPEN" : "CLOSED", inRTH ? colUp : color.silver, inRTH ? upBg : mutedBg)
+    f_row(3,  "Signal Status", statusTxt, statusCol, statusTxt == "ARMED" ? upBg : (statusTxt == "MUTED" or statusTxt == "CLOSED" ? mutedBg : downBg))
+    f_row(4,  "HTF Filter",   "OFF", color.silver, mutedBg)
+    f_row(5,  "Active Signal", activeTxt, activeCol, activeTxt == "BUY" ? upBg : (activeTxt == "SELL" ? downBg : (activeTxt == "DAILY STOP" ? warnBg : baseBg)))
+    f_row(6,  "Last Signal",  lastDir, lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver), baseBg)
+    f_row(7,  "Entry",        f_px(lastE), color.white, baseBg)
+    f_row(8,  "Stop",         f_px(lastS), colDn, baseBg)
+    f_row(9,  "Target",       f_px(lastT), colUp, baseBg)
+    f_row(10, "Trades",       str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white, baseBg)
+    f_row(11, "Validation",   alertsLive ? "CANDIDATE" : "KILLED", alertsLive ? color.yellow : colDn, alertsLive ? warnBg : downBg)

@@ -8,7 +8,8 @@ order by hand on MFF.
 
 | File | What it does |
 |---|---|
-| `mnq_rth_long_bias.pine` | **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. |
+| `mnq_rth_long_bias.pine` | **Manual v4 / honesty build.** EMA(9/21) cross + VWAP, **RTH-only**, **long-biased**, ATR stop/target. Commercial-grade visuals (trend ribbon, VWAP σ-bands, huge BUY/SELL markers, full-candle alert pinstripes, drawn entry/stop/target rays, trend bar-coloring, on-chart dashboard) + a rich JSON alert payload + **MFF discipline guardrails** (max trades/day, daily-loss limit, one-shot `DAILY_STOP`). **The signal is KILLED and entry alerts are MUTED by default** — see the status note below. v4 adds honest Strategy Tester costs, the KILLED-mute switch, and a dev-window Tester gate. Uses **no `request.security()`** (repaint class structurally absent). |
+| `mnq_1h_4h_defender.pine` | **Research candidate — alerts MUTED, NOT ledger-registered.** 1h execution / 4h regime: a long-biased breakout-or-pullback entry filtered by the last **confirmed** 4h EMA trend, read via `request.security(..., [close[1], …], lookahead=barmerge.lookahead_off)` — anti-repaint by construction (conservative/stale, never future-leaking; see the file header). **RTH-only**, shorts off by default, ATR stop/target (R=2.5), max-trades/day cap, MFF 5-contract echo, dev-window Tester gate + honest costs (same as the long-bias file), and a `mnq-1h-4h-defender` JSON alert payload. Mirrors the Python `hourly_defender_signals` validation candidate. **Unlike the long-bias file it DOES use `request.security`** — its repaint safety rests on the `lookahead_off` discipline, not on structural absence. |
 
 ## On-chart visuals (Manual v4 / pinstripe)
 
@@ -24,7 +25,7 @@ buried the chart under stacked boxes and giant stripes.
 
 All toggleable in the **Style** input group (colors are pickers):
 
-- **Dashboard** — themed table (position selectable) with trend, session, status (`ARMED` / `MAX TRADES` / `DAILY STOP` / `CLOSED`), last signal, entry/stop/target, R:R, $-risk/contract, trades-today, daily P&L.
+- **Dashboard** — compact, semi-transparent status table (position selectable, default middle-right) with trend, session, signal status, explicit `HTF Filter: OFF`, active signal, last signal, entry/stop/target, trades-today, and validation state.
 - **EMA ribbon** — fill between fast/slow EMAs, green/red by trend.
 - **VWAP** (+ optional ±1σ bands).
 - **Signal markers** — huge BUY MNQ / SELL MNQ triangles at the exact bar that fires.
@@ -117,10 +118,14 @@ how you verify nothing has un-baked them and the report means what it appears to
    reading it casually in the Tester spends it forever. Deep Backtesting (Premium+) must use
    the same date range.
 5. **Repaint checks.** `calc_on_every_tick = false`, `process_orders_on_close = true`, all
-   `alert()` calls fire once per bar close, and the script uses NO `request.security()` —
-   the whole HTF-lookahead repaint class is structurally absent. Verify the Tester shows no
-   warning icon, and bar-replay a few sessions: signals must appear only at bar close and
-   never vanish.
+   `alert()` calls fire once per bar close, and **`mnq_rth_long_bias.pine` uses NO
+   `request.security()`** — for that file the whole HTF-lookahead repaint class is
+   structurally absent. (Its sibling `mnq_1h_4h_defender.pine` DOES read a 4h regime via
+   `request.security`; that file's anti-repaint safety instead rests on the `close[1]` +
+   `lookahead=barmerge.lookahead_off` discipline documented in its header — conservative/stale,
+   never future-leaking, so bar-replay it across a few 4h transitions to confirm the regime
+   EMAs never revise intrabar.) Verify the Tester shows no warning icon, and bar-replay a few
+   sessions: signals must appear only at bar close and never vanish.
 6. **Broker-emulator skepticism.** Without Bar Magnifier the emulator invents the intrabar
    path (open→high→low→close or open→low→high→close by which extreme is nearer the open).
    When a bar's range contains BOTH the stop and the target, the credited outcome is pure
