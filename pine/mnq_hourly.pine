@@ -331,6 +331,7 @@ var float lastSwingLow  = na
 var int   lastSwingHiX  = na
 var int   lastSwingLoX  = na
 var int   structBias    = 0
+var int   lastStructBar = na
 var array<line>  msLines  = array.new<line>()
 var array<label> msLabels = array.new<label>()
 f_pushLine(line ln) =>
@@ -347,20 +348,25 @@ if not na(ph)
 if not na(pl)
     lastSwingLow  := pl
     lastSwingLoX  := bar_index - pivRight
-breakUp   = showStruct and not na(lastSwingHigh) and not na(lastSwingHiX) and ta.crossover(close,  lastSwingHigh)
-breakDown = showStruct and not na(lastSwingLow)  and not na(lastSwingLoX) and ta.crossunder(close, lastSwingLow)
+// Debounce: require a gap since the last structure label so clustered breaks in chop
+// don't stack labels on top of each other.
+structGapOk = na(lastStructBar) or (bar_index - lastStructBar) >= pivRight
+breakUp   = showStruct and structGapOk and not na(lastSwingHigh) and not na(lastSwingHiX) and ta.crossover(close,  lastSwingHigh)
+breakDown = showStruct and structGapOk and not na(lastSwingLow)  and not na(lastSwingLoX) and ta.crossunder(close, lastSwingLow)
 if breakUp
     choch = structBias == -1
     bcol  = choch ? colChoch : colBos
-    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed, force_overlay=true))
-    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 25), textcolor=color.white, size=size.small, force_overlay=true))
+    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
     structBias := 1
+    lastStructBar := bar_index
 if breakDown
     choch = structBias == 1
     bcol  = choch ? colChoch : colBos
-    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed, force_overlay=true))
-    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 25), textcolor=color.white, size=size.small, force_overlay=true))
+    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
     structBias := -1
+    lastStructBar := bar_index
 
 // ────────────────────────────  ALERTS + ENTRIES  ────────────────────────────
 f_msg(action, stop, target, reason) =>
