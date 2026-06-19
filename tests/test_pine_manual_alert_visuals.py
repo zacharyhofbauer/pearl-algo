@@ -76,7 +76,7 @@ def test_manual_pine_dashboard_is_compact_and_honest() -> None:
     source = _pine()
 
     assert 'input.string("Middle Right", "Pos"' in source
-    assert 'input.int(42, "Dash opacity"' in source
+    assert 'input.int(22, "Dash opacity"' in source
     assert "Signal Status" in source
     assert "HTF Filter" in source
     assert '"OFF"' in source

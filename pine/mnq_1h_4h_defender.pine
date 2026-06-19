@@ -82,6 +82,8 @@ showDash    = input.bool(true, "Dashboard", group=gV, inline="v")
 colUp  = input.color(#26a69a, "Up",      group=gV, inline="c")
 colDn  = input.color(#ef5350, "Down",    group=gV, inline="c")
 colNeu = input.color(#78909c, "Neutral", group=gV, inline="c")
+colAlgo = input.color(#ffb300, "Algo frame", group=gV, tooltip="Distinct AMBER accent so this PEARL panel stands out from the other indicators on the chart (and from the cyan long-bias panel).")
+dashPos = input.string("Bottom Right", "Dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, tooltip="Defaults to Bottom Right so it never stacks on the long-bias (Middle Right) panel when both scripts run on one chart.")
 
 // 4h regime. The [1]/[2] offsets deliberately reference the PREVIOUS confirmed 4h
 // bar; combined with lookahead_off this is anti-repaint by construction (see header).
@@ -206,11 +208,20 @@ if shortSig
 if rthOnly and not inRTH
     strategy.close_all("RTH end")
 
-// Dashboard.
-var table dash = table.new(position.middle_right, 2, 9, frame_width=1, frame_color=color.new(color.gray, 70), border_width=1)
+// Dashboard. Branded AMBER frame + Bottom-Right default so it reads as a distinct
+// PEARL panel and never stacks on the long-bias dashboard when both run on one chart.
+f_pos(s) =>
+    switch s
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        "Bottom Left"  => position.bottom_left
+        => position.bottom_right
+var table dash = table.new(f_pos(dashPos), 2, 9, frame_width=2, frame_color=color.new(colAlgo, 0), border_width=1, border_color=color.new(colAlgo, 70))
 f_row(r, k, v, vc) =>
-    table.cell(dash, 0, r, k, text_color=color.silver, text_size=size.small, bgcolor=color.new(color.black, 45), text_halign=text.align_left)
-    table.cell(dash, 1, r, v, text_color=vc, text_size=size.small, bgcolor=color.new(color.black, 45), text_halign=text.align_right)
+    table.cell(dash, 0, r, k, text_color=color.silver, text_size=size.small, bgcolor=color.new(color.black, 22), text_halign=text.align_left)
+    table.cell(dash, 1, r, v, text_color=vc, text_size=size.small, bgcolor=color.new(color.black, 22), text_halign=text.align_right)
 
 if showDash and barstate.islast
     statusTxt = not isOneHour ? "USE 1H" : not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : alertsLive ? "ARMED" : "MUTED"

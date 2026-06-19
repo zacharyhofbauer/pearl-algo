@@ -79,10 +79,11 @@ showSignalFlash = input.bool(true, "Signal flash", group=gV, inline="v4")
 showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v4")
 dashPos     = input.string("Middle Right", "Pos",
      options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v4")
-dashOpacity = input.int(42, "Dash opacity", minval=0, maxval=80, group=gV)
+dashOpacity = input.int(22, "Dash opacity", minval=0, maxval=80, group=gV)
 colUp = input.color(#26a69a, "Up",   group=gV, inline="c")
 colDn = input.color(#ef5350, "Down", group=gV, inline="c")
 colVw = input.color(#ab47bc, "VWAP", group=gV, inline="c")
+colAlgo = input.color(#00e5ff, "Algo frame", group=gV, tooltip="Distinct CYAN accent so this PEARL panel stands out from the other indicators on the chart (and from the amber 1H/4H defender panel).")
 
 // ─────────────────────────────────  CALC  ───────────────────────────────────
 emaFast = ta.ema(close, emaFastLen)
@@ -291,8 +292,8 @@ f_pos(s) =>
         "Bottom Left"  => position.bottom_left
         => position.top_right
 
-var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=1, frame_color=color.new(color.gray, 68),
-     border_width=1, border_color=color.new(color.gray, 86))
+var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=2, frame_color=color.new(colAlgo, 0),
+     border_width=1, border_color=color.new(colAlgo, 78))
 
 f_row(_r, _k, _v, _vc, _bg) =>
     table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 12))
