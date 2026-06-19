@@ -61,6 +61,7 @@ def _http_post(url: str, body: bytes) -> tuple[int, str]:
 _ACTION_STYLE = {
     "BUY":        ("🟢", 0x2ECC71),
     "SELL":       ("🔴", 0xE74C3C),
+    "EXIT":       ("🏁", 0x3498DB),
     "DAILY_STOP": ("🛑", 0xE67E22),
 }
 _DEFAULT_STYLE = ("⚪", 0x95A5A6)
@@ -94,6 +95,26 @@ def build_embed(payload: dict) -> dict:
             "description": desc,
             "color": color,
             "footer": {"text": f"{strat} • stop trading for the day (MFF discipline)"},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if action == "EXIT":
+        exit_px = _num(payload.get("exit"))
+        reason = payload.get("reason", "closed")
+        desc = f"**closed @ `{exit_px}`**  •  {reason}"
+        pnl = payload.get("pnl_usd")
+        if pnl is not None:
+            try:
+                desc += f"  •  P&L `${float(pnl):,.2f}`"
+            except (TypeError, ValueError):
+                pass
+        if payload.get("bar_time"):
+            desc += f"\n{payload['bar_time']}"
+        return {
+            "title": f"{emoji} EXIT — {sym}",
+            "description": desc,
+            "color": color,
+            "footer": {"text": f"{strat} • position closed — flatten if you're still in"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -135,9 +156,18 @@ def build_embed(payload: dict) -> dict:
             tf_txt += f"/{payload['regime_tf']}"
         desc_bits.append(tf_txt)
 
+    # Quick-read headline — the whole trade in one bold line, then context below.
+    entry_s = _num(payload.get("entry"))
+    head = f"**{action} {sym} @ {entry_s}**"
+    if payload.get("stop") is not None:
+        head += f"  🛑 `{_num(payload.get('stop'))}`"
+    if payload.get("target") is not None:
+        head += f"  🎯 `{_num(payload.get('target'))}`"
+    desc = head + ("\n" + "  •  ".join(desc_bits) if desc_bits else "")
+
     return {
         "title": f"{emoji} {action} {sym}",
-        "description": "  •  ".join(desc_bits) if desc_bits else None,
+        "description": desc,
         "color": color,
         "fields": fields,
         "footer": {"text": foot},
@@ -256,6 +286,9 @@ def _selftest() -> int:
          "trigger": "pullback", "entry": 30592.75, "stop": 30625.0, "target": 30510.0, "atr": 40.0,
          "rr": 2.5, "risk_pts": 32.75, "risk_usd_per_contract": 65.5, "risk_usd_total": 65.5,
          "contracts": 1, "max_contracts": 5, "trades_today": 2},
+        # mnq-hourly EXIT ping (position closed).
+        {"strat": "mnq-hourly", "v": 1, "action": "EXIT", "symbol": "MNQ1!", "exec_tf": "60",
+         "bar_time": "2026-06-19 14:00 ET", "exit": 30680.0, "pnl_usd": 175.5, "reason": "target / win"},
     ]
     for s in samples:
         print(json.dumps(build_embed(s), indent=2))

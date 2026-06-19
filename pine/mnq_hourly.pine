@@ -466,6 +466,23 @@ if rthOnly and not inRTH
     pLong  := false
     beHit  := false
 
+// Manual-model EXIT ping: fire ONCE when an open position closes (target / stop /
+// RTH-flatten), so you know the trade is done. Reason is from the realized result of
+// the last closed trade (robust — no intrabar guessing). Gated by alertsLive like entries.
+exitClosed = flat and not flat[1]
+lastPnl    = strategy.closedtrades > 0 ? strategy.closedtrades.profit(strategy.closedtrades - 1) : na
+if exitClosed and alertsLive
+    exReason = (rthOnly and not inRTH) ? "RTH flatten" : (not na(lastPnl) and lastPnl >= 0 ? "target / win" : "stop / loss")
+    alert('{"strat":"mnq-hourly","v":1,"action":"EXIT"' +
+         ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+         ',"symbol":"' + syminfo.ticker + '"' +
+         ',"exec_tf":"' + execTf + '"' +
+         ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+         ',"exit":' + str.tostring(close, format.mintick) +
+         ',"pnl_usd":' + str.tostring(na(lastPnl) ? 0.0 : lastPnl, "#.##") +
+         ',"reason":"' + exReason + '"}',
+         alert.freq_once_per_bar_close)
+
 // ───────────────────────────────  DASHBOARD  ────────────────────────────────
 f_pos(p) =>
     switch p
