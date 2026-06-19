@@ -196,12 +196,27 @@ def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
     assert "sessionOk" in source                      # midday/news halts (inert when off)
     assert "if not riskEngine" in source              # off => original bracket
 
+    # Phantom Flow visual layer: two-sided sells (decoupled study vs trade), market
+    # structure (BOS/CHoCH), diamonds, power gauge, ribbon. All descriptive, not wired
+    # to orders (only longSig/shortSig place trades).
+    assert "shortSigStudy" in source                                  # display-only short
+    assert "shortSig      = allowShorts and shortSigStudy" in source  # tradeable short gated
+    assert "ta.pivothigh(high, pivLeft, pivRight)" in source          # market structure
+    assert '"CHoCH"' in source and '"BOS"' in source
+    assert "array<line>" in source                                    # FIFO managed drawings
+    assert "shape.diamond" in source                                  # confirmation diamonds
+    assert "buyPower" in source and "powIsBuy" in source              # power gauge
+    assert "Multi-band ribbon" in source
+
     # PREMIUM, CLUTTER-FREE: corner dashboard is the only home for trade detail — NO
     # on-price callout labels/boxes at all; markers are small glyphs; gradient cloud;
     # VWAP line broken at the session reset (no vertical jump).
     assert "table.new(f_pos(dashPosIn)" in source
-    assert "label.new" not in source          # no on-price callouts/labels to collide
     assert "box.new" not in source            # no over-candle boxes burying price
+    # Market-structure labels/lines are used now, but MUST be FIFO-managed (capped,
+    # oldest recycled) so they never accumulate or hit the drawing caps.
+    assert "line.delete(array.shift(msLines))" in source
+    assert "label.delete(array.shift(msLabels))" in source
     assert "size=size.small" in source
     assert "BUY\\nMNQ" not in source          # no multiline marker text
     assert "Trend cloud" in source                                  # cloud is the primary trend cue
