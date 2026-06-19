@@ -184,6 +184,18 @@ def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
     assert 'input.bool(false, "Require confluence' in source
     assert "confLongOk" in source
 
+    # Prop-firm risk engine: buffer-based sizing + partials + breakeven + session/news
+    # halts. Defaults OFF (inert: base 1-contract bracket reproduces prior fills).
+    assert 'input.bool(false, "Enable risk engine"' in source
+    assert "Trailing-DD buffer" in source
+    assert "sizedQty" in source
+    assert "qtyUsed     = riskEngine ? sizedQty : contracts" in source
+    assert "qty=qtyUsed" in source
+    assert "qty_percent=50" in source                 # partial at +1R
+    assert "beHit" in source                          # sticky breakeven
+    assert "sessionOk" in source                      # midday/news halts (inert when off)
+    assert "if not riskEngine" in source              # off => original bracket
+
     # PREMIUM, CLUTTER-FREE: corner dashboard is the only home for trade detail — NO
     # on-price callout labels/boxes at all; markers are small glyphs; gradient cloud;
     # VWAP line broken at the session reset (no vertical jump).

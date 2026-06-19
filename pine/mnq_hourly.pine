@@ -92,6 +92,17 @@ adxMin  = input.int(20, "ADX min (trend)", minval=1, group=gC)
 requireConfluence = input.bool(false, "Require confluence to ARM (experimental, changes fills)", group=gC, tooltip="OFF = confluence is display-only decision support. ON = also gates entries on the score — this CHANGES backtest fills, so it is a new un-validated trial (pre-register before trusting any Tester read).")
 minConfluence     = input.int(3, "Min confluence score", minval=1, group=gC)
 
+gP = "➞ Prop-firm risk (changes sizing & exits)"
+riskEngine   = input.bool(false, "Enable risk engine", group=gP, tooltip="OFF = base behavior (1-contract ATR bracket, reproducible). ON = buffer-based sizing + partials + breakeven + session/news halts. Changes every fill → re-validate before trusting Tester numbers.")
+ddBuffer     = input.float(1500, "Trailing-DD buffer $", minval=100, step=50, group=gP, tooltip="Your REMAINING trailing-drawdown room (MFF Core $50k = $1,500). Sizing risks a % of THIS, not the balance.")
+riskPctBuf   = input.float(1.0, "Risk % of buffer/trade", minval=0.1, step=0.25, group=gP)
+usePartial   = input.bool(true, "Partial 50% at +1R", group=gP, inline="pm")
+useBreakeven = input.bool(true, "Stop→breakeven", group=gP, inline="pm")
+beTrigR      = input.float(0.75, "Breakeven trigger (R)", minval=0.1, step=0.05, group=gP)
+haltMidday   = input.bool(true, "Halt midday 12:00–13:59 ET", group=gP)
+avoidFomcHour= input.bool(true, "Avoid 14:00 ET hour (FOMC)", group=gP)
+newsBlackout = input.bool(false, "News blackout active (manual: CPI/FOMC/NFP)", group=gP)
+
 visArmed = forceArmed or alertsLive
 
 // ────────────────────────────  SIGNAL (any-TF)  ─────────────────────────────
@@ -155,6 +166,9 @@ powerHour = inRTH and hourET == 15
 midday    = inRTH and hourET >= 12 and hourET < 14
 primeTime = openDrive or powerHour
 sessPhase = not inRTH ? "CLOSED" : openDrive ? "OPEN DRIVE" : powerHour ? "POWER HOUR" : midday ? "MIDDAY" : "RTH"
+// Risk-engine entry windows: halt midday, the 14:00 ET (FOMC) hour, and manual news
+// blackout. Inert (always true) when the engine is off.
+sessionOk = (not riskEngine) or ((not haltMidday or not midday) and (not newsBlackout) and (not avoidFomcHour or hourET != 14))
 
 // 1 pt each: regime, prime session, + each enabled+aligned factor. Disabled
 // factors do not count for or against. Score is for the regime's direction.
@@ -171,8 +185,8 @@ longPullback  = allowPullback and htfUp   and xPbL
 shortPullback = allowPullback and htfDown and xPbS
 rawLong  = longBreakout or longPullback
 rawShort = allowShorts and (shortBreakout or shortPullback)
-longSig  = newExecBar and rawLong  and canTrade and confLongOk
-shortSig = newExecBar and rawShort and canTrade and confShortOk
+longSig  = newExecBar and rawLong  and canTrade and confLongOk  and sessionOk
+shortSig = newExecBar and rawShort and canTrade and confShortOk and sessionOk
 triggerTxt = (longBreakout or shortBreakout) ? "breakout" : "pullback"
 
 // Tick-aligned stop/target off the confirmed exec close + exec ATR.
@@ -185,6 +199,11 @@ riskPts     = stopAtr * xAtr
 riskUsdPer  = riskPts * syminfo.pointvalue
 riskUsdTot  = riskUsdPer * contracts
 flat        = strategy.position_size == 0
+// Buffer-based sizing: risk a % of the trailing-DD BUFFER (not balance), floored to
+// whole contracts, capped at the MFF max. Falls back to the manual size when off.
+bufRiskUsd  = ddBuffer * riskPctBuf / 100.0
+sizedQty    = riskUsdPer > 0 ? math.max(1, math.min(maxContracts, int(math.floor(bufRiskUsd / riskUsdPer)))) : 1
+qtyUsed     = riskEngine ? sizedQty : contracts
 
 // ────────────────────────────────  VISUALS  ─────────────────────────────────
 // Premium trend cloud: smooth chart EMAs, colored by 4h regime, gradient by spread.
@@ -262,24 +281,79 @@ f_msg(action, stop, target, reason) =>
      ',"max_contracts":' + str.tostring(maxContracts) +
      ',"trades_today":' + str.tostring(tradesToday + 1) + '}')
 
+// Entry/exit. Risk engine OFF → original 1-shot ATR bracket (reproducible base).
+// Risk engine ON → buffer-sized qty + per-bar bracket management (sticky breakeven,
+// optional 50% partial at +1R). Levels are stored at entry and managed off THOSE
+// (never re-priced to the current bar). tradesToday counts SIGNALS regardless.
+var float pEntry = na
+var float pStop  = na
+var float pTgt   = na
+var float pTp1   = na
+var bool  pLong  = false
+var bool  beHit  = false
+
 if longSig
     if ordersOk and flat
-        strategy.entry("Long", strategy.long, qty=contracts)
-        strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+        strategy.entry("Long", strategy.long, qty=qtyUsed)
+        pEntry := xClose
+        pStop  := longStop
+        pTgt   := longTarget
+        pTp1   := f_tick(xClose + riskPts)
+        pLong  := true
+        beHit  := false
+        if not riskEngine
+            strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
     if alertsLive
         alert(f_msg("BUY", longStop, longTarget, triggerTxt), alert.freq_once_per_bar_close)
     tradesToday += 1
 
 if shortSig
     if ordersOk and flat
-        strategy.entry("Short", strategy.short, qty=contracts)
-        strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+        strategy.entry("Short", strategy.short, qty=qtyUsed)
+        pEntry := xClose
+        pStop  := shortStop
+        pTgt   := shortTarget
+        pTp1   := f_tick(xClose - riskPts)
+        pLong  := false
+        beHit  := false
+        if not riskEngine
+            strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
     if alertsLive
         alert(f_msg("SELL", shortStop, shortTarget, triggerTxt), alert.freq_once_per_bar_close)
     tradesToday += 1
 
+// Risk-engine bracket management (per bar): sticky breakeven + optional +1R partial.
+// NOTE: beHit uses the CHART bar's high/low — exact on a 1h chart (chart TF == exec TF);
+// on a lower-TF chart the breakeven trips off the finer bars (the honest read is 1h).
+if riskEngine and not na(pEntry)
+    rPts = math.abs(pEntry - pStop)
+    if useBreakeven and not beHit and rPts > 0
+        if pLong and high >= pEntry + beTrigR * rPts
+            beHit := true
+        if (not pLong) and low <= pEntry - beTrigR * rPts
+            beHit := true
+    curStop = f_tick(beHit ? pEntry : pStop)
+    if pLong
+        if usePartial
+            strategy.exit("L-tp1", "Long", qty_percent=50, limit=pTp1, stop=curStop)
+            strategy.exit("L-run", "Long", limit=pTgt, stop=curStop)
+        else
+            strategy.exit("L-x", "Long", limit=pTgt, stop=curStop)
+    else
+        if usePartial
+            strategy.exit("S-tp1", "Short", qty_percent=50, limit=pTp1, stop=curStop)
+            strategy.exit("S-run", "Short", limit=pTgt, stop=curStop)
+        else
+            strategy.exit("S-x", "Short", limit=pTgt, stop=curStop)
+
 if rthOnly and not inRTH
     strategy.close_all("RTH end")
+    pEntry := na
+    pStop  := na
+    pTgt   := na
+    pTp1   := na
+    pLong  := false
+    beHit  := false
 
 // ───────────────────────────────  DASHBOARD  ────────────────────────────────
 f_pos(p) =>
