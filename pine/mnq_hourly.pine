@@ -18,7 +18,8 @@
 // ANTI-REPAINT: every request.security reads the previous CONFIRMED HTF/exec bar
 // ([1] + lookahead_off), so signals can never revise intrabar. The honest Strategy
 // Tester read is most faithful on a 1h chart (chart TF == exec TF); lower-TF charts
-// are for display/alerts. Tester order placement is dev-window gated by default.
+// are for display/alerts. Tester uses FULL chart history by default (TradingView-first
+// validation); flip "Limit Strategy Tester to dev window" ON for a clean out-of-sample slice.
 strategy("PearlAlgo MNQ — Hourly v5", overlay=true,
      default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
      margin_long=0, margin_short=0,       // v6 default is 100; pinned to 0 so fills match the validated runs
@@ -58,7 +59,7 @@ maxTradesDay = input.int(2, "Max trades/day (0=off)", minval=0, group=gS, toolti
 gH = "➞ Honesty"
 sigStatusIn = input.string("Research — alerts muted", "Signal status", options=["Research — alerts muted", "Candidate — alerts on"], group=gH, tooltip="Muted until a pre-registered trial clears docs/audits/validation-trial-ledger.md. Visuals stay live; only alert() delivery is gated.")
 alertsLive  = sigStatusIn == "Candidate — alerts on"
-useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH, tooltip="ON restricts ORDER placement to the registered dev slice so the Tester never spends the held-out set (2026-04-20+).")
+useBtWindow = input.bool(false, "Limit Strategy Tester to dev window", group=gH, tooltip="OFF (default) = Strategy Tester uses ALL chart history — the full-sample read for TradingView-first validation. ON = restrict orders to the registered dev slice (2025-10-26→2026-04-19) for a clean out-of-sample test. With OFF, your out-of-sample is FORWARD paper-testing instead.")
 btStart     = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
 btEnd       = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
 ordersOk    = not useBtWindow or (time >= btStart and time < btEnd)
