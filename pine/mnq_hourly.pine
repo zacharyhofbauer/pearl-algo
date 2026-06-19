@@ -74,7 +74,7 @@ showBg     = input.bool(false, "Background tints", group=gV, inline="v2")
 showDash   = input.bool(true,  "Dashboard",   group=gV, inline="v2")
 colorBars  = input.bool(false, "Color candles by trend (off — cloud shows trend)", group=gV, tooltip="Optional: tints the price candles by trend. OFF by default because it muddies the up/down read — the cloud is the trend cue. Turn on if you want PEARL to fully own the candles.")
 boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV, tooltip="Heavier cloud fill and a wider EMA halo so the trend reads from across the chart.")
-showDiamonds = input.bool(true,  "Confirmation diamonds", group=gV, inline="v3")
+showDiamonds = input.bool(false, "Confirmation diamonds", group=gV, inline="v3")
 showRibbon   = input.bool(false, "Multi-band ribbon", group=gV, inline="v3", tooltip="Faint 4-EMA ribbon UNDER the cloud; band spread = trend strength (fanned=strong, tight=chop). Off by default to keep the clean 2-EMA look.")
 dashPosIn  = input.string("Top Right", "Dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV)
 dashOpacity= input.int(20, "Dash opacity", minval=0, maxval=80, group=gV)
@@ -239,14 +239,15 @@ fillTrns  = boldCloud ? 66 : 80
 strength  = math.min(math.abs(spread), 2.0) / 2.0
 cloudCol  = color.new(cloudBase, fillTrns - int(strength * 16))
 // Premium neon glow on the leading EMA: layered plots, increasing width + transparency.
-// display.pane keeps every decorative line ON the chart but OFF the price scale and
-// status line — no duplicate axis labels, no "0.00" status-line clutter.
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7, display=display.pane)
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane)
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane)
-pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane)
-pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 78) : na, linewidth=1, display=display.pane)
-fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")
+// display.pane keeps every decorative line OFF the price scale + status line (no "0.00"
+// clutter); force_overlay=true brings the whole PEARL layer IN FRONT of the candles —
+// transparency keeps price readable, so it overlays without blocking.
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane, force_overlay=true)
+pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane, force_overlay=true)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 78) : na, linewidth=1, display=display.pane, force_overlay=true)
+fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")   // follows pF/pS (force_overlaid) to the front
 
 // Multi-band ribbon (off by default): 4 EMAs, band SPREAD = trend strength. Fills
 // only (lines invisible), high transparency so it sits UNDER the cloud.
@@ -255,12 +256,12 @@ rb2 = ta.ema(close, 13)
 rb3 = ta.ema(close, 34)
 rb4 = ta.ema(close, 55)
 ribCol = rb1 >= rb4 ? colUp : colDn
-pr1 = plot(showRibbon ? rb1 : na, "rb1", color=na, display=display.pane)
-pr2 = plot(showRibbon ? rb2 : na, "rb2", color=na, display=display.pane)
-pr3 = plot(showRibbon ? rb3 : na, "rb3", color=na, display=display.pane)
-pr4 = plot(showRibbon ? rb4 : na, "rb4", color=na, display=display.pane)
-fill(pr1, pr2, color=showRibbon ? color.new(ribCol, 88) : na, title="ribbon 1")
-fill(pr2, pr3, color=showRibbon ? color.new(ribCol, 84) : na, title="ribbon 2")
+pr1 = plot(showRibbon ? rb1 : na, "rb1", color=na, display=display.pane, force_overlay=true)
+pr2 = plot(showRibbon ? rb2 : na, "rb2", color=na, display=display.pane, force_overlay=true)
+pr3 = plot(showRibbon ? rb3 : na, "rb3", color=na, display=display.pane, force_overlay=true)
+pr4 = plot(showRibbon ? rb4 : na, "rb4", color=na, display=display.pane, force_overlay=true)
+fill(pr1, pr2, color=showRibbon ? color.new(ribCol, 88) : na, title="ribbon 1")   // fills follow their
+fill(pr2, pr3, color=showRibbon ? color.new(ribCol, 84) : na, title="ribbon 2")   // force_overlaid plots
 fill(pr3, pr4, color=showRibbon ? color.new(ribCol, 80) : na, title="ribbon 3")
 
 // Buy/Sell power gauge (DESCRIPTIVE, not predictive): normalized blend of cloud slope,
@@ -278,7 +279,7 @@ powVal   = powIsBuy ? buyPower : sellPower
 powCol   = powIsBuy ? colUp : colDn
 
 // Exec EMA (the actual 1h signal EMA), optional + subtle.
-plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1, display=display.pane)
+plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1, display=display.pane, force_overlay=true)
 
 // RTH-anchored VWAP, line BROKEN at the session reset (no vertical jump).
 var float cumPV  = na
@@ -290,7 +291,7 @@ cumPV  += hlc3 * volume
 cumVol += volume
 rthVwap = cumVol > 0 ? cumPV / cumVol : na
 // Live-session only (show_last) so historical VWAP segments don't clutter the chart.
-plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10, display=display.pane)
+plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10, display=display.pane, force_overlay=true)
 
 // Color the candles by the trend cloud so THIS indicator visually owns the chart
 // (toggle off for plain candles). Biggest single "pop" lever vs other indicators.
@@ -304,12 +305,12 @@ bgcolor(showBg and not inRTH ? color.new(color.gray, 94) : showBg and not trades
 
 // Markers: clean pro-style triangle + small Buy/Sell tag (no on-price box — detail
 // lives in the dashboard). Muted state = faint tiny triangle, no tag.
-plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colUp, 0), text="Buy",  textcolor=color.new(colUp, 0), size=size.small)
-plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colDn, 0), text="Sell", textcolor=color.new(colDn, 0), size=size.small)
-plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colUp, 55), size=size.tiny)
-plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colDn, 55), size=size.tiny)
+plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colUp, 0), text="Buy",  textcolor=color.new(colUp, 0), size=size.small, force_overlay=true)
+plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colDn, 0), text="Sell", textcolor=color.new(colDn, 0), size=size.small, force_overlay=true)
+plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colUp, 55), size=size.tiny, force_overlay=true)
+plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colDn, 55), size=size.tiny, force_overlay=true)
 // Study-only short: setup present but allowShorts=false → NEVER trades (labeled "sell?").
-plotshape(showSignals and showShortStudy and shortSigStudy and not shortSig, "Study short", shape.triangledown, location.abovebar, color.new(colNeu, 35), text="sell?", textcolor=color.new(colNeu, 25), size=size.tiny)
+plotshape(showSignals and showShortStudy and shortSigStudy and not shortSig, "Study short", shape.triangledown, location.abovebar, color.new(colNeu, 35), text="sell?", textcolor=color.new(colNeu, 25), size=size.tiny, force_overlay=true)
 
 // Confirmation diamonds (DESCRIPTIVE confluence flags, NOT entries): strong confluence
 // aligned with regime on a fresh exec bar, suppressed when an actual entry triangle fires.
@@ -317,8 +318,8 @@ confLongStrong  = htfUp   and sLong  >= maxConf - 1
 confShortStrong = htfDown and sShort >= maxConf - 1
 buyConfirm      = newExecBar and confLongStrong  and not longSig
 sellConfirm     = newExecBar and confShortStrong and not shortSig
-plotshape(showDiamonds and showSignals and buyConfirm,  "Buy confirm",  shape.diamond, location.belowbar, color.new(colUp, 25), size=size.tiny)
-plotshape(showDiamonds and showSignals and sellConfirm, "Sell confirm", shape.diamond, location.abovebar, color.new(colDn, 25), size=size.tiny)
+plotshape(showDiamonds and showSignals and buyConfirm,  "Buy confirm",  shape.diamond, location.belowbar, color.new(colUp, 25), size=size.tiny, force_overlay=true)
+plotshape(showDiamonds and showSignals and sellConfirm, "Sell confirm", shape.diamond, location.abovebar, color.new(colDn, 25), size=size.tiny, force_overlay=true)
 
 // ────────────────────  MARKET STRUCTURE (SMC, descriptive)  ──────────────────
 // CHoCH/BOS from CONFIRMED swing pivots — DESCRIPTIVE + LAGGING (a swing is only known
@@ -351,14 +352,14 @@ breakDown = showStruct and not na(lastSwingLow)  and not na(lastSwingLoX) and ta
 if breakUp
     choch = structBias == -1
     bcol  = choch ? colChoch : colBos
-    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed))
-    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 25), textcolor=color.white, size=size.small))
+    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 25), textcolor=color.white, size=size.small, force_overlay=true))
     structBias := 1
 if breakDown
     choch = structBias == 1
     bcol  = choch ? colChoch : colBos
-    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed))
-    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 25), textcolor=color.white, size=size.small))
+    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 20), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 25), textcolor=color.white, size=size.small, force_overlay=true))
     structBias := -1
 
 // ────────────────────────────  ALERTS + ENTRIES  ────────────────────────────
