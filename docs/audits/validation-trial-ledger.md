@@ -423,4 +423,23 @@ Integrity preflight (must reproduce trial 11): `--strategy pine --start 2025-10-
 
 ### Path D results
 
-_(appended after the run)_
+**Run 2026-06-19** — `scripts/ops/validate_hourly_2026_06_19.py`, dev window 2025-10-26→2026-04-19,
+engine-default costs. Artifact: `docs/audits/2026-06-19-hourly_defender_validation.json`.
+
+| # | Strategy | Trades | Win% | Net exp (pt/trade) | Max DD (pt) | Tier-0 |
+|---|----------|--------|------|--------------------|-------------|--------|
+| 19 | hourly_defender long-only | 171 | 32.8% | **−6.35** | 1650.8 | **KILL** (exp ≤ 0) |
+| 20 | hourly_defender two-sided | 309 | 33.3% | **−6.54** | 3012.3 | **KILL** (exp ≤ 0) |
+
+Both KILL at Tier-0 (net expectancy ≤ 0) — split-half (Tier-1) not run, it only applies to a
+Tier-0 PASS. Moving execution to the hourly timeframe did **not** rescue the breakout/pullback
+family (the same family killed at 5m as trials 8/11); **adding the short side made it WORSE**
+(~1.8× the trades, slightly worse per-trade expectancy, ~1.8× the drawdown), consistent with the
+922-trade finding that shorts are weak.
+
+**Verdict → action (per pre-registration): KILL.** No Pine signal swap; `mnq_hourly.pine` stays
+RESEARCH / alerts muted; recommended posture for any future variant is long-only (shorts off).
+The TradingView Strategy Tester's +$1.7k / PF 4.7 over "last 90 days" was a small-sample,
+shorts-on, partly-out-of-dev-window read — the cost-honest dev-window expectancy is −6.35 pt/trade.
+
+DSR `n_trials` now **20**.

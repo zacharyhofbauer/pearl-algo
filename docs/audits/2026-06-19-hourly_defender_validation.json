@@ -1,0 +1,22 @@
+{
+  "trial19_long_only": {
+    "window": "dev 2025-10-26->2026-04-19",
+    "entries": 171,
+    "exp_pt": -6.35,
+    "win_rate": 0.3275,
+    "max_dd_pt": 1650.81,
+    "tier0": "KILL",
+    "reason": "net expectancy -6.348 pt/trade <= 0",
+    "undersized": false
+  },
+  "trial20_two_sided": {
+    "window": "dev 2025-10-26->2026-04-19",
+    "entries": 309,
+    "exp_pt": -6.54,
+    "win_rate": 0.3333,
+    "max_dd_pt": 3012.27,
+    "tier0": "KILL",
+    "reason": "net expectancy -6.536 pt/trade <= 0",
+    "undersized": false
+  }
+}
