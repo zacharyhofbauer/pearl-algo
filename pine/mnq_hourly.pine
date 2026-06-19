@@ -147,15 +147,17 @@ cloudBase = htfUp ? colUp : htfDown ? colDn : colNeu
 fillTrns  = boldCloud ? 70 : 82
 cloudCol  = color.from_gradient(spread, -2.0, 2.0, color.new(colDn, fillTrns), color.new(colUp, fillTrns))
 // Premium neon glow on the leading EMA: layered plots, increasing width + transparency.
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7)
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4)
-plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3)
-pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2)
-pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 50) : na, linewidth=1)
+// display.pane keeps every decorative line ON the chart but OFF the price scale and
+// status line — no duplicate axis labels, no "0.00" status-line clutter.
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7, display=display.pane)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane)
+pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 50) : na, linewidth=1, display=display.pane)
 fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")
 
 // Exec EMA (the actual 1h signal EMA), optional + subtle.
-plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1)
+plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1, display=display.pane)
 
 // RTH-anchored VWAP, line BROKEN at the session reset (no vertical jump).
 var float cumPV  = na
@@ -167,7 +169,7 @@ cumPV  += hlc3 * volume
 cumVol += volume
 rthVwap = cumVol > 0 ? cumPV / cumVol : na
 // Live-session only (show_last) so historical VWAP segments don't clutter the chart.
-plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10)
+plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10, display=display.pane)
 
 // Color the candles by the trend cloud so THIS indicator visually owns the chart
 // (toggle off for plain candles). Biggest single "pop" lever vs other indicators.
@@ -245,7 +247,9 @@ f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
 
 if showDash and barstate.islast
     chartOk   = timeframe.in_seconds() <= timeframe.in_seconds(execTf)
-    statusTxt = not chartOk ? "VIEW ≤" + execTf : not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : visArmed ? "ARMED" : "MUTED"
+    tfLabel   = execTf == "60" ? "1H" : execTf == "120" ? "2H" : execTf == "240" ? "4H" : execTf == "D" ? "1D" : execTf
+    tkr       = str.replace_all(syminfo.ticker, "1!", "")
+    statusTxt = not chartOk ? "VIEW ≤" + tfLabel : not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : visArmed ? "ARMED" : "MUTED"
     statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "MUTED" or statusTxt == "CLOSED") ? color.silver : color.orange
     isLong    = longSig
     isShort   = shortSig
@@ -255,7 +259,7 @@ if showDash and barstate.islast
     stopStr   = isShort ? f_px(shortStop) : isLong ? f_px(longStop) : "—"
     tgtStr    = isShort ? f_px(shortTarget) : isLong ? f_px(longTarget) : "—"
     table.cell(dash, 0, 0, "◆ PEARL", text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 10), text_halign=text.align_left)
-    table.cell(dash, 1, 0, syminfo.ticker + " · " + execTf, text_color=color.white, text_size=size.small, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
+    table.cell(dash, 1, 0, tkr + " · " + tfLabel, text_color=color.white, text_size=size.small, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
     f_row(1, "Status", "● " + statusTxt, statusCol)
     f_row(2, "Regime", regimeTxt, regimeCol)
     f_row(3, "Setup",  setupTxt, setupCol)
