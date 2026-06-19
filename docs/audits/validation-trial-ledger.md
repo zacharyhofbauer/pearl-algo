@@ -366,3 +366,61 @@ validated; none changes any verdict):
    (Presidents' Day). All three Path-C verdicts are KILL by margins that dwarf any
    plausible effect. Future registrations must either pre-register early-close session
    handling or make the timeout session-aware.
+
+---
+
+## Path D — 4h regime / 1h execution (pre-registered 2026-06-19)
+
+A genuinely different family from trials 7–18: a **confirmed higher-timeframe regime filter**
+(4h EMA) gating **1h execution** (breakout or EMA pullback). The Python twin of the
+`pine/mnq_hourly.pine` toolkit. Tests whether moving execution to the hourly timeframe (vs the
+killed 5m families) and/or adding the short side produces edge.
+
+**Pre-registration (immutable; committed BEFORE any trial runs).**
+
+### Frozen definitions
+
+- `regime_4h` (from the last CONFIRMED 4h aggregate before the decision bar): UP if
+  `close > EMA8 > EMA21 and EMA8 >= EMA8_prev`; DOWN if the mirror; else NEUTRAL (no trade).
+  EMAs on 4h closes, lengths 8/21; the forming 4h bar is excluded (no look-ahead).
+- `exec` (1h): EMA length 20; breakout lookback 8.
+  - breakout = 1h close crossing the prior-8-bar high (long) / low (short), in regime direction.
+  - pullback = 1h close crossing back above EMA20 (long) / below (short), in regime direction.
+- `stop` = entry ∓ 1.5 × ATR(14); `target` = entry ± 1.5 × 2.5 × ATR(14) (R = 2.5).
+- RTH-only (09:30–16:00 ET), one position at a time, fire once per bar.
+- Costs: engine defaults — slippage 0.25 pt/side, commission 1.0 pt round-trip (~$3 RT).
+- Max-hold 180 min; entry at the signal bar's close.
+- Impl: `pearlalgo.validation.strategies.signal_fns.hourly_defender_signals`, frozen at this
+  commit. NO tuning against the Tester — any change is a new trial.
+
+### Trials (DSR `n_trials` 18 → 20)
+
+| # | Strategy | Direction | Notes |
+|---|----------|-----------|-------|
+| 19 (PRIMARY)   | `hourly_defender` (allow_shorts=false) | long only | matches the 922-trade long bias |
+| 20 (secondary) | `hourly_defender` (allow_shorts=true)  | two-sided | variant now default-on in the Pine; shorts tested weak in all prior families |
+
+### Commands (dev-window only; held-out 2026-04-20+ untouched)
+
+```
+.venv/bin/python scripts/ops/validate_hourly_2026_06_19.py
+# drives backtest_config.run_backtest on 2025-10-26 → 2026-04-19; trial 20 forces
+# vparams.allow_shorts=true via a wrapper; Tier-0 via stats.tier0_verdict; split-half on PASS.
+```
+
+Integrity preflight (must reproduce trial 11): `--strategy pine --start 2025-10-26 --end 2026-04-19`
+→ n=152, −4.46 pt/trade. **Verified 2026-06-19 (exact match).**
+
+### Pre-registered verdict → action mapping
+
+- **Promotion to "Candidate — paper-trade the gate" (flip the Pine `Signal status`) requires:**
+  (1) Tier-0 PASS (net expectancy > 0 with 95% bootstrap CI not crossing zero) AND
+  (2) Tier-1 split-half PASS (positive in BOTH halves AND neither half > 70% of total profit).
+  Trial 20 (two-sided) must ALSO clear (1)+(2) before shorts are armed.
+- **Tier-0 PASS but Tier-1 FAIL, or undersized (n < 100):** INCONCLUSIVE, record-only, NO Pine
+  signal swap, alerts stay muted.
+- **Tier-0 KILL:** recorded; alerts stay muted; shorts stay off.
+
+### Path D results
+
+_(appended after the run)_

@@ -42,9 +42,9 @@ def _ema(s: pd.Series, n: int) -> pd.Series:
 
 
 def _wilder_atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
-    h, l, c = df["high"], df["low"], df["close"]
-    prev_c = c.shift(1)
-    tr = pd.concat([(h - l), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+    high, low, close = df["high"], df["low"], df["close"]
+    prev_c = close.shift(1)
+    tr = pd.concat([(high - low), (high - prev_c).abs(), (low - prev_c).abs()], axis=1).max(axis=1)
     # Wilder's smoothing == EMA with alpha = 1/n.
     return tr.ewm(alpha=1.0 / n, adjust=False).mean()
 
@@ -125,6 +125,51 @@ def _hold_signal(direction, c, trigger, ts):
     if direction == "long":
         return _signal("long", c, c * (1 - _HOLD_SENTINEL), c * (1 + _HOLD_SENTINEL), trigger, ts)
     return _signal("short", c, c * (1 + _HOLD_SENTINEL), c * (1 - _HOLD_SENTINEL), trigger, ts)
+
+
+def _confirmed_htf_bars(df: pd.DataFrame, last_ts: int, tf: str = "4h") -> pd.DataFrame:
+    """Aggregate confirmed higher-timeframe bars before the execution bar.
+
+    ``last_ts`` is the 1h decision bar. Excluding it keeps the regime filter
+    honest: the 1h entry can only see fully closed 4h candles.
+    """
+    if df is None or len(df) < 5:
+        return pd.DataFrame()
+    prior = df[df["time"] < int(last_ts)].copy()
+    if len(prior) < 4:
+        return pd.DataFrame()
+    idx = pd.to_datetime(prior["time"], unit="s", utc=True)
+    prior = prior.set_index(idx)
+    bars = prior.resample(tf, label="right", closed="right", origin="epoch").agg(
+        {
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        }
+    )
+    bars = bars.dropna(subset=["open", "high", "low", "close"])
+    return bars[bars.index <= idx.max()]
+
+
+def _trend_4h_context(df: pd.DataFrame, ts: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    fast_n = int(params.get("htf_fast", 8))
+    slow_n = int(params.get("htf_slow", 21))
+    bars = _confirmed_htf_bars(df, ts, "4h")
+    if len(bars) < max(fast_n, slow_n) + 2:
+        return None
+    fast = _ema(bars["close"], fast_n)
+    slow = _ema(bars["close"], slow_n)
+    last_close = float(bars["close"].iloc[-1])
+    fast_last = float(fast.iloc[-1])
+    slow_last = float(slow.iloc[-1])
+    fast_prev = float(fast.iloc[-2])
+    up = last_close > fast_last > slow_last and fast_last >= fast_prev
+    down = last_close < fast_last < slow_last and fast_last <= fast_prev
+    if not (up or down):
+        return None
+    return {"direction": "long" if up else "short", "close": last_close, "fast": fast_last, "slow": slow_last}
 
 
 # ── strategies ──────────────────────────────────────────────────────────────────
@@ -256,6 +301,61 @@ def _opening_drive_core(df, drive_minutes, atr_len=14, trigger="opening_drive"):
     return [_hold_signal("long" if drive > 0 else "short", ctx["close"], trigger, cur_ts)]
 
 
+def hourly_defender_signals(df, config=None, current_time=None) -> List[Dict[str, Any]]:
+    """4h regime + 1h execution candidate for the manual/research lane.
+
+    Default posture is long-biased and RTH-only for MNQ: use the last confirmed
+    4h candle as the regime filter, then enter on a 1h breakout or EMA pullback
+    in that direction. Shorts exist only when ``vparams.allow_shorts`` is true.
+    """
+    p = (config or {}).get("vparams", {})
+    atr_len = int(p.get("atr_len", 14))
+    stop_atr = float(p.get("stop_atr", 1.5))
+    target_r = float(p.get("target_r", 2.5))
+    exec_ema_len = int(p.get("exec_ema", 20))
+    breakout_lookback = int(p.get("breakout_lookback", 8))
+    allow_breakout = bool(p.get("allow_breakout", True))
+    allow_pullback = bool(p.get("allow_pullback", True))
+    allow_shorts = bool(p.get("allow_shorts", False))
+
+    ctx = _base(df, atr_len)
+    min_bars = max(atr_len + 2, exec_ema_len + 2, breakout_lookback + 2)
+    if ctx is None or df is None or len(df) < min_bars:
+        return []
+
+    trend = _trend_4h_context(df, ctx["ts"], p)
+    if trend is None:
+        return []
+    direction = str(trend["direction"])
+    if direction == "short" and not allow_shorts:
+        return []
+
+    c = ctx["close"]
+    atr = ctx["atr"]
+    prev_close = float(df.iloc[-2]["close"])
+    prior = df.iloc[:-1]
+    exec_ema = _ema(df["close"], exec_ema_len)
+    ema_now = float(exec_ema.iloc[-1])
+    ema_prev = float(exec_ema.iloc[-2])
+
+    prior_high = float(prior["high"].tail(breakout_lookback).max())
+    prior_low = float(prior["low"].tail(breakout_lookback).min())
+    breakout = allow_breakout and (
+        (direction == "long" and c > prior_high) or (direction == "short" and c < prior_low)
+    )
+    pullback = allow_pullback and (
+        (direction == "long" and prev_close <= ema_prev and c > ema_now)
+        or (direction == "short" and prev_close >= ema_prev and c < ema_now)
+    )
+    if not (breakout or pullback):
+        return []
+
+    trigger = "hourly_defender_breakout" if breakout else "hourly_defender_pullback"
+    if direction == "long":
+        return [_signal("long", c, c - stop_atr * atr, c + stop_atr * target_r * atr, trigger, ctx["ts"], conf=0.62)]
+    return [_signal("short", c, c + stop_atr * atr, c - stop_atr * target_r * atr, trigger, ctx["ts"], conf=0.62)]
+
+
 def opening_drive_signals(df, config=None, current_time=None) -> List[Dict[str, Any]]:
     """Opening-drive CONTINUATION (15-min window): enter in the sign direction of
     the first 15 min of RTH, hold to the close. Genuinely different from ORB — it
@@ -374,9 +474,9 @@ def _daily_atr(df: pd.DataFrame, today: str, n: int = _PATHC_ATR_DAYS) -> Option
     atr: Optional[float] = None
     trs: list = []
     for i in range(1, len(daily)):
-        h, l, _c = daily[i]
+        high, low, _c = daily[i]
         pc = daily[i - 1][2]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
+        tr = max(high - low, abs(high - pc), abs(low - pc))
         if atr is None:
             trs.append(tr)
             if len(trs) == n:
@@ -486,6 +586,7 @@ STRATEGY_FNS = {
     "pine": pine_simple_signals,
     "orb": orb_signals,
     "vwap_reversion": vwap_reversion_signals,
+    "hourly_defender": hourly_defender_signals,
     "opening_drive": opening_drive_signals,
     "opening_drive_5": opening_drive_5_signals,
     "tod_rth_long": tod_rth_long_signals,

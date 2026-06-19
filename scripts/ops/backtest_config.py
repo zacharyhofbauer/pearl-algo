@@ -592,12 +592,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="composite",
         choices=[
             "composite", "pine", "orb", "vwap_reversion",
+            "hourly_defender",
             "opening_drive", "opening_drive_5", "tod_rth_long", "overnight_seasonality",
             "gap_fade_small", "gap_fade_all", "gap_continue_large",
         ],
         help=(
             "Signal source: 'composite' = live generate_signals (the RICH strategy); "
-            "pine/orb/vwap_reversion = isolated validation strategies; "
+            "pine/orb/vwap_reversion/hourly_defender = isolated validation strategies; "
             "opening_drive[_5]/tod_rth_long/overnight_seasonality = Path-B time-based hypotheses; "
             "gap_fade_small/gap_fade_all/gap_continue_large = Path-C overnight-gap hypotheses."
         ),

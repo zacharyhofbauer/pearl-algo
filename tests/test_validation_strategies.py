@@ -13,6 +13,7 @@ import pandas as pd
 
 from pearlalgo.validation.strategies.signal_fns import (
     _ema,
+    _confirmed_htf_bars,
     _in_rth,
     _wilder_atr,
     opening_drive_5_signals,
@@ -22,6 +23,7 @@ from pearlalgo.validation.strategies.signal_fns import (
     pine_simple_signals,
     tod_rth_long_signals,
     vwap_reversion_signals,
+    hourly_defender_signals,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -44,6 +46,41 @@ def _run(fn, df, warmup=25):
     for i in range(warmup, len(df)):
         out.extend(fn(df.iloc[: i + 1].copy()))
     return out
+
+
+def _hourly_df(closes, *, start="2026-01-05 09:30", rng=1.0, vol=100.0):
+    """Build a 1h OHLCV frame for the 4h/1h candidate tests."""
+    t0 = datetime.strptime(start, "%Y-%m-%d %H:%M").replace(tzinfo=ET)
+    rows = []
+    for k, c in enumerate(closes):
+        ts = int((t0 + timedelta(hours=k)).timestamp())
+        rows.append({"time": ts, "open": float(c), "high": float(c) + rng,
+                     "low": float(c) - rng, "close": float(c), "volume": vol})
+    return pd.DataFrame(rows)
+
+
+def _hourly_rth_df(closes, *, start="2026-01-05 09:30", rng=1.0, vol=100.0):
+    """Build 1h bars that advance only through RTH sessions."""
+    dt = datetime.strptime(start, "%Y-%m-%d %H:%M").replace(tzinfo=ET)
+    rows = []
+    for c in closes:
+        ts = int(dt.timestamp())
+        rows.append({"time": ts, "open": float(c), "high": float(c) + rng,
+                     "low": float(c) - rng, "close": float(c), "volume": vol})
+        dt = dt + timedelta(hours=1)
+        if dt.hour > 15 or (dt.hour == 15 and dt.minute > 30):
+            dt = (dt + timedelta(days=1)).replace(hour=9, minute=30)
+            while dt.weekday() >= 5:
+                dt = (dt + timedelta(days=1)).replace(hour=9, minute=30)
+    return pd.DataFrame(rows)
+
+
+_HOURLY_TEST_CONFIG = {
+    "vparams": {
+        "htf_fast": 2, "htf_slow": 3, "exec_ema": 3, "breakout_lookback": 3,
+        "atr_len": 3, "stop_atr": 1.0, "target_r": 2.0,
+    }
+}
 
 
 # ── indicators ────────────────────────────────────────────────────────────────
@@ -112,6 +149,53 @@ def test_vwap_reversion_fires_on_dip_below_band():
     assert s["entry_trigger"] == "vwap_reversion"
     assert s["take_profit"] > s["entry_price"]   # target = VWAP (above a dip)
     assert s["stop_loss"] < s["entry_price"]
+
+
+# ── hourly_defender: confirmed 4h regime + 1h execution ──────────────────────
+def test_confirmed_htf_bars_excludes_current_execution_bar():
+    df = _hourly_df([100, 101, 102, 103, 104, 130], start="2026-01-05 00:30")
+    bars = _confirmed_htf_bars(df, int(df.iloc[-1]["time"]), "4h")
+    assert len(bars) >= 1
+    assert 130.0 not in set(bars["close"].round(4))
+
+
+def test_hourly_defender_fires_long_breakout_with_4h_uptrend():
+    closes = [100 + k for k in range(32)] + [140]
+    sigs = _run(lambda d: hourly_defender_signals(d, _HOURLY_TEST_CONFIG), _hourly_rth_df(closes), warmup=25)
+    assert len(sigs) >= 1
+    s = sigs[-1]
+    assert s["direction"] == "long"
+    assert s["entry_trigger"] == "hourly_defender_breakout"
+    assert s["stop_loss"] < s["entry_price"] < s["take_profit"]
+
+
+def test_hourly_defender_fires_long_pullback_when_breakout_disabled():
+    cfg = {"vparams": {**_HOURLY_TEST_CONFIG["vparams"], "allow_breakout": False, "breakout_lookback": 8}}
+    closes = [100 + k for k in range(28)] + [123, 126]
+    sigs = _run(lambda d: hourly_defender_signals(d, cfg), _hourly_rth_df(closes), warmup=25)
+    assert len(sigs) == 1
+    assert sigs[0]["direction"] == "long"
+    assert sigs[0]["entry_trigger"] == "hourly_defender_pullback"
+
+
+def test_hourly_defender_short_side_requires_opt_in():
+    closes = [140 - k for k in range(32)] + [100]
+    df = _hourly_rth_df(closes)
+    assert _run(lambda d: hourly_defender_signals(d, _HOURLY_TEST_CONFIG), df, warmup=25) == []
+    cfg = {"vparams": {**_HOURLY_TEST_CONFIG["vparams"], "allow_shorts": True}}
+    sigs = _run(lambda d: hourly_defender_signals(d, cfg), df, warmup=25)
+    assert len(sigs) >= 1
+    assert sigs[-1]["direction"] == "short"
+
+
+def test_hourly_defender_respects_rth_gate():
+    closes = [100 + k for k in range(32)] + [140]
+    sigs = _run(
+        lambda d: hourly_defender_signals(d, _HOURLY_TEST_CONFIG),
+        _hourly_df(closes, start="2026-01-05 18:00"),
+        warmup=25,
+    )
+    assert sigs == []
 
 
 # ── Path-B: opening-drive (sign of opening return, hold to session close) ─────────
@@ -368,5 +452,5 @@ def test_gap_first_session_in_history_silent():
 
 
 def test_gap_strategies_registered():
-    for name in ("gap_fade_small", "gap_fade_all", "gap_continue_large"):
+    for name in ("hourly_defender", "gap_fade_small", "gap_fade_all", "gap_continue_large"):
         assert name in STRATEGY_FNS
