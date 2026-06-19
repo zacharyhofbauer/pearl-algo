@@ -71,7 +71,7 @@ showExecEma= input.bool(false, "Exec EMA",    group=gV, inline="v2")
 showSignals= input.bool(true,  "Signals",     group=gV, inline="v2")
 showRegime = input.bool(true,  "Regime tint", group=gV, inline="v2")
 showDash   = input.bool(true,  "Dashboard",   group=gV, inline="v2")
-colorBars  = input.bool(true,  "Color candles by trend (makes PEARL pop)", group=gV, tooltip="Tints the price candles by the trend cloud so this indicator visually owns the chart. Turn OFF when you want plain candles for your other tools.")
+colorBars  = input.bool(false, "Color candles by trend (off — cloud shows trend)", group=gV, tooltip="Optional: tints the price candles by trend. OFF by default because it muddies the up/down read — the cloud is the trend cue. Turn on if you want PEARL to fully own the candles.")
 boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV, tooltip="Heavier cloud fill and a wider EMA halo so the trend reads from across the chart.")
 dashPosIn  = input.string("Top Right", "Dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV)
 dashOpacity= input.int(20, "Dash opacity", minval=0, maxval=80, group=gV)
@@ -143,9 +143,13 @@ cloudFast = ta.ema(close, 8)
 cloudSlow = ta.ema(close, 21)
 cAtr      = ta.atr(14)
 spread    = na(cAtr) or cAtr == 0 ? 0.0 : (cloudFast - cloudSlow) / cAtr
-cloudBase = htfUp ? colUp : htfDown ? colDn : colNeu
-fillTrns  = boldCloud ? 70 : 82
-cloudCol  = color.from_gradient(spread, -2.0, 2.0, color.new(colDn, fillTrns), color.new(colUp, fillTrns))
+// Cloud colored by its OWN slope (fast vs slow) so it reads cleanly green/red — the
+// 4h regime lives in the background tint + dashboard, not muddied into the cloud.
+// Opacity deepens with trend strength (|spread|), faint in chop, solid in a run.
+cloudBase = cloudFast >= cloudSlow ? colUp : colDn
+fillTrns  = boldCloud ? 66 : 80
+strength  = math.min(math.abs(spread), 2.0) / 2.0
+cloudCol  = color.new(cloudBase, fillTrns - int(strength * 16))
 // Premium neon glow on the leading EMA: layered plots, increasing width + transparency.
 // display.pane keeps every decorative line ON the chart but OFF the price scale and
 // status line — no duplicate axis labels, no "0.00" status-line clutter.

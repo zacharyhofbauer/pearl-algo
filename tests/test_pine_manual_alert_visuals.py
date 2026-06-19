@@ -182,7 +182,8 @@ def test_hourly_pine_is_v6_premium_and_any_timeframe() -> None:
     assert "box.new" not in source            # no over-candle boxes burying price
     assert "size=size.small" in source
     assert "BUY\\nMNQ" not in source          # no multiline marker text
-    assert "color.from_gradient(" in source
+    assert "Trend cloud" in source                                  # cloud is the primary trend cue
+    assert 'input.bool(false, "Color candles by trend' in source    # candles stay plain by default
     assert "not newSession ? rthVwap : na" in source
 
     # Clean settings dropdowns (input.string + switch — enum tripped the v6 translator)
