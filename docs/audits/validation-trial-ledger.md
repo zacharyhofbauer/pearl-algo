@@ -174,3 +174,272 @@ the weak free-data signal (operator's $ call).
 The held-out slice (2026-04-20→2026-06-03) remains **untouched** (all runs verified
 `window_to ≤ 2026-04-20`). DSR `n_trials` is now **15**. Per-strategy JSON saved at
 `docs/audits/2026-06-03-pathb-*.json`.
+
+---
+
+## Path C — overnight-gap conditioning (pre-registered 2026-06-12)
+
+A genuinely different signal family: the conditioning variable is the **overnight gap**
+(today's RTH open vs yesterday's RTH close) — never used by trials 7–15 (those were
+indicator crosses, range breakouts, band fades, and unconditional clock bets). Plan:
+`docs/plans/2026-06-12-001-feat-gap-family-validation-pine-honesty-plan.md`.
+
+**Pre-registration (immutable; this entry is committed BEFORE any trial runs).**
+
+### Frozen definitions
+
+- `prior_rth_close` = close of the last 5m bar with ET time in [09:30, 16:00) on the most
+  recent prior trading date.
+- `gap` = open of the FIRST RTH 5m bar today − `prior_rth_close` (points; + = up-gap).
+- `ATR_d(14)` = Wilder ATR over daily aggregates (ET calendar date, full ETH range) of all
+  bars **strictly before today**. Valid only once **14 complete prior daily aggregates**
+  exist; the archive's first (possibly partial) calendar day is excluded from aggregates.
+- Decision/entry bar = the first RTH bar of the session; entries at its CLOSE (engine
+  convention, same as Path B). Fire at most once per session.
+- Cost floor: no fade trade unless the remaining distance to target at the entry-bar close
+  is ≥ **5.0 pt** (≥5× the ~1.0 pt RT cost). Skip the session if the gap has already
+  filled by the entry-bar close (fades only).
+- **Roll-splice exclusion:** sessions **2025-12-22** and **2026-03-23** are excluded from
+  all three trials. The dev window is IBKR continuous (`ibkr_historical`), spliced
+  unadjusted at expiry; on the first session after the Dec 19, 2025 / Mar 20, 2026
+  expirations, `gap` embeds the calendar spread (a phantom gap). Census found no
+  basis-jump outlier at these dates (spread hides inside the 120-pt median gap), so this
+  is conservative hygiene, not outlier surgery. The three genuine |gap| outliers found
+  (2025-11-20 +486.5, 2026-03-03 −487.8, 2026-04-08 +830.0) are real market gaps and are
+  KEPT.
+- Exits, frozen: fades target `prior_rth_close` (the fill), stop = entry ∓ remaining
+  distance (1:1 R on the remaining gap), max-hold to RTH close (`--max-hold-minutes 385`).
+  `gap_continue_large` holds to RTH close via the `_HOLD_SENTINEL` convention (pure
+  conditional-drift read, no stop lever — same mechanics as Path B).
+- ATR-validity gate applies to trials 16 and 18 (their conditions use ATR_d). **Trial 17's
+  condition uses no ATR and carries NO ATR-warmup gate** (decided here, pre-hoc).
+- Two-sided by design; the two-sided read is THE read. Per-side breakdowns are diagnostics
+  and never a promotion basis.
+
+### Trials (DSR `n_trials` 15 → 18)
+
+| # | Strategy | Condition (at entry-bar close) | Direction | Exit |
+|---|----------|-------------------------------|-----------|------|
+| 16 (PRIMARY) | `gap_fade_small` | 5.0 pt ≤ \|gap\| ≤ 0.30 × ATR_d | against gap | fill target / 1:1 stop / 385m |
+| 17 (secondary) | `gap_fade_all` | \|gap\| ≥ 5.0 pt (no ceiling, no ATR gate) | against gap | fill target / 1:1 stop / 385m |
+| 18 (secondary) | `gap_continue_large` | \|gap\| ≥ 0.70 × ATR_d | with gap | sentinel hold to RTH close |
+
+**External priors (fixed pre-hoc, never fitted):** NQ gap-fill 2015–2025 (n=2,791,
+TradingStats.net): <0.3×ATR fills 77.8% → trial 16 fade prior **moderate**; all-gaps fills
+60.3% → trial 17 prior **WEAK** (registered honestly as the dilution control; 17 ⊇ 16);
+>1.2×ATR fills only 8.2% → large gaps continue, trial 18 prior directional-only at
+0.70×ATR. Overnight-drift literature (Cooper/Cliff/Gulen; Boyarchenko et al. NY Fed)
+implies RTH-session weakness but its "opening reversal" is only weakly coupled to the gap;
+Plastun et al. 2020 finds gap-day *continuation* in stocks/daily. Net: smallest honest
+family that respects the size-regime split. **Family-wise: ≈14% chance of ≥1 false
+positive at nominal 95% across 3 trials.**
+
+### Conditioning census (outcome-blind, run BEFORE registration was finalized)
+
+`scripts/ops/pathc_conditioning_census.py` — reads gap sizes, ATR_d, and entry-bar-close
+position only; simulates no entries/exits/P&L. Dev window: 121 RTH sessions; median |gap|
+120.8 pt; median ATR_d 434.1 pt. **Expected n (after roll exclusion): trial 16 ≈ 50
+(max 58), trial 17 ≈ 107, trial 18 ≈ 15.** Disclosed consequences, pre-hoc: trial 16 can
+NEVER satisfy the n ≥ 100 powered-read bar on this window; trial 18 is expected
+INCONCLUSIVE unless the effect is enormous.
+
+### Pre-registered verdict → action mapping
+
+- **Promotion to the Pine manual toolkit ("candidate — paper-trade the gate") requires ALL
+  of:** (1) trial 16 Tier-0 PASS (any n) — the strongest-prior read concurs directionally;
+  (2) trial 17 Tier-0 PASS with `undersized=false` (n ≥ 100) — the only powered read;
+  (3) Tier-1 split-half on trial 17 (H1 2025-10-26→2026-01-22 / H2 2026-01-23→2026-04-19):
+  positive expectancy in BOTH halves AND neither half > 70% of total profit (two-way
+  operationalization of the W13 concentration guard; noted deviation from the literal 40%
+  wording, which targets finer partitions). On promotion, the shipped Pine defaults to the
+  validated TWO-SIDED configuration.
+- **Any Tier-0 PASS that fails the above** (incl. PASS+undersized) → recorded
+  **INCONCLUSIVE**, record-only, NO Pine signal swap. Sanctioned next steps are an
+  operator decision recorded here (paper-trade off chart visuals, or the deep-data $ call).
+- **KILL** (per committed `tier0_verdict` gate) → recorded; Pine entry alerts stay muted.
+- Operator override of any routing must be recorded in this ledger to take effect.
+- Honest ceiling (Path-B precedent, restated): a Tier-0 PASS on this ~5.5-month free slice
+  is NOT an edge and NOT a fund signal.
+
+### Integrity preflight (pinned; run before trial 16)
+
+Reproduce trial 11 with every flag explicit — a mismatch is data/engine drift and a hard
+STOP; varying flags until n=152 reappears is forbidden (flag-fitting):
+
+```
+backtest_config.py --strategy pine --tf 5m --start 2025-10-26 --end 2026-04-19 \
+  --warmup-bars 120 --max-hold-minutes 180 --slippage-points 0.25 --commission-points 1.0 --json
+```
+
+Expected: n=152, net expectancy −4.46 pt/trade. (Reconstructed engine defaults; trial 11's
+flags were never recorded — that reconstruction is itself part of what this pin freezes.)
+
+### Commands (dev-window only; engine-default costs, identical to trials 7–15)
+
+```
+backtest_config.py --strategy gap_fade_small     --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy gap_fade_all       --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+backtest_config.py --strategy gap_continue_large --tf 5m --max-hold-minutes 385 --start 2025-10-26 --end 2026-04-19 --json
+# Tier-1 split-half (only on a trial-17 Tier-0 PASS):
+#   same commands with --start 2025-10-26 --end 2026-01-22  and  --start 2026-01-23 --end 2026-04-19
+```
+
+**Development prohibition:** no gap-family strategy may be run against `data/candles.db`
+until the strategy functions and their synthetic-frame tests are committed and the official
+runs (above) begin. Development uses synthetic frames exclusively — this closes the
+informal-peek channel that commit ordering alone does not.
+
+### Path C results
+
+**Integrity preflight (2026-06-12): PASSED.** The pinned trial-11 command reproduced
+exactly — n=152, net expectancy −4.46 pt/trade — proving engine + dev-window data are
+unchanged since the 2026-06-03 snapshot (the post-snapshot WAL activity added no MNQ 5m
+bars: count is still 41,423).
+
+| # | Date | Strategy | Window | Trades | Net exp (pt/trade) | Tier | Verdict |
+|---|------|----------|--------|--------|--------------------|------|---------|
+| 16 | 2026-06-12 | gap_fade_small (PRIMARY) | dev-only 2025-10-26→2026-04-19 | 50 | **−25.61**, CI95 [−51.56, +0.04] | 0 | **KILL** (exp ≤ 0) |
+| 17 | 2026-06-12 | gap_fade_all | dev-only | 107 | **−1.25**, CI95 [−29.02, +27.19] | 0 | **KILL** (exp ≤ 0) |
+| 18 | 2026-06-12 | gap_continue_large | dev-only | 15 | **−220.07**, CI95 [−368.99, −103.40] | 0 | **KILL** (exp ≤ 0) |
+
+Census accuracy: predicted n of ≈50 / ≈107 / ≈15 — actuals 50 / 107 / 15. JSON artifacts:
+`docs/audits/2026-06-12-pathc-*.json`. Held-out untouched (every `window_to` =
+2026-04-20T00:00 ET boundary; the guard is now machine-enforced). **DSR `n_trials` = 18.**
+
+## CONCLUSION — Path C (2026-06-12)
+
+**The overnight-gap family is dead on this data. All three pre-registered trials KILL at
+Tier-0; per the pre-registered mapping there is no promotion, no Pine signal swap, and the
+Pine toolkit's entry alerts stay muted.**
+
+- **gap_fade_small (PRIMARY): KILL** at −25.61 pt/trade, 42% win rate. The external prior
+  (78% small-gap fill rate on NQ 2015–2025) did not survive contact: "fills by the close"
+  is not the same trade as "1:1 stop on the remaining distance" — the stop got hit before
+  the fill often enough to lose 25 pt/trade. Conditioning on small size made the fade
+  WORSE than unconditional in this window, the opposite of the external evidence's
+  size-regime story.
+- **gap_fade_all: KILL** at −1.25 pt/trade on the only powered read (n=107). Gross of the
+  ~1.5 pt modeled costs this is ≈ break-even — the unconditional gap fade is a coin flip
+  that costs eat. No regime of hope here: CI spans ±28.
+- **gap_continue_large: KILL** at −220.07 pt/trade, 1 win in 15. Large gaps in this window
+  mean-reverted hard rather than continuing. **Anti-fishing note (binding):** the symmetric
+  large-gap FADE would show ≈ +220 ex-costs *by construction* on the same 15 sessions —
+  that is a post-hoc sign flip on n=15, exactly the move Path B's conclusion forbids ("a
+  lone direction-flip on noisy data is no green light"). It is recorded here as
+  NOT-actionable. Any future test of it must be a fresh pre-registration on NEW deep data,
+  not this slice.
+- Program-level: a fifth signal family is now cost-dead on this 121-session slice
+  (after EMA/VWAP cross, ORB, VWAP-band reversion, and the Path-B time family). The free
+  5m data has been mined by 18 registered trials; survivorship pressure on any future
+  "discovery" here is severe. This further strengthens the existing recommendation:
+  **lean Path A (redirect off intraday MNQ); do not fund; do not buy deep data to chase
+  gap conditioning** — the powered read was break-even gross, which prices the family's
+  ceiling near zero before costs.
+
+### Post-registration implementation clarifications & errata (2026-06-12, appended — never edited)
+
+From the multi-agent code review run after the official trials (all items independently
+validated; none changes any verdict):
+
+1. **Held-out boundary off-by-one (fixed post-run).** The guard's original `<=` boundary
+   let the single bar stamped 2026-04-20T00:00 ET (a Sunday-evening ETH bar — the first
+   held-out calendar date) load on maximal dev runs, and the three Path-C runs loaded it
+   (`candles_processed` 33694 vs 33693 without it). Validated **outcome-inert**: no RTH
+   strategy can signal on a 00:00 ET bar and no position could extend there. The harness
+   boundary is now exclusive; the trial-11 preflight was re-verified post-fix.
+2. **ATR_d validity operationalization.** The frozen "14 complete prior daily aggregates"
+   wording is implemented as **14 TRs, which require 15 complete prior daily aggregates**.
+   Census and engine agree (that is why predicted n matched actuals exactly); recorded
+   results unaffected.
+3. **Decision-bar O(1) gate.** `_gap_context` accepts a session's first RTH bar only in
+   [09:30, 10:00) ET — an unregistered narrowing of "the first RTH bar of the session."
+   No dev-window session has a first RTH bar at/after 10:00, so no recorded trial was
+   affected; future windows with delayed opens would differ.
+4. **Window-relative ATR exclusion.** "The archive's first day is excluded" is implemented
+   relative to the LOADED window, not the archive. Identical here (window start == archive
+   start), but any future ATR-gated run starting mid-archive (e.g., a split-half H2) must
+   load a ≥15-day warmup prefix or ~16 sessions silently lose ATR validity.
+5. **Early-close erratum.** The engine's max-hold timeout exits at the first bar at/after
+   the deadline — on early-close sessions that is the NEXT session's 18:00 ET reopen, not
+   the early close. Affected dev-window sessions: 2025-11-27/28 (Thanksgiving), 2026-01-19
+   (MLK — including one of trial 18's 15 trades, held through a ~5-hour halt), 2026-02-16
+   (Presidents' Day). All three Path-C verdicts are KILL by margins that dwarf any
+   plausible effect. Future registrations must either pre-register early-close session
+   handling or make the timeout session-aware.
+
+---
+
+## Path D — 4h regime / 1h execution (pre-registered 2026-06-19)
+
+A genuinely different family from trials 7–18: a **confirmed higher-timeframe regime filter**
+(4h EMA) gating **1h execution** (breakout or EMA pullback). The Python twin of the
+`pine/mnq_hourly.pine` toolkit. Tests whether moving execution to the hourly timeframe (vs the
+killed 5m families) and/or adding the short side produces edge.
+
+**Pre-registration (immutable; committed BEFORE any trial runs).**
+
+### Frozen definitions
+
+- `regime_4h` (from the last CONFIRMED 4h aggregate before the decision bar): UP if
+  `close > EMA8 > EMA21 and EMA8 >= EMA8_prev`; DOWN if the mirror; else NEUTRAL (no trade).
+  EMAs on 4h closes, lengths 8/21; the forming 4h bar is excluded (no look-ahead).
+- `exec` (1h): EMA length 20; breakout lookback 8.
+  - breakout = 1h close crossing the prior-8-bar high (long) / low (short), in regime direction.
+  - pullback = 1h close crossing back above EMA20 (long) / below (short), in regime direction.
+- `stop` = entry ∓ 1.5 × ATR(14); `target` = entry ± 1.5 × 2.5 × ATR(14) (R = 2.5).
+- RTH-only (09:30–16:00 ET), one position at a time, fire once per bar.
+- Costs: engine defaults — slippage 0.25 pt/side, commission 1.0 pt round-trip (~$3 RT).
+- Max-hold 180 min; entry at the signal bar's close.
+- Impl: `pearlalgo.validation.strategies.signal_fns.hourly_defender_signals`, frozen at this
+  commit. NO tuning against the Tester — any change is a new trial.
+
+### Trials (DSR `n_trials` 18 → 20)
+
+| # | Strategy | Direction | Notes |
+|---|----------|-----------|-------|
+| 19 (PRIMARY)   | `hourly_defender` (allow_shorts=false) | long only | matches the 922-trade long bias |
+| 20 (secondary) | `hourly_defender` (allow_shorts=true)  | two-sided | variant now default-on in the Pine; shorts tested weak in all prior families |
+
+### Commands (dev-window only; held-out 2026-04-20+ untouched)
+
+```
+.venv/bin/python scripts/ops/validate_hourly_2026_06_19.py
+# drives backtest_config.run_backtest on 2025-10-26 → 2026-04-19; trial 20 forces
+# vparams.allow_shorts=true via a wrapper; Tier-0 via stats.tier0_verdict; split-half on PASS.
+```
+
+Integrity preflight (must reproduce trial 11): `--strategy pine --start 2025-10-26 --end 2026-04-19`
+→ n=152, −4.46 pt/trade. **Verified 2026-06-19 (exact match).**
+
+### Pre-registered verdict → action mapping
+
+- **Promotion to "Candidate — paper-trade the gate" (flip the Pine `Signal status`) requires:**
+  (1) Tier-0 PASS (net expectancy > 0 with 95% bootstrap CI not crossing zero) AND
+  (2) Tier-1 split-half PASS (positive in BOTH halves AND neither half > 70% of total profit).
+  Trial 20 (two-sided) must ALSO clear (1)+(2) before shorts are armed.
+- **Tier-0 PASS but Tier-1 FAIL, or undersized (n < 100):** INCONCLUSIVE, record-only, NO Pine
+  signal swap, alerts stay muted.
+- **Tier-0 KILL:** recorded; alerts stay muted; shorts stay off.
+
+### Path D results
+
+**Run 2026-06-19** — `scripts/ops/validate_hourly_2026_06_19.py`, dev window 2025-10-26→2026-04-19,
+engine-default costs. Artifact: `docs/audits/2026-06-19-hourly_defender_validation.json`.
+
+| # | Strategy | Trades | Win% | Net exp (pt/trade) | Max DD (pt) | Tier-0 |
+|---|----------|--------|------|--------------------|-------------|--------|
+| 19 | hourly_defender long-only | 171 | 32.8% | **−6.35** | 1650.8 | **KILL** (exp ≤ 0) |
+| 20 | hourly_defender two-sided | 309 | 33.3% | **−6.54** | 3012.3 | **KILL** (exp ≤ 0) |
+
+Both KILL at Tier-0 (net expectancy ≤ 0) — split-half (Tier-1) not run, it only applies to a
+Tier-0 PASS. Moving execution to the hourly timeframe did **not** rescue the breakout/pullback
+family (the same family killed at 5m as trials 8/11); **adding the short side made it WORSE**
+(~1.8× the trades, slightly worse per-trade expectancy, ~1.8× the drawdown), consistent with the
+922-trade finding that shorts are weak.
+
+**Verdict → action (per pre-registration): KILL.** No Pine signal swap; `mnq_hourly.pine` stays
+RESEARCH / alerts muted; recommended posture for any future variant is long-only (shorts off).
+The TradingView Strategy Tester's +$1.7k / PF 4.7 over "last 90 days" was a small-sample,
+shorts-on, partly-out-of-dev-window read — the cost-honest dev-window expectancy is −6.35 pt/trade.
+
+DSR `n_trials` now **20**.

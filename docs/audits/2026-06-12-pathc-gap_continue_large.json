@@ -1,0 +1,61 @@
+{
+  "avg_loss_points": -238.43,
+  "avg_win_points": 37.0,
+  "by_trigger": {
+    "gap_continue_large": {
+      "avg_points": -220.07,
+      "entries": 15,
+      "losses": 14,
+      "total_points": -3301.0,
+      "win_rate": 0.0667,
+      "wins": 1
+    }
+  },
+  "entries": 15,
+  "expectancy_points_per_trade": -220.07,
+  "hold_duration_buckets": {
+    ">240m": 15
+  },
+  "losses": 14,
+  "max_drawdown_points": 3301.0,
+  "max_loss_points": -1053.75,
+  "max_win_points": 37.0,
+  "meta": {
+    "candles_processed": 33694,
+    "commission_points": 1.0,
+    "config_path": "/Users/pearlassistant/projects/pearl-algo/config/live/tradovate_paper.yaml",
+    "days_requested": 30,
+    "max_concurrent": 1,
+    "max_hold_minutes": 385,
+    "signals_generated": 15,
+    "slippage_points": 0.25,
+    "strategy": "gap_continue_large",
+    "symbol": "MNQ",
+    "timeframe": "5m",
+    "trades_opened": 15,
+    "warmup_bars": 120,
+    "window_from": 1761451200,
+    "window_to": 1776657600
+  },
+  "net_points_per_trade": [
+    -463.25,
+    -1053.75,
+    -239.5,
+    -19.0,
+    -295.0,
+    -4.25,
+    -171.0,
+    -124.5,
+    -6.25,
+    -190.5,
+    -230.25,
+    37.0,
+    -23.0,
+    -433.25,
+    -84.5
+  ],
+  "timeouts": 15,
+  "total_points": -3301.0,
+  "win_rate": 0.0667,
+  "wins": 1
+}

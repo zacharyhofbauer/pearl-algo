@@ -414,3 +414,133 @@ def test_scorecard_to_dict_is_json_serializable(mod):
     blob = json.dumps(d)
     reloaded = json.loads(blob)
     assert reloaded["entries"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Held-out guard (registered slice 2026-04-20+ — validation-trial-ledger.md)
+# ---------------------------------------------------------------------------
+
+
+def test_held_out_boundary_constant_and_ts(mod):
+    assert mod.HELD_OUT_START_DATE == "2026-04-20"
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    expected = int(
+        datetime(2026, 4, 20, tzinfo=ZoneInfo("America/New_York")).timestamp()
+    )
+    assert mod._held_out_start_ts() == expected
+
+
+def test_clamp_trailing_window_into_held_out_is_clamped(mod):
+    boundary = mod._held_out_start_ts()
+    win_to = boundary + 30 * 86400  # trailing window ending well past the boundary
+    win_from = win_to - 120 * 86400
+    f, t, clamped = mod.clamp_to_held_out(win_from, win_to, allow_held_out=False)
+    assert clamped is True
+    assert t == boundary - 1  # exclusive: the boundary-midnight bar must not load
+    assert f <= boundary - 1
+
+
+def test_clamp_exact_boundary_ts_is_clamped(mod):
+    # A window ending exactly AT the held-out midnight would load the bar
+    # stamped at that ts (query_range is inclusive) -- it belongs to the
+    # held-out date, so the clamp must fire (review finding #1).
+    boundary = mod._held_out_start_ts()
+    win_from = boundary - 120 * 86400
+    f, t, clamped = mod.clamp_to_held_out(win_from, boundary, allow_held_out=False)
+    assert clamped is True
+    assert t == boundary - 1
+    assert f == win_from
+
+
+def test_run_backtest_trailing_window_clamps_end_to_end(mod, tmp_path, monkeypatch, capsys):
+    # The contamination mechanism the guard exists for: a trailing --days
+    # window with "now" past the boundary must clamp inside run_backtest.
+    monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "empty_candles.db"))
+    from pearlalgo.persistence import candle_archive
+
+    candle_archive.reset_for_tests()
+    try:
+        rc = mod.main(["--days", "30", "--warmup-bars", "5", "--json"])
+        assert rc == 1  # empty archive -> not-enough-candles, AFTER the clamp
+        out = capsys.readouterr()
+        assert "held-out guard" in out.err
+        assert "not enough candles" in out.out
+    finally:
+        candle_archive.reset_for_tests()
+
+
+def test_run_backtest_fully_held_out_range_surfaces_guard_error(mod, tmp_path, monkeypatch):
+    # A programmatic explicit range entirely inside the held-out slice must
+    # produce the guard error, not a misleading backfill message (finding #8).
+    monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "empty_candles.db"))
+    from pathlib import Path as _P
+
+    boundary = mod._held_out_start_ts()
+    result = mod.run_backtest(
+        config_path=_P("config/live/tradovate_paper.yaml"),
+        ts_from=boundary + 86400,
+        ts_to=boundary + 10 * 86400,
+    )
+    assert "error" in result
+    assert "held-out" in result["error"]
+
+
+def test_clamp_noop_for_dev_window(mod):
+    boundary = mod._held_out_start_ts()
+    win_to = boundary - 86400  # ends the day before the boundary
+    win_from = win_to - 120 * 86400
+    f, t, clamped = mod.clamp_to_held_out(win_from, win_to, allow_held_out=False)
+    assert (f, t, clamped) == (win_from, win_to, False)
+
+
+def test_clamp_bypassed_with_tier5_flag(mod):
+    boundary = mod._held_out_start_ts()
+    win_to = boundary + 30 * 86400
+    win_from = win_to - 120 * 86400
+    f, t, clamped = mod.clamp_to_held_out(win_from, win_to, allow_held_out=True)
+    assert (f, t, clamped) == (win_from, win_to, False)
+
+
+def test_cli_explicit_end_in_held_out_errors(mod, capsys):
+    rc = mod.main(["--end", "2026-05-01", "--json"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "held-out" in err
+
+
+def test_cli_end_exactly_on_boundary_errors(mod, capsys):
+    rc = mod.main(["--end", "2026-04-20", "--json"])
+    assert rc == 1
+    assert "held-out" in capsys.readouterr().err
+
+
+def test_cli_last_legal_end_passes_guard(mod, tmp_path, monkeypatch, capsys):
+    # --end 2026-04-19 (inclusive) must NOT trip the guard; with an empty
+    # archive the run still fails, but for the not-enough-candles reason.
+    monkeypatch.setenv("PEARL_CANDLES_DB", str(tmp_path / "empty_candles.db"))
+    from pearlalgo.persistence import candle_archive
+
+    candle_archive.reset_for_tests()
+    try:
+        rc = mod.main([
+            "--start", "2026-04-01", "--end", "2026-04-19",
+            "--warmup-bars", "5", "--json",
+        ])
+        assert rc == 1
+        out = capsys.readouterr()
+        assert "held-out" not in out.err
+        assert "not enough candles" in out.out
+    finally:
+        candle_archive.reset_for_tests()
+
+
+def test_cli_help_mentions_tier5_flag():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--tier5-held-out" in result.stdout

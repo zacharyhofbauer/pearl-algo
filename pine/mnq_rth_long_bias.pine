@@ -1,12 +1,33 @@
-//@version=5
-// PearlAlgo PINSTRIPE MNQ — Manual v3
+//@version=6
+// PearlAlgo PINSTRIPE MNQ — Manual v4 (honesty build)
 // Polished TradingView build: trend ribbon, VWAP(+σ bands), signal markers, drawn trade levels,
 // bright manual-alert pinstripes, trend bar-coloring, session/mute shading, and an on-chart dashboard.
-// Signal (EMA9/21 cross +
-// VWAP, RTH-only, long-bias) is UNCHANGED and unproven — paper-trade the gate before funded capital.
-strategy("PearlAlgo PINSTRIPE MNQ — Manual v3", overlay = true,
+//
+// ⚠️ SIGNAL STATUS: KILLED. The EMA9/21+VWAP signal FAILED cost-honest validation
+// (trial 11: −4.46 pt/trade, n=152, dev-clean). The pre-registered overnight-gap
+// replacement family ALSO failed (trials 16–18, all KILL, 2026-06-12). See
+// docs/audits/validation-trial-ledger.md. Entry ALERTS ARE MUTED BY DEFAULT
+// (Signal status input); chart visuals stay live for study. Do NOT trade this
+// signal on funded capital. Honesty checklist: pine/README.md.
+//
+// Strategy Tester honesty: real per-side costs + slippage are modeled in the
+// declaration below, and the Tester is window-gated to the registered dev slice
+// (2025-10-26 → 2026-04-19) by default so reads match the validation ledger and
+// never touch the held-out slice (2026-04-20+, reserved for a one-shot Tier-5).
+//
+// Visual posture (v4.1): while Signal status is KILLED/muted the chart stays
+// QUIET — tiny direction-tinted study markers only; the loud manual-alert kit (huge
+// BUY/SELL markers, callouts, pinstripe, flash, trade-level rays) renders ONLY
+// when status = Candidate. Pinstripe and callout are single-instance managed
+// drawings (prior one deleted on each signal) so they can never pile up.
+strategy("PearlAlgo PINSTRIPE MNQ — Manual v4", overlay = true,
      default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
+     margin_long = 0, margin_short = 0,  // v6 default is 100; pinned to 0 (the v5 default) so fills / trade count stay identical to the validated runs
      calc_on_every_tick = false, process_orders_on_close = true,
+     commission_type = strategy.commission.cash_per_contract,
+     commission_value = 0.95,  // Tradovate free-tier all-in per side (2025-11 schedule)
+     slippage = 1,             // 1 tick = $0.50 adverse on market/stop fills
+     backtest_fill_limits_assumption = 1,  // no touch-fills on limit targets
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
 // ─────────────────────────────────  INPUTS  ─────────────────────────────────
@@ -22,6 +43,22 @@ allowShorts = input.bool(false, "Allow shorts (weak win rate)", group=gS)
 gSe = "➞ Session"
 rthOnly = input.bool(true, "RTH only (overnight loses)", group=gSe)
 sessRTH = input.session("0930-1600", "RTH session (ET)", group=gSe)
+
+gH = "➞ Honesty"
+// Entry alerts are MUTED while the signal is KILLED (validation ledger). Flip to
+// "Candidate — alerts on" ONLY when a pre-registered trial family passes the
+// promotion gate and the ledger records it. Visuals stay live either way.
+signalStatus = input.string("KILLED — alerts muted", "Signal status",
+     options=["KILLED — alerts muted", "Candidate — alerts on"], group=gH,
+     tooltip="docs/audits/validation-trial-ledger.md: EMA/VWAP killed (trial 11); gap family killed (trials 16-18).")
+alertsLive = signalStatus == "Candidate — alerts on"
+// Strategy Tester window — defaults to the registered dev slice so Tester reads
+// match the ledger and never touch the held-out slice (2026-04-20+). Order
+// placement only: signals, visuals, and (if un-muted) alerts are NOT window-gated.
+useBtWindow = input.bool(true, "Limit Strategy Tester to dev window", group=gH)
+btStart = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
+btEnd   = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
+ordersOk = not useBtWindow or (time >= btStart and time < btEnd)
 
 gM = "➞ MFF guardrails"
 contracts    = input.int(1, "Contracts/trade", minval=1, maxval=5, group=gM, inline="sz")
@@ -39,12 +76,16 @@ colorBars   = input.bool(true,  "Color bars",     group=gV, inline="v2")
 showCallouts = input.bool(true, "Big signal callouts", group=gV, inline="v3")
 showPinstripe = input.bool(true, "Alert pinstripe", group=gV, inline="v3")
 showSignalFlash = input.bool(true, "Signal flash", group=gV, inline="v4")
+forceArmed  = input.bool(true,  "Force armed visuals (full kit even when KILLED)", group=gV,
+     tooltip="Shows the complete visual kit — markers, callouts, rays, pinstripe, flash — regardless of Signal status, so the chart looks armed. Alert DELIVERY stays separately gated by Signal status: a KILLED signal still never pings your phone.")
 showDash    = input.bool(true,  "Dashboard",      group=gV, inline="v4")
-dashPos     = input.string("Top Right", "Pos",
+dashPos     = input.string("Middle Right", "Pos",
      options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV, inline="v4")
+dashOpacity = input.int(22, "Dash opacity", minval=0, maxval=80, group=gV)
 colUp = input.color(#26a69a, "Up",   group=gV, inline="c")
 colDn = input.color(#ef5350, "Down", group=gV, inline="c")
 colVw = input.color(#ab47bc, "VWAP", group=gV, inline="c")
+colAlgo = input.color(#00e5ff, "Algo frame", group=gV, tooltip="Distinct CYAN accent so this PEARL panel stands out from the other indicators on the chart (and from the amber 1H/4H defender panel).")
 
 // ─────────────────────────────────  CALC  ───────────────────────────────────
 emaFast = ta.ema(close, emaFastLen)
@@ -55,7 +96,11 @@ vwStd   = ta.stdev(close, 20)
 trendUp = emaFast > emaSlow
 
 inRTH = not rthOnly or not na(time(timeframe.period, sessRTH, "America/New_York"))
-newSession = inRTH and not inRTH[1]
+// Daily-state reset: RTH-session open when rthOnly; otherwise calendar-day
+// change. (Without the newDay branch, rthOnly=false made inRTH constant-true,
+// the reset never fired, and max-trades/DAY silently became max-trades-EVER.)
+newDay = ta.change(time("D")) != 0
+newSession = rthOnly ? (inRTH and not inRTH[1]) : newDay
 
 var int   tradesToday    = 0
 var float dayStartProfit = 0.0
@@ -67,7 +112,11 @@ if newSession
 dailyPnlUsd = strategy.netprofit - dayStartProfit
 tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
 lossLimitOk = dailyLossUsd == 0.0 or dailyPnlUsd > -dailyLossUsd
-canTrade    = inRTH and tradesCapOk and lossLimitOk
+// not na(atr) keeps stop/target and the alert JSON from ever formatting a bare NaN
+// (invalid JSON) on a pre-warmup bar — parity with mnq_1h_4h_defender.pine. Today this
+// can't flip a firing bar (a cross needs EMA-21 warmed, well past ATR-14), so it changes
+// no in-window signal/entry; it only future-proofs a later non-cross trigger.
+canTrade    = inRTH and tradesCapOk and lossLimitOk and not na(atr)
 
 bullCross   = ta.crossover(emaFast, emaSlow)
 bearCross   = ta.crossunder(emaFast, emaSlow)
@@ -91,29 +140,47 @@ riskUsdPer  = riskPts * syminfo.pointvalue
 riskUsdTot  = riskUsdPer * contracts
 
 // ────────────────────────────────  VISUALS  ─────────────────────────────────
-pFast = plot(emaFast, "EMA fast", color = showRibbon ? color.new(colUp, 10) : na, linewidth=1)
-pSlow = plot(emaSlow, "EMA slow", color = showRibbon ? color.new(colDn, 10) : na, linewidth=1)
-fill(pFast, pSlow, color = not showRibbon ? na : color.new(trendUp ? colUp : colDn, 88), title="EMA ribbon")
+// visArmed drives the LOUD VISUAL kit only. It is independent of alertsLive,
+// which still gates real alert() DELIVERY — so the chart can look fully armed
+// while a KILLED signal never pings your phone. (forceArmed defaults ON.)
+visArmed = forceArmed or alertsLive
 
-plot(showVwap ? vwap : na, "VWAP", color=color.new(colVw, 0), linewidth=2)
-ub = plot(showBands ? vwap + vwStd : na, "VWAP +1σ", color=color.new(colVw, 70))
-lb = plot(showBands ? vwap - vwStd : na, "VWAP -1σ", color=color.new(colVw, 70))
-fill(ub, lb, color = showBands ? color.new(colVw, 93) : na, title="VWAP band")
+// Premium trend cloud: both EMAs tinted by trend, bold leading edge, rich fill.
+pFast = plot(emaFast, "EMA fast", color = showRibbon ? color.new(trendUp ? colUp : colDn, 0)  : na, linewidth=2)
+pSlow = plot(emaSlow, "EMA slow", color = showRibbon ? color.new(trendUp ? colUp : colDn, 55) : na, linewidth=1)
+fill(pFast, pSlow, color = not showRibbon ? na : color.new(trendUp ? colUp : colDn, 78), title="EMA cloud")
+
+// VWAP plotted only during RTH — this kills the ugly vertical "jump" the session
+// anchor reset draws across the overnight gap, and matches the RTH-only model.
+// (The SIGNAL still uses the full vwap series unchanged; only the DISPLAY is gated.)
+plot(showVwap and inRTH ? vwap : na, "VWAP", color=color.new(colVw, 0), linewidth=2)
+ub = plot(showBands and inRTH ? vwap + vwStd : na, "VWAP +1σ", color=color.new(colVw, 70))
+lb = plot(showBands and inRTH ? vwap - vwStd : na, "VWAP -1σ", color=color.new(colVw, 70))
+fill(ub, lb, color = showBands and inRTH ? color.new(colVw, 93) : na, title="VWAP band")
 
 barcolor(colorBars ? color.new(trendUp ? colUp : colDn, 35) : na, title="Trend bars")
 
-plotshape(showSignals and longOk,  "BUY MNQ alert marker",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.huge, text="BUY\nMNQ",  textcolor=color.white)
-plotshape(showSignals and shortOk, "SELL MNQ alert marker", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.huge, text="SELL\nMNQ", textcolor=color.white)
-plotshape(showSignals and dailyStopWillFire and not sigFired, "DAILY STOP alert marker", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.huge, text="STOP\nTODAY", textcolor=color.white)
+// Armed: clean labeled markers (the manual-alert kit), shown whenever visArmed.
+// Muted (visArmed off): tiny neutral study marks only. Alert DELIVERY is gated
+// separately by alertsLive, so these can show without pinging a KILLED signal.
+plotshape(showSignals and longOk and visArmed,  "BUY MNQ alert marker",  shape.triangleup,   location.belowbar, color.new(colUp, 0), size=size.normal, text="BUY",  textcolor=color.white)
+plotshape(showSignals and shortOk and visArmed, "SELL MNQ alert marker", shape.triangledown, location.abovebar, color.new(colDn, 0), size=size.normal, text="SELL", textcolor=color.white)
+plotshape(showSignals and dailyStopWillFire and not sigFired and visArmed, "DAILY STOP alert marker", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.normal, text="STOP", textcolor=color.white)
+plotshape(showSignals and longOk and not visArmed,  "Muted study marker (long)",  shape.triangleup,   location.belowbar, color.new(colUp, 45), size=size.tiny)
+plotshape(showSignals and shortOk and not visArmed, "Muted study marker (short)", shape.triangledown, location.abovebar, color.new(colDn, 45), size=size.tiny)
 
 // Grey wash outside RTH; red wash when entries are muted (daily stop / max trades) during RTH.
 bgcolor(not inRTH ? color.new(color.gray, 92) : (not (tradesCapOk and lossLimitOk) ? color.new(colDn, 90) : na), title="Session / mute")
-bgcolor(showSignalFlash and alertVisual ? color.new(sigFired ? (longOk ? colUp : colDn) : color.orange, 58) : na, title="Manual alert flash")
+bgcolor(showSignalFlash and alertVisual and visArmed ? color.new(sigFired ? (longOk ? colUp : colDn) : color.orange, 58) : na, title="Manual alert flash")
 
+// Single MANAGED pinstripe (v3 bug: stripes were never deleted and piled up as
+// giant towers). Armed-only, and ±1.5×ATR instead of ±4 so it flags the bar
+// without dwarfing the price action.
 var box alertStripe = na
-if showPinstripe and alertVisual
+if showPinstripe and alertVisual and visArmed
+    box.delete(alertStripe)
     stripeColor = sigFired ? (longOk ? colUp : colDn) : color.orange
-    box.new(bar_index, high + atr * 4.0, bar_index + 1, low - atr * 4.0,
+    alertStripe := box.new(bar_index, high + atr * 1.5, bar_index + 1, low - atr * 1.5,
          border_color=color.new(stripeColor, 0), border_width=2, bgcolor=color.new(stripeColor, 72),
          text=sigFired ? (longOk ? "BUY MNQ" : "SELL MNQ") : "DAILY STOP", text_color=color.white, text_size=size.large)
 
@@ -129,19 +196,24 @@ var float  lastE = na
 var float  lastS = na
 var float  lastT = na
 
+var label lastCallout = na
 if sigFired
     lastDir := longOk ? "▲ LONG" : "▼ SHORT"
     lastE := sEntry
     lastS := sStop
     lastT := sTgt
-    if showCallouts
+    // Single MANAGED callout (v3 bug: one label per signal accumulated forever
+    // and stacked into overlapping boxes). Armed-only — when muted, the same
+    // numbers live in the dashboard's Entry/Stop/Target rows instead.
+    if showCallouts and visArmed
+        label.delete(lastCallout)
         calloutDir = longOk ? "BUY MNQ" : "SELL MNQ"
         calloutText = calloutDir + "\nEntry " + str.tostring(sEntry, format.mintick) + "\nStop " + str.tostring(sStop, format.mintick) + "  Target " + str.tostring(sTgt, format.mintick)
-        label.new(bar_index, longOk ? low : high, calloutText,
+        lastCallout := label.new(bar_index, longOk ? low : high, calloutText,
              yloc=longOk ? yloc.belowbar : yloc.abovebar,
              style=longOk ? label.style_label_up : label.style_label_down,
              color=color.new(longOk ? colUp : colDn, 0), textcolor=color.white, size=size.large)
-    if showLevels
+    if showLevels and visArmed
         line.delete(lnE)
         line.delete(lnS)
         line.delete(lnT)
@@ -157,7 +229,8 @@ if sigFired
 
 // ─────────────────────────────  ALERTS + ENTRIES  ───────────────────────────
 f_msg(action, entry, stop, target, reason) =>
-    ('{"strat":"mnq-rth-long-bias","v":2' +
+    ('{"strat":"mnq-rth-long-bias","v":3' +
+     ',"status":"' + signalStatus + '"' +
      ',"action":"' + action + '"' +
      ',"symbol":"' + syminfo.ticker + '"' +
      ',"tf":"' + timeframe.period + '"' +
@@ -175,42 +248,56 @@ f_msg(action, entry, stop, target, reason) =>
      ',"trades_today":' + str.tostring(tradesToday + 1) +
      ',"reason":"' + reason + '"}')
 
+// Order placement is gated to the dev window (Tester honesty); alert() is gated
+// by the KILLED-by-default signal status. tradesToday counts SIGNALS (not fills)
+// so the trades/day guardrail keeps working regardless of either gate. The
+// $-loss guardrail reads strategy.netprofit (hypothetical fills) and is only
+// meaningful inside the Tester window — on a manual account your real P&L lives
+// at the broker, not here.
 if longOk
-    strategy.entry("Long", strategy.long, qty=contracts)
-    strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
-    alert(f_msg("BUY", close, longStop, longTarget,
-         "EMA" + str.tostring(emaFastLen) + ">" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", above VWAP" : "")),
-         alert.freq_once_per_bar_close)
+    if ordersOk
+        strategy.entry("Long", strategy.long, qty=contracts)
+        strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    if alertsLive
+        alert(f_msg("BUY", close, longStop, longTarget,
+             "EMA" + str.tostring(emaFastLen) + ">" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", above VWAP" : "")),
+             alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
 if shortOk
-    strategy.entry("Short", strategy.short, qty=contracts)
-    strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
-    alert(f_msg("SELL", close, shortStop, shortTarget,
-         "EMA" + str.tostring(emaFastLen) + "<" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", below VWAP" : "")),
-         alert.freq_once_per_bar_close)
+    if ordersOk
+        strategy.entry("Short", strategy.short, qty=contracts)
+        strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    if alertsLive
+        alert(f_msg("SELL", close, shortStop, shortTarget,
+             "EMA" + str.tostring(emaFastLen) + "<" + str.tostring(emaSlowLen) + " cross" + (useVwap ? ", below VWAP" : "")),
+             alert.freq_once_per_bar_close)
     tradesToday := tradesToday + 1
 
-hitTrades = maxTradesDay > 0 and tradesToday >= maxTradesDay
 hitLoss   = dailyLossUsd > 0.0 and dailyPnlUsd <= -dailyLossUsd
 if dailyStopWillFire
     dailyStopFired := true
-    alert('{"strat":"mnq-rth-long-bias","v":2,"action":"DAILY_STOP"' +
-         ',"symbol":"' + syminfo.ticker + '"' +
-         ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +
-         ',"daily_pnl_usd":' + str.tostring(dailyPnlUsd, "#.##") +
-         ',"trades_today":' + str.tostring(tradesToday) + '}',
-         alert.freq_once_per_bar_close)
+    if alertsLive
+        alert('{"strat":"mnq-rth-long-bias","v":3,"action":"DAILY_STOP"' +
+             ',"status":"' + signalStatus + '"' +
+             ',"symbol":"' + syminfo.ticker + '"' +
+             ',"reason":"' + (hitLoss ? "daily loss limit hit — stop for the day" : "max trades/day hit — stop for the day") + '"' +
+             ',"daily_pnl_usd":' + str.tostring(dailyPnlUsd, "#.##") +
+             ',"trades_today":' + str.tostring(tradesToday) + '}',
+             alert.freq_once_per_bar_close)
 
-alertcondition(longOk,  title="PearlAlgo MNQ — Long",
-     message='{"strat":"mnq-rth-long-bias","action":"BUY","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
-alertcondition(shortOk, title="PearlAlgo MNQ — Short",
-     message='{"strat":"mnq-rth-long-bias","action":"SELL","symbol":"{{ticker}}","tf":"{{interval}}","entry":{{close}}}')
+// NOTE: alertcondition() is removed — it is nonfunctional in strategy scripts
+// (Pine docs: alerts cannot be created from alertcondition() in a strategy).
+// The ONLY working alert path is the alert() calls above, wired via
+// "Any alert() function call" per pine/README.md.
 
 if rthOnly and not inRTH
     strategy.close_all("RTH end")
 
 // ───────────────────────────────  DASHBOARD  ────────────────────────────────
+// LuxAlgo/ChartPrime-style panel: one consistent cyan brand header, status dots,
+// and colour-coded value pills so it reads at a glance on a busy chart. Pure
+// presentation — no signal/order/guardrail logic lives here.
 f_pos(s) =>
     switch s
         "Top Right"    => position.top_right
@@ -220,28 +307,231 @@ f_pos(s) =>
         "Bottom Left"  => position.bottom_left
         => position.top_right
 
-var table dash = table.new(f_pos(dashPos), 2, 12, frame_width=1, frame_color=color.new(color.gray, 60),
-     border_width=1, border_color=color.new(color.gray, 80))
+var table dash = table.new(f_pos(dashPos), 2, 13, frame_width=2, frame_color=color.new(colAlgo, 0),
+     border_width=1, border_color=color.new(colAlgo, 82))
 
-f_row(_r, _k, _v, _vc) =>
-    table.cell(dash, 0, _r, _k, text_color=color.silver, text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, 30))
-    table.cell(dash, 1, _r, _v, text_color=_vc,          text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, 30))
+// key cell: muted label left. val cell: bold-ish value right, on a colour pill.
+f_row(_r, _k, _v, _vc, _bg) =>
+    table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 5), text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 14))
+    table.cell(dash, 1, _r, _v, text_color=_vc,                        text_size=size.small, text_halign=text.align_right, bgcolor=_bg)
 
 f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
 
 if showDash and barstate.islast
-    statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : "ARMED"))
-    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" ? color.silver : colDn)
-    table.cell(dash, 0, 0, "PEARLALGO MNQ", text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_left)
-    table.cell(dash, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colUp, 25), text_halign=text.align_right)
-    f_row(1,  "Trend",     trendUp ? "▲ Up" : "▼ Down",   trendUp ? colUp : colDn)
-    f_row(2,  "Session",   inRTH ? "RTH open" : "closed",  inRTH ? colUp : color.silver)
-    f_row(3,  "Status",    statusTxt,                      statusCol)
-    f_row(4,  "Last sig",  lastDir,                        lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver))
-    f_row(5,  "Entry",     f_px(lastE),                    color.white)
-    f_row(6,  "Stop",      f_px(lastS),                    colDn)
-    f_row(7,  "Target",    f_px(lastT),                    colUp)
-    f_row(8,  "R : R",     "1 : " + str.tostring(targetR, "#.#"),  color.white)
-    f_row(9,  "Risk/ct",   "$" + str.tostring(riskUsdPer, "#.##"), color.white)
-    f_row(10, "Trades",    str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
-    f_row(11, "Daily P&L", "$" + str.tostring(dailyPnlUsd, "#.##"), dailyPnlUsd >= 0 ? colUp : colDn)
+    // ARMED reflects the VISUAL posture (visArmed); the Validation row below stays
+    // the binding truth (KILLED/CANDIDATE) and alert delivery follows alertsLive.
+    statusTxt = not inRTH ? "CLOSED" : (not lossLimitOk ? "DAILY STOP" : (not tradesCapOk ? "MAX TRADES" : (visArmed ? "ARMED" : "MUTED")))
+    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "CLOSED" or statusTxt == "MUTED" ? color.silver : colDn)
+    activeTxt = dailyStopWillFire and not sigFired ? "DAILY STOP" : (longOk ? "BUY" : (shortOk ? "SELL" : "NONE"))
+    activeCol = activeTxt == "BUY" ? colUp : (activeTxt == "SELL" or activeTxt == "DAILY STOP" ? colDn : color.silver)
+    baseBg  = color.new(color.black, dashOpacity)
+    upBg    = color.new(colUp, 78)
+    downBg  = color.new(colDn, 78)
+    warnBg  = color.new(color.orange, 75)
+    mutedBg = color.new(color.gray, 82)
+    // Brand header bar (consistent cyan) + a one-line plain-language read-out so
+    // a glance tells you what the algo is "doing" without decoding the rows.
+    headline = activeTxt == "BUY" ? "▲ LONG SETUP" : activeTxt == "SELL" ? "▼ SHORT SETUP" : activeTxt == "DAILY STOP" ? "✕ STOP FOR DAY" : trendUp ? "▲ TREND UP · WAIT" : "▼ TREND DOWN · WAIT"
+    headCol  = activeTxt == "BUY" or (activeTxt == "NONE" and trendUp) ? colUp : activeTxt == "SELL" or (activeTxt == "NONE" and not trendUp) ? colDn : color.orange
+    table.cell(dash, 0, 0, "◆ PEARLALGO", text_color=color.white, text_size=size.large, bgcolor=color.new(colAlgo, 6), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + "  ·  " + timeframe.period, text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 6), text_halign=text.align_right)
+    table.cell(dash, 0, 1, "READ", text_color=color.new(color.silver, 5), text_size=size.small, text_halign=text.align_left, bgcolor=color.new(color.black, dashOpacity + 14))
+    table.cell(dash, 1, 1, headline, text_color=headCol, text_size=size.normal, text_halign=text.align_right, bgcolor=color.new(headCol, 80))
+    f_row(2,  "Trend",         trendUp ? "▲  UP" : "▼  DOWN", trendUp ? colUp : colDn, trendUp ? upBg : downBg)
+    f_row(3,  "Session",       inRTH ? "● RTH OPEN" : "○ CLOSED", inRTH ? colUp : color.silver, inRTH ? upBg : mutedBg)
+    f_row(4,  "Signal Status", "● " + statusTxt, statusCol, statusTxt == "ARMED" ? upBg : (statusTxt == "MUTED" or statusTxt == "CLOSED" ? mutedBg : downBg))
+    f_row(5,  "HTF Filter",    "OFF", color.silver, mutedBg)
+    f_row(6,  "Active Signal", activeTxt == "BUY" ? "▲ BUY" : (activeTxt == "SELL" ? "▼ SELL" : (activeTxt == "DAILY STOP" ? "✕ STOP" : "—  NONE")), activeCol, activeTxt == "BUY" ? upBg : (activeTxt == "SELL" ? downBg : (activeTxt == "DAILY STOP" ? warnBg : baseBg)))
+    f_row(7,  "Last Signal",   lastDir, lastDir == "▲ LONG" ? colUp : (lastDir == "▼ SHORT" ? colDn : color.silver), baseBg)
+    f_row(8,  "Entry",         f_px(lastE), color.white, baseBg)
+    f_row(9,  "Stop",          f_px(lastS), colDn, baseBg)
+    f_row(10, "Target",        f_px(lastT), colUp, baseBg)
+    f_row(11, "Trades",        str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white, baseBg)
+    f_row(12, "Validation",    alertsLive ? "● CANDIDATE" : "● KILLED", alertsLive ? color.yellow : colDn, alertsLive ? warnBg : downBg)
+
+// ─────────────────────────  ROBUSTNESS SWEEP (read-only)  ────────────────────
+// Parameter-STABILITY diagnostic — a disconfirmation tool, NOT an optimizer.
+// It replays the long-only EMA/VWAP entry across a RANGE of the EMA-slow length
+// and shows the metrics for EACH value, ORDERED BY THE SWEPT AXIS (never ranked
+// "best on top"), so you read the SHAPE: a flat plateau of viable settings = a
+// robust edge; a lone profitable spike = curve-fit luck. The live EMA-slow length
+// stays FROZEN at the ledger-registered value — it is only HIGHLIGHTED (◆), never
+// auto-selected. Reading this table to PICK a live setting is in-sample tuning: a
+// new trial that needs ledger pre-registration (pine/README.md, Tester-honesty #3).
+//
+// The numbers are a SELF-CONTAINED, RELATIVE backtest (manual-seeded EMAs,
+// pessimistic same-bar stop-first, simplified slippage) — they are NOT the
+// Strategy Tester and must not be read as real P&L; only the SHAPE across the
+// axis carries signal. The sweep runs ONLY inside the dev window (reuses ordersOk)
+// so it never spends the held-out slice (2026-04-20+). Shorts are excluded (the
+// live default is long-only). Default OFF — it is a heavier study compute.
+gSw = "➞ Robustness sweep"
+showSweep   = input.bool(false, "Show robustness sweep (diagnostic, not an optimizer)", group=gSw,
+     tooltip="A disconfirmation view of parameter stability — NOT a setting picker. The live EMA-slow stays frozen; this only shows whether the edge is a plateau or a spike. Numbers are RELATIVE, not the Strategy Tester.")
+sweepMinLen = input.int(12, "Min EMA-slow", minval=2, maxval=400, group=gSw, inline="r")
+sweepMaxLen = input.int(30, "Max EMA-slow", minval=3, maxval=400, group=gSw, inline="r")
+sweepWarmup = input.int(50, "Warmup bars", minval=0, group=gSw,
+     tooltip="Bars to let the manual-seeded sweep EMAs converge before trades are counted. Mirrors LuxAlgo's Warmup Period.")
+sweepMetric = input.string("Net Profit", "Flag in-sample max of",
+     options=["Net Profit", "Winrate", "Profit Factor", "Max Drawdown", "Potential Ratio"], group=gSw,
+     tooltip="Marks which row is the in-sample maximum (⚠ = DO NOT TRADE). It does NOT reorder the table and does NOT change the live signal — it just shows you the cherry-pick you must resist.")
+
+sweepLo   = math.min(sweepMinLen, sweepMaxLen)
+sweepHi   = math.max(sweepMinLen, sweepMaxLen)
+sweepStep = int(math.max(1, math.ceil((sweepHi - sweepLo + 1) / 26.0)))   // bound the table to ≤26 rows
+nSens     = int(math.floor((sweepHi - sweepLo) / sweepStep)) + 1
+
+// Per-sensitivity state (parallel arrays — one slot per swept EMA-slow length).
+var array<float> swEma   = array.new<float>(nSens, na)   // running manual EMA per length
+var array<int>   swPos   = array.new<int>(nSens, 0)      // 0 flat / 1 long
+var array<float> swEntry = array.new<float>(nSens, na)
+var array<float> swStop  = array.new<float>(nSens, na)
+var array<float> swTgt   = array.new<float>(nSens, na)
+var array<float> swMfe   = array.new<float>(nSens, 0.0)  // current-trade max favorable excursion (pts)
+var array<float> swMae   = array.new<float>(nSens, 0.0)  // current-trade max adverse excursion (pts)
+var array<int>   swTr    = array.new<int>(nSens, 0)      // trades
+var array<int>   swWin   = array.new<int>(nSens, 0)      // wins
+var array<float> swGp    = array.new<float>(nSens, 0.0)  // gross profit $
+var array<float> swGl    = array.new<float>(nSens, 0.0)  // gross loss $ (stored positive)
+var array<float> swNet   = array.new<float>(nSens, 0.0)  // net $
+var array<float> swPeak  = array.new<float>(nSens, 0.0)  // equity peak $
+var array<float> swDd    = array.new<float>(nSens, 0.0)  // max drawdown $ (stored positive)
+var array<float> swSumF  = array.new<float>(nSens, 0.0)  // Σ per-trade MFE (pts) — φ numerator
+var array<float> swSumA  = array.new<float>(nSens, 0.0)  // Σ per-trade MAE (pts) — φ denominator
+
+// Honest costs mirror the strategy() declaration: $0.95/side commission + 1-tick
+// slippage on the market entry and on stop exits (limit targets never slip).
+tickUsd     = syminfo.mintick * syminfo.pointvalue
+commUsd     = 2 * 0.95 * contracts
+slipEntry   = tickUsd * contracts
+rthFlat     = rthOnly and (not inRTH) and inRTH[1]                    // first bar after the RTH close
+sweepActive = showSweep and ordersOk and bar_index > sweepWarmup and not na(atr)
+
+if showSweep and nSens > 0
+    for i = 0 to nSens - 1
+        sLen  = sweepLo + i * sweepStep
+        prev  = array.get(swEma, i)                                   // last bar's EMA(sLen) = ema[1]
+        alpha = 2.0 / (sLen + 1)
+        cur   = na(prev) ? close : alpha * close + (1.0 - alpha) * prev
+        array.set(swEma, i, cur)
+
+        pos = array.get(swPos, i)
+        if pos == 0
+            // crossover(emaFast, emaSlow_s): fast[1] ≤ slow[1] and fast > slow
+            bull = (not na(prev)) and (emaFast[1] <= prev) and (emaFast > cur)
+            if bull and (not useVwap or close > vwap) and inRTH and sweepActive
+                array.set(swPos, i, 1)
+                array.set(swEntry, i, close)
+                array.set(swStop, i, close - stopAtr * atr)
+                array.set(swTgt,  i, close + targetR * stopAtr * atr)
+                array.set(swMfe, i, 0.0)
+                array.set(swMae, i, 0.0)
+        else
+            entry = array.get(swEntry, i)
+            stop  = array.get(swStop, i)
+            tgt   = array.get(swTgt, i)
+            array.set(swMfe, i, math.max(array.get(swMfe, i), high - entry))
+            array.set(swMae, i, math.max(array.get(swMae, i), entry - low))
+            float exitPx  = na
+            bool  stopHit = low <= stop
+            if stopHit
+                exitPx := stop                                        // pessimistic: stop wins a same-bar straddle
+            else if high >= tgt
+                exitPx := tgt
+            else if rthFlat
+                exitPx := close                                       // flatten at RTH end — never overnight
+            if not na(exitPx)
+                pnlUsd = (exitPx - entry) * syminfo.pointvalue * contracts - commUsd - slipEntry - (stopHit ? tickUsd * contracts : 0.0)
+                array.set(swTr, i, array.get(swTr, i) + 1)
+                if pnlUsd > 0
+                    array.set(swWin, i, array.get(swWin, i) + 1)
+                    array.set(swGp, i, array.get(swGp, i) + pnlUsd)
+                else
+                    array.set(swGl, i, array.get(swGl, i) - pnlUsd)
+                net = array.get(swNet, i) + pnlUsd
+                array.set(swNet, i, net)
+                pk = math.max(array.get(swPeak, i), net)
+                array.set(swPeak, i, pk)
+                array.set(swDd, i, math.max(array.get(swDd, i), pk - net))
+                array.set(swSumF, i, array.get(swSumF, i) + array.get(swMfe, i))
+                array.set(swSumA, i, array.get(swSumA, i) + array.get(swMae, i))
+                array.set(swPos, i, 0)
+
+// Render: axis-ordered table (NOT ranked). nSens rows + header + verdict ≤ 28.
+var table swTable = table.new(position.top_right, 7, 28, frame_width=2, frame_color=color.new(colAlgo, 0),
+     border_width=1, border_color=color.new(colAlgo, 82))
+f_swHdr(_c, _t) => table.cell(swTable, _c, 0, _t, text_color=color.new(colAlgo, 0), text_size=size.small, bgcolor=color.new(color.black, dashOpacity + 12), text_halign=text.align_right)
+
+if showSweep and barstate.islast and nSens > 0
+    // Viability + SHAPE verdict (heuristic): longest contiguous run of net-positive
+    // settings. A real edge survives a band of neighbors; a spike stands alone.
+    int viable     = 0
+    int run        = 0
+    int bestRun    = 0
+    int bestIdx    = 0
+    float bestM    = na
+    for i = 0 to nSens - 1
+        net = array.get(swNet, i)
+        if net > 0
+            viable += 1
+            run    += 1
+            bestRun := math.max(bestRun, run)
+        else
+            run := 0
+        tr   = array.get(swTr, i)
+        win  = array.get(swWin, i)
+        gp   = array.get(swGp, i)
+        gl   = array.get(swGl, i)
+        dd   = array.get(swDd, i)
+        sumF = array.get(swSumF, i)
+        sumA = array.get(swSumA, i)
+        m = sweepMetric == "Winrate" ? (tr > 0 ? win * 100.0 / tr : na) : sweepMetric == "Profit Factor" ? (gl > 0 ? gp / gl : na) : sweepMetric == "Max Drawdown" ? -dd : sweepMetric == "Potential Ratio" ? (sumA > 0 ? sumF / sumA : na) : net
+        if not na(m) and (na(bestM) or m > bestM)
+            bestM   := m
+            bestIdx := i
+    verdict    = viable == 0 ? "DEAD" : bestRun >= 5 ? "PLATEAU" : bestRun >= 3 ? "SOFT" : "SPIKE"
+    verdictCol = viable == 0 or bestRun < 3 ? colDn : bestRun >= 5 ? colUp : color.orange
+
+    f_swHdr(0, "Sens")
+    f_swHdr(1, "Trd")
+    f_swHdr(2, "Net$")
+    f_swHdr(3, "Win%")
+    f_swHdr(4, "PF")
+    f_swHdr(5, "DD$")
+    f_swHdr(6, "φ")
+    for i = 0 to nSens - 1
+        r    = i + 1
+        sLen = sweepLo + i * sweepStep
+        tr   = array.get(swTr, i)
+        win  = array.get(swWin, i)
+        gp   = array.get(swGp, i)
+        gl   = array.get(swGl, i)
+        net  = array.get(swNet, i)
+        dd   = array.get(swDd, i)
+        sumF = array.get(swSumF, i)
+        sumA = array.get(swSumA, i)
+        winPct = tr > 0 ? win * 100.0 / tr : na
+        pf     = gl > 0 ? gp / gl : na
+        phi    = sumA > 0 ? sumF / sumA : na
+        isFrozen = sLen == emaSlowLen
+        isBest   = i == bestIdx
+        rowBg    = isFrozen ? color.new(colAlgo, 68) : isBest ? color.new(color.orange, 74) : color.new(color.black, dashOpacity)
+        tag      = isFrozen ? "◆ " : isBest ? "⚠ " : ""
+        netCol   = net >= 0 ? colUp : colDn
+        table.cell(swTable, 0, r, tag + str.tostring(sLen), text_color=isFrozen ? color.new(colAlgo, 0) : color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 1, r, str.tostring(tr),                              text_color=color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 2, r, str.tostring(net, "#.##"),                     text_color=netCol,       text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 3, r, na(winPct) ? "—" : str.tostring(winPct, "#.#"),text_color=color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 4, r, na(pf) ? "—" : str.tostring(pf, "#.##"),       text_color=color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 5, r, str.tostring(dd, "#.##"),                      text_color=color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+        table.cell(swTable, 6, r, na(phi) ? "—" : str.tostring(phi, "#.##"),     text_color=color.silver, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg)
+    vr = nSens + 1
+    table.cell(swTable, 0, vr, verdict, text_color=color.white, text_size=size.small, text_halign=text.align_left, bgcolor=color.new(verdictCol, 30),
+         tooltip="DIAGNOSTIC — relative shape only, NOT the Strategy Tester. ◆ = frozen live setting · ⚠ = in-sample max (do not trade). DEAD/SPIKE = no robust edge; PLATEAU = a band of viable neighbors. Reading this to choose a live setting is in-sample tuning that needs a new ledger pre-registration.")
+    table.cell(swTable, 1, vr, "viable", text_color=color.silver, text_size=size.tiny, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+    table.cell(swTable, 2, vr, str.tostring(viable) + "/" + str.tostring(nSens), text_color=viable == 0 ? colDn : color.white, text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+    table.cell(swTable, 3, vr, "max@", text_color=color.silver, text_size=size.tiny, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+    table.cell(swTable, 4, vr, "⚠" + str.tostring(sweepLo + bestIdx * sweepStep), text_color=color.orange, text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+    table.cell(swTable, 5, vr, "rel.", text_color=color.silver, text_size=size.tiny, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity),
+         tooltip="RELATIVE backtest — not the Strategy Tester. Use the SHAPE across Sens, not any single cell, and never the live numbers.")
+    table.cell(swTable, 6, vr, "", bgcolor=color.new(color.black, dashOpacity))

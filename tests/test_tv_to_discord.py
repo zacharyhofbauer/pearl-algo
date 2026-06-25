@@ -32,6 +32,37 @@ def test_embed_sell_is_red():
     assert t.build_embed(p)["color"] == 0xE74C3C
 
 
+def test_embed_mnq_hourly_payload_renders_trigger_regime_tf():
+    # The mnq_hourly.pine payload uses trigger/regime/exec_tf/regime_tf (not reason/tf).
+    e = t.build_embed({"strat": "mnq-hourly", "v": 1, "status": "Candidate", "action": "SELL",
+                       "symbol": "MNQ1!", "exec_tf": "60", "regime_tf": "240",
+                       "bar_time": "2026-06-19 10:00 ET", "regime": "DOWN", "trigger": "pullback",
+                       "entry": 30592.75, "stop": 30625.0, "target": 30510.0, "atr": 40.0, "rr": 2.5,
+                       "risk_usd_per_contract": 65.5, "contracts": 1, "max_contracts": 5, "trades_today": 2})
+    assert "SELL MNQ1!" in e["title"] and e["color"] == 0xE74C3C
+    assert "pullback" in e["description"]      # trigger surfaced as the reason
+    assert "DOWN" in e["description"]          # regime surfaced
+    assert "tf 60/240" in e["description"]     # exec/regime timeframes
+    assert {"Entry", "Stop", "Target"} <= {f["name"] for f in e["fields"]}
+
+
+def test_embed_buy_has_quick_read_headline():
+    e = t.build_embed(_buy())
+    # Whole trade in one bold line at the top, then context.
+    assert e["description"].startswith("**BUY MNQ1! @ 21,850.25**")
+    assert "🛑" in e["description"] and "🎯" in e["description"]
+
+
+def test_embed_exit_renders_result():
+    e = t.build_embed({"strat": "mnq-hourly", "action": "EXIT", "symbol": "MNQ1!", "exec_tf": "60",
+                       "bar_time": "2026-06-19 14:00 ET", "exit": 30680.0, "pnl_usd": 175.5,
+                       "reason": "target / win"})
+    assert "EXIT — MNQ1!" in e["title"] and e["color"] == 0x3498DB
+    assert "30,680" in e["description"]
+    assert "target / win" in e["description"]
+    assert "175.50" in e["description"]
+
+
 def test_embed_daily_stop():
     e = t.build_embed({"strat": "x", "action": "DAILY_STOP", "symbol": "MNQ1!",
                        "reason": "max trades/day hit", "daily_pnl_usd": -42.0, "trades_today": 3})
