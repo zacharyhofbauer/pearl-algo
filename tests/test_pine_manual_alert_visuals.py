@@ -6,6 +6,7 @@ from pathlib import Path
 PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_rth_long_bias.pine"
 DEFENDER_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_1h_4h_defender.pine"
 HOURLY_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_hourly.pine"
+CRYPTO_V4_PINE = Path(__file__).resolve().parent.parent / "pine" / "pearl_algo_crypto" / "pearl_algo_crypto_v4.pine"
 
 
 def _pine() -> str:
@@ -18,6 +19,10 @@ def _defender_pine() -> str:
 
 def _hourly_pine() -> str:
     return HOURLY_PINE.read_text()
+
+
+def _crypto_v4_pine() -> str:
+    return CRYPTO_V4_PINE.read_text()
 
 
 def test_manual_pine_has_mobile_obvious_pinstripe_identity() -> None:
@@ -96,6 +101,24 @@ def test_manual_pine_dashboard_is_compact_and_honest() -> None:
     assert "Active Signal" in source
     assert "KILLED" in source
     assert "CANDIDATE" in source
+
+
+def test_crypto_v4_dashboard_is_compile_safe_and_repaints_last_bar() -> None:
+    source = _crypto_v4_pine()
+
+    assert "//@version=6" in source
+    assert 'strategy("PEARL Algo Crypto v4"' in source
+    assert "var table dash = table.new(f_pos(dashPosIn), 2, 18" in source
+    assert "Show PEARL dashboard" in source
+    assert "PEARL dashboard position" in source
+    assert "PEARL dashboard size" in source
+    assert 'input.string("Full", "PEARL dashboard size"' in source
+    assert "if showDash and barstate.islast\n    table.clear(dash, 0, 0, 1, 17)" in source
+    assert "text_size=dash" not in source
+    assert "dashTxtSz" not in source
+    assert "f_rowS" in source and "text_size=size.small" in source
+    assert "f_rowT" in source and "text_size=size.tiny" in source
+    assert source.count("f_rowB(") >= 6
 
 
 def test_pine_scripts_are_v6() -> None:

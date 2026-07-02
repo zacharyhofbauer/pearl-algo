@@ -1,0 +1,738 @@
+//@version=6
+// PEARL Algo Crypto v3 — crypto day-trade signals (long-biased, any-timeframe)
+//
+// WHAT THIS IS: the crypto sibling of "PearlAlgo MNQ — Hourly v5", rebuilt around a
+// manual leverage workflow: ~$100 isolated margin per trade at 10–40x, long day
+// trades targeting +50–100% ROI on margin. The script's job is to say WHEN to enter
+// and hand you the plan — entry, a BUY ZONE to scale into (you place the adds by
+// hand), one stop under the zone, a target expressed as ROI-on-margin, and an
+// estimated liquidation price so the stop is never on the wrong side of liq.
+// The Tester models ONE fill at signal close (pyramiding=0, house standard) —
+// there is NO automated order ladder.
+//
+// SIGNAL: 4h EMA regime (+ optional 1D 200-EMA bias) with TWO long entry families:
+//   CONTINUATION — HTF up + 15m breakout or pullback-reclaim (Hourly v5 pattern).
+//   REVERSAL     — HTF was down, 15m prints a confirmed CHoCH-up (close crossing the
+//                  last confirmed pivot swing high) + fast-EMA reclaim: the turn-catch.
+// Long-only per the 2026-07-01 BTC research (long-only beat two-sided across the
+// sweep); shorts render only as faint "sell?" study markers, never orders/alerts.
+//
+// ANTI-REPAINT: every request.security read is the previous CONFIRMED bar
+// ([1] + lookahead_off), so signals never revise intrabar. WORKS ON ANY CHART TF:
+// below the exec TF the signal stays exec-anchored (view 15m signals from a 5m
+// chart); on charts ABOVE it the signal TF AUTO-RAISES to the chart TF (1h chart →
+// 1h signal, 4h chart → 4h signal), because Pine cannot reliably request data from
+// below the chart TF. The dashboard header always names the live signal TF.
+// TWO structure engines exist on purpose: the exec-TF pivot
+// state machine inside f_execBundle() is wired to the REVERSAL entry (TF-independent,
+// pivot confirms pivRight exec bars late by construction); the chart-TF BOS/CHoCH
+// layer is DESCRIPTIVE ONLY and changes with the chart TF — never wired to entries.
+//
+// HONEST STATUS: RESEARCH candidate. NOT ledger-registered, NO backtest, and there
+// is NO registered crypto holdout window yet — the Tester-window toggle ships OFF
+// and its dates are placeholders (NOT the MNQ dev window). Entry alerts are MUTED
+// by default; forward paper alerts are the out-of-sample. Do not trade this on real
+// margin until a pre-registered trial clears docs/audits/validation-trial-ledger.md.
+//
+// ROI MATH DISCLAIMER: leverage, margin, ROI-on-margin, and liquidation numbers are
+// PLANNING MATH for your manual isolated-margin position. The Strategy Tester is
+// notional-based (margin_long=0): its % returns will NEVER match ROI-on-margin, and
+// it does not simulate liquidation. A +75% ROI trade at 20x shows as ~+3.75% of
+// notional in the Tester.
+//
+// TESTER-HONESTY GOTCHAS (read before trusting any Tester number):
+//  - Percent commission (0.06%/side) + slippage(5 ticks) are the honest crypto-taker
+//    settings; zero them once as a sensitivity check, never as the headline.
+//  - Crypto qty is fractional but exchanges have min-qty steps; the entry guard skips
+//    a signal whose qty rounds to 0 at qtyPrec decimals.
+//  - The chandelier high-water updates from CONFIRMED exec-TF highs, so on charts
+//    below the exec TF the trail is one exec bar stale; the honest Tester read is
+//    chart TF == exec TF (15m by default).
+//  - On charts ABOVE the input exec TF the signal auto-raises to the CHART TF, so
+//    a Tester run on a 1h/4h chart is a DIFFERENT (slower) trial than the 15m one.
+//  - Tester % ≠ ROI-on-margin (see above). No crypto holdout is registered yet.
+strategy("PEARL Algo Crypto v3", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     margin_long=0, margin_short=0,
+     calc_on_every_tick=false, process_orders_on_close=true,
+     commission_type=strategy.commission.percent, commission_value=0.06,
+     slippage=5, backtest_fill_limits_assumption=1,
+     max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+
+// ─────────────────────────────────  INPUTS  ─────────────────────────────────
+gR = "➞ Regime (HTF)"
+regimeTf     = input.timeframe("240", "Regime timeframe", group=gR, inline="h")
+htfFastLen   = input.int(8,  "EMA fast", minval=1, group=gR, inline="h")
+htfSlowLen   = input.int(21, "EMA slow", minval=2, group=gR, inline="h")
+useDailyBias = input.bool(true, "Daily bias filter", group=gR, inline="d", tooltip="Continuation longs also require price above this higher-TF EMA. Does NOT gate reversal entries — a turn is by construction usually below it.")
+dailyTf      = input.timeframe("D", "TF", group=gR, inline="d")
+dailyLen     = input.int(200, "EMA", minval=10, group=gR, inline="d")
+
+gE = "➞ Execution (signal TF)"
+execTf      = input.timeframe("15", "Execution timeframe", group=gE, inline="e", tooltip="The signal is evaluated on this timeframe via request.security. Default 15 (15m day-trade pace). On charts ABOVE this TF the signal auto-raises to the chart TF (1h chart → 1h signal, 4h chart → 4h signal).")
+execEmaLen  = input.int(20, "Pullback EMA", minval=1, group=gE, inline="e")
+breakoutLen = input.int(8,  "Breakout lookback", minval=2, group=gE, tooltip="Breakout = close CROSSING the highest high of the prior N exec bars (an edge, not a held level).")
+allowBreakout = input.bool(true, "Breakout",  group=gE, inline="t")
+allowPullback = input.bool(true, "Pullback",  group=gE, inline="t")
+allowReversal = input.bool(true, "Reversal",  group=gE, inline="t", tooltip="Counter-trend turn-catch: HTF was DOWN recently, exec TF prints a confirmed CHoCH-up (close crossing the last confirmed pivot swing high) + fast-EMA reclaim. Riskier than continuation — validate separately.")
+revLookback = input.int(32, "Reversal: HTF-down within N exec bars", minval=1, group=gE, tooltip="The turn-catch only arms if the HTF regime was DOWN within the last N exec bars (32 × 15m = 8h). Prevents stale CHoCHs firing long after the downtrend ended.")
+revNeedDaily= input.bool(false, "Reversal also requires daily bias", group=gE, tooltip="Stricter mode: reversal longs must also be above the daily EMA. OFF by default — turns usually start below it.")
+pivLeftX    = input.int(3, "Exec pivot left", minval=1, group=gE, inline="pv")
+pivRightX   = input.int(3, "right (confirm lag)", minval=1, group=gE, inline="pv", tooltip="Exec-TF swing pivots for the reversal CHoCH. A swing is only CONFIRMED this many exec bars after it forms — structural lag, not prediction.")
+showShortStudy = input.bool(true, "Show SELL study markers (no trade)", group=gE, tooltip="Faint 'sell?' markers on exec-TF CHoCH-down + EMA loss. Display-only: never orders, never alerts. Long-only per the 2026-07-01 BTC research.")
+
+gZ = "➞ Buy zone (manual scale-in guidance)"
+zoneAdds    = input.int(2, "Add levels below entry", minval=0, maxval=3, group=gZ, inline="z", tooltip="You said you buy slowly and buy into it — these are the suggested add prices below the signal. DISPLAY + ALERT ONLY: the script never places these orders; the Tester models one fill at signal close.")
+zoneAtrStep = input.float(0.75, "Spacing ×ATR", minval=0.1, step=0.05, group=gZ, inline="z")
+
+gX = "➞ Exits"
+exitMode = input.string("Fixed ROI bracket", "Exit mode", options=["Fixed ROI bracket", "Partial + trail", "R-multiple bracket"], group=gX, tooltip="Fixed ROI bracket (default): full exit at the ROI-on-margin target, hard stop below the zone — simplest to mirror manually. Partial + trail: take tp1 qty% at the first ROI target, trail the rest with a wide ATR chandelier (2026-07-01 BTC research: wide trails dominated 3x/5x). R-multiple: classic bracket, ROI shown for reference only.")
+atrLen   = input.int(14, "ATR len", minval=1, group=gX, inline="x")
+stopAtr  = input.float(1.0, "Stop ×ATR below zone base", minval=0.1, step=0.1, group=gX, inline="x")
+tgtRoiPct= input.float(75.0, "Target ROI on margin %", minval=5.0, step=5.0, group=gX, tooltip="Fixed-bracket target as ROI on your margin at the chosen leverage. +75% at 20x = a +3.75% price move from the average entry. SANITY-CHECK against volatility: on quiet majors (BTC 15m, ATR ~0.1%) that is a 30×ATR multi-day move sold as a day trade — use 15–25% there; +50–100% suits fast alt/meme perps. The dashboard Target row flags ⚠ when the target sits more than 6×ATR away.")
+tp1RoiPct= input.float(50.0, "TP1 ROI %", minval=5.0, step=5.0, group=gX, inline="p")
+tp1Pct   = input.int(50, "TP1 qty %", minval=1, maxval=99, group=gX, inline="p")
+useBreakeven = input.bool(true, "Stop→breakeven after TP1", group=gX, inline="p2")
+trailAtr = input.float(8.0, "Trail ×ATR (chandelier)", minval=0.5, step=0.5, group=gX, inline="p2", tooltip="Runner trail width for Partial + trail mode. Wide on purpose: the 2026-07-01 BTC sweep found 8×ATR dominated tighter 3×/5× trails.")
+targetR  = input.float(2.5, "Target ×R (R-multiple mode)", minval=0.1, step=0.1, group=gX)
+
+gLev = "➞ Leverage + liquidation (planning math)"
+marginUsd = input.float(100.0, "Margin per trade $", minval=1.0, step=10.0, group=gLev, inline="l")
+levX      = input.int(20, "Leverage ×", minval=1, maxval=50, group=gLev, inline="l")
+mmrPct    = input.float(0.5, "Maintenance margin %", minval=0.0, step=0.1, group=gLev, tooltip="Isolated-margin liquidation ESTIMATE: liq ≈ avg × (1 − 1/lev + mmr/100). Excludes fees, funding, and tiered maintenance — real liquidation sits CLOSER than this. Treat the estimate as optimistic.")
+qtyPrec   = input.int(4, "Qty decimals", minval=0, maxval=8, group=gLev, tooltip="Tester qty rounding. Exchanges also enforce their own min-qty step; a signal whose qty rounds to 0 is skipped.")
+
+gS = "➞ Session + Safety"
+sessionMode  = input.string("Auto", "Session filter", options=["Auto", "24x7", "RTH", "Custom"], group=gS, tooltip="Auto = 24x7 on crypto pairs AND index-type symbols (CRYPTOCAP etc.); RTH auto-applies only to futures/stocks. RTH/Custom flatten outside the session.")
+sessRTH      = input.session("0930-1600", "Session (ET, RTH/Custom)", group=gS)
+maxTradesDay = input.int(3, "Max signals/day (0=off)", minval=0, group=gS, tooltip="Caps NEW entry SIGNALS per day. The only guardrail that protects a live manual account.")
+
+gH = "➞ Honesty"
+sigStatusIn = input.string("Research — alerts muted", "Signal status", options=["Research — alerts muted", "Candidate — alerts on"], group=gH, tooltip="Muted until a pre-registered trial clears docs/audits/validation-trial-ledger.md. Visuals stay live; only alert() delivery is gated.")
+alertsLive  = sigStatusIn == "Candidate — alerts on"
+alertFmtIn  = input.string("Discord webhook", "Alert format", options=["Discord webhook", "Receiver JSON"], group=gH, tooltip="Discord webhook (default): alert() emits a Discord-ready payload — in the TradingView alert dialog set the webhook URL to a Discord channel webhook (#algorithm) and pings land with zero server. Receiver JSON: flat machine JSON for the alerts/tv_to_discord.py journaling receiver (not currently running).")
+discordFmt  = alertFmtIn == "Discord webhook"
+useBtWindow = input.bool(false, "Limit Strategy Tester to a window", group=gH, tooltip="OFF (default): full chart history. NOTE: no crypto holdout is registered yet — these dates are PLACEHOLDERS, not the MNQ dev window. Forward paper alerts are the out-of-sample until a crypto trial is registered.")
+btStart     = input.time(timestamp("2024-01-01T00:00:00+00:00"), "Window start", group=gH)
+btEnd       = input.time(timestamp("2026-07-01T00:00:00+00:00"), "Window end (exclusive)", group=gH)
+ordersOk    = not useBtWindow or (time >= btStart and time < btEnd)
+
+gV = "➞ Style"
+forceArmed = input.bool(true, "Force armed visuals (full kit even when muted)", group=gV, tooltip="Shows markers regardless of Signal status, so the chart looks armed. Alert DELIVERY stays gated by Signal status — a muted signal never pings your phone.")
+showCloud  = input.bool(true,  "Trend cloud", group=gV, inline="v1")
+showGlow   = input.bool(true,  "EMA glow",    group=gV, inline="v1")
+showZone   = input.bool(true,  "Buy-zone rays", group=gV, inline="v1", tooltip="Dotted price rays for entry / adds / stop / target on each signal — the levels you type into the exchange. Deleted when the trade closes.")
+showExecEma= input.bool(false, "Exec EMA",    group=gV, inline="v2")
+showSignals= input.bool(true,  "Signals",     group=gV, inline="v2")
+showBg     = input.bool(false, "Background tints", group=gV, inline="v2")
+showDash   = input.bool(true,  "Dashboard",   group=gV, inline="v2")
+colorBars  = input.bool(false, "Color candles by trend", group=gV)
+boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV)
+showDiamonds = input.bool(false, "Confirmation diamonds", group=gV, inline="v3")
+showRibbon   = input.bool(false, "Multi-band ribbon", group=gV, inline="v3")
+dashPosIn  = input.string("Top Right", "Dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV)
+dashSizeIn = input.string("Compact", "Dashboard size", options=["Compact", "Full"], group=gV, tooltip="Compact (default): phone-sized — tiny text, trade-plan rows only. Full: every diagnostic row (power, confluence, BTC lead, vol, perp) at small text.")
+dashOpacity= input.int(20, "Dash opacity", minval=0, maxval=80, group=gV)
+colAlgo = input.color(#00e5ff, "Brand",   group=gV, inline="c")
+colUp   = input.color(#26a69a, "Up",      group=gV, inline="c")
+colDn   = input.color(#ef5350, "Down",    group=gV, inline="c")
+colNeu  = input.color(#78909c, "Neutral", group=gV, inline="c")
+colBuy  = input.color(#2979ff, "Buy signal",  group=gV, inline="sig")
+colSell = input.color(#ff2d9b, "Sell study",  group=gV, inline="sig")
+
+gC = "➞ Confluence (crypto, decision support)"
+useBtcLead = input.bool(true, "BTC leader confirm", group=gC, inline="c1", tooltip="Alts mostly follow BTC. Auto-disabled when the chart symbol itself contains BTC (no self-confirmation). Degrades to n/a if the feed is unavailable.")
+btcSymbol  = input.symbol("INDEX:BTCUSD", "Leader", group=gC, inline="c1")
+useAdx     = input.bool(true, "ADX strength", group=gC, inline="c2")
+adxMin     = input.int(20, "min", minval=1, group=gC, inline="c2")
+useAtrBand = input.bool(true, "ATR% volatility band (hard gate)", group=gC, inline="c3", tooltip="Skips entries when exec ATR as % of price is outside this band: below = dead chop not worth fees at leverage, above = blow-off conditions where stops and liq math break. Unlike the other factors this one HARD-gates entries when enabled.")
+atrPctLo   = input.float(0.10, "lo %", minval=0.0, step=0.05, group=gC, inline="c3")
+atrPctHi   = input.float(6.0,  "hi %", minval=0.1, step=0.5,  group=gC, inline="c3")
+useRvol    = input.bool(true, "Relative volume", group=gC, inline="c4")
+rvolMin    = input.float(1.0, "min ×", minval=0.1, step=0.1, group=gC, inline="c4")
+requireConfluence = input.bool(false, "Require confluence to ARM (experimental, changes fills)", group=gC, tooltip="OFF = confluence is display-only decision support. ON = also gates entries on the score — this CHANGES backtest fills, so it is a new un-validated trial.")
+minConfluence     = input.int(3, "Min confluence score", minval=1, group=gC)
+
+gPerp = "➞ Perp filters (crypto risk controls)"
+usePerpFilters = input.bool(true, "Use perp filters on crypto", group=gPerp, tooltip="Crowding/risk controls, not edge: basis cap, funding-window avoidance, volume-stress skip. Degrade gracefully to off/na when data is missing.")
+spotSymbol   = input.symbol("BINANCE:BTCUSDT", "Spot/index reference", group=gPerp, tooltip="Matching spot/index for the perp being traded (e.g. BINANCE:ETHUSDT for ETHUSDT.P). Used to estimate perp premium/basis.")
+maxBasisLong = input.float(0.35, "Max long premium %", minval=0.0, step=0.05, group=gPerp, tooltip="Skip fresh longs when the perp trades too far above spot/index: crowded-long / expensive-funding proxy.")
+avoidFundingWindow = input.bool(true, "Avoid funding window", group=gPerp, inline="f")
+fundingWindowMin   = input.int(20, "± minutes", minval=0, maxval=60, group=gPerp, inline="f", tooltip="Skip new entries near the common 00:00/08:00/16:00 UTC funding marks. Exchanges can differ.")
+useVolumeStress = input.bool(true, "Avoid volume-stress spikes", group=gPerp, inline="vs")
+volStressMult   = input.float(3.0, "spike ×", minval=1.0, step=0.25, group=gPerp, inline="vs", tooltip="Skips entries during extreme exec-TF relative-volume spikes — a liquidation-cascade proxy.")
+
+gMS = "➞ Market Structure (chart TF, descriptive)"
+showStruct = input.bool(true, "Show BOS / CHoCH", group=gMS, inline="ms", tooltip="Chart-TF reading aid, NOT wired to entries (the entry-wired structure lives on the exec TF inside f_execBundle).")
+pivLeft    = input.int(5, "Pivot left",  minval=1, group=gMS, inline="msp")
+pivRight   = input.int(5, "Pivot right (confirm lag)", minval=1, group=gMS, inline="msp")
+structMax  = input.int(6, "Max BOS/CHoCH kept", minval=1, maxval=40, group=gMS)
+colBos     = input.color(#26a69a, "BOS",   group=gMS, inline="msc")
+colChoch   = input.color(#ffa726, "CHoCH", group=gMS, inline="msc")
+
+gPow = "➞ Power gauge (descriptive)"
+showPower = input.bool(true, "Show Buy/Sell Power", group=gPow, inline="pw")
+rsiLen    = input.int(14, "RSI len", minval=2, group=gPow, inline="pw")
+slopeLen  = input.int(10, "Slope lookback", minval=2, group=gPow)
+
+visArmed = forceArmed or alertsLive
+isCrypto = syminfo.type == "crypto"
+// Auto sessions: 24/7 for anything WITHOUT a real trading session (crypto pairs,
+// CRYPTOCAP/market-cap indexes...). RTH auto-applies only to futures and stocks.
+use24x7  = sessionMode == "24x7" or (sessionMode == "Auto" and not (syminfo.type == "futures" or syminfo.type == "stock"))
+
+// ─────────────────────────────────  HELPERS  ────────────────────────────────
+f_tick(x) => na(x) ? na : math.round(x / syminfo.mintick) * syminfo.mintick
+// Floor (not round) so the sized qty never implies more margin than allotted.
+f_qty(x) => na(x) ? na : math.floor(x * math.pow(10, qtyPrec)) / math.pow(10, qtyPrec)
+f_adx() =>
+    [_dp, _dm, adxV] = ta.dmi(14, 14)
+    adxV[1]
+
+// Effective timeframes: the signal engine never requests BELOW the chart TF
+// (request.security cannot reliably read lower TFs). On charts above the input
+// exec TF the signal AUTO-RAISES to the chart TF; regime and daily bias raise
+// with it if overtaken. On 5m/15m charts everything behaves exactly as the inputs say.
+f_tfMax(string a, string b) => timeframe.in_seconds(a) >= timeframe.in_seconds(b) ? a : b
+f_tfLabel(string tf) =>
+    tf == "1" ? "1M" : tf == "3" ? "3M" : tf == "5" ? "5M" : tf == "15" ? "15M" :
+     tf == "30" ? "30M" : tf == "45" ? "45M" : tf == "60" ? "1H" : tf == "120" ? "2H" :
+     tf == "240" ? "4H" : tf == "480" ? "8H" : tf == "720" ? "12H" :
+     tf == "D" or tf == "1D" ? "1D" : tf == "W" or tf == "1W" ? "1W" : tf
+effExecTf  = f_tfMax(timeframe.period, execTf)
+effRegTf   = f_tfMax(effExecTf, regimeTf)
+effDailyTf = f_tfMax(effExecTf, dailyTf)
+
+// Exec-TF bundle — runs INSIDE the effective exec-TF security context. Every returned element
+// is [1]-offset (previous CONFIRMED exec bar). The pivot state machine here is the
+// ENTRY-WIRED structure engine: TF-independent and anti-repaint (a pivot only exists
+// pivRightX exec bars after it forms, then the [1] offset confirms the break bar).
+f_execBundle() =>
+    emaX  = ta.ema(close, execEmaLen)
+    atrX  = ta.atr(atrLen)
+    bkL   = ta.crossover(close, ta.highest(high[1], breakoutLen))
+    pbL   = ta.crossover(close, emaX)
+    ph    = ta.pivothigh(high, pivLeftX, pivRightX)
+    pl    = ta.pivotlow(low,  pivLeftX, pivRightX)
+    var float swHi = na
+    var float swLo = na
+    var int   bias = 0
+    if not na(ph)
+        swHi := ph
+    if not na(pl)
+        swLo := pl
+    crossHi = ta.crossover(close,  swHi)
+    crossLo = ta.crossunder(close, swLo)
+    chochUp = crossHi and bias == -1
+    chochDn = crossLo and bias == 1
+    if crossHi
+        bias := 1
+    if crossLo
+        bias := -1
+    aboveEma = close > emaX
+    relVol   = volume / math.max(ta.sma(volume, 20), 1e-10)
+    [close[1], emaX[1], atrX[1], high[1], bkL[1], pbL[1], chochUp[1], chochDn[1], aboveEma[1], relVol[1]]
+
+// ─────────────────────────────  SECURITY READS  ─────────────────────────────
+// 4h regime — previous CONFIRMED HTF bar ([1] + lookahead_off = anti-repaint).
+[htfClose, htfFast, htfSlow, htfFastPrev] = request.security(
+     syminfo.tickerid, effRegTf,
+     [close[1], ta.ema(close, htfFastLen)[1], ta.ema(close, htfSlowLen)[1], ta.ema(close, htfFastLen)[2]],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+dailyEma = request.security(syminfo.tickerid, effDailyTf, ta.ema(close, dailyLen)[1],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[xClose, xEma, xAtr, xHigh, xBkL, xPbL, xChochUp, xChochDn, xAbove, xRvol] = request.security(
+     syminfo.tickerid, effExecTf, f_execBundle(),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+execAdx = request.security(syminfo.tickerid, effExecTf, f_adx(),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[btcClose, btcEma] = request.security(btcSymbol, effExecTf,
+     [close[1], ta.ema(close, execEmaLen)[1]],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+spotClose = request.security(spotSymbol, effExecTf, close[1],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+// ─────────────────────────  REGIME + SESSION STATE  ─────────────────────────
+htfUp     = htfClose > htfFast and htfFast > htfSlow and htfFast >= htfFastPrev
+htfDown   = htfClose < htfFast and htfFast < htfSlow and htfFast <= htfFastPrev
+regimeTxt = htfUp ? "UP" : htfDown ? "DOWN" : "NEUTRAL"
+regimeCol = htfUp ? colUp : htfDown ? colDn : colNeu
+
+dailyActive = useDailyBias and not na(dailyEma)
+dailyPt     = dailyActive and xClose > dailyEma
+dailyLongOk = not useDailyBias or na(dailyEma) or xClose > dailyEma
+
+execOpenT  = time(effExecTf)
+newExecBar = ta.change(execOpenT) != 0
+inSession  = use24x7 or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = use24x7 ? ta.change(time("D")) != 0 : (inSession and not inSession[1])
+
+// Reversal memory: was the HTF regime DOWN within the lookback window? Wall-clock
+// based (revLookback × exec-TF seconds) so it reads identically on every chart TF.
+var int lastDownT = na
+if htfDown
+    lastDownT := time
+downRecently = not na(lastDownT) and (time - lastDownT) <= revLookback * timeframe.in_seconds(effExecTf) * 1000
+
+var int tradesToday = 0
+if newSession
+    tradesToday := 0
+tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
+canTrade    = inSession and tradesCapOk and not na(xAtr)
+
+// Perp crowding/risk context (long side only — this file never shorts).
+basisPct    = na(spotClose) or spotClose == 0 ? na : 100.0 * (xClose - spotClose) / spotClose
+basisLongOk = not (isCrypto and usePerpFilters) or na(basisPct) or basisPct <= maxBasisLong
+// Funding clock from the EXEC-PERIOD open (== the signal evaluation moment), not
+// the chart bar's own clock — keeps the gate chart-TF independent.
+hourUTC     = hour(execOpenT, "UTC")
+minUTC      = minute(execOpenT, "UTC")
+nearFunding = (hourUTC % 8 == 0 and minUTC <= fundingWindowMin) or (((hourUTC + 1) % 8 == 0) and minUTC >= 60 - fundingWindowMin)
+fundingOk   = not (isCrypto and usePerpFilters and avoidFundingWindow) or not nearFunding
+volStress   = isCrypto and usePerpFilters and useVolumeStress and not na(xRvol) and xRvol >= volStressMult
+perpOk      = (not isCrypto or not usePerpFilters) or (fundingOk and not volStress)
+
+// ─────────────────────────  CONFLUENCE (crypto)  ────────────────────────────
+// Display-first decision support (house default). Only the ATR% band hard-gates.
+btcSelf   = str.contains(str.upper(syminfo.ticker), "BTC")
+btcActive = useBtcLead and not btcSelf and not na(btcClose) and not na(btcEma)
+btcUp     = btcActive and btcClose > btcEma
+adxActive = useAdx and not na(execAdx)
+adxOk     = adxActive and execAdx >= adxMin
+atrPct    = na(xAtr) or na(xClose) or xClose == 0 ? na : 100.0 * xAtr / xClose
+atrActive = useAtrBand and not na(atrPct)
+atrBandOk = not na(atrPct) and atrPct >= atrPctLo and atrPct <= atrPctHi
+rvolActive= useRvol and not na(xRvol)
+rvolOk    = rvolActive and xRvol >= rvolMin
+
+maxConf = 1 + (dailyActive ? 1 : 0) + (btcActive ? 1 : 0) + (adxActive ? 1 : 0) + (atrActive ? 1 : 0) + (rvolActive ? 1 : 0)
+sLong   = (htfUp ? 1 : 0) + (dailyPt ? 1 : 0) + (btcUp ? 1 : 0) + (adxOk ? 1 : 0) + (atrBandOk ? 1 : 0) + (rvolOk ? 1 : 0)
+confLongOk = not requireConfluence or sLong >= minConfluence
+volOk      = not useAtrBand or atrBandOk
+
+// ─────────────────────────────  ENTRY FAMILIES  ─────────────────────────────
+contBreak = allowBreakout and htfUp and dailyLongOk and xBkL
+contPull  = allowPullback and htfUp and dailyLongOk and xPbL
+revDailyOk= not revNeedDaily or na(dailyEma) or xClose > dailyEma
+revSetup  = allowReversal and not htfUp and downRecently and xChochUp and xAbove and revDailyOk
+rawLong   = contBreak or contPull or revSetup
+longSig   = newExecBar and rawLong and canTrade and volOk and confLongOk and perpOk and basisLongOk
+isRevSig  = longSig and revSetup and not (contBreak or contPull)
+triggerTxt= revSetup ? "reversal-choch" : contBreak ? "continuation-breakout" : "continuation-pullback"
+// Study-only short read (display, never orders/alerts): CHoCH-down + EMA loss.
+sellStudy = newExecBar and showShortStudy and xChochDn and not xAbove
+
+// ────────────────────  BUY ZONE + ROI / LIQUIDATION MATH  ───────────────────
+// Planned levels frozen at signal from the confirmed exec close + exec ATR. The
+// zone is where YOU scale in by hand; the Tester models one fill at signal close.
+var float pE1 = na
+var float pAdd1 = na
+var float pAdd2 = na
+var float pAdd3 = na
+var float pZoneLow = na
+var float pStop = na
+var float pTgt = na
+var float pTp1 = na
+var float pAvgWC = na
+var float pWorstUsd = na
+var float pRisk1Usd = na
+var float pLiq1 = na
+if longSig
+    pE1      := f_tick(xClose)
+    pAdd1    := zoneAdds >= 1 ? f_tick(xClose - 1 * zoneAtrStep * xAtr) : na
+    pAdd2    := zoneAdds >= 2 ? f_tick(xClose - 2 * zoneAtrStep * xAtr) : na
+    pAdd3    := zoneAdds >= 3 ? f_tick(xClose - 3 * zoneAtrStep * xAtr) : na
+    pZoneLow := zoneAdds == 0 ? pE1 : zoneAdds == 1 ? pAdd1 : zoneAdds == 2 ? pAdd2 : pAdd3
+    pStop    := f_tick(pZoneLow - stopAtr * xAtr)
+    // Single-fill plan (matches the Tester): full margin deployed at the signal.
+    // Target is MODE-AWARE so the ray, alert "target", and dashboard all show the
+    // price of the actual working order, not always the fixed-ROI level.
+    pTp1     := f_tick(pE1 * (1 + tp1RoiPct / (100 * levX)))
+    pTgt     := exitMode == "R-multiple bracket" ? f_tick(pE1 + targetR * (pE1 - pStop)) :
+                 exitMode == "Partial + trail" ? pTp1 :
+                 f_tick(pE1 * (1 + tgtRoiPct / (100 * levX)))
+    q1        = marginUsd * levX / pE1
+    pRisk1Usd:= q1 * (pE1 - pStop)
+    pLiq1    := f_tick(pE1 * (1 - 1.0 / levX + mmrPct / 100))
+    // Full scale-in plan (equal margin per fill across entry + adds): blended avg,
+    // worst-case $ risk if every add fills and the stop is hit.
+    float sumQ = 0.0
+    float sumN = 0.0
+    int fills = 1 + zoneAdds
+    for i = 0 to zoneAdds
+        px = xClose - i * zoneAtrStep * xAtr
+        q  = (marginUsd / fills) * levX / px
+        sumQ += q
+        sumN += q * px
+    pAvgWC   := sumN / sumQ
+    pWorstUsd:= sumQ * (pAvgWC - pStop)
+// Liquidation warning keys on the single-fill liq (the HIGHER, binding one — the
+// blended scale-in liq sits lower). If the stop is at/under est. liq, the exchange
+// takes you out before your stop ever trades. Fatal at 40x, where liq ≈ 2% below.
+liqWarn = not na(pStop) and not na(pLiq1) and pStop <= pLiq1
+roiStop1 = na(pE1) or na(pStop) ? na : -100.0 * levX * (pE1 - pStop) / pE1
+
+// ────────────────────────────  ORDERS + EXITS  ──────────────────────────────
+flat = strategy.position_size == 0
+var float hiWater   = na
+var float trailStop = na
+var bool  tp1Done   = false
+// Trade-scoped exit anchor: latched at ENTRY and never touched by later signals. A
+// repeat signal mid-position updates the display/alert plan (pStop etc.) but must
+// NOT re-price the OPEN trade's working orders (donor rule: manage off entry state).
+var float eStop = na
+var float entryNetProfit = na
+
+if longSig
+    qEntry = f_qty(marginUsd * levX / close)
+    if ordersOk and flat and not na(qEntry) and qEntry > 0
+        strategy.entry("Long", strategy.long, qty=qEntry)
+        eStop     := pStop
+        entryNetProfit := strategy.netprofit
+        hiWater   := na
+        trailStop := na
+        tp1Done   := false
+        // Initial bracket on the SIGNAL bar with the same IDs the per-bar block
+        // re-issues (later calcs modify, not duplicate). Without this the trade
+        // would sit one full bar unprotected: process_orders_on_close fills the
+        // entry at this bar's close, but inPos only turns true on the next calc.
+        if exitMode == "Fixed ROI bracket"
+            strategy.exit("XB", "Long", limit=pTgt, stop=eStop)
+        else if exitMode == "Partial + trail"
+            strategy.exit("TP1", "Long", qty_percent=tp1Pct, limit=pTp1, stop=eStop)
+            strategy.exit("RUN", "Long", stop=eStop)
+        else
+            strategy.exit("XR", "Long", limit=pTgt, stop=eStop)
+    tradesToday += 1
+
+inPos = strategy.position_size > 0
+if inPos
+    avg = strategy.position_avg_price
+    if newExecBar
+        hiWater := math.max(nz(hiWater, xHigh), xHigh)
+    // Partial fill latch: position shrank but is still open → TP1 has filled.
+    if strategy.position_size < strategy.position_size[1] and not tp1Done
+        tp1Done := true
+    if exitMode == "Fixed ROI bracket"
+        strategy.exit("XB", "Long", limit=f_tick(avg * (1 + tgtRoiPct / (100 * levX))), stop=eStop)
+    else if exitMode == "Partial + trail"
+        cand = na(hiWater) or na(xAtr) ? eStop : hiWater - trailAtr * xAtr
+        bePx = useBreakeven and tp1Done ? avg : eStop
+        trailStop := f_tick(math.max(nz(trailStop, eStop), math.max(nz(cand, eStop), math.max(bePx, eStop))))
+        if not tp1Done
+            strategy.exit("TP1", "Long", qty_percent=tp1Pct, limit=f_tick(avg * (1 + tp1RoiPct / (100 * levX))), stop=trailStop)
+        strategy.exit("RUN", "Long", stop=trailStop)
+    else
+        rBase = avg - eStop
+        strategy.exit("XR", "Long", limit=f_tick(avg + targetR * rBase), stop=eStop)
+
+if not use24x7 and not inSession
+    strategy.close_all("Session end")
+
+// ────────────────────────────────  ALERTS  ──────────────────────────────────
+f_msgBuy() =>
+    ('{"strat":"pearl-algo","v":1' +
+     ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+     ',"action":"BUY"' +
+     ',"symbol":"' + syminfo.ticker + '"' +
+     ',"exec_tf":"' + effExecTf + '","regime_tf":"' + effRegTf + '"' +
+     ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+     ',"regime":"' + regimeTxt + '","trigger":"' + triggerTxt + '"' +
+     ',"entry":' + str.tostring(pE1, format.mintick) +
+     (na(pAdd1) ? '' : ',"add1":' + str.tostring(pAdd1, format.mintick)) +
+     (na(pAdd2) ? '' : ',"add2":' + str.tostring(pAdd2, format.mintick)) +
+     (na(pAdd3) ? '' : ',"add3":' + str.tostring(pAdd3, format.mintick)) +
+     ',"zone_low":' + str.tostring(pZoneLow, format.mintick) +
+     ',"stop":' + str.tostring(pStop, format.mintick) +
+     ',"target":' + str.tostring(pTgt, format.mintick) +
+     ',"tp1":' + str.tostring(pTp1, format.mintick) +
+     ',"leverage":' + str.tostring(levX) +
+     ',"margin_usd":' + str.tostring(marginUsd, "#.##") +
+     ',"avg_scalein":' + str.tostring(pAvgWC, format.mintick) +
+     ',"est_liq":' + str.tostring(pLiq1, format.mintick) +
+     ',"liq_safe":' + (liqWarn ? "false" : "true") +
+     ',"risk_usd":' + str.tostring(pRisk1Usd, "#.##") +
+     ',"worst_risk_usd":' + str.tostring(pWorstUsd, "#.##") +
+     ',"roi_target_pct":' + str.tostring(tgtRoiPct, "#.#") +
+     ',"roi_stop_pct":' + str.tostring(roiStop1, "#.#") +
+     ',"atr":' + str.tostring(xAtr, "#.#####") +
+     ',"atr_pct":' + str.tostring(atrPct, "#.##") +
+     ',"conf":' + str.tostring(sLong) + ',"conf_max":' + str.tostring(maxConf) +
+     ',"trades_today":' + str.tostring(tradesToday) + '}')
+
+// Discord-ready BUY payload ({"content":...}): point the TradingView alert webhook
+// straight at a Discord channel webhook (#algorithm) — zero server. \\n = newline
+// after Discord JSON-decodes the content. Keep well under Discord's 2000-char cap.
+f_msgBuyDiscord() =>
+    addsD = na(pAdd1) ? 'none' : str.tostring(pAdd1, format.mintick) + (na(pAdd2) ? '' : ' / ' + str.tostring(pAdd2, format.mintick)) + (na(pAdd3) ? '' : ' / ' + str.tostring(pAdd3, format.mintick))
+    liqD  = liqWarn ? '🚨 STOP AT/BELOW EST. LIQ ' + str.tostring(pLiq1, format.mintick) : 'liq ' + str.tostring(pLiq1, format.mintick) + ' ok'
+    ('{"content":"🟢 **BUY ' + syminfo.ticker + '** · ' + f_tfLabel(effExecTf) + ' ' + triggerTxt + (alertsLive ? '' : ' · research') +
+     '\\nentry ' + str.tostring(pE1, format.mintick) + ' · adds ' + addsD +
+     '\\nSL ' + str.tostring(pStop, format.mintick) + ' (' + str.tostring(roiStop1, "#") + '%) · TP ' + str.tostring(pTgt, format.mintick) + ' (+' + str.tostring(tgtRoiPct, "#") + '% @' + str.tostring(levX) + 'x)' +
+     '\\n' + liqD + ' · risk $' + str.tostring(pRisk1Usd, "#.#") + ' (full $' + str.tostring(pWorstUsd, "#.#") + ') · conf ' + str.tostring(sLong) + '/' + str.tostring(maxConf) + '"}')
+
+if longSig and alertsLive
+    alert(discordFmt ? f_msgBuyDiscord() : f_msgBuy(), alert.freq_once_per_bar_close)
+
+// EXIT ping: fire ONCE when an open position closes (target / stop / session end).
+// PnL spans the WHOLE position (netprofit delta since entry): Partial + trail books
+// TP1 and the runner as separate closed-trade records, so the last record alone lies.
+justFlat = flat and not flat[1]
+lastPnl  = not na(entryNetProfit) ? strategy.netprofit - entryNetProfit :
+             strategy.closedtrades > 0 ? strategy.closedtrades.profit(strategy.closedtrades - 1) : na
+if justFlat and alertsLive
+    exReason = (not use24x7 and not inSession) ? "session flatten" : (not na(lastPnl) and lastPnl >= 0 ? "target / win" : "stop / loss")
+    exitJson = '{"strat":"pearl-algo","v":1,"action":"EXIT"' +
+         ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+         ',"symbol":"' + syminfo.ticker + '"' +
+         ',"exec_tf":"' + effExecTf + '"' +
+         ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+         ',"exit":' + str.tostring(close, format.mintick) +
+         ',"pnl_usd":' + str.tostring(na(lastPnl) ? 0.0 : lastPnl, "#.##") +
+         ',"reason":"' + exReason + '"}'
+    exitDisc = '{"content":"' + (not na(lastPnl) and lastPnl >= 0 ? '✅' : '🛑') + ' **EXIT ' + syminfo.ticker + '** @ ' + str.tostring(close, format.mintick) +
+         ' · ' + exReason + ' · PnL $' + str.tostring(na(lastPnl) ? 0.0 : lastPnl, "#.##") + '"}'
+    alert(discordFmt ? exitDisc : exitJson, alert.freq_once_per_bar_close)
+// Cleanup skips bars where a NEW signal landed (intrabar stop-out + fresh signal on
+// the same bar): the entry branch has already re-latched trade state and the fresh
+// plan — wiping it here would strip the new trade's stop anchor and its rays.
+if justFlat and not longSig
+    hiWater   := na
+    trailStop := na
+    tp1Done   := false
+    eStop     := na
+    entryNetProfit := na
+    pE1       := na
+    pAdd1     := na
+    pAdd2     := na
+    pAdd3     := na
+    pZoneLow  := na
+    pStop     := na
+    pTgt      := na
+    pTp1      := na
+    pAvgWC    := na
+    pWorstUsd := na
+    pRisk1Usd := na
+    pLiq1     := na
+
+// ────────────────────────────────  VISUALS  ─────────────────────────────────
+// Premium trend cloud: smooth chart EMAs colored by their own slope; opacity
+// deepens with trend strength. The 4h regime lives in the dashboard + bg tint.
+cloudFast = ta.ema(close, 8)
+cloudSlow = ta.ema(close, 21)
+cAtr      = ta.atr(14)
+spread    = na(cAtr) or cAtr == 0 ? 0.0 : (cloudFast - cloudSlow) / cAtr
+cloudBase = cloudFast >= cloudSlow ? colUp : colDn
+fillTrns  = boldCloud ? 66 : 80
+strength  = math.min(math.abs(spread), 2.0) / 2.0
+cloudCol  = color.new(cloudBase, fillTrns - int(strength * 16))
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane, force_overlay=true)
+pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane, force_overlay=true)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 78) : na, linewidth=1, display=display.pane, force_overlay=true)
+fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")
+
+// Multi-band ribbon (off by default): 4 EMAs, band spread = trend strength.
+rb1 = ta.ema(close, 5)
+rb2 = ta.ema(close, 13)
+rb3 = ta.ema(close, 34)
+rb4 = ta.ema(close, 55)
+ribCol = rb1 >= rb4 ? colUp : colDn
+pr1 = plot(showRibbon ? rb1 : na, "rb1", color=na, display=display.pane, force_overlay=true)
+pr2 = plot(showRibbon ? rb2 : na, "rb2", color=na, display=display.pane, force_overlay=true)
+pr3 = plot(showRibbon ? rb3 : na, "rb3", color=na, display=display.pane, force_overlay=true)
+pr4 = plot(showRibbon ? rb4 : na, "rb4", color=na, display=display.pane, force_overlay=true)
+fill(pr1, pr2, color=showRibbon ? color.new(ribCol, 88) : na, title="ribbon 1")
+fill(pr2, pr3, color=showRibbon ? color.new(ribCol, 84) : na, title="ribbon 2")
+fill(pr3, pr4, color=showRibbon ? color.new(ribCol, 80) : na, title="ribbon 3")
+
+// Buy/Sell power gauge (DESCRIPTIVE): normalized blend of cloud slope, RSI, confluence.
+rsiV     = ta.rsi(close, rsiLen)
+slopeRaw = (cloudFast - cloudFast[slopeLen]) / slopeLen
+slopeN   = na(cAtr) or cAtr == 0 ? 0.5 : math.min(1.0, math.max(0.0, 0.5 + slopeRaw / cAtr))
+rsiN     = na(rsiV) ? 0.5 : rsiV / 100.0
+confN    = maxConf > 0 ? (sLong * 1.0) / maxConf : 0.0
+powerRaw = 0.40 * slopeN + 0.25 * rsiN + 0.35 * confN
+buyPower = int(math.round(100 * powerRaw))
+sellPower= 100 - buyPower
+powIsBuy = buyPower >= 50
+powVal   = powIsBuy ? buyPower : sellPower
+powCol   = powIsBuy ? colUp : colDn
+
+plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1, display=display.pane, force_overlay=true)
+barcolor(colorBars ? color.new(cloudFast > cloudSlow ? colUp : colDn, 25) : na, title="Trend candles")
+bgcolor(showBg and htfUp ? color.new(colUp, 94) : showBg and htfDown ? color.new(colDn, 94) : na, title="Regime tint")
+bgcolor(showBg and not tradesCapOk ? color.new(colDn, 92) : na, title="Signal cap")
+
+// Markers: continuation "Buy", reversal "Rev" (the turn-catch), muted tiny variants,
+// faint "sell?" study marker (display-only, never trades).
+plotshape(showSignals and longSig and not isRevSig and visArmed, "BUY",  shape.triangleup, location.belowbar, color.new(colBuy, 0),  text="Buy", textcolor=color.new(colBuy, 0),  size=size.small, force_overlay=true)
+plotshape(showSignals and isRevSig and visArmed,                 "REV BUY", shape.triangleup, location.belowbar, color.new(colAlgo, 0), text="Rev", textcolor=color.new(colAlgo, 0), size=size.small, force_overlay=true)
+plotshape(showSignals and longSig and not visArmed,              "Muted long", shape.triangleup, location.belowbar, color.new(colBuy, 55), size=size.tiny, force_overlay=true)
+plotshape(showSignals and sellStudy,                             "Study sell", shape.triangledown, location.abovebar, color.new(colNeu, 35), text="sell?", textcolor=color.new(colNeu, 25), size=size.tiny, force_overlay=true)
+
+// Confirmation diamonds (descriptive confluence flags, suppressed when an entry fires).
+buyConfirm = newExecBar and htfUp and sLong >= maxConf - 1 and not longSig
+plotshape(showDiamonds and showSignals and buyConfirm, "Buy confirm", shape.diamond, location.belowbar, color.new(colUp, 25), size=size.tiny, force_overlay=true)
+
+// Buy-zone rays: the exact levels you type into the exchange. Single-instance
+// managed (deleted + redrawn per signal, cleared when the trade closes).
+var line lnE1 = na
+var line lnA1 = na
+var line lnA2 = na
+var line lnA3 = na
+var line lnStop = na
+var line lnTgt = na
+f_ray(line ln, float px, color col) =>
+    if not na(ln)
+        line.delete(ln)
+    na(px) ? line(na) : line.new(bar_index, px, bar_index + 1, px, extend=extend.right, color=col, style=line.style_dotted, width=1, force_overlay=true)
+if showZone and longSig
+    lnE1   := f_ray(lnE1,   pE1,   color.new(colBuy, 15))
+    lnA1   := f_ray(lnA1,   pAdd1, color.new(colBuy, 45))
+    lnA2   := f_ray(lnA2,   pAdd2, color.new(colBuy, 55))
+    lnA3   := f_ray(lnA3,   pAdd3, color.new(colBuy, 65))
+    lnStop := f_ray(lnStop, pStop, color.new(colDn, 20))
+    lnTgt  := f_ray(lnTgt,  pTgt,  color.new(colUp, 20))
+if justFlat and not longSig
+    lnE1   := f_ray(lnE1,   na, colBuy)
+    lnA1   := f_ray(lnA1,   na, colBuy)
+    lnA2   := f_ray(lnA2,   na, colBuy)
+    lnA3   := f_ray(lnA3,   na, colBuy)
+    lnStop := f_ray(lnStop, na, colDn)
+    lnTgt  := f_ray(lnTgt,  na, colUp)
+
+// ────────────────────  MARKET STRUCTURE (chart TF, descriptive)  ─────────────
+// Reading aid only — the ENTRY-wired structure is the exec-TF engine in f_execBundle.
+ph = ta.pivothigh(high, pivLeft, pivRight)
+pl = ta.pivotlow(low,  pivLeft, pivRight)
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+var int   lastSwingHiX  = na
+var int   lastSwingLoX  = na
+var int   structBias    = 0
+var int   lastStructBar = na
+var array<line>  msLines  = array.new<line>()
+var array<label> msLabels = array.new<label>()
+f_pushLine(line ln) =>
+    array.push(msLines, ln)
+    if array.size(msLines) > structMax
+        line.delete(array.shift(msLines))
+f_pushLabel(label lb) =>
+    array.push(msLabels, lb)
+    if array.size(msLabels) > structMax
+        label.delete(array.shift(msLabels))
+if not na(ph)
+    lastSwingHigh := ph
+    lastSwingHiX  := bar_index - pivRight
+if not na(pl)
+    lastSwingLow  := pl
+    lastSwingLoX  := bar_index - pivRight
+structGapOk = na(lastStructBar) or (bar_index - lastStructBar) >= pivRight
+breakUp   = showStruct and structGapOk and not na(lastSwingHigh) and not na(lastSwingHiX) and ta.crossover(close,  lastSwingHigh)
+breakDown = showStruct and structGapOk and not na(lastSwingLow)  and not na(lastSwingLoX) and ta.crossunder(close, lastSwingLow)
+if breakUp
+    choch = structBias == -1
+    bcol  = choch ? colChoch : colBos
+    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
+    structBias := 1
+    lastStructBar := bar_index
+if breakDown
+    choch = structBias == 1
+    bcol  = choch ? colChoch : colBos
+    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
+    structBias := -1
+    lastStructBar := bar_index
+
+// ───────────────────────────────  DASHBOARD  ────────────────────────────────
+f_pos(p) =>
+    switch p
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+var table dash = table.new(f_pos(dashPosIn), 2, 18, frame_width=1, frame_color=color.new(colAlgo, 40),
+     border_width=1, border_color=color.new(colAlgo, 88))
+dashCompact = dashSizeIn == "Compact"
+dashTxtSz   = dashCompact ? size.tiny : size.small
+f_row(_r, _k, _v, _vc) =>
+    table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 10), text_size=dashTxtSz, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 16))
+    table.cell(dash, 1, _r, _v, text_color=_vc,                         text_size=dashTxtSz, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
+
+if showDash and barstate.islast
+    table.clear(dash, 0, 0, 1, 17)
+    tfLabel   = f_tfLabel(effExecTf)
+    havePlan  = not na(pE1)
+    // Live values while in a trade (working orders), frozen plan otherwise — never mixed.
+    liveAvg   = inPos ? strategy.position_avg_price : na
+    dispStop  = inPos ? (exitMode == "Partial + trail" and not na(trailStop) ? trailStop : eStop) : pStop
+    dispTgt   = not inPos ? pTgt :
+                 exitMode == "Fixed ROI bracket" ? f_tick(liveAvg * (1 + tgtRoiPct / (100 * levX))) :
+                 exitMode == "Partial + trail" ? f_tick(liveAvg * (1 + tp1RoiPct / (100 * levX))) :
+                 f_tick(liveAvg + targetR * (liveAvg - eStop))
+    dispLiq   = inPos ? f_tick(liveAvg * (1 - 1.0 / levX + mmrPct / 100)) : pLiq1
+    liqWarnD  = inPos ? (not na(dispStop) and not na(dispLiq) and dispStop <= dispLiq) : liqWarn
+    roiStopD  = inPos ? (na(dispStop) or na(liveAvg) or liveAvg == 0 ? na : -100.0 * levX * (liveAvg - dispStop) / liveAvg) : roiStop1
+    roiStopTxt= na(roiStopD) ? "" : " (" + (roiStopD >= 0 ? "+" : "") + str.tostring(roiStopD, "#") + "%)"
+    // Target-vs-volatility sanity: a target sitting many ATRs away is a multi-day
+    // move sold as a day trade (the BTC-15m failure mode) — flag it in orange.
+    tgtRef    = inPos ? liveAvg : pE1
+    tgtAtrX   = not na(tgtRef) and not na(dispTgt) and not na(xAtr) and xAtr > 0 ? (dispTgt - tgtRef) / xAtr : na
+    tgtFar    = not na(tgtAtrX) and tgtAtrX > 6
+    statusTxt = not tradesCapOk ? "MAX SIGNALS" : liqWarnD and (inPos or havePlan) ? "LIQ RISK" : visArmed ? "ARMED" : "MUTED"
+    statusCol = statusTxt == "ARMED" ? colUp : statusTxt == "LIQ RISK" ? colDn : statusTxt == "MUTED" ? color.silver : color.orange
+    setupTxt  = longSig ? (isRevSig ? "▲ REV BUY" : "▲ BUY") : htfUp ? "▲ WAIT" : htfDown ? "▼ WAIT" : "● WAIT"
+    setupCol  = longSig ? colUp : htfUp ? colUp : htfDown ? colDn : color.silver
+    addsTxt   = zoneAdds == 0 ? "none" : f_px(pAdd1) + (zoneAdds >= 2 ? " / " + f_px(pAdd2) : "") + (zoneAdds >= 3 ? " / " + f_px(pAdd3) : "")
+    tgtTxt    = f_px(dispTgt) + (tgtFar ? " ⚠" + str.tostring(tgtAtrX, "#") + "×ATR" : inPos and exitMode == "Partial + trail" and tp1Done ? " (trail)" : "")
+    riskTxt   = not havePlan ? "—" : "$" + str.tostring(pRisk1Usd, "#.#") + " · $" + str.tostring(pWorstUsd, "#.#") + " full"
+    table.cell(dash, 0, 0, "◆ PEARL", text_color=color.white, text_size=dashCompact ? size.small : size.normal, bgcolor=color.new(colAlgo, 10), text_halign=text.align_left)
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + tfLabel, text_color=color.white, text_size=dashTxtSz, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
+    int r = 1
+    f_row(r, "Status", "● " + statusTxt, statusCol)
+    r += 1
+    f_row(r, "Regime", regimeTxt + (dailyActive ? (dailyPt ? " · 1D✓" : " · 1D✕") : ""), regimeCol)
+    r += 1
+    f_row(r, "Setup", setupTxt, setupCol)
+    r += 1
+    if not dashCompact
+        f_row(r, powIsBuy ? "Buy Power" : "Sell Power", showPower ? (powIsBuy ? "▲ " : "▼ ") + str.tostring(powVal) : "off", showPower ? powCol : color.silver)
+        r += 1
+        f_row(r, "Confluence", str.tostring(sLong) + " / " + str.tostring(maxConf), sLong >= minConfluence ? colUp : color.orange)
+        r += 1
+        f_row(r, "BTC lead", not useBtcLead ? "off" : btcSelf ? "self" : not btcActive ? "n/a" : btcUp ? "▲ UP" : "▼ DOWN", not btcActive ? color.silver : btcUp ? colUp : colDn)
+        r += 1
+        f_row(r, "ATR%·RV", (na(atrPct) ? "—" : str.tostring(atrPct, "#.##") + "%") + " · " + (na(xRvol) ? "—" : str.tostring(xRvol, "#.#") + "x") + (useAtrBand and not atrBandOk ? " ✕" : ""), useAtrBand and not atrBandOk ? color.orange : atrBandOk and rvolOk ? colUp : color.silver)
+        r += 1
+        f_row(r, "Perp", not isCrypto ? "n/a" : not usePerpFilters ? "off" : volStress ? "VOL STRESS" : not fundingOk ? "FUNDING" : na(basisPct) ? "24x7" : "basis " + str.tostring(basisPct, "#.##") + "%", not isCrypto or not usePerpFilters ? color.silver : perpOk and basisLongOk ? colUp : color.orange)
+        r += 1
+    f_row(r, "Entry", inPos ? f_px(liveAvg) + " avg" : f_px(pE1), color.white)
+    r += 1
+    f_row(r, "Adds", havePlan ? addsTxt : "—", color.new(colBuy, 10))
+    r += 1
+    f_row(r, "Stop", f_px(dispStop) + roiStopTxt, colDn)
+    r += 1
+    f_row(r, "Target", tgtTxt, tgtFar ? color.orange : colUp)
+    r += 1
+    f_row(r, "Liq", f_px(dispLiq) + (liqWarnD ? " ⚠" : ""), liqWarnD ? colDn : color.silver)
+    r += 1
+    f_row(r, "Risk", riskTxt, color.white)
+    r += 1
+    if not dashCompact
+        f_row(r, "ROI math", "+" + str.tostring(tgtRoiPct, "#") + "% @" + str.tostring(levX) + "x = +" + str.tostring(tgtRoiPct / levX, "#.##") + "% move", color.new(colAlgo, 10))
+        r += 1
+    f_row(r, "Signals", str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
+    r += 1
+    f_row(r, "Signal", alertsLive ? "● CANDIDATE" : "● RESEARCH", alertsLive ? color.yellow : colDn)

@@ -1,0 +1,151 @@
+//@version=6
+// PearlAlgo BTC - Trend Defender Research
+// Research candidate for BTC spot/perp or CME MBT/BTC charts. Alerts are muted by default.
+// Prior: crypto trend-following research favors Donchian/channel trend models with volatility-aware risk.
+// Safety: higher-timeframe data is requested with [1] + lookahead_on so only confirmed HTF bars are used.
+strategy("PearlAlgo BTC - Trend Defender Research", overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     pyramiding=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, process_orders_on_close=true,
+     commission_type=strategy.commission.percent, commission_value=0.06,
+     slippage=5,
+     max_lines_count=100, max_labels_count=100, max_boxes_count=30)
+
+gR = "Regime"
+regimeTf = input.timeframe("240", "Regime timeframe", group=gR)
+htfFastLen = input.int(20, "HTF EMA fast", minval=1, group=gR, inline="h")
+htfSlowLen = input.int(50, "slow", minval=2, group=gR, inline="h")
+useDailyFilter = input.bool(true, "Use daily 200 EMA filter", group=gR)
+dailyTf = input.timeframe("D", "Daily filter timeframe", group=gR, inline="d")
+dailyLen = input.int(200, "EMA", minval=10, group=gR, inline="d")
+adxLen = input.int(14, "ADX length", minval=2, group=gR, inline="a")
+adxMin = input.float(10.0, "ADX min", minval=1, step=0.5, group=gR, inline="a")
+
+gE = "Entries"
+donLen = input.int(100, "Donchian breakout", minval=5, group=gE, inline="e")
+emaPullLen = input.int(21, "Pullback EMA", minval=2, group=gE, inline="e")
+useBreakout = input.bool(true, "Breakout entries", group=gE, inline="t")
+usePullback = input.bool(false, "Pullback re-entry", group=gE, inline="t", tooltip="Off by default; enabling changes the trial family.")
+allowShorts = input.bool(false, "Allow shorts", group=gE, tooltip="BTC spot users should leave this off. Futures/perp users can study both sides.")
+
+gX = "Risk"
+atrLen = input.int(14, "ATR length", minval=2, group=gX, inline="x")
+trailAtr = input.float(8.0, "Chandelier stop x ATR", minval=0.5, step=0.25, group=gX, inline="x")
+minAtrPct = input.float(0.30, "Min ATR %", minval=0.0, step=0.05, group=gX, inline="v")
+maxAtrPct = input.float(8.0, "Max ATR %", minval=0.1, step=0.25, group=gX, inline="v")
+maxBarsTrade = input.int(0, "Max bars in trade (0=off)", minval=0, group=gX)
+
+gH = "Honesty"
+sigStatus = input.string("Research - alerts muted", "Signal status", options=["Research - alerts muted", "Candidate - alerts on"], group=gH)
+alertsLive = sigStatus == "Candidate - alerts on"
+useBtWindow = input.bool(false, "Limit Strategy Tester window", group=gH)
+btStart = input.time(timestamp("2018-12-17T00:00:00Z"), "Window start", group=gH)
+btEnd = input.time(timestamp("2026-07-01T00:00:00Z"), "Window end", group=gH)
+ordersOk = not useBtWindow or (time >= btStart and time < btEnd)
+
+gV = "Visuals"
+showDash = input.bool(true, "Dashboard", group=gV, inline="v")
+showBands = input.bool(true, "Donchian bands", group=gV, inline="v")
+colorBars = input.bool(true, "Color bars", group=gV, inline="v")
+colUp = input.color(#26a69a, "Up", group=gV, inline="c")
+colDn = input.color(#ef5350, "Down", group=gV, inline="c")
+colNeu = input.color(#78909c, "Neutral", group=gV, inline="c")
+colBrand = input.color(#00e5ff, "Brand", group=gV, inline="c")
+
+f_adx_confirmed(_len) =>
+    [_p, _m, _a] = ta.dmi(_len, _len)
+    _a[1]
+
+// Confirmed HTF values. The [1] offset plus lookahead_on follows TradingView's non-repaint pattern.
+[hClose, hFast, hSlow, hAdx] = request.security(
+     syminfo.tickerid, regimeTf,
+     [close[1], ta.ema(close, htfFastLen)[1], ta.ema(close, htfSlowLen)[1], f_adx_confirmed(adxLen)],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+dailyEma = request.security(syminfo.tickerid, dailyTf, ta.ema(close, dailyLen)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+
+atr = ta.atr(atrLen)
+atrPct = atr / close * 100.0
+volOk = not na(atrPct) and atrPct >= minAtrPct and atrPct <= maxAtrPct
+htfUp = hClose > hFast and hFast > hSlow and hAdx >= adxMin
+htfDown = hClose < hFast and hFast < hSlow and hAdx >= adxMin
+dailyLongOk = not useDailyFilter or close > dailyEma
+dailyShortOk = not useDailyFilter or close < dailyEma
+trendLong = htfUp and dailyLongOk and volOk
+trendShort = htfDown and dailyShortOk and volOk
+
+upper = ta.highest(high[1], donLen)
+lower = ta.lowest(low[1], donLen)
+pullEma = ta.ema(close, emaPullLen)
+longBreak = useBreakout and trendLong and ta.crossover(close, upper)
+shortBreak = useBreakout and trendShort and ta.crossunder(close, lower)
+longPull = usePullback and trendLong and low[1] < pullEma[1] and ta.crossover(close, pullEma)
+shortPull = usePullback and trendShort and high[1] > pullEma[1] and ta.crossunder(close, pullEma)
+longSig = ordersOk and (longBreak or longPull)
+shortSig = ordersOk and allowShorts and (shortBreak or shortPull)
+
+var float longHigh = na
+var float shortLow = na
+var int entryBar = na
+flat = strategy.position_size == 0
+
+if longSig and flat
+    strategy.entry("Long", strategy.long)
+    longHigh := high
+    shortLow := na
+    entryBar := bar_index
+    if alertsLive
+        alert('{"strat":"btc-trend-defender","v":1,"status":"Candidate","action":"BUY","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","reason":"' + (longBreak ? "donchian_breakout" : "ema_pullback") + '","close":' + str.tostring(close) + ',"atr_pct":' + str.tostring(atrPct) + '}', alert.freq_once_per_bar_close)
+
+if shortSig and flat
+    strategy.entry("Short", strategy.short)
+    shortLow := low
+    longHigh := na
+    entryBar := bar_index
+    if alertsLive
+        alert('{"strat":"btc-trend-defender","v":1,"status":"Candidate","action":"SELL","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","reason":"' + (shortBreak ? "donchian_breakdown" : "ema_pullback") + '","close":' + str.tostring(close) + ',"atr_pct":' + str.tostring(atrPct) + '}', alert.freq_once_per_bar_close)
+
+if strategy.position_size > 0
+    longHigh := strategy.position_size[1] <= 0 ? high : math.max(nz(longHigh, high), high)
+    lStop = longHigh - trailAtr * atr
+    strategy.exit("Long X", "Long", stop=lStop)
+    if maxBarsTrade > 0 and not na(entryBar) and bar_index - entryBar >= maxBarsTrade
+        strategy.close("Long", comment="time stop")
+else
+    longHigh := na
+
+if strategy.position_size < 0
+    shortLow := strategy.position_size[1] >= 0 ? low : math.min(nz(shortLow, low), low)
+    sStop = shortLow + trailAtr * atr
+    strategy.exit("Short X", "Short", stop=sStop)
+    if maxBarsTrade > 0 and not na(entryBar) and bar_index - entryBar >= maxBarsTrade
+        strategy.close("Short", comment="time stop")
+else
+    shortLow := na
+
+if flat
+    entryBar := na
+
+plot(showBands ? upper : na, "Donchian high", color=color.new(colBrand, 15), linewidth=1)
+plot(showBands ? lower : na, "Donchian low", color=color.new(colBrand, 15), linewidth=1)
+plot(pullEma, "Pullback EMA", color=color.new(color.white, 30), linewidth=1)
+plot(useDailyFilter ? dailyEma : na, "Daily EMA filter", color=color.new(color.orange, 0), linewidth=2)
+barcolor(colorBars ? (trendLong ? color.new(colUp, 0) : trendShort ? color.new(colDn, 0) : color.new(colNeu, 45)) : na)
+plotshape(longSig, "BUY", shape.triangleup, location.belowbar, color=color.new(colUp, 0), size=size.tiny, text="BUY")
+plotshape(shortSig, "SELL", shape.triangledown, location.abovebar, color=color.new(colDn, 0), size=size.tiny, text="SELL")
+
+var table dash = table.new(position.top_right, 2, 8, border_width=1)
+f_row(r, k, v, c) =>
+    table.cell(dash, 0, r, k, text_color=color.silver, bgcolor=color.new(color.black, 20), text_size=size.small)
+    table.cell(dash, 1, r, v, text_color=c, bgcolor=color.new(color.black, 10), text_size=size.small)
+if showDash and barstate.islast
+    regime = trendLong ? "UP" : trendShort ? "DOWN" : "NEUTRAL"
+    setup = longSig ? "BUY" : shortSig ? "SELL" : "WAIT"
+    f_row(0, "PEARL", "BTC", colBrand)
+    f_row(1, "Status", alertsLive ? "ARMED" : "MUTED", alertsLive ? colUp : color.silver)
+    f_row(2, "Regime", regime, trendLong ? colUp : trendShort ? colDn : colNeu)
+    f_row(3, "Setup", setup, longSig ? colUp : shortSig ? colDn : color.silver)
+    f_row(4, "ATR %", str.tostring(atrPct, "#.##"), volOk ? colBrand : color.orange)
+    f_row(5, "ADX", str.tostring(hAdx, "#.##"), hAdx >= adxMin ? colBrand : color.orange)
+    f_row(6, "Trades", str.tostring(strategy.closedtrades), color.silver)
+    f_row(7, "Signal", sigStatus, alertsLive ? colUp : color.red)

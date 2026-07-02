@@ -1,0 +1,106 @@
+{
+  "params": {
+    "product": "BTC-USD",
+    "start": "2018-12-17T00:00:00Z",
+    "end": "2026-07-01T00:00:00Z",
+    "donchian": 100,
+    "htf_fast": 20,
+    "htf_slow": 50,
+    "daily_ema": 200,
+    "adx_len": 14,
+    "adx_min": 10.0,
+    "atr_len": 14,
+    "trail_atr": 8.0,
+    "min_atr_pct": 0.3,
+    "max_atr_pct": 8.0,
+    "fee_bps_side": 6.0,
+    "slippage_usd_side": 5.0,
+    "allow_shorts": false,
+    "max_bars_trade": 0
+  },
+  "source": "Coinbase Exchange BTC-USD hourly candles",
+  "bars": 61256,
+  "start": "2019-07-05 00:00:00+00:00",
+  "end": "2026-07-01 00:00:00+00:00",
+  "trades": 100,
+  "total_return_pct": 282.09,
+  "buy_hold_return_pct": 424.07,
+  "max_drawdown_pct": -36.56,
+  "win_rate_pct": 43.0,
+  "profit_factor": 1.662,
+  "expectancy_usd": 282.09,
+  "expectancy_pct_trade": 2.821,
+  "bootstrap_mean_pct_trade": {
+    "n": 100,
+    "mean_pct": 2.821,
+    "ci95_pct": [
+      -0.465,
+      6.474
+    ]
+  },
+  "sample_trades": [
+    {
+      "entry_time": "2019-07-08 20:00:00+00:00",
+      "exit_time": "2019-07-11 20:00:00+00:00",
+      "side": "long",
+      "entry": 12224.93,
+      "exit": 11047.220476905084,
+      "pnl": -974.7890690425705,
+      "pnl_pct": -0.09747890690425705,
+      "bars": 72
+    },
+    {
+      "entry_time": "2019-08-01 21:00:00+00:00",
+      "exit_time": "2019-08-10 11:00:00+00:00",
+      "side": "long",
+      "entry": 10417.92,
+      "exit": 11261.351429740227,
+      "pnl": 719.4094944782471,
+      "pnl_pct": 0.07194094944782471,
+      "bars": 206
+    },
+    {
+      "entry_time": "2019-09-03 13:00:00+00:00",
+      "exit_time": "2019-09-07 10:00:00+00:00",
+      "side": "long",
+      "entry": 10584.27,
+      "exit": 10350.19983166379,
+      "pnl": -227.06563804065752,
+      "pnl_pct": -0.02270656380406575,
+      "bars": 93
+    },
+    {
+      "ellipsis": 94
+    },
+    {
+      "entry_time": "2025-10-26 10:00:00+00:00",
+      "exit_time": "2025-10-29 16:00:00+00:00",
+      "side": "long",
+      "entry": 112564.59,
+      "exit": 111325.3552912291,
+      "pnl": -509.31747810329443,
+      "pnl_pct": -0.05093174781032944,
+      "bars": 78
+    },
+    {
+      "entry_time": "2026-05-06 11:00:00+00:00",
+      "exit_time": "2026-05-08 07:00:00+00:00",
+      "side": "long",
+      "entry": 82289.2,
+      "exit": 79700.21575375761,
+      "pnl": -1345.8598951977094,
+      "pnl_pct": -0.13458598951977094,
+      "bars": 39
+    },
+    {
+      "entry_time": "2026-05-11 00:00:00+00:00",
+      "exit_time": "2026-05-13 15:00:00+00:00",
+      "side": "long",
+      "entry": 82204.99,
+      "exit": 78850.44714436801,
+      "pnl": -1674.4168218219918,
+      "pnl_pct": -0.16744168218219918,
+      "bars": 63
+    }
+  ]
+}
