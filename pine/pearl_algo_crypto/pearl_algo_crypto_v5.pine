@@ -1,0 +1,582 @@
+//@version=6
+// PEARL Algo Crypto v5 — MNQ v5 engine adapted for crypto/perps
+//
+// Crypto/perp PEARL chart kit forked from the working MNQ Hourly v5 engine.
+// The execution and regime timeframes are pulled with the confirmed-bar
+// request.security idiom ([1] + lookahead_off), so you can view it on a lower chart
+// while the signal remains anchored to the chosen execution timeframe.
+//
+// HONEST STATUS: this is a RESEARCH/CANDIDATE visual strategy template, not a
+// guaranteed high-win-rate system. It ships with alerts muted. Use Strategy Tester,
+// forward paper alerts, and market-specific validation before using leverage. Perp
+// filters are crowding/risk controls, not edge guarantees.
+//
+// Defaults target crypto day-trading: 15m execution + 4h regime, selective
+// confluence, MNQ v5 visual/dashboard surface, 24x7 sessions, and perp risk context.
+// This is a new research candidate; validate each symbol/timeframe before leverage.
+strategy("PEARL Algo Crypto v5", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     margin_long=0, margin_short=0,
+     calc_on_every_tick=false, process_orders_on_close=true,
+     commission_type=strategy.commission.percent, commission_value=0.06,
+     slippage=5,
+     backtest_fill_limits_assumption=1,
+     max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+
+// ─────────────────────────────────  INPUTS  ─────────────────────────────────
+gR = "➞ Regime (higher TF)"
+regimeTf   = input.timeframe("240", "Regime timeframe", group=gR, inline="h")
+htfFastLen = input.int(8,  "EMA fast", minval=1, group=gR, inline="h")
+htfSlowLen = input.int(21, "EMA slow", minval=2, group=gR, inline="h")
+
+gE = "➞ Execution (signal TF)"
+execTf      = input.timeframe("15", "Execution timeframe", group=gE, inline="e", tooltip="The signal is evaluated on this timeframe via request.security, so it works on any chart. Default 15m for crypto day-trading; use 60/240 for slower perps.")
+execEmaLen  = input.int(20, "Pullback EMA", minval=1, group=gE, inline="e")
+breakoutLen = input.int(8,  "Breakout lookback", minval=2, group=gE, tooltip="Breakout = close CROSSING the highest high of the prior N exec bars (an edge, not a held level).")
+allowBreakout = input.bool(true,  "Breakout", group=gE, inline="t")
+allowPullback = input.bool(true,  "Pullback", group=gE, inline="t")
+allowShorts   = input.bool(true, "Allow shorts — full Sell signal", group=gE, tooltip="ON copies MNQ v5 two-sided behavior for perps. This is unvalidated per symbol; turn OFF for long-only research.")
+showShortStudy= input.bool(true,  "Show SELL markers for study (no trade)", group=gE, tooltip="Renders short setups as faint 'sell?' markers WITHOUT placing orders — decoupled from 'Allow shorts'. Display-only; does NOT change fills or alerts.")
+
+gX = "➞ Exits"
+atrLen  = input.int(14, "ATR len", minval=1, group=gX, inline="x")
+stopAtr = input.float(1.5, "Stop ×ATR", minval=0.1, step=0.1, group=gX, inline="x")
+targetR = input.float(2.5, "Target ×R", minval=0.1, step=0.1, group=gX, inline="x")
+
+gS = "➞ Session + Safety"
+sessionMode  = input.string("Auto", "Session filter", options=["Auto", "24x7", "RTH", "Custom"], group=gS, tooltip="Auto uses 24x7 on crypto/CRYPTOCAP/perp-like symbols and RTH on futures/stocks. RTH/Custom flatten outside the session.")
+sessRTH      = input.session("0930-1600", "RTH/custom session (ET)", group=gS)
+qtyInput     = input.float(1.0, "Qty/trade", minval=0.001, step=0.001, group=gS, inline="sz")
+maxQty       = input.float(5.0, "Max qty", minval=0.001, step=0.001, group=gS, inline="sz")
+maxTradesDay = input.int(2, "Max trades/session (0=off)", minval=0, group=gS, tooltip="Caps NEW entry SIGNALS per session/day. Keep this tight when using leverage.")
+
+gH = "➞ Honesty"
+sigStatusIn = input.string("Research — alerts muted", "Signal status", options=["Research — alerts muted", "Candidate — alerts on"], group=gH, tooltip="Muted until a pre-registered trial clears docs/audits/validation-trial-ledger.md. Visuals stay live; only alert() delivery is gated.")
+alertsLive  = sigStatusIn == "Candidate — alerts on"
+useBtWindow = input.bool(false, "Limit Strategy Tester to dev window", group=gH, tooltip="OFF (default) = Strategy Tester uses ALL chart history — the full-sample read for TradingView-first validation. ON = restrict orders to the registered dev slice (2025-10-26→2026-04-19) for a clean out-of-sample test. With OFF, your out-of-sample is FORWARD paper-testing instead.")
+btStart     = input.time(timestamp("2025-10-26T00:00:00-04:00"), "Dev window start", group=gH)
+btEnd       = input.time(timestamp("2026-04-20T00:00:00-04:00"), "Dev window end (exclusive)", group=gH)
+ordersOk    = not useBtWindow or (time >= btStart and time < btEnd)
+
+gV = "➞ Style"
+forceArmed = input.bool(true, "Force armed visuals (full kit even when muted)", group=gV, tooltip="Shows markers regardless of Signal status, so the chart looks armed. Alert DELIVERY stays gated by Signal status — a muted signal never pings your phone.")
+showCloud  = input.bool(true,  "Trend cloud", group=gV, inline="v1")
+showGlow   = input.bool(true,  "EMA glow",    group=gV, inline="v1")
+showVwap   = input.bool(false, "RTH VWAP (live session)", group=gV, inline="v1")
+showExecEma= input.bool(false, "Exec EMA",    group=gV, inline="v2")
+showSignals= input.bool(true,  "Signals",     group=gV, inline="v2")
+showBg     = input.bool(false, "Background tints", group=gV, inline="v2")
+showDash   = input.bool(true,  "Show PEARL dashboard", group=gV, tooltip="MNQ v5-style dashboard, ON by default. New v5 name avoids stale v4 hidden settings.")
+colorBars  = input.bool(false, "Color candles by trend (off — cloud shows trend)", group=gV, tooltip="Optional: tints the price candles by trend. OFF by default because it muddies the up/down read — the cloud is the trend cue. Turn on if you want PEARL to fully own the candles.")
+boldCloud  = input.bool(true,  "Bold cloud + glow", group=gV, tooltip="Heavier cloud fill and a wider EMA halo so the trend reads from across the chart.")
+showDiamonds = input.bool(false, "Confirmation diamonds", group=gV, inline="v3")
+showRibbon   = input.bool(false, "Multi-band ribbon", group=gV, inline="v3", tooltip="Faint 4-EMA ribbon UNDER the cloud; band spread = trend strength (fanned=strong, tight=chop). Off by default to keep the clean 2-EMA look.")
+dashPosIn  = input.string("Top Right", "PEARL dashboard position", options=["Top Right", "Middle Right", "Bottom Right", "Top Left", "Bottom Left"], group=gV)
+dashOpacity= input.int(20, "Dash opacity", minval=0, maxval=80, group=gV)
+colAlgo = input.color(#00e5ff, "Brand",   group=gV, inline="c", tooltip="Cyan PEARL accent.")
+colUp   = input.color(#26a69a, "Up",      group=gV, inline="c")
+colDn   = input.color(#ef5350, "Down",    group=gV, inline="c")
+colNeu  = input.color(#78909c, "Neutral", group=gV, inline="c")
+colVw   = input.color(#ab47bc, "VWAP",    group=gV, inline="c")
+colBuy  = input.color(#2979ff, "Buy signal",  group=gV, inline="sig", tooltip="Distinct entry/exit colors — deliberately OUTSIDE the cloud green/red, CHoCH orange, brand cyan, and VWAP purple so Buy/Sell pop off everything else. Vivid blue (Buy) / magenta (Sell) by default.")
+colSell = input.color(#ff2d9b, "Sell signal", group=gV, inline="sig")
+
+gPerp = "➞ Perp / crypto risk filters"
+marketMode = input.string("Auto", "Market mode", options=["Auto", "Crypto perp/spot", "MNQ/futures", "Other"], group=gPerp, tooltip="Auto treats crypto, CRYPTOCAP, USDT/USDC tickers, and .P/PERP symbols as 24x7/perp-aware. Use Crypto perp/spot to force it.")
+usePerpFilters = input.bool(true, "Use perp filters on crypto", group=gPerp, inline="p1", tooltip="Adds basis/crowding and funding-window gates for crypto/perp charts. Missing spot data degrades to display-only/off.")
+spotSymbol = input.symbol("BINANCE:BTCUSDT", "Spot/index reference", group=gPerp, tooltip="Set this to the matching spot/index symbol for the perp being traded, e.g. BINANCE:ETHUSDT for ETHUSDT.P. Used to estimate perp premium/basis.")
+maxBasisLong = input.float(0.35, "Max long premium %", minval=0.0, step=0.05, group=gPerp, inline="p2", tooltip="Avoid fresh longs when the perp trades too far above spot/index: crowded-long / expensive-funding proxy.")
+maxBasisShort = input.float(0.35, "Max short discount %", minval=0.0, step=0.05, group=gPerp, inline="p2", tooltip="Avoid fresh shorts when the perp trades too far below spot/index: crowded-short / expensive-funding proxy.")
+avoidFundingWindow = input.bool(true, "Avoid funding window", group=gPerp, inline="p3", tooltip="Avoid new perp entries near the common 00:00/08:00/16:00 UTC funding marks. Binance documents 8h default funding windows, but exchanges can differ.")
+fundingWindowMin = input.int(20, "Minutes", minval=0, maxval=60, group=gPerp, inline="p3")
+useVolumeStress = input.bool(true, "Avoid volume stress spikes", group=gPerp, inline="p4", tooltip="Skips new crypto/perp entries during extreme relative-volume spikes, a simple liquidation/crowding proxy when live liquidation data is not available in Pine.")
+volStressMult = input.float(3.0, "Vol spike x", minval=1.0, step=0.25, group=gPerp, inline="p4")
+
+gC = "➞ Confluence (decision support)"
+useTick = input.bool(false, "TICK internals (US index futures)", group=gC, inline="c1")
+useVix  = input.bool(false, "VIX regime (US risk filter)",       group=gC, inline="c1")
+useEs   = input.bool(false, "ES confirm (index futures)",        group=gC, inline="c2")
+useAdx  = input.bool(true,  "ADX strength",                      group=gC, inline="c2")
+vixLo   = input.float(13.0, "VIX band", step=0.5, group=gC, inline="vx")
+vixHi   = input.float(28.0, "to",       step=0.5, group=gC, inline="vx")
+adxMin  = input.int(20, "ADX min (trend)", minval=1, group=gC)
+requireConfluence = input.bool(true, "Require confluence to ARM", group=gC, tooltip="ON makes the universal script more selective. This changes fills and must be validated per symbol/timeframe.")
+minConfluence     = input.int(3, "Min confluence score", minval=1, group=gC)
+
+gP = "➞ Prop-firm risk (changes sizing & exits)"
+riskEngine   = input.bool(false, "Enable risk engine", group=gP, tooltip="OFF = base behavior (manual qty ATR bracket, reproducible). ON = buffer-based sizing + partials + breakeven + session/news halts. Changes every fill → re-validate before trusting Tester numbers.")
+ddBuffer     = input.float(1500, "Trailing-DD buffer $", minval=100, step=50, group=gP, tooltip="Your REMAINING trailing-drawdown room (prop-firm Core $50k = $1,500). Sizing risks a % of THIS, not the balance.")
+riskPctBuf   = input.float(1.0, "Risk % of buffer/trade", minval=0.1, step=0.25, group=gP)
+usePartial   = input.bool(true, "Partial 50% at +1R", group=gP, inline="pm")
+useBreakeven = input.bool(true, "Stop→breakeven", group=gP, inline="pm")
+beTrigR      = input.float(0.75, "Breakeven trigger (R)", minval=0.1, step=0.05, group=gP)
+haltMidday   = input.bool(true, "Halt midday 12:00–13:59 ET", group=gP)
+avoidFomcHour= input.bool(true, "Avoid 14:00 ET hour (FOMC)", group=gP)
+newsBlackout = input.bool(false, "News blackout active (manual: CPI/FOMC/NFP)", group=gP)
+
+gMS = "➞ Market Structure (SMC, descriptive)"
+showStruct = input.bool(true, "Show BOS / CHoCH", group=gMS, inline="ms")
+pivLeft    = input.int(5, "Pivot left",  minval=1, group=gMS, inline="msp")
+pivRight   = input.int(5, "Pivot right (confirm lag)", minval=1, group=gMS, inline="msp", tooltip="A swing is CONFIRMED only this many bars AFTER it forms — structural LAG, not prediction. Bigger = fewer, sturdier swings.")
+structMax  = input.int(6, "Max BOS/CHoCH kept", minval=1, maxval=40, group=gMS, tooltip="FIFO cap: oldest labels recycled so the chart never accumulates.")
+colBos     = input.color(#26a69a, "BOS",   group=gMS, inline="msc")
+colChoch   = input.color(#ffa726, "CHoCH", group=gMS, inline="msc")
+
+gPow = "➞ Power gauge (descriptive)"
+showPower = input.bool(true, "Show Buy/Sell Power", group=gPow, inline="pw")
+rsiLen    = input.int(14, "RSI len", minval=2, group=gPow, inline="pw")
+slopeLen  = input.int(10, "Slope lookback", minval=2, group=gPow)
+
+visArmed = forceArmed or alertsLive
+tickerUpper = str.upper(syminfo.ticker)
+tickerIdUpper = str.upper(syminfo.tickerid)
+isCryptoSymbol = syminfo.type == "crypto"
+isCryptoLike = isCryptoSymbol or str.contains(tickerIdUpper, "CRYPTOCAP:") or str.contains(tickerUpper, "USDT") or str.contains(tickerUpper, "USDC") or str.contains(tickerUpper, "PERP") or str.contains(tickerUpper, ".P")
+isPerpMode = marketMode == "Crypto perp/spot" or (marketMode == "Auto" and isCryptoLike)
+useSessionFilter = sessionMode == "RTH" or sessionMode == "Custom" or (sessionMode == "Auto" and not isPerpMode)
+
+// Effective TFs: request.security cannot reliably read BELOW the chart TF. On a chart
+// above the input exec/regime TF, auto-raise to the chart TF (4h chart → 4h signal) so
+// signals and alerts never evaluate off downsampled sub-chart-TF data.
+f_tfMax(string a, string b) => timeframe.in_seconds(a) >= timeframe.in_seconds(b) ? a : b
+effExecTf = f_tfMax(timeframe.period, execTf)
+effRegTf  = f_tfMax(effExecTf, regimeTf)
+
+// ────────────────────────────  SIGNAL (any-TF)  ─────────────────────────────
+// Regime timeframe — previous CONFIRMED bar ([1] + lookahead_off = anti-repaint).
+[htfClose, htfFast, htfSlow, htfFastPrev] = request.security(syminfo.tickerid, effRegTf, [close[1], ta.ema(close, htfFastLen)[1], ta.ema(close, htfSlowLen)[1], ta.ema(close, htfFastLen)[2]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfUp     = htfClose > htfFast and htfFast > htfSlow and htfFast >= htfFastPrev
+htfDown   = htfClose < htfFast and htfFast < htfSlow and htfFast <= htfFastPrev
+regimeTxt = htfUp ? "UP" : htfDown ? "DOWN" : "NEUTRAL"
+regimeCol = htfUp ? colUp : htfDown ? colDn : colNeu
+
+// Execution timeframe — previous CONFIRMED exec bar. Each element [1]-offset for anti-repaint.
+[xClose, xEma, xAtr, xBkL, xBkS, xPbL, xPbS] = request.security(syminfo.tickerid, effExecTf, [close[1], ta.ema(close, execEmaLen)[1], ta.atr(atrLen)[1], ta.crossover(close, ta.highest(high[1], breakoutLen))[1], ta.crossunder(close, ta.lowest(low[1], breakoutLen))[1], ta.crossover(close, ta.ema(close, execEmaLen))[1], ta.crossunder(close, ta.ema(close, execEmaLen))[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Perp basis/crowding context. TradingView exposes funding as a built-in derivative
+// metric, but Pine cannot reliably request that built-in directly from this strategy.
+// The practical in-script proxy is perp-vs-spot/index premium plus funding-window timing.
+spotClose = request.security(spotSymbol, effExecTf, close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+basisPct = not na(spotClose) and spotClose != 0 ? 100.0 * (xClose - spotClose) / spotClose : na
+basisLongOk = not (isPerpMode and usePerpFilters) or na(basisPct) or basisPct <= maxBasisLong
+basisShortOk = not (isPerpMode and usePerpFilters) or na(basisPct) or basisPct >= -maxBasisShort
+execOpenT = time(effExecTf)
+hourUTC = hour(execOpenT, "UTC")
+minUTC = minute(execOpenT, "UTC")
+nearFunding = not na(execOpenT) and ((hourUTC % 8 == 0 and minUTC <= fundingWindowMin) or (((hourUTC + 1) % 8 == 0) and minUTC >= 60 - fundingWindowMin))
+fundingOk = not (isPerpMode and usePerpFilters and avoidFundingWindow) or not nearFunding
+relVol = volume / math.max(ta.sma(volume, 20), 1e-10)
+volStress = isPerpMode and usePerpFilters and useVolumeStress and relVol >= volStressMult
+perpOk = (not isPerpMode or not usePerpFilters) or (fundingOk and not volStress)
+
+// Fire ONCE per exec bar: true on the first chart bar of each new exec period.
+newExecBar = ta.change(execOpenT) != 0
+inRTH      = not useSessionFilter or not na(time(timeframe.period, sessRTH, "America/New_York"))
+newSession = useSessionFilter ? (inRTH and not inRTH[1]) : (ta.change(time("D")) != 0)
+var int tradesToday = 0
+if newSession
+    tradesToday := 0
+tradesCapOk = maxTradesDay == 0 or tradesToday < maxTradesDay
+canTrade    = inRTH and tradesCapOk and not na(xAtr)
+
+// ─────────────────────────  CONFLUENCE (multi-factor)  ──────────────────────
+// Extra data points pulled in Pine (your IBKR Python stack can't get these) to
+// grade SETUP QUALITY. Each reads the previous CONFIRMED bar (anti-repaint) and
+// degrades gracefully (ignore_invalid_symbol → na) if a data plan lacks the feed.
+// Confluence gates entries by default in this universal build. Changing the gate
+// changes fills, so each symbol/timeframe still needs its own validation.
+f_adx() =>
+    [_dp, _dm, adxV] = ta.dmi(14, 14)
+    adxV[1]
+tickMA = request.security("USI:TICK", effExecTf, ta.sma(close, 20)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+vixVal = request.security("CBOE:VIX", effExecTf, close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[esClose, esEma] = request.security("CME_MINI:ES1!", effExecTf, [close[1], ta.ema(close, htfFastLen)[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+execAdx = request.security(syminfo.tickerid, effExecTf, f_adx(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+tickActive = useTick and not na(tickMA)
+vixActive  = useVix and not na(vixVal)
+esActive   = useEs and not na(esClose)
+adxActive  = useAdx and not na(execAdx)
+tickBull = tickActive and tickMA > 0
+tickBear = tickActive and tickMA < 0
+vixOk    = vixActive and vixVal >= vixLo and vixVal <= vixHi
+esUp     = esActive and esClose > esEma
+esDown   = esActive and esClose < esEma
+adxOk    = adxActive and execAdx >= adxMin
+
+hourET = hour(time, "America/New_York")
+minET  = minute(time, "America/New_York")
+openDrive = useSessionFilter and inRTH and (hourET == 9 or (hourET == 10 and minET < 30))
+powerHour = useSessionFilter and inRTH and hourET == 15
+midday    = useSessionFilter and inRTH and hourET >= 12 and hourET < 14
+primeTime = not useSessionFilter or openDrive or powerHour
+sessPhase = not useSessionFilter ? "24x7" : not inRTH ? "CLOSED" : openDrive ? "OPEN DRIVE" : powerHour ? "POWER HOUR" : midday ? "MIDDAY" : "RTH"
+// Risk-engine entry windows: halt midday, the 14:00 ET (FOMC) hour, and manual news
+// blackout. Inert (always true) when the engine is off.
+sessionOk = (not riskEngine) or ((not haltMidday or not midday) and (not newsBlackout) and (not avoidFomcHour or hourET != 14))
+
+// 1 pt each: regime, prime session, + each enabled+aligned factor. Disabled
+// factors do not count for or against. Score is for the regime's direction.
+sLong  = (htfUp ? 1 : 0)   + (primeTime ? 1 : 0) + (tickBull ? 1 : 0) + (vixOk ? 1 : 0) + (esUp ? 1 : 0)   + (adxOk ? 1 : 0)
+sShort = (htfDown ? 1 : 0) + (primeTime ? 1 : 0) + (tickBear ? 1 : 0) + (vixOk ? 1 : 0) + (esDown ? 1 : 0) + (adxOk ? 1 : 0)
+maxConf   = 2 + (tickActive ? 1 : 0) + (vixActive ? 1 : 0) + (esActive ? 1 : 0) + (adxActive ? 1 : 0)
+confScore = htfUp ? sLong : htfDown ? sShort : 0
+confLongOk  = not requireConfluence or sLong  >= minConfluence
+confShortOk = not requireConfluence or sShort >= minConfluence
+
+longBreakout  = allowBreakout and htfUp   and xBkL
+shortBreakout = allowBreakout and htfDown and xBkS
+longPullback  = allowPullback and htfUp   and xPbL
+shortPullback = allowPullback and htfDown and xPbS
+rawLong       = longBreakout or longPullback
+shortSetup    = shortBreakout or shortPullback
+longSig       = newExecBar and rawLong    and canTrade and confLongOk  and sessionOk and perpOk and basisLongOk
+// shortSigStudy = a short setup we'd SHOW (display); shortSig additionally requires
+// allowShorts and is the ONLY one wired to orders/alerts. Decoupled so Sells can be
+// studied without trading the weak short side.
+shortSigStudy = newExecBar and shortSetup and canTrade and confShortOk and sessionOk and perpOk and basisShortOk
+shortSig      = allowShorts and shortSigStudy
+triggerTxt = (longBreakout or shortBreakout) ? "breakout" : "pullback"
+
+// Tick-aligned stop/target off the confirmed exec close + exec ATR.
+f_tick(x)   => na(x) ? na : math.round(x / syminfo.mintick) * syminfo.mintick
+longStop    = f_tick(xClose - stopAtr * xAtr)
+longTarget  = f_tick(xClose + stopAtr * xAtr * targetR)
+shortStop   = f_tick(xClose + stopAtr * xAtr)
+shortTarget = f_tick(xClose - stopAtr * xAtr * targetR)
+riskPts     = stopAtr * xAtr
+riskUsdPer  = riskPts * syminfo.pointvalue
+riskUsdTot  = riskUsdPer * qtyInput
+flat        = strategy.position_size == 0
+// Buffer-based sizing: risk a % of the trailing-DD BUFFER (not balance), floored to
+// practical whole units for futures-style instruments and capped at Max qty. Falls
+// back to the manual size when off.
+bufRiskUsd  = ddBuffer * riskPctBuf / 100.0
+sizedQty    = riskUsdPer > 0 ? math.max(1.0, math.min(maxQty, math.floor(bufRiskUsd / riskUsdPer))) : 1.0
+qtyUsed     = riskEngine ? sizedQty : qtyInput
+
+// ────────────────────────────────  VISUALS  ─────────────────────────────────
+// Premium trend cloud: smooth chart EMAs, colored by trend, gradient by spread.
+cloudFast = ta.ema(close, 8)
+cloudSlow = ta.ema(close, 21)
+cAtr      = ta.atr(14)
+spread    = na(cAtr) or cAtr == 0 ? 0.0 : (cloudFast - cloudSlow) / cAtr
+// Cloud colored by its OWN slope (fast vs slow) so it reads cleanly green/red — the
+// Higher-timeframe regime lives in the background tint + dashboard, not muddied into the cloud.
+// Opacity deepens with trend strength (|spread|), faint in chop, solid in a run.
+cloudBase = cloudFast >= cloudSlow ? colUp : colDn
+fillTrns  = boldCloud ? 66 : 80
+strength  = math.min(math.abs(spread), 2.0) / 2.0
+cloudCol  = color.new(cloudBase, fillTrns - int(strength * 16))
+// Premium neon glow on the leading EMA: layered plots, increasing width + transparency.
+// display.pane keeps every decorative line OFF the price scale + status line (no "0.00"
+// clutter); force_overlay=true brings the whole PEARL layer IN FRONT of the candles —
+// transparency keeps price readable, so it overlays without blocking.
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 4", color=color.new(cloudBase, 92), linewidth=boldCloud ? 11 : 7, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 3", color=color.new(cloudBase, 84), linewidth=boldCloud ? 6 : 4, display=display.pane, force_overlay=true)
+plot(showCloud and showGlow ? cloudFast : na, "EMA glow 2", color=color.new(cloudBase, 72), linewidth=3, display=display.pane, force_overlay=true)
+pF = plot(showCloud ? cloudFast : na, "Cloud fast", color=showCloud ? color.new(cloudBase, 0)  : na, linewidth=2, display=display.pane, force_overlay=true)
+pS = plot(showCloud ? cloudSlow : na, "Cloud slow", color=showCloud ? color.new(cloudBase, 78) : na, linewidth=1, display=display.pane, force_overlay=true)
+fill(pF, pS, color=showCloud ? cloudCol : na, title="Trend cloud")   // follows pF/pS (force_overlaid) to the front
+
+// Multi-band ribbon (off by default): 4 EMAs, band SPREAD = trend strength. Fills
+// only (lines invisible), high transparency so it sits UNDER the cloud.
+rb1 = ta.ema(close, 5)
+rb2 = ta.ema(close, 13)
+rb3 = ta.ema(close, 34)
+rb4 = ta.ema(close, 55)
+ribCol = rb1 >= rb4 ? colUp : colDn
+pr1 = plot(showRibbon ? rb1 : na, "rb1", color=na, display=display.pane, force_overlay=true)
+pr2 = plot(showRibbon ? rb2 : na, "rb2", color=na, display=display.pane, force_overlay=true)
+pr3 = plot(showRibbon ? rb3 : na, "rb3", color=na, display=display.pane, force_overlay=true)
+pr4 = plot(showRibbon ? rb4 : na, "rb4", color=na, display=display.pane, force_overlay=true)
+fill(pr1, pr2, color=showRibbon ? color.new(ribCol, 88) : na, title="ribbon 1")   // fills follow their
+fill(pr2, pr3, color=showRibbon ? color.new(ribCol, 84) : na, title="ribbon 2")   // force_overlaid plots
+fill(pr3, pr4, color=showRibbon ? color.new(ribCol, 80) : na, title="ribbon 3")
+
+// Buy/Sell power gauge (DESCRIPTIVE, not predictive): normalized blend of cloud slope,
+// RSI, and the confluence score → 0..100. A read of current conditions, not an edge.
+rsiV     = ta.rsi(close, rsiLen)
+slopeRaw = (cloudFast - cloudFast[slopeLen]) / slopeLen
+slopeN   = na(cAtr) or cAtr == 0 ? 0.5 : math.min(1.0, math.max(0.0, 0.5 + slopeRaw / cAtr))
+rsiN     = na(rsiV) ? 0.5 : rsiV / 100.0
+confN    = maxConf > 0 ? (confScore * 1.0) / maxConf : 0.0
+basisN   = not isPerpMode or na(basisPct) ? 0.5 : math.min(1.0, math.max(0.0, 0.5 + basisPct / math.max(maxBasisLong + maxBasisShort, 0.01)))
+powerRaw = 0.36 * slopeN + 0.24 * rsiN + 0.32 * confN + 0.08 * basisN
+buyPower = int(math.round(100 * powerRaw))
+sellPower= 100 - buyPower
+powIsBuy = buyPower >= 50
+powVal   = powIsBuy ? buyPower : sellPower
+powCol   = powIsBuy ? colUp : colDn
+
+// Exec EMA (the actual signal-timeframe EMA), optional + subtle.
+plot(showExecEma ? xEma : na, "Exec EMA", color=color.new(color.white, 20), linewidth=1, display=display.pane, force_overlay=true)
+
+// RTH-anchored VWAP, line BROKEN at the session reset (no vertical jump).
+var float cumPV  = na
+var float cumVol = na
+if newSession or na(cumVol)
+    cumPV  := 0.0
+    cumVol := 0.0
+cumPV  += hlc3 * volume
+cumVol += volume
+rthVwap = cumVol > 0 ? cumPV / cumVol : na
+// Live-session only (show_last) so historical VWAP segments don't clutter the chart.
+plot(showVwap and inRTH and not newSession ? rthVwap : na, "RTH VWAP", color=color.new(colVw, 0), linewidth=2, show_last=10, display=display.pane, force_overlay=true)
+
+// Color the candles by the trend cloud so THIS indicator visually owns the chart
+// (toggle off for plain candles). Biggest single "pop" lever vs other indicators.
+barcolor(colorBars ? color.new(cloudFast > cloudSlow ? colUp : colDn, 25) : na, title="Trend candles")
+
+// Background tints OFF by default (they clutter the read). When toggled on: a faint
+// Higher-timeframe regime wash + grey outside the active session / red when a guardrail caps entries. The dashboard
+// carries the same info, so this is purely optional.
+bgcolor(showBg and htfUp ? color.new(colUp, 94) : showBg and htfDown ? color.new(colDn, 94) : na, title="Regime tint")
+bgcolor(showBg and not inRTH ? color.new(color.gray, 94) : showBg and not tradesCapOk ? color.new(colDn, 92) : na, title="Session / mute")
+
+// Markers: clean pro-style triangle + small Buy/Sell tag (no on-price box — detail
+// lives in the dashboard). Muted state = faint tiny triangle, no tag.
+plotshape(showSignals and longSig  and visArmed,      "BUY",  shape.triangleup,   location.belowbar, color.new(colBuy, 0),  text="Buy",  textcolor=color.new(colBuy, 0),  size=size.small, force_overlay=true)
+plotshape(showSignals and shortSig and visArmed,      "SELL", shape.triangledown, location.abovebar, color.new(colSell, 0), text="Sell", textcolor=color.new(colSell, 0), size=size.small, force_overlay=true)
+plotshape(showSignals and longSig  and not visArmed,  "Muted long",  shape.triangleup,   location.belowbar, color.new(colBuy, 55),  size=size.tiny, force_overlay=true)
+plotshape(showSignals and shortSig and not visArmed,  "Muted short", shape.triangledown, location.abovebar, color.new(colSell, 55), size=size.tiny, force_overlay=true)
+// Study-only short: setup present but allowShorts=false → NEVER trades (labeled "sell?").
+plotshape(showSignals and showShortStudy and shortSigStudy and not shortSig, "Study short", shape.triangledown, location.abovebar, color.new(colNeu, 35), text="sell?", textcolor=color.new(colNeu, 25), size=size.tiny, force_overlay=true)
+
+// Confirmation diamonds (DESCRIPTIVE confluence flags, NOT entries): strong confluence
+// aligned with regime on a fresh exec bar, suppressed when an actual entry triangle fires.
+confLongStrong  = htfUp   and sLong  >= maxConf - 1
+confShortStrong = htfDown and sShort >= maxConf - 1
+buyConfirm      = newExecBar and confLongStrong  and not longSig
+sellConfirm     = newExecBar and confShortStrong and not shortSig
+plotshape(showDiamonds and showSignals and buyConfirm,  "Buy confirm",  shape.diamond, location.belowbar, color.new(colUp, 25), size=size.tiny, force_overlay=true)
+plotshape(showDiamonds and showSignals and sellConfirm, "Sell confirm", shape.diamond, location.abovebar, color.new(colDn, 25), size=size.tiny, force_overlay=true)
+
+// ────────────────────  MARKET STRUCTURE (SMC, descriptive)  ──────────────────
+// CHoCH/BOS from CONFIRMED swing pivots — DESCRIPTIVE + LAGGING (a swing is only known
+// pivRight bars after it prints) — a reading aid, NOT a forecast, NOT wired to entries.
+ph = ta.pivothigh(high, pivLeft, pivRight)
+pl = ta.pivotlow(low,  pivLeft, pivRight)
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+var int   lastSwingHiX  = na
+var int   lastSwingLoX  = na
+var int   structBias    = 0
+var int   lastStructBar = na
+var array<line>  msLines  = array.new<line>()
+var array<label> msLabels = array.new<label>()
+f_pushLine(line ln) =>
+    array.push(msLines, ln)
+    if array.size(msLines) > structMax
+        line.delete(array.shift(msLines))
+f_pushLabel(label lb) =>
+    array.push(msLabels, lb)
+    if array.size(msLabels) > structMax
+        label.delete(array.shift(msLabels))
+if not na(ph)
+    lastSwingHigh := ph
+    lastSwingHiX  := bar_index - pivRight
+if not na(pl)
+    lastSwingLow  := pl
+    lastSwingLoX  := bar_index - pivRight
+// Debounce: require a gap since the last structure label so clustered breaks in chop
+// don't stack labels on top of each other.
+structGapOk = na(lastStructBar) or (bar_index - lastStructBar) >= pivRight
+breakUp   = showStruct and structGapOk and not na(lastSwingHigh) and not na(lastSwingHiX) and ta.crossover(close,  lastSwingHigh)
+breakDown = showStruct and structGapOk and not na(lastSwingLow)  and not na(lastSwingLoX) and ta.crossunder(close, lastSwingLow)
+if breakUp
+    choch = structBias == -1
+    bcol  = choch ? colChoch : colBos
+    f_pushLine(line.new(lastSwingHiX, lastSwingHigh, bar_index, lastSwingHigh, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingHigh, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
+    structBias := 1
+    lastStructBar := bar_index
+if breakDown
+    choch = structBias == 1
+    bcol  = choch ? colChoch : colBos
+    f_pushLine(line.new(lastSwingLoX, lastSwingLow, bar_index, lastSwingLow, xloc=xloc.bar_index, color=color.new(bcol, 35), width=1, style=line.style_dashed, force_overlay=true))
+    f_pushLabel(label.new(bar_index, lastSwingLow, choch ? "CHoCH" : "BOS", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(bcol, 40), textcolor=color.new(color.white, 10), size=size.tiny, force_overlay=true))
+    structBias := -1
+    lastStructBar := bar_index
+
+// ────────────────────────────  ALERTS + ENTRIES  ────────────────────────────
+f_msg(action, stop, target, reason) =>
+    ('{"strat":"pearl-algo-crypto-v5","v":1' +
+     ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+     ',"action":"' + action + '"' +
+     ',"symbol":"' + syminfo.ticker + '"' +
+     ',"exec_tf":"' + effExecTf + '","regime_tf":"' + effRegTf + '"' +
+     ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+     ',"regime":"' + regimeTxt + '","trigger":"' + reason + '"' +
+     ',"entry":' + str.tostring(xClose, format.mintick) +
+     ',"stop":' + str.tostring(stop, format.mintick) +
+     ',"target":' + str.tostring(target, format.mintick) +
+     ',"atr":' + str.tostring(xAtr, "#.##") +
+     ',"rr":' + str.tostring(targetR, "#.#") +
+     ',"risk_pts":' + str.tostring(riskPts, "#.##") +
+     ',"risk_usd_per_contract":' + str.tostring(riskUsdPer, "#.##") +
+     ',"risk_usd_total":' + str.tostring(riskUsdTot, "#.##") +
+     ',"qty":' + str.tostring(qtyInput, "#.####") +
+     ',"max_qty":' + str.tostring(maxQty, "#.####") +
+     ',"market_mode":"' + marketMode + '"' +
+     ',"basis_pct":' + str.tostring(na(basisPct) ? 0.0 : basisPct, "#.###") +
+     ',"perp_ok":' + str.tostring(perpOk and (htfUp ? basisLongOk : basisShortOk)) +
+     ',"trades_today":' + str.tostring(tradesToday + 1) + '}')
+
+// Entry/exit. Risk engine OFF → original 1-shot ATR bracket (reproducible base).
+// Risk engine ON → buffer-sized qty + per-bar bracket management (sticky breakeven,
+// optional 50% partial at +1R). Levels are stored at entry and managed off THOSE
+// (never re-priced to the current bar). tradesToday counts SIGNALS regardless.
+var float pEntry = na
+var float pStop  = na
+var float pTgt   = na
+var float pTp1   = na
+var bool  pLong  = false
+var bool  beHit  = false
+
+if longSig
+    if ordersOk and flat
+        strategy.entry("Long", strategy.long, qty=qtyUsed)
+        pEntry := xClose
+        pStop  := longStop
+        pTgt   := longTarget
+        pTp1   := f_tick(xClose + riskPts)
+        pLong  := true
+        beHit  := false
+        if not riskEngine
+            strategy.exit("Long X", "Long", stop=longStop, limit=longTarget)
+    if alertsLive
+        alert(f_msg("BUY", longStop, longTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+if shortSig
+    if ordersOk and flat
+        strategy.entry("Short", strategy.short, qty=qtyUsed)
+        pEntry := xClose
+        pStop  := shortStop
+        pTgt   := shortTarget
+        pTp1   := f_tick(xClose - riskPts)
+        pLong  := false
+        beHit  := false
+        if not riskEngine
+            strategy.exit("Short X", "Short", stop=shortStop, limit=shortTarget)
+    if alertsLive
+        alert(f_msg("SELL", shortStop, shortTarget, triggerTxt), alert.freq_once_per_bar_close)
+    tradesToday += 1
+
+// Risk-engine bracket management (per bar): sticky breakeven + optional +1R partial.
+// NOTE: beHit uses the CHART bar's high/low — most faithful when chart TF == exec TF;
+// on a lower-TF chart the breakeven trips off the finer bars.
+if riskEngine and not na(pEntry)
+    rPts = math.abs(pEntry - pStop)
+    if useBreakeven and not beHit and rPts > 0
+        if pLong and high >= pEntry + beTrigR * rPts
+            beHit := true
+        if (not pLong) and low <= pEntry - beTrigR * rPts
+            beHit := true
+    curStop = f_tick(beHit ? pEntry : pStop)
+    if pLong
+        if usePartial
+            strategy.exit("L-tp1", "Long", qty_percent=50, limit=pTp1, stop=curStop)
+            strategy.exit("L-run", "Long", limit=pTgt, stop=curStop)
+        else
+            strategy.exit("L-x", "Long", limit=pTgt, stop=curStop)
+    else
+        if usePartial
+            strategy.exit("S-tp1", "Short", qty_percent=50, limit=pTp1, stop=curStop)
+            strategy.exit("S-run", "Short", limit=pTgt, stop=curStop)
+        else
+            strategy.exit("S-x", "Short", limit=pTgt, stop=curStop)
+
+if useSessionFilter and not inRTH
+    strategy.close_all("Session end")
+    pEntry := na
+    pStop  := na
+    pTgt   := na
+    pTp1   := na
+    pLong  := false
+    beHit  := false
+
+// Manual-model EXIT ping: fire ONCE when an open position closes (target / stop /
+// session flatten), so you know the trade is done. Reason is from the realized result of
+// the last closed trade (robust — no intrabar guessing). Gated by alertsLive like entries.
+exitClosed = flat and not flat[1]
+lastPnl    = strategy.closedtrades > 0 ? strategy.closedtrades.profit(strategy.closedtrades - 1) : na
+if exitClosed and alertsLive
+    exReason = (useSessionFilter and not inRTH) ? "session flatten" : (not na(lastPnl) and lastPnl >= 0 ? "target / win" : "stop / loss")
+    alert('{"strat":"pearl-algo-crypto-v5","v":1,"action":"EXIT"' +
+         ',"status":"' + (alertsLive ? "Candidate" : "Research") + '"' +
+         ',"symbol":"' + syminfo.ticker + '"' +
+         ',"exec_tf":"' + effExecTf + '"' +
+         ',"bar_time":"' + str.format_time(time, "yyyy-MM-dd HH:mm", "America/New_York") + ' ET"' +
+         ',"exit":' + str.tostring(close, format.mintick) +
+         ',"pnl_usd":' + str.tostring(na(lastPnl) ? 0.0 : lastPnl, "#.##") +
+         ',"reason":"' + exReason + '"}',
+         alert.freq_once_per_bar_close)
+
+// ───────────────────────────────  DASHBOARD  ────────────────────────────────
+f_pos(p) =>
+    switch p
+        "Top Right"    => position.top_right
+        "Middle Right" => position.middle_right
+        "Bottom Right" => position.bottom_right
+        "Top Left"     => position.top_left
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+// Compact corner panel (top-right by default) — MNQ v5-style footprint, status pills,
+// and the single home for entry/stop/target. Header size.normal, rows size.small.
+var table dash = table.new(f_pos(dashPosIn), 2, 16, frame_width=1, frame_color=color.new(colAlgo, 40),
+     border_width=1, border_color=color.new(colAlgo, 88))
+f_row(_r, _k, _v, _vc) =>
+    table.cell(dash, 0, _r, _k, text_color=color.new(color.silver, 10), text_size=size.small, text_halign=text.align_left,  bgcolor=color.new(color.black, dashOpacity + 16))
+    table.cell(dash, 1, _r, _v, text_color=_vc,                         text_size=size.small, text_halign=text.align_right, bgcolor=color.new(color.black, dashOpacity))
+f_px(x) => na(x) ? "—" : str.tostring(x, format.mintick)
+
+if showDash and barstate.islast
+    tfLabel   = effExecTf == "15" ? "15M" : effExecTf == "60" ? "1H" : effExecTf == "120" ? "2H" : effExecTf == "240" ? "4H" : effExecTf == "D" ? "1D" : effExecTf
+    tkr       = str.replace_all(syminfo.ticker, "1!", "")
+    statusTxt = not inRTH ? "CLOSED" : not tradesCapOk ? "MAX TRADES" : not perpOk ? "PERP WAIT" : visArmed ? "ARMED" : "MUTED"
+    statusCol = statusTxt == "ARMED" ? colUp : (statusTxt == "MUTED" or statusTxt == "CLOSED") ? color.silver : color.orange
+    isLong    = longSig
+    isShort   = shortSig
+    setupTxt  = isLong ? "▲ BUY" : isShort ? "▼ SELL" : htfUp ? "▲ WAIT" : htfDown ? "▼ WAIT" : "● WAIT"
+    setupCol  = isLong ? colUp : isShort ? colDn : htfUp ? colUp : htfDown ? colDn : color.silver
+    entryStr  = (isLong or isShort) ? f_px(xClose) : "—"
+    stopStr   = isShort ? f_px(shortStop) : isLong ? f_px(longStop) : "—"
+    tgtStr    = isShort ? f_px(shortTarget) : isLong ? f_px(longTarget) : "—"
+    // Confluence cockpit reads (graceful "off"/"n/a" when a feed is disabled/absent).
+    esConfirm = (esUp and htfUp) or (esDown and htfDown)
+    tickTxt = not useTick ? "off" : na(tickMA) ? "n/a" : tickBull ? "▲ UP" : tickBear ? "▼ DOWN" : "flat"
+    tickC   = (not useTick) or na(tickMA) ? color.silver : tickBull ? colUp : tickBear ? colDn : color.silver
+    vixTxt  = not useVix ? "off" : na(vixVal) ? "n/a" : str.tostring(vixVal, "#.#") + (vixOk ? " ●" : " !")
+    vixC    = (not useVix) or na(vixVal) ? color.silver : vixOk ? colUp : color.orange
+    esTxt   = not useEs ? "off" : na(esClose) ? "n/a" : not (htfUp or htfDown) ? (esUp ? "▲ UP" : esDown ? "▼ DOWN" : "flat") : esConfirm ? "● CONFIRM" : "○ DIVERGE"
+    esC     = (not useEs) or na(esClose) ? color.silver : esConfirm ? colUp : color.orange
+    adxTxt  = not useAdx ? "off" : na(execAdx) ? "n/a" : str.tostring(execAdx, "#") + (adxOk ? " ●" : "")
+    adxC    = (not useAdx) or na(execAdx) ? color.silver : adxOk ? colUp : color.silver
+    sessC   = primeTime ? colUp : midday ? color.orange : color.silver
+    confTxt = str.tostring(confScore) + " / " + str.tostring(maxConf)
+    confC   = confScore >= minConfluence ? colUp : color.orange
+    basisTxt = not isPerpMode ? "off" : na(basisPct) ? "n/a" : str.tostring(basisPct, "#.##") + "%"
+    basisC   = not isPerpMode or na(basisPct) ? color.silver : basisLongOk and basisShortOk ? colUp : color.orange
+    perpTxt  = not isPerpMode ? sessPhase : not fundingOk ? "FUNDING" : volStress ? "VOL STRESS" : "24x7"
+    perpC    = not isPerpMode ? sessC : perpOk ? colUp : color.orange
+    table.cell(dash, 0, 0, "◆ PEARL", text_color=color.white, text_size=size.normal, bgcolor=color.new(colAlgo, 10), text_halign=text.align_left)
+    table.cell(dash, 1, 0, tkr + " · " + tfLabel, text_color=color.white, text_size=size.small, bgcolor=color.new(colAlgo, 10), text_halign=text.align_right)
+    powTxt = (powIsBuy ? "▲ " : "▼ ") + str.tostring(powVal)
+    f_row(1,  "Status",     "● " + statusTxt, statusCol)
+    f_row(2,  "Regime",     regimeTxt, regimeCol)
+    f_row(3,  "Setup",      setupTxt, setupCol)
+    f_row(4,  powIsBuy ? "Buy Power" : "Sell Power", showPower ? powTxt : "off", showPower ? powCol : color.silver)
+    f_row(5,  "Confluence", confTxt, confC)
+    f_row(6,  isPerpMode ? "Basis" : "Internals", isPerpMode ? basisTxt : tickTxt, isPerpMode ? basisC : tickC)
+    f_row(7,  isPerpMode ? "Perp" : "Vol (VIX)", isPerpMode ? perpTxt : vixTxt, isPerpMode ? perpC : vixC)
+    f_row(8,  isPerpMode ? "Rel Vol" : "ES", isPerpMode ? str.tostring(relVol, "#.#") + "x" : esTxt, isPerpMode ? (volStress ? color.orange : color.silver) : esC)
+    f_row(9,  "ADX",        adxTxt, adxC)
+    f_row(10, "Session",    sessPhase, sessC)
+    f_row(11, "Entry",      entryStr, color.white)
+    f_row(12, "Stop",       stopStr, colDn)
+    f_row(13, "Target",     tgtStr, colUp)
+    f_row(14, "Trades",     str.tostring(tradesToday) + (maxTradesDay > 0 ? " / " + str.tostring(maxTradesDay) : ""), color.white)
+    f_row(15, "Signal",     alertsLive ? "● CANDIDATE" : "● RESEARCH", alertsLive ? color.yellow : colDn)

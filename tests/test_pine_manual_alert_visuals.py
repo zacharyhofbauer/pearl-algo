@@ -7,6 +7,7 @@ PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_rth_long_bias.pine
 DEFENDER_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_1h_4h_defender.pine"
 HOURLY_PINE = Path(__file__).resolve().parent.parent / "pine" / "mnq_hourly.pine"
 CRYPTO_V4_PINE = Path(__file__).resolve().parent.parent / "pine" / "pearl_algo_crypto" / "pearl_algo_crypto_v4.pine"
+CRYPTO_V5_PINE = Path(__file__).resolve().parent.parent / "pine" / "pearl_algo_crypto" / "pearl_algo_crypto_v5.pine"
 
 
 def _pine() -> str:
@@ -23,6 +24,10 @@ def _hourly_pine() -> str:
 
 def _crypto_v4_pine() -> str:
     return CRYPTO_V4_PINE.read_text()
+
+
+def _crypto_v5_pine() -> str:
+    return CRYPTO_V5_PINE.read_text()
 
 
 def test_manual_pine_has_mobile_obvious_pinstripe_identity() -> None:
@@ -119,6 +124,55 @@ def test_crypto_v4_dashboard_is_compile_safe_and_repaints_last_bar() -> None:
     assert "f_rowS" in source and "text_size=size.small" in source
     assert "f_rowT" in source and "text_size=size.tiny" in source
     assert source.count("f_rowB(") >= 6
+
+
+def test_crypto_v5_copies_mnq_v5_dashboard_and_adds_perp_context() -> None:
+    source = _crypto_v5_pine()
+
+    assert "//@version=6" in source
+    assert 'strategy("PEARL Algo Crypto v5"' in source
+    assert 'strategy("PEARL Algo Crypto v5", overlay=true, initial_capital=10000,\n     default_qty_type=strategy.fixed' in source
+    assert 'input.timeframe("15", "Execution timeframe"' in source
+    assert 'input.timeframe("240", "Regime timeframe"' in source
+    assert "commission_type=strategy.commission.percent" in source
+    assert "commission_value=0.06" in source
+    assert "slippage=5" in source
+
+    # Auto-raise guard: request.security must read the EFFECTIVE (chart-or-higher) TF,
+    # never the raw exec/regime input — else on a chart above 15m the signals and alerts
+    # evaluate off downsampled sub-chart-TF data (the effExecTf trap).
+    assert "f_tfMax(string a, string b) =>" in source
+    assert "effExecTf = f_tfMax(timeframe.period, execTf)" in source
+    assert "effRegTf  = f_tfMax(effExecTf, regimeTf)" in source
+    assert "request.security(syminfo.tickerid, effRegTf" in source
+    assert "request.security(syminfo.tickerid, effExecTf" in source
+    assert "request.security(syminfo.tickerid, execTf" not in source
+    assert "request.security(spotSymbol, execTf" not in source
+    # alert TF fields must report the effective TF actually evaluated, not the raw input
+    assert "+ effExecTf +" in source
+    assert "+ effRegTf +" in source
+    assert "lookahead=barmerge.lookahead_off" in source
+    assert "newExecBar = ta.change(execOpenT) != 0" in source
+
+    assert "Show PEARL dashboard" in source
+    assert "var table dash = table.new(f_pos(dashPosIn), 2, 16" in source
+    assert 'f_row(1,  "Status"' in source
+    assert 'f_row(11, "Entry"' in source
+    assert 'f_row(12, "Stop"' in source
+    assert 'f_row(13, "Target"' in source
+    assert "table.clear" not in source
+
+    assert "isCryptoLike" in source
+    assert 'str.contains(tickerIdUpper, "CRYPTOCAP:")' in source
+    assert 'str.contains(tickerUpper, "USDT")' in source
+    assert "basisPct" in source
+    assert "nearFunding" in source
+    assert "volStress" in source
+    assert 'isPerpMode ? "Basis" : "Internals"' in source
+    assert 'isPerpMode ? "Perp" : "Vol (VIX)"' in source
+    assert 'isPerpMode ? "Rel Vol" : "ES"' in source
+    assert source.count('hourUTC = hour(execOpenT, "UTC")') == 1
+    assert '"strat":"pearl-algo-crypto-v5"' in source
 
 
 def test_pine_scripts_are_v6() -> None:
